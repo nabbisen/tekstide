@@ -19749,6 +19749,9 @@ fn a_family_is_used_only_if_the_lookup_finds_it_and_is_named_when_not() {
     });
     assert!(fallbacks.is_empty(), "{fallbacks:?}");
     assert_eq!(theme.font(), iced::Font::with_name("Fixture Sans"));
+    // RFC-057, the owner's font ruling: a configured family reaches the
+    // editor body exactly as it reaches the rest of the interface.
+    assert_eq!(theme.editor_font(), iced::Font::with_name("Fixture Sans"));
     assert_eq!(theme.font_size_body(), 15.0);
 
     let mut fallbacks = Vec::new();
@@ -19761,6 +19764,14 @@ fn a_family_is_used_only_if_the_lookup_finds_it_and_is_named_when_not() {
         }]
     );
     assert_eq!(theme.font(), iced::Font::DEFAULT, "the default face stands");
+    // RFC-057, the owner's font ruling: with nothing configured, the
+    // editor body's own default is fixed-width, not the interface's own
+    // `Font::DEFAULT`.
+    assert_eq!(
+        theme.editor_font(),
+        iced::Font::MONOSPACE,
+        "the editor body's own default is fixed-width"
+    );
     assert_eq!(theme.font_size_body(), 15.0, "and the size still applied");
 }
 

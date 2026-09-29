@@ -335,3 +335,27 @@ None are superseded on the property each was actually taken to show (the gutter,
 ### Gate
 
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `712 + 16 + 1045` = 1,773 passed, 0 failed, 0 entries left after each.** No intermittent this time.
+
+## The owner's font ruling — the editor body defaults to fixed-width
+
+### What was built
+
+`Theme` (`theme.rs`) gains `editor_font: Font`, resolved in `from_settings` from the same `family: Option<&'static str>` input `font` already uses, with a different fallback: `family.map_or(Font::MONOSPACE, Font::with_name)` instead of `Font::DEFAULT`. A configured family reaches the editor body exactly as it reaches the rest of the interface; only the *default*, with nothing configured, changed. `surface/editor.rs`'s four body-text elements (both sides of the caret, the plain-row case, the gutter number) now take `.font(theme.editor_font())`, overriding the `.font(ui_font())` `crate::theme::text` already applied — the same "a widget that wants a specific face sets `.font(..)` after it" pattern `explorer::TREE_FONT` and the terminal's `MONOSPACE` already use, just per-render rather than process-global (the editor body still honours a user's configured family, unlike those two, which never do).
+
+### Held, not merely measured
+
+Q3's own falsification harness (`editor_column_width.rs`) is generalized to take a `font: iced::Font` parameter (previously hard-coded to `crate::theme::ui_font()`, i.e. always `Font::DEFAULT`). The original Q3 test is unchanged in what it measures (still `Font::DEFAULT`, still finds the same ~51-column overflow — that risk is real whenever a user configures a proportional family, and stays disclosed). A new test, **not** `#[ignore]`d, measures `Font::MONOSPACE` — the shipped default — with the same harness: `the_default_editor_font_is_monospace_and_the_width_approximation_holds_for_it` asserts every character gives the identical real advance width (true by definition of monospace) and that overflow is exactly zero. Measured number: **8.400 px/char measured against 8.400 approximated — 0.0% off.** Held as a real regression guard, not printed and forgotten, because (unlike Q3's finding) this is a property that actually holds and is meant to keep holding.
+
+A direct unit test on `Theme::editor_font()` itself (`shell/tests.rs`, extending `a_family_is_used_only_if_the_lookup_finds_it_and_is_named_when_not`): with a configured, installed family, `editor_font()` equals `font()`; with nothing configured, `editor_font()` is `Font::MONOSPACE` while `font()` stays `Font::DEFAULT` — the two are the same only when a family is actually set.
+
+### Captured live, at the exact column the defect was found at
+
+Review 444's own `07-q3-caret-invisible-at-column-81-header-still-says-81.png` showed the caret gone entirely at *Line 1, Column 81* of a 200-`W` line, under the proportional default. `evidence/font-ruling/01-caret-visible-at-column-81-fixed-width-default.png` is the same fixture, the same column, under the shipped fixed-width default — the caret is visible, a thin bar inside the drawn row, and the header's *Line 1, Column 81* is no longer a claim the screen contradicts. Release binary, fresh `XDG_STATE_HOME`, fixture under `/dev/shm` via `mktemp -d`, real navigation through the real router (tab strip, explorer, `ArrowRight` × 80) — no test-only shortcut.
+
+### The book and the changelog, corrected
+
+`docs/src/users/configuration.md`'s paragraph beside the family setting now states the editor body's own fixed-width default explicitly, and reframes Q3's ~50-column finding as a risk that returns specifically when a proportional family is configured — not a property of what ships. The `Unreleased` changelog entry states the same, with the measured number.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean.

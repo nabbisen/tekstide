@@ -98,7 +98,7 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
       change it, and review 444's ~51-column caret loss stops being shipped by default. A user who
       chooses a proportional family still gets it, and inherits an approximation the book already
       discloses with its measured number.
-- [ ] **To implement before the `0.28.0` candidate:** the editor body defaults to a fixed-width face
+- [x] **To implement before the `0.28.0` candidate:** the editor body defaults to a fixed-width face
       while still honouring a configured `family`; `configuration.md`'s paragraph and the changelog
       say so; review 444's disclosure stays, reframed as the consequence of a choice rather than the
       default anyone gets. The original wording of this box: the book says the family
@@ -106,6 +106,11 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
       *"because a column of code has to line up"*. The editor now has a gutter and column arithmetic,
       so it meets that reason. Either it joins the fixed-width side (recommended), or the horizontal
       window measures real text. The changelog must describe whichever is chosen.
+      *(`Theme::editor_font()` added, same `family` resolution as `font()`, `Font::MONOSPACE`
+      fallback. Held: `the_default_editor_font_is_monospace_and_the_width_approximation_holds_for_it`
+      — `8.400` px/char measured vs `8.400` approximated, `0.0%` off, zero overflow. Captured live at
+      column 81, the exact column review 444's `07-` lost the caret at — the caret is visible now.
+      `configuration.md` and the changelog both corrected.)*
 
 ## PR-057-E — the two-row header
 

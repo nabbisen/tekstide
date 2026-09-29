@@ -218,6 +218,15 @@ measured number. Nothing is taken away from anyone.
 configured `family`; `configuration.md`'s paragraph and the `0.28.0` changelog describe that, and the
 review-444 disclosure stays, reframed as the consequence of a choice rather than a default.
 
+**Done (2026-09-29).** `Theme` gains `editor_font()` alongside `font()` -- same `family` resolution,
+different fallback (`Font::MONOSPACE` instead of `Font::DEFAULT`); the editor body's four text
+elements (both sides of the caret, the plain-row case, the gutter number) take it instead of the
+interface's own `ui_font()`. Held, not just measured: `the_default_editor_font_is_monospace_and_
+the_width_approximation_holds_for_it` (`editor_column_width.rs`) asserts zero overflow against real
+`iced` layout -- `8.400` px/char measured, `8.400` approximated, `0.0%` off. Captured live at the
+same column (81) review 444's own `07-` capture lost the caret at: the caret is visible
+(`evidence/font-ruling/01-…`). `configuration.md` and the changelog corrected.
+
 ### Owner decision, ruled 2026-09-29: does the editor's font family include the body, now that it has column arithmetic? (2026-09-29, RFC-057 review 443)
 
 **Not decided in PR-057-C, and not blocking PR-057-D.** `docs/src/users/configuration.md` says the configured font family

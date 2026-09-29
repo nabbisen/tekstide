@@ -753,20 +753,31 @@ pub fn view<'a, Message: 'a + Clone>(
                     // caret. `row_plan` decides *whether and where*, as a pure
                     // function this module's tests can drive without `iced`;
                     // this match only ever builds what `row_plan` said.
+                    // RFC-057, the owner's font ruling: the body's own
+                    // text -- both sides of the caret, the plain-row case,
+                    // and the gutter number -- takes `theme.editor_font()`,
+                    // not the interface's own `ui_font()` [`text`] already
+                    // applies. Monospace by default, a configured family
+                    // if the user set one; never `Font::DEFAULT`'s own
+                    // proportional fallback, which is what review 444
+                    // measured the ~51-column caret loss against.
                     let row_body: Element<'a, Message> =
                         match row_plan(windowed, caret_at, row_index) {
                             RowPlan::WithCaret { before, after } => iced::widget::row![
                                 text(before.to_owned())
                                     .size(theme.font_size_body())
+                                    .font(theme.editor_font())
                                     .wrapping(iced::widget::text::Wrapping::None),
                                 caret_element(*theme, pitch),
                                 text(after.to_owned())
                                     .size(theme.font_size_body())
+                                    .font(theme.editor_font())
                                     .wrapping(iced::widget::text::Wrapping::None),
                             ]
                             .into(),
                             RowPlan::Plain(text_only) => text(text_only.to_owned())
                                 .size(theme.font_size_body())
+                                .font(theme.editor_font())
                                 .wrapping(iced::widget::text::Wrapping::None)
                                 .into(),
                         };
@@ -775,6 +786,7 @@ pub fn view<'a, Message: 'a + Clone>(
                             container(
                                 text(number)
                                     .size(theme.font_size_body())
+                                    .font(theme.editor_font())
                                     .wrapping(iced::widget::text::Wrapping::None)
                             )
                             .width(Length::Shrink),

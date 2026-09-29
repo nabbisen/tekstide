@@ -35,6 +35,12 @@
 - **The window moves only by the cursor**: there is still no scrollbar and no mouse wheel, and navigation is still the four arrow keys.
 - **The top of the window is two rows, not three.** The title and the two global actions (Trust Settings, Help) now share one row;
   the project tabs are the row below it, instead of a third row of their own underneath both.
+- **The editor body's own default font is now fixed-width**, matching the terminal and the file tree, rather than the interface's
+  own general default (which may be proportional). A configured font `family` still reaches the editor body exactly as it reaches
+  the rest of the interface — this only changes what you get if you configure nothing. This is what makes the horizontal-scroll
+  approximation correct by default: measured against the shipped default, **0.0% off, zero caret overflow**, where the previous
+  default could lose the caret over 50 columns off screen on a line of wide characters. Configuring a proportional family still
+  carries that risk, disclosed in `configuration.md`.
 
 ### Measured — typing in a very large file
 

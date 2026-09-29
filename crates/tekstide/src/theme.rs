@@ -57,6 +57,17 @@ pub struct Theme {
     /// chosen for reading prose must not undo what makes a column of code line
     /// up.
     font: Font,
+    /// **RFC-057, the owner's font ruling (review 443/444, 2026-09-29).**
+    /// The editor body's own face -- **not** locked to monospace the way
+    /// the tree and terminal are, and **not** simply [`Self::font`]
+    /// either: a user's configured `family` still reaches the editor body
+    /// if they set one (`Some(name)`, same resolution as `font`), but the
+    /// *default* with nothing configured is [`Font::MONOSPACE`], not
+    /// `Font::DEFAULT`. This is what makes `CHAR_WIDTH_FACTOR`'s
+    /// approximation right by construction for anyone who never touches
+    /// `font.family` -- review 444's measured ~51-column caret loss was a
+    /// property of the *proportional* default, which no longer ships.
+    editor_font: Font,
 }
 
 fn colour(colour: Colour) -> Color {
@@ -88,11 +99,19 @@ impl Theme {
             font_size_heading: sizes.heading,
             font_size_status: sizes.status,
             font: family.map_or(Font::DEFAULT, Font::with_name),
+            editor_font: family.map_or(Font::MONOSPACE, Font::with_name),
         }
     }
 
     pub fn font(&self) -> Font {
         self.font
+    }
+
+    /// **RFC-057, the owner's font ruling.** The editor body's own face --
+    /// see the field's own doc for what makes this different from
+    /// [`Self::font`].
+    pub fn editor_font(&self) -> Font {
+        self.editor_font
     }
 
     pub fn background(&self) -> Color {

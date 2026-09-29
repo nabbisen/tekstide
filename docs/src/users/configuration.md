@@ -149,17 +149,31 @@ on this machine — the same list the window is drawn from — and nothing you w
 a font file. A path (`/usr/share/fonts/…`, anything with a slash) is refused as "not a name"; a name
 no installed font has is refused as "not installed"; either way the default face stands and the
 board says so. Case does not matter (`dejavu serif` finds `DejaVu Serif`). The family applies to
-the interface's own text, including the editor's; **the terminal and the file tree keep a
-fixed-width face**, because a column of code has to line up whatever you read prose in.
+the interface's own text, including the editor's, if you set one; **the terminal and the file tree
+keep a fixed-width face regardless**, because a column of code has to line up whatever you read
+prose in.
 
-**The editor's own horizontal scrolling assumes a roughly even character width, and a
-proportional family — the default included — does not have one.** When a long line scrolls
-sideways to keep your cursor on screen, the width of the window it scrolls within is an
-approximation, not the family's real, measured metrics. Checked against the default face: a line of
-narrow characters never loses the cursor, but a line of wide characters (a capital `W`, repeated)
-can leave the cursor **over 50 columns outside the window that is actually drawn** — effectively off
-screen, while the status line still reports a real column number. This is a known limitation, not
-yet fixed; if your cursor seems to vanish while typing, this is why.
+**The editor body's own default is fixed-width, unlike the rest of the interface's.** Ruled
+2026-09-29, after `family` was found to reach the editor's own column arithmetic in a way it had
+not before: the editor's own text takes a configured `family` exactly as the rest of the interface
+does, but with nothing configured, its default is the same fixed-width face the terminal and the
+file tree already use — not the interface's own general default. This corrects the paragraph below
+as it stood before this release: that finding was real, and it was a property of the *proportional*
+default, which no longer ships.
+
+**The editor's own horizontal scrolling assumes a roughly even character width, which the shipped
+default now genuinely has.** When a long line scrolls sideways to keep your cursor on screen, the
+width of the window it scrolls within is an approximation, not the family's real, measured metrics
+— but for a fixed-width face every character shares one real advance width, so the approximation
+cannot single out one character the way it could a proportional face. Measured against the shipped
+default: **8.400 pixels per character measured, against 8.400 approximated — exact, zero overflow.**
+**If you configure a proportional family, this approximation returns**, in the same shape it had
+before this release: checked against `Font::DEFAULT`, a line of narrow characters never loses the
+cursor, but a line of wide characters (a capital `W`, repeated) can leave the cursor **over 50
+columns outside the window that is actually drawn** — effectively off screen, while the status line
+still reports a real column number. This is a known limitation of a proportional editor family
+specifically, not yet fixed; if your cursor seems to vanish while typing with a configured
+proportional family, this is why.
 
 Every one of these falls back **on its own**: one bad colour does not cost you the rest of the
 file.
