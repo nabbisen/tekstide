@@ -217,3 +217,7 @@ Release binary, fixtures in `mktemp -d` under `/dev/shm`, focus-verified `wtype`
 ### Not shown live
 
 A mouse click on any control (every step was a key, matching this project's established practice for this surface). The approximate column-width factor's own accuracy was not measured against `cosmic-text`'s real shaping — it is disclosed as an approximation, the same as row height already is, not verified against the renderer.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `703 + 16 + 1039` = 1,758 passed, 0 failed, 0 entries left after each** (loads at the end 1.50, 2.09, 3.62 — a quiet machine). No intermittent.
