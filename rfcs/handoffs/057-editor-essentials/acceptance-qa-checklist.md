@@ -103,6 +103,20 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 - [ ] The actions row carries the title and sits above the tab strip.
 - [ ] Captured, and **every superseded capture named** across the evidence packs.
 
+### Required at review 445
+
+- [ ] **`crates/tekstide/typing-measurement-sample.rs` is deleted or relocated.** 1,472 tracked
+      lines, moved there at the `0.4.0` candidate and untouched for twenty-three releases; not
+      compiled (crate root, not `src/`); invisible to every mechanical scan (they walk `src/`);
+      seven `use crate::…` imports naming *core* modules from inside the *app* crate; **and it ships
+      in every published archive, including `0.27.0`.** Not RFC-057's doing — found tracing
+      `replace_text`'s callers at review 445.
+- [ ] **A package check**: the archive carries no `.rs` outside `src/`, `tests/`, `examples/`,
+      `benches/`. The reviewer's entry-list diff compares releases and is blind to a file that has
+      always been wrong.
+- [ ] **Before PR-057-E starts**: the capture path works. E is a purely visual change with no state
+      to assert, so an unresolved `niri` screenshot gap blocks it rather than inconveniencing it.
+
 ## Whole-RFC
 
 - [ ] `REQ-EDIT-002` moves to met with evidence a user can see; `NFR-REL-005` records undo;
