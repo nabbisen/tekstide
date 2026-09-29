@@ -48,10 +48,16 @@ repository, in one Git will not be asked about, or under a repository rooted at 
 global ignore file you named with `core.excludesFile` is **not** applied (the default `$XDG_CONFIG_HOME/git/ignore`,
 `.git/info/exclude` and the repository's `.gitignore` files are).
 
-**The editor draws the lines that fit and follows the cursor.** Only the visible lines are laid out, so typing stays fast in a file
-of 100,000 lines. The window moves when the cursor leaves it — by the arrow keys or by typing — and there is no scrollbar or
-mouse wheel yet. **A line wider than the editor is clipped at its right edge**: it is not wrapped, and there is no horizontal
-scrolling, so the end of a very long line is not visible even though it is in the file.
+**The editor draws the lines that fit and follows the cursor, in both directions.** Only the visible lines are laid out, so typing
+stays fast in a file of 100,000 lines. The window moves when the cursor leaves it — by the arrow keys or by typing — and there is
+no scrollbar or mouse wheel yet. A line wider than the editor **scrolls sideways to keep the cursor visible**, by the same rule as
+the vertical window; lines are not wrapped, so a long line's own middle is never on screen at once, only the part around the
+cursor.
+
+**The editor has line numbers and a visible caret.** The gutter shows each line's real number, sized to the whole file so the
+text column does not shift as you scroll past 10,000 lines (or any other power of ten). The caret is drawn as its own mark, never
+as a character inserted into the file's text — a file whose contents happen to include something that looks like a caret is not
+confused with the real one.
 
 **The editor has no undo.** A mid-buffer edit is unrecoverable within the session past what
 `Backspace` can still reach. There is no syntax highlighting, language server, multi-cursor, or

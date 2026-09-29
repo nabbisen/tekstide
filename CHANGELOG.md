@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added — line numbers, a real caret, and a line too long for the window scrolls sideways
+
+- **The editor has line numbers.** They read the file's own line index, not the row's position on screen, and the gutter is sized to
+  the whole file's own digit count — a file crossing 10,000 lines does not shift its text column as you scroll past the boundary
+  (measured live, both sides of the crossing).
+- **The editor has a visible caret**, drawn as its own element, never as a character inserted into the text: a file whose text
+  contains a look-alike glyph (a full block, the character someone might reach for to draw a caret by hand) shows the real caret and
+  the glyph as two visibly different things, at the same time, on adjacent lines.
+- **A line wider than the editor now scrolls sideways to follow the cursor**, on the same rule the vertical scroll already
+  used — the least movement that keeps the cursor on screen. **This corrects PR-057-B's own entry below**, "clipped at its right
+  edge, not wrapped, ... so the end of a very long line is not visible": that was true for one release and is no longer. A user
+  typing past the right edge of a long line could type into text they could not see; they cannot now, at any column.
+- **Lines still do not wrap.** One line is one drawn row; a long line's own width is windowed, the same way the file's height already
+  is, rather than broken across more than one row — wrapping would trade away the exact per-row arithmetic the vertical window
+  depends on.
+
 ### Changed — the editor draws only the lines that fit
 
 - **The editor draws the lines that fit the window, not the whole file, and the window follows the cursor.** Typing in a 100,000-line
@@ -10,6 +26,7 @@
   not changed here. Arrow keys cost slightly more than before (2.8 ms against 1.8 at 100,000 lines: they now keep the window on the cursor).
 - **A line wider than the editor is clipped at its right edge, not wrapped**, and there is still no horizontal scrolling, so the end of a
   very long line is not visible. Drawing one row per line is what makes the window exact; soft wrap is not part of this release.
+  **Corrected above: the editor now scrolls sideways to keep the cursor visible on a long line, and does not leave it clipped.**
 - **The window moves only by the cursor**: there is still no scrollbar and no mouse wheel, and navigation is still the four arrow keys.
 
 ### Measured — typing in a very large file
@@ -24,7 +41,10 @@
   lines average 51 bytes (this project's first test fixture) is refused at that many lines, so the requirement's "100,000-line file" and the size cap
   disagree for any file with longer lines. Neither has been changed.
 - **The editor shows about 48 lines of a large file and has no scrollbar**, no line numbers and no visible caret; the header says *Line N, Column M*.
-  That is unchanged in this entry and is what the next releases address.
+  **Corrected below: the line numbers and the caret are added in this same release, in the entry above.** There is still no scrollbar.
+- **The column width used to fit a proportional font's characters is an approximation** (the same kind of approximation row height already used
+  for line pitch), not a measurement of the actual, per-character width `cosmic-text` will lay out — a window sized from it can hold very
+  slightly more or fewer characters than the region's real pixel width allows.
 
 ## 0.27.0 - A Run That Still Exists Tomorrow
 
