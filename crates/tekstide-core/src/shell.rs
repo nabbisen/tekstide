@@ -1,7 +1,9 @@
 use crate::app::{AddProjectOutcome, AppState, RemoveProjectError};
 use crate::close::CloseAssessment;
 use crate::command::AppCommand;
-use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor, TextViewport};
+use crate::content::{
+    EditOperation, ExternalChangeDecision, SaveDecision, TextCursor, TextViewport,
+};
 use crate::navigation::{TerminalLayoutClass, TerminalPanePolicy};
 use crate::project::recent::RecentProjectState;
 use crate::project::root::ProjectRootValidationError;
@@ -187,6 +189,38 @@ impl ApplicationShell {
         viewport: TextViewport,
     ) -> Result<(), ProjectContentError> {
         let result = self.state.set_active_project_viewport(viewport);
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
+    /// RFC-057 D3.
+    pub fn record_active_project_edit_operation(
+        &mut self,
+        operation: EditOperation,
+    ) -> Result<(), ProjectContentError> {
+        let result = self.state.record_active_project_edit_operation(operation);
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
+    pub fn undo_active_project_document(
+        &mut self,
+    ) -> Result<Option<EditOperation>, ProjectContentError> {
+        let result = self.state.undo_active_project_document();
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        result
+    }
+
+    pub fn redo_active_project_document(
+        &mut self,
+    ) -> Result<Option<EditOperation>, ProjectContentError> {
+        let result = self.state.redo_active_project_document();
         if self.state.active_project().is_some() {
             self.route = AppRoute::ActiveProjectWorkspace;
         }

@@ -254,3 +254,59 @@ Recorded in `delivery-plan.md`'s coverage table for `REQ-EDIT-002`/`003` area: w
 ### Gate (Q3 follow-up)
 
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `703 + 16 + 1039` = 1,758 passed, 0 failed, 0 entries left after each** (loads 2.5, 4.1, 5.4). `editor_column_width`'s own two tests: one ordinary (sanity only, runs every gate), one `#[ignore]`d (the measurement, run by hand for this evidence). No intermittent.
+
+## PR-057-D — undo
+
+### What was built
+
+| | |
+| --- | --- |
+| core, `content/undo.rs` (new) | `EditOperation` (`Insert`/`Enter`/`RemoveChar`/`JoinLines`, each storing exactly what its own inverse needs, never a copy of the document) and `UNDO_MAX_DEPTH = 500` |
+| core, `content/document.rs` | `TextDocument` gains `undo_stack`/`redo_stack`/`undo_bound_reached`; `record_edit_operation`/`undo_operation`/`redo_operation`/`can_undo`/`can_redo`/`undo_depth_bound_reached`; `replace_text`'s one-way `Dirty` latch fixed — text back to exactly the opened content now returns to `Clean`, guarded to only apply from `Clean`/`Dirty` (an `ExternalChanged`/`Conflict`/`SaveError` state is never silently cleared by a coincidence of content) |
+| core, `content/snapshot.rs` | `FileSnapshot::matches_content` — an in-process hash comparison, the Clean-detection signal, reusing the existing `content_hash` rather than storing a second copy of the opened text |
+| `surface/editor.rs` | `remove_at`/`join_lines_at` (the two new pure helpers `apply_undo` needs; `join_lines_at` is also `backspace_at_cursor`'s own start-of-line case, factored out and reused rather than duplicated); `apply_undo`/`apply_redo` (redo is literally `insert_at`/`split_line_at_cursor`/`backspace_at_cursor` called again at the operation's own `at` — no third implementation); `apply_edit_key` now returns `EditOutcome { result, operation }` instead of bare `EditResult`, so every caller gets the operation to record for free; `history_bound_line` (the D3 disclosure, `None` until the bound is actually reached) |
+| core, `navigation.rs` | `UndoActiveDocument`/`RedoActiveDocument`, bound to `Ctrl+Z`/`Ctrl+Shift+Z`, the same "global, needs real document-level write, no `AppCommand`" shape `SaveActiveDocument` already uses |
+| `shell.rs` | `handle_editor_key` records the operation after every ordinary edit; `attempt_undo_active_document`/`attempt_redo_active_document`, the same two-step `replace_active_project_text`/`set_active_project_cursor` shape an ordinary edit already uses, just fed `apply_undo`/`apply_redo`'s output instead of `apply_edit_key`'s |
+| `keyboard_help.rs` | both actions catalogued; `ControlCoverage::KeyboardOnly` (no toolbar exists to put a button on, and the task breakdown names none) |
+
+### Operations, not snapshots; the bound, stated
+
+`EditOperation`'s four variants store only what their own inverse needs (a cursor and, at most, a string, a `char`, or a `usize`) — never a copy of the document, so the stack's own size is bounded by edit count, not by file size times depth. `record_edit_operation` caps the stack at `UNDO_MAX_DEPTH` (500), dropping the oldest entry and latching `undo_bound_reached` past it. **Held in code**: `recording_past_the_bound_drops_the_oldest_edit_and_latches_the_reached_flag` records 501 edits and asserts the 501st undo reaches the *second*-recorded edit, never the first, and that the flag stays true afterward (it does not un-latch once the stack has room again). **Stated, not merely tracked**: `history_bound_line` is the on-screen disclosure (`editor-history-bound-reached`, naming the real `UNDO_MAX_DEPTH` number, not "a lot") — `None` until the bound is hit, `Some` after, held by `history_bound_line_is_none_until_the_bound_is_reached_then_names_the_limit`.
+
+### Typing then undoing restores text and cursor
+
+`EditOperation::at` is, on every variant, the cursor *before* the operation — and every operation's own inverse (`remove_at`, `join_lines_at` at the split point, `insert_at`/`split_line_at_cursor` reapplied at the join point) lands the cursor back at exactly `at`, by construction of what each inverse function already returns, never a manual override. Held for all four kinds of edit at once: `undoing_every_kind_of_edit_restores_the_original_text_and_cursor` drives `apply_edit_key` for a typed character, `Enter`, and both `Backspace` cases, inverts each with `apply_undo`, and asserts both the text and the cursor land back where they started. `redoing_every_kind_of_edit_reproduces_the_original_outcome` is the mirror: undo then redo reproduces exactly the original edit's own text and cursor. Through real keys and the real router, not only the pure functions: `ctrl_z_undoes_a_real_typed_character_and_returns_to_clean` presses a real `!`, then a real `Ctrl+Z` (proved to route to `RoutedInput::Shell`, not fall through to `Surface`), and asserts both.
+
+### Undoing to the opened text returns to Clean
+
+`replacing_text_back_to_the_opened_content_returns_to_clean` (core): `TextDocument::replace_text` away from the opened content (`Dirty`), then back to it exactly, returns to `Clean`. Guarded correctly, not merely permissively: `replacing_text_back_to_the_opened_content_does_not_override_an_external_change_state` puts the document in real `Conflict` (a real external write, then `refresh_external_state`) and proves that replacing the text back to the opened content does **not** silently clear it — a `Conflict` still needs its own resolution. `ctrl_z_undoes_a_real_typed_character_and_returns_to_clean` closes the loop through the real router: type, `Ctrl+Z`, and the document's own `state()` reads `Clean`.
+
+### Undo does not cross an external-change reload
+
+**Free by construction, not by a new guard.** `activate_current_modal`'s Reload arm calls `open_active_project_text_document`, which constructs a brand-new `TextDocument::open(...)` and replaces `self.active_document` wholesale (`ProjectContentWorkspace::open_text_document`) — never patches `text` on the existing instance. A fresh `TextDocument` has empty `undo_stack`/`redo_stack` by construction (`open`'s own field initialization), so a reload's own replacement already clears undo history; there is no separate `clear_undo_history` method to call or forget to call. `undo_does_not_cross_a_real_external_change_reload` proves it end to end: type a real edit, write a real conflicting change to disk, save (refused, opens the conflict modal), Reload (which really re-opens the file, discarding the local edit — the same property `saving_over_a_real_external_change_opens_the_conflict_modal_and_reload_takes_the_disk_content` already proved), then a real `Ctrl+Z` — a no-op, the discarded edit never resurrected.
+
+### Redo then save writes what the screen showed
+
+`redo_then_save_writes_what_the_screen_showed`: type, undo, redo (screen now shows the redone edit), `Ctrl+S`, and the bytes on disk are read back and compared byte-for-byte against what the screen showed — not what was on disk before the edit, and not what undo left behind.
+
+### The requirements gap
+
+Written up in `delivery-plan.md` ("Requirements gap: no `REQ-EDIT` names undo"), the same disclosed-not-minted shape as RFC-056 D11's open question: `NFR-REL-005` is the closest existing text and only assumes undo exists; no `REQ-EDIT` row names it. Not fixed by minting a requirement from inside this slice — that is the owner's call.
+
+### Tests (17 new: 5 core, 6 pure-function, 6 real-routing)
+
+Core (`content/tests/edit.rs`): `replacing_text_back_to_the_opened_content_returns_to_clean`, `replacing_text_back_to_the_opened_content_does_not_override_an_external_change_state`, `recording_an_edit_after_an_undo_clears_the_redo_stack`, `recording_past_the_bound_drops_the_oldest_edit_and_latches_the_reached_flag`.
+
+Pure functions (`surface/editor/tests.rs`): `undoing_every_kind_of_edit_restores_the_original_text_and_cursor`, `redoing_every_kind_of_edit_reproduces_the_original_outcome`, `remove_at_removes_exactly_the_given_span_and_restores_the_cursor`, `join_lines_at_joins_the_given_line_into_the_one_before_it`, `history_bound_line_is_none_until_the_bound_is_reached_then_names_the_limit`. The five existing `apply_edit_key` tests were widened, not just updated for the new return type: each now also asserts the exact `EditOperation` produced.
+
+Real routing (`shell/tests.rs`): `ctrl_z_undoes_a_real_typed_character_and_returns_to_clean`, `undo_does_not_cross_a_real_external_change_reload`, `redo_then_save_writes_what_the_screen_showed`, `ctrl_shift_z_is_a_real_global_keybinding_for_redo`.
+
+Plus the mechanical keybinding tests every new `NavigationAction` gets: `undo_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`, `redo_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule` (core `navigation/tests.rs`).
+
+### Not shown live
+
+**Tooling gap, disclosed rather than skipped silently.** `niri msg action screenshot-window` (and a full-screen `niri msg action screenshot`) both returned exit 0 against the real, focused Tekstide window this session, but produced no file anywhere under the configured screenshot path or `$HOME`/`/dev/shm` — a live capture of undo/redo could not be produced this slice. Every property above is instead proven through the real router (`route_non_modal_input`, asserted to classify `Ctrl+Z`/`Ctrl+Shift+Z` as `RoutedInput::Shell` rather than falling through) and real document state (`TextDocument::state()`, real bytes read back from disk) — the same "no test-only shortcut" standard the live captures exist to hold, met here without a screenshot. The 500-edit bound disclosure (`history_bound_line`) is proven directly against a real `TextDocument`, not through 501 real keystrokes — the pure function is the same one `view()` calls, so a live capture would show the same string this test already asserts, not a different property.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `712 + 16 + 1045` = 1,773 passed, 0 failed, 0 entries left after each.** One intermittent met along the way (row 1, `approval::tests::channel::bind_recovers_from_a_stale_socket_file`, twice back to back in redone attempts of the middle run) — passed in isolation both times, not the slice, the gate redone rather than counted; see `test-process-leak.md`'s 2026-09-29 recurrence entry, which also records a sharper reading of the `SocketPathTooLong` class found along the way (a `mktemp -d /dev/shm/…` `TMPDIR` can still be too long; a short fixed literal is the actual fix).

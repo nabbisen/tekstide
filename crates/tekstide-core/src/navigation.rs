@@ -36,6 +36,15 @@ pub enum NavigationAction {
     /// check) and reads whichever document is open at press time, not a
     /// per-keystroke encoding.
     SaveActiveDocument,
+    /// RFC-057 D3: `Ctrl+Z`, the universal undo convention. Global rather
+    /// than editor-surface-routed, the same reasoning `SaveActiveDocument`
+    /// already carries: it needs a real document-level write
+    /// (`TextDocument::undo_operation`) and acts on whichever document is
+    /// open at press time, not a per-keystroke encoding through
+    /// `apply_edit_key`.
+    UndoActiveDocument,
+    /// The mirror of `UndoActiveDocument`: `Ctrl+Shift+Z`.
+    RedoActiveDocument,
     CycleVisibleTerminalSession,
     /// RFC-022 PR-022-D: launches a real AgentRun in the active project,
     /// through a code-defined profile (`AiCliProfile::claude_code_linux_default`)
@@ -99,7 +108,7 @@ impl NavigationAction {
     /// Every action, in declaration order. `config_name` is an exhaustive match,
     /// so adding an action without a name does not compile; a test holds this
     /// list to the policy so adding one without a rule does not pass.
-    pub const ALL: [NavigationAction; 18] = [
+    pub const ALL: [NavigationAction; 20] = [
         Self::OpenProjectBoard,
         Self::OpenProjectEntryField,
         Self::SwitchActiveProject,
@@ -107,6 +116,8 @@ impl NavigationAction {
         Self::LaunchTerminal,
         Self::PasteIntoTerminal,
         Self::SaveActiveDocument,
+        Self::UndoActiveDocument,
+        Self::RedoActiveDocument,
         Self::CycleVisibleTerminalSession,
         Self::LaunchAgentRun,
         Self::OpenCurrentAgentRunDetail,
@@ -132,6 +143,8 @@ impl NavigationAction {
             Self::LaunchTerminal => "launch_terminal",
             Self::PasteIntoTerminal => "paste_into_terminal",
             Self::SaveActiveDocument => "save_active_document",
+            Self::UndoActiveDocument => "undo_active_document",
+            Self::RedoActiveDocument => "redo_active_document",
             Self::CycleVisibleTerminalSession => "cycle_visible_terminal_session",
             Self::LaunchAgentRun => "launch_agent_run",
             Self::OpenCurrentAgentRunDetail => "open_current_agent_run_detail",
@@ -340,6 +353,23 @@ impl KeybindingPolicy {
                 // by `save_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone.
                 KeybindingRule::bound(NavigationAction::SaveActiveDocument, "Ctrl+S"),
+                // RFC-057 D3: `Ctrl+Z`, the universal undo convention
+                // across editors. Does not collide with any
+                // `Ctrl+Alt+<letter>` rule, `Ctrl+Shift+<letter>` rule, or
+                // plain `Ctrl+S` above -- checked mechanically by
+                // `undo_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone.
+                KeybindingRule::bound(NavigationAction::UndoActiveDocument, "Ctrl+Z"),
+                // RFC-057 D3: `Ctrl+Shift+Z`, the universal redo
+                // convention -- distinct from the `Ctrl+Y` some editors
+                // use, matching `Ctrl+Shift+V`'s own terminal-emulator
+                // precedent above of preferring `Shift` over a second
+                // letter. Does not collide with `Ctrl+Shift+P`
+                // (`Reserved`), `Ctrl+Shift+V`, or any other rule here --
+                // checked mechanically by
+                // `redo_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone.
+                KeybindingRule::bound(NavigationAction::RedoActiveDocument, "Ctrl+Shift+Z"),
                 // RFC-022 PR-022-D: `Ctrl+Alt+A`, following the existing
                 // `Ctrl+Alt+<letter>` shape (`P`, `M`, `T` above) -- `A`
                 // for Agent, unused by any other rule here and not

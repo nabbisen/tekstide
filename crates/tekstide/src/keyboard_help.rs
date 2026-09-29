@@ -54,6 +54,8 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::LaunchTerminal => Some("keyboard-help-launch-terminal"),
         NavigationAction::PasteIntoTerminal => Some("keyboard-help-paste-into-terminal"),
         NavigationAction::SaveActiveDocument => Some("keyboard-help-save-active-document"),
+        NavigationAction::UndoActiveDocument => Some("keyboard-help-undo-active-document"),
+        NavigationAction::RedoActiveDocument => Some("keyboard-help-redo-active-document"),
         NavigationAction::LaunchAgentRun => Some("keyboard-help-launch-agent-run"),
         NavigationAction::OpenCurrentAgentRunDetail => {
             Some("keyboard-help-open-current-agent-run-detail")
@@ -193,6 +195,21 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
             description: "the editor's own \"Save\" button (surface::editor::view, RFC-040 PR-040-C)",
             on_press_snippet: "Message::SaveActiveDocumentButtonPressed,",
         }),
+        // RFC-057 D3: `Ctrl+Z`/`Ctrl+Shift+Z` are the universal
+        // text-editing convention, and the task breakdown's own PR-057-D
+        // scope names four tests and a chrome disclosure
+        // (`history_bound_line`) -- never a button. Permanent for this
+        // design; a future editor toolbar could add one, but nothing in
+        // this RFC calls for it.
+        NavigationAction::UndoActiveDocument => Some(ControlCoverage::KeyboardOnly(
+            "RFC-057 D3: the universal `Ctrl+Z` convention. No editor toolbar exists to put an \
+             Undo button on, and the task breakdown names no such button. Permanent for this \
+             design.",
+        )),
+        NavigationAction::RedoActiveDocument => Some(ControlCoverage::KeyboardOnly(
+            "RFC-057 D3: the universal `Ctrl+Shift+Z` convention, the mirror of \
+             `UndoActiveDocument`'s own reason. Permanent for this design.",
+        )),
         NavigationAction::LaunchAgentRun => Some(ControlCoverage::VisibleControl {
             description: "TrustSettings's own \"Launch AI CLI Run\" button (RFC-040 PR-040-C)",
             on_press_snippet: ".on_press(Message::LaunchAgentRunButtonPressed)",

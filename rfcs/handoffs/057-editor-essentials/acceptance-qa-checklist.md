@@ -65,13 +65,21 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ## PR-057-D — undo
 
-- [ ] Operations, not snapshots; the depth is bounded and the bound is **stated when reached**.
-- [ ] Typing then undoing restores text **and cursor**.
-- [ ] Undoing to the opened text returns the document to `Clean`.
-- [ ] Undo does not cross an external-change reload and write over a file that moved underneath.
-- [ ] Redo then save writes what the screen showed.
-- [ ] The requirements gap (no `REQ-EDIT` names undo) is written up for the owner; no requirement is
+- [x] Operations, not snapshots; the depth is bounded and the bound is **stated when reached**.
+      *(`EditOperation`'s four variants store no document copy; `UNDO_MAX_DEPTH = 500`;
+      `history_bound_line` is the on-screen disclosure, naming the real number.)*
+- [x] Typing then undoing restores text **and cursor**.
+      *(Held for all four edit kinds, and through real `Ctrl+Z` routing.)*
+- [x] Undoing to the opened text returns the document to `Clean`.
+      *(`replace_text`'s one-way latch fixed, guarded to not override `ExternalChanged`/`Conflict`/`SaveError`.)*
+- [x] Undo does not cross an external-change reload and write over a file that moved underneath.
+      *(Free by construction — a reload replaces the whole `TextDocument`, never patches it in place —
+      proved end to end with a real conflict, a real Reload, then a real `Ctrl+Z`.)*
+- [x] Redo then save writes what the screen showed.
+      *(Bytes read back from disk after redo, compared against the screen's own text.)*
+- [x] The requirements gap (no `REQ-EDIT` names undo) is written up for the owner; no requirement is
       minted.
+      *(`delivery-plan.md`, "Requirements gap: no `REQ-EDIT` names undo," 2026-09-29.)*
 
 ### Required at review 443
 

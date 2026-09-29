@@ -748,6 +748,11 @@ editor-save-button = Save
 
 editor-empty = No file is open. Select a file in the explorer and press Enter.
 
+# RFC-057 D3: the undo depth bound is stated when reached, not silently
+# forgotten -- `$limit` is `UNDO_MAX_DEPTH`, a real number rather than a
+# vague "a lot," so a user who hits it knows exactly what it means.
+editor-history-bound-reached = Undo history limit reached ({ $limit } edits) -- the oldest edit can no longer be undone.
+
 # `$message` is `TextDocumentOpenError`'s own `Display`, which -- like
 # `ExplorerScanError`'s -- embeds the target's relative path in every
 # variant, including the 4 MiB `TooLarge` refusal this message renders.
@@ -1298,6 +1303,8 @@ keyboard-help-toggle-project-mode = Switch between Content and Terminal (needs a
 keyboard-help-launch-terminal = New terminal (needs an open project)
 keyboard-help-paste-into-terminal = Paste into the focused terminal
 keyboard-help-save-active-document = Save the open file
+keyboard-help-undo-active-document = Undo the last edit (needs an open file)
+keyboard-help-redo-active-document = Redo the last undone edit (needs an open file)
 keyboard-help-launch-agent-run = Launch an AI CLI run (needs a trusted project)
 keyboard-help-open-current-agent-run-detail = AgentRun Report for the latest run
 keyboard-help-open-approval-history = Approval History (needs an open project)

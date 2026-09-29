@@ -2165,6 +2165,15 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             if action == NavigationAction::SaveActiveDocument {
                 attempt_save_active_document(state);
             }
+            // RFC-057 D3: `Ctrl+Z`/`Ctrl+Shift+Z` need the same real,
+            // document-level write `SaveActiveDocument` needs above, not
+            // an `AppCommand`.
+            if action == NavigationAction::UndoActiveDocument {
+                attempt_undo_active_document(state);
+            }
+            if action == NavigationAction::RedoActiveDocument {
+                attempt_redo_active_document(state);
+            }
             // RFC-038 PR-038-B: the route change itself now goes through
             // the normal `Some(command)` branch above
             // (`app_command_for`'s own doc on this action explains why
@@ -4349,9 +4358,20 @@ fn handle_editor_key(state: &mut State, key: &input::KeyPress) {
     // `set_active_project_cursor`) so the cursor always lands exactly
     // where the edit left it, never recomputed from a second, possibly
     // stale read of `document.cursor()` after the text already changed.
-    if let Some(edit) = crate::surface::editor::apply_edit_key(&text, cursor, &key.key) {
-        let _ = state.app_shell.replace_active_project_text(edit.text);
-        let _ = state.app_shell.set_active_project_cursor(edit.cursor);
+    if let Some(outcome) = crate::surface::editor::apply_edit_key(&text, cursor, &key.key) {
+        let _ = state
+            .app_shell
+            .replace_active_project_text(outcome.result.text);
+        let _ = state
+            .app_shell
+            .set_active_project_cursor(outcome.result.cursor);
+        // RFC-057 D3: recorded after the edit itself lands, matching the
+        // order `attempt_undo_active_document`/`attempt_redo_active_document`
+        // apply theirs in -- the operation being recorded is the one that
+        // just happened, never one about to.
+        let _ = state
+            .app_shell
+            .record_active_project_edit_operation(outcome.operation);
         settle_editor_viewport(state);
         return;
     }
@@ -5597,6 +5617,49 @@ fn save_active_document_button_pressed(state: &mut State) {
         return;
     }
     attempt_save_active_document(state);
+}
+
+/// RFC-057 D3: `Ctrl+Z`. Pops the active document's most recent undo
+/// entry and applies its inverse through the same two-step
+/// `replace_active_project_text`/`set_active_project_cursor` shape
+/// `handle_editor_key` already uses for an ordinary edit -- undo is not a
+/// third way of writing to a document, it is the same one, with
+/// `apply_undo`'s own text/cursor in place of `apply_edit_key`'s. A
+/// no-op, not an error, when there is no active document or nothing to
+/// undo (`undo_active_project_document` returning `Ok(None)`).
+fn attempt_undo_active_document(state: &mut State) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let Some(document) = project.content_workspace().active_document() else {
+        return;
+    };
+    let text = document.text().to_string();
+    let Ok(Some(operation)) = state.app_shell.undo_active_project_document() else {
+        return;
+    };
+    let result = crate::surface::editor::apply_undo(&text, &operation);
+    let _ = state.app_shell.replace_active_project_text(result.text);
+    let _ = state.app_shell.set_active_project_cursor(result.cursor);
+    settle_editor_viewport(state);
+}
+
+/// The mirror of [`attempt_undo_active_document`], for `Ctrl+Shift+Z`.
+fn attempt_redo_active_document(state: &mut State) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let Some(document) = project.content_workspace().active_document() else {
+        return;
+    };
+    let text = document.text().to_string();
+    let Ok(Some(operation)) = state.app_shell.redo_active_project_document() else {
+        return;
+    };
+    let result = crate::surface::editor::apply_redo(&text, &operation);
+    let _ = state.app_shell.replace_active_project_text(result.text);
+    let _ = state.app_shell.set_active_project_cursor(result.cursor);
+    settle_editor_viewport(state);
 }
 
 /// Terminal launch UX handoff: the real `Ctrl+Alt+T` path, calling
@@ -7123,6 +7186,11 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // `update`'s `Shell` arm special-cases it directly, the same shape
         // `PasteIntoTerminal` uses above.
         | NavigationAction::SaveActiveDocument
+        // RFC-057 D3: undo/redo need no core route/mode change either --
+        // `update`'s `Shell` arm special-cases both directly, the same
+        // shape `SaveActiveDocument` uses above.
+        | NavigationAction::UndoActiveDocument
+        | NavigationAction::RedoActiveDocument
         // RFC-038 PR-038-C: opening a modal is shell-local UI state
         // (`state.modal`), never part of `tekstide-core`'s `AppState`/
         // `AppRoute` model -- there is no `AppCommand` for it, the same

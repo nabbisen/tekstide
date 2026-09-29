@@ -1,6 +1,8 @@
 use crate::agent::AgentRunLaunchPlan;
 use crate::close::{CloseAssessment, assess_close};
-use crate::content::{ExternalChangeDecision, SaveDecision, TextCursor, TextViewport};
+use crate::content::{
+    EditOperation, ExternalChangeDecision, SaveDecision, TextCursor, TextViewport,
+};
 use crate::domain::{
     AgentRunId, ChangeSetId, OwnershipError, ReviewState, TerminalId, TerminalSession, VisibleSlot,
 };
@@ -529,6 +531,38 @@ impl AppState {
         };
 
         project.set_active_viewport(viewport)
+    }
+
+    /// RFC-057 D3.
+    pub fn record_active_project_edit_operation(
+        &mut self,
+        operation: EditOperation,
+    ) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.record_active_edit_operation(operation)
+    }
+
+    pub fn undo_active_project_document(
+        &mut self,
+    ) -> Result<Option<EditOperation>, ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.undo_active_document()
+    }
+
+    pub fn redo_active_project_document(
+        &mut self,
+    ) -> Result<Option<EditOperation>, ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.redo_active_document()
     }
 
     pub fn save_active_project_text_document(

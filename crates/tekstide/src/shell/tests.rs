@@ -10646,6 +10646,221 @@ fn ctrl_s_saves_the_real_edited_document_to_disk() {
     );
 }
 
+// --- RFC-057 D3: undo/redo ---
+
+fn document_state(state: &State) -> tekstide_core::content::TextDocumentState {
+    state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.content_workspace().active_document())
+        .expect("an active document must exist")
+        .state()
+}
+
+fn press_via_real_routing(state: &mut State, press: crate::input::KeyPress) {
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(state, Message::Input(routed));
+}
+
+fn press_ctrl_z(state: &mut State) {
+    press_via_real_routing(
+        state,
+        crate::input::KeyPress {
+            key: iced::keyboard::Key::Character("z".into()),
+            modifiers: iced::keyboard::Modifiers::CTRL,
+        },
+    );
+}
+
+fn press_ctrl_shift_z(state: &mut State) {
+    press_via_real_routing(
+        state,
+        crate::input::KeyPress {
+            key: iced::keyboard::Key::Character("z".into()),
+            modifiers: iced::keyboard::Modifiers::CTRL | iced::keyboard::Modifiers::SHIFT,
+        },
+    );
+}
+
+fn press_typed_character(state: &mut State, character: &str) {
+    press_via_real_routing(
+        state,
+        crate::input::KeyPress {
+            key: iced::keyboard::Key::Character(character.into()),
+            modifiers: iced::keyboard::Modifiers::empty(),
+        },
+    );
+}
+
+/// Risk document §3 row one, through real `Ctrl+Z`/`Ctrl+S` chords, not
+/// `shell_input_for_test`: `Ctrl+Z` really is `NavigationAction::
+/// UndoActiveDocument` (proving the chord itself, not merely the handler),
+/// and undoing back to the opened text lands on `Clean`, never stuck
+/// `Dirty` because it changed at some point.
+#[test]
+fn ctrl_z_undoes_a_real_typed_character_and_returns_to_clean() {
+    let (mut state, _dir) = state_with_an_open_document("editor-real-undo-to-clean", "hello");
+    assert_eq!(
+        document_state(&state),
+        tekstide_core::content::TextDocumentState::Clean
+    );
+
+    press_typed_character(&mut state, "!");
+    assert_eq!(active_document_text(&state), "!hello");
+    assert_eq!(
+        document_state(&state),
+        tekstide_core::content::TextDocumentState::Dirty
+    );
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("z".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    assert!(
+        matches!(routed, crate::input::RoutedInput::Shell(_)),
+        "Ctrl+Z must be a real global keybinding, not fall through to Surface: {routed:?}"
+    );
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        active_document_text(&state),
+        "hello",
+        "undo must restore the exact text that was opened"
+    );
+    assert_eq!(
+        active_document_cursor(&state),
+        tekstide_core::content::TextCursor { line: 0, column: 0 },
+        "undo must restore the cursor too, not only the text"
+    );
+    assert_eq!(
+        document_state(&state),
+        tekstide_core::content::TextDocumentState::Clean,
+        "undoing back to exactly the opened text must return to Clean"
+    );
+}
+
+/// Risk document §3 row three: undo must never reach back across an
+/// external-change reload and overwrite the file that moved underneath
+/// it. A real conflict, a real Reload (which re-opens the document from
+/// scratch, per `activate_current_modal`'s own doc), then `Ctrl+Z` must be
+/// a no-op -- the local edit that existed before the reload is gone, not
+/// merely undone.
+#[test]
+fn undo_does_not_cross_a_real_external_change_reload() {
+    let (mut state, dir) = state_with_an_open_document("editor-undo-not-across-reload", "original");
+    press_typed_character(&mut state, "!");
+    assert_eq!(active_document_text(&state), "!original");
+    std::fs::write(dir.join("file.txt"), "external edit").unwrap();
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let save_press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, save_press);
+    let _ = super::update(&mut state, Message::Input(routed));
+    assert_eq!(
+        external_change_focus(&state.modal),
+        Some(ExternalChangeButton::Dismiss),
+        "test precondition: the refused save must open the conflict modal"
+    );
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        external_change_focus(&state.modal),
+        Some(ExternalChangeButton::Reload)
+    );
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert!(state.modal.is_none(), "Reload must close the modal");
+    assert_eq!(
+        active_document_text(&state),
+        "external edit",
+        "test precondition: Reload must take disk's real current content"
+    );
+
+    press_ctrl_z(&mut state);
+
+    assert_eq!(
+        active_document_text(&state),
+        "external edit",
+        "undo must not reach back across the reload and resurrect the discarded local edit"
+    );
+}
+
+/// Risk document §3 row four: redo, then save, writes to disk exactly
+/// what the screen showed -- not what was on disk before the edit, and
+/// not what undo left behind.
+#[test]
+fn redo_then_save_writes_what_the_screen_showed() {
+    let (mut state, dir) = state_with_an_open_document("editor-redo-then-save", "hello");
+
+    press_typed_character(&mut state, "!");
+    assert_eq!(active_document_text(&state), "!hello");
+
+    press_ctrl_z(&mut state);
+    assert_eq!(active_document_text(&state), "hello");
+
+    press_ctrl_shift_z(&mut state);
+    assert_eq!(
+        active_document_text(&state),
+        "!hello",
+        "test precondition: redo must restore the undone edit before saving"
+    );
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let save_press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, save_press);
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "!hello",
+        "save after redo must write exactly what the screen showed"
+    );
+}
+
+/// `Ctrl+Shift+Z` is a real global keybinding too, distinct from `Ctrl+Z`
+/// -- proven through the real router, the same way `ctrl_s_saves_the_
+/// real_edited_document_to_disk` proves `Ctrl+S`.
+#[test]
+fn ctrl_shift_z_is_a_real_global_keybinding_for_redo() {
+    let (mut state, _dir) = state_with_an_open_document("editor-real-ctrl-shift-z", "hello");
+    press_typed_character(&mut state, "!");
+    press_ctrl_z(&mut state);
+    assert_eq!(active_document_text(&state), "hello");
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("z".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL | iced::keyboard::Modifiers::SHIFT,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    assert!(
+        matches!(routed, crate::input::RoutedInput::Shell(_)),
+        "Ctrl+Shift+Z must be a real global keybinding, not fall through to Surface: {routed:?}"
+    );
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert_eq!(active_document_text(&state), "!hello");
+}
+
 fn external_change_focus(modal: &Option<ModalContent>) -> Option<ExternalChangeButton> {
     match modal {
         Some(ModalContent::ExternalChange(external_change)) => Some(external_change.focus),
@@ -11643,7 +11858,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     );
     assert_eq!(
         lines.len(),
-        15,
+        17,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }

@@ -730,7 +730,7 @@ fn the_configuration_page_lists_every_rebindable_action_with_its_default_chord()
             ),
         }
     }
-    assert_eq!(listed, 15, "every rebindable action is listed exactly once");
+    assert_eq!(listed, 17, "every rebindable action is listed exactly once");
 }
 
 /// **RFC-054 PR-054-B.** The configuration page shows every colour role a user

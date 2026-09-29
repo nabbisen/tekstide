@@ -17,6 +17,11 @@
 - **Lines still do not wrap.** One line is one drawn row; a long line's own width is windowed, the same way the file's height already
   is, rather than broken across more than one row — wrapping would trade away the exact per-row arithmetic the vertical window
   depends on.
+- **The editor has undo and redo**, `Ctrl+Z`/`Ctrl+Shift+Z`. Operations, not snapshots: the four invertible edits are a character,
+  `Enter`, `Space` and `Backspace`, each stored as what its own inverse needs, never a copy of the document. Depth is bounded at
+  500 edits, and the editor says so on screen once that bound is actually reached, rather than dropping the oldest edit silently.
+  Undoing all the way back to the text a file was opened with returns it to a clean, unmodified state, and undo does not reach
+  back across a reload of the file's real, current content on disk.
 
 ### Changed — the editor draws only the lines that fit
 

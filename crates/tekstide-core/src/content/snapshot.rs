@@ -86,6 +86,19 @@ pub(super) fn file_snapshot_for_current_disk(
     })
 }
 
+impl FileSnapshot {
+    /// RFC-057 D3: whether `text` hashes to what this snapshot recorded
+    /// when it was opened -- an in-process comparison only, per
+    /// `content_hash`'s own doc, used to detect "the buffer is back to
+    /// the text that was on disk when this document opened," the signal
+    /// `TextDocument::replace_text` needs to return to `Clean` on an
+    /// undo that lands back on the opened text rather than staying
+    /// `Dirty` forever because it changed at some point.
+    pub(super) fn matches_content(&self, text: &str) -> bool {
+        self.content_hash == Some(hash_bytes(text.as_bytes()))
+    }
+}
+
 pub(super) fn is_external_snapshot_shape_change(error: &TextDocumentSnapshotError) -> bool {
     matches!(
         error.kind,

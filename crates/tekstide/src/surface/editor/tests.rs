@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tekstide_core::content::{TextDocument, TextDocumentOpenPolicy, TextDocumentState};
+use tekstide_core::content::{
+    EditOperation, TextDocument, TextDocumentOpenPolicy, TextDocumentState,
+};
 use tekstide_core::project::root::{
     ProjectRootHandle, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
@@ -695,9 +697,15 @@ fn a_typed_character_inserts_at_the_cursor() {
     let result = apply_edit_key("held", cursor(0, 2), &character_key("!"));
     assert_eq!(
         result,
-        Some(super::EditResult {
-            text: "he!ld".to_string(),
-            cursor: cursor(0, 3),
+        Some(super::EditOutcome {
+            result: super::EditResult {
+                text: "he!ld".to_string(),
+                cursor: cursor(0, 3),
+            },
+            operation: EditOperation::Insert {
+                at: cursor(0, 2),
+                inserted: "!".to_string(),
+            },
         })
     );
 }
@@ -715,9 +723,12 @@ fn enter_splits_the_line_at_the_cursor() {
     );
     assert_eq!(
         result,
-        Some(super::EditResult {
-            text: "he\nllo".to_string(),
-            cursor: cursor(1, 0),
+        Some(super::EditOutcome {
+            result: super::EditResult {
+                text: "he\nllo".to_string(),
+                cursor: cursor(1, 0),
+            },
+            operation: EditOperation::Enter { at: cursor(0, 2) },
         })
     );
 }
@@ -734,9 +745,15 @@ fn backspace_removes_the_character_before_the_cursor_by_char_not_by_byte() {
     );
     assert_eq!(
         result,
-        Some(super::EditResult {
-            text: "caf".to_string(),
-            cursor: cursor(0, 3),
+        Some(super::EditOutcome {
+            result: super::EditResult {
+                text: "caf".to_string(),
+                cursor: cursor(0, 3),
+            },
+            operation: EditOperation::RemoveChar {
+                at: cursor(0, 4),
+                removed: '\u{e9}',
+            },
         })
     );
 }
@@ -754,9 +771,15 @@ fn backspace_at_the_start_of_a_line_joins_with_the_previous_line() {
     );
     assert_eq!(
         result,
-        Some(super::EditResult {
-            text: "abcd".to_string(),
-            cursor: cursor(0, 2),
+        Some(super::EditOutcome {
+            result: super::EditResult {
+                text: "abcd".to_string(),
+                cursor: cursor(0, 2),
+            },
+            operation: EditOperation::JoinLines {
+                at: cursor(1, 0),
+                previous_len: 2,
+            },
         })
     );
 }
@@ -795,10 +818,151 @@ fn a_multi_byte_typed_character_inserts_whole() {
     let result = apply_edit_key("caf", cursor(0, 3), &character_key("\u{e9}"));
     assert_eq!(
         result,
-        Some(super::EditResult {
-            text: "caf\u{e9}".to_string(),
-            cursor: cursor(0, 4),
+        Some(super::EditOutcome {
+            result: super::EditResult {
+                text: "caf\u{e9}".to_string(),
+                cursor: cursor(0, 4),
+            },
+            operation: EditOperation::Insert {
+                at: cursor(0, 3),
+                inserted: "\u{e9}".to_string(),
+            },
         })
+    );
+}
+
+// --- RFC-057 D3: undo/redo, inverting and reapplying an `EditOperation` ---
+
+/// For every edit key `apply_edit_key` knows, applying it and then
+/// undoing the `EditOperation` it produced restores both the original
+/// text and the original cursor -- the checklist's own "typing then
+/// undoing restores text and cursor," proved against the real inversion
+/// path rather than by construction.
+#[test]
+fn undoing_every_kind_of_edit_restores_the_original_text_and_cursor() {
+    let cases: &[(&str, TextCursor, iced::keyboard::Key)] = &[
+        ("held", cursor(0, 2), character_key("!")),
+        (
+            "hello",
+            cursor(0, 2),
+            named_key(iced::keyboard::key::Named::Enter),
+        ),
+        (
+            "caf\u{e9}",
+            cursor(0, 4),
+            named_key(iced::keyboard::key::Named::Backspace),
+        ),
+        (
+            "ab\ncd",
+            cursor(1, 0),
+            named_key(iced::keyboard::key::Named::Backspace),
+        ),
+    ];
+    for (original_text, original_cursor, key) in cases {
+        let outcome = apply_edit_key(original_text, *original_cursor, key)
+            .unwrap_or_else(|| panic!("{key:?} at {original_cursor:?} must produce an edit"));
+        let undone = super::apply_undo(&outcome.result.text, &outcome.operation);
+        assert_eq!(
+            undone.text, *original_text,
+            "undoing {:?} must restore the original text",
+            outcome.operation
+        );
+        assert_eq!(
+            undone.cursor, *original_cursor,
+            "undoing {:?} must restore the original cursor",
+            outcome.operation
+        );
+    }
+}
+
+/// The mirror property: redoing an already-undone edit reproduces
+/// exactly the text and cursor the original edit produced -- `apply_redo`
+/// reapplies the same functions `apply_edit_key` used, not a third
+/// implementation.
+#[test]
+fn redoing_every_kind_of_edit_reproduces_the_original_outcome() {
+    let cases: &[(&str, TextCursor, iced::keyboard::Key)] = &[
+        ("held", cursor(0, 2), character_key("!")),
+        (
+            "hello",
+            cursor(0, 2),
+            named_key(iced::keyboard::key::Named::Enter),
+        ),
+        (
+            "caf\u{e9}",
+            cursor(0, 4),
+            named_key(iced::keyboard::key::Named::Backspace),
+        ),
+        (
+            "ab\ncd",
+            cursor(1, 0),
+            named_key(iced::keyboard::key::Named::Backspace),
+        ),
+    ];
+    for (original_text, original_cursor, key) in cases {
+        let outcome = apply_edit_key(original_text, *original_cursor, key)
+            .unwrap_or_else(|| panic!("{key:?} at {original_cursor:?} must produce an edit"));
+        let undone = super::apply_undo(&outcome.result.text, &outcome.operation);
+        let redone = super::apply_redo(&undone.text, &outcome.operation);
+        assert_eq!(
+            redone.text, outcome.result.text,
+            "redoing {:?} must reproduce the original edit's text",
+            outcome.operation
+        );
+        assert_eq!(
+            redone.cursor, outcome.result.cursor,
+            "redoing {:?} must reproduce the original edit's cursor",
+            outcome.operation
+        );
+    }
+}
+
+/// `remove_at`, `apply_undo`'s own helper for `EditOperation::Insert`:
+/// removes exactly the inserted span and lands the cursor back where the
+/// insertion started.
+#[test]
+fn remove_at_removes_exactly_the_given_span_and_restores_the_cursor() {
+    let result = super::remove_at("he!ld", cursor(0, 2), 1);
+    assert_eq!(result.text, "held");
+    assert_eq!(result.cursor, cursor(0, 2));
+}
+
+/// `join_lines_at`, `apply_undo`'s own helper for `EditOperation::Enter`
+/// (and `backspace_at_cursor`'s own start-of-line case): joins the given
+/// line into the one before it.
+#[test]
+fn join_lines_at_joins_the_given_line_into_the_one_before_it() {
+    let result = super::join_lines_at("he\nllo", 1);
+    assert_eq!(result.text, "hello");
+    assert_eq!(result.cursor, cursor(0, 2));
+}
+
+/// RFC-057 D3: the undo depth bound is stated when reached, and
+/// `history_bound_line` is that statement -- `None` ordinarily, `Some`
+/// only once the bound has actually been hit.
+#[test]
+fn history_bound_line_is_none_until_the_bound_is_reached_then_names_the_limit() {
+    let catalog = real_catalog();
+    let sandbox = Sandbox::new("undo-bound-line");
+    sandbox.write_file("file.txt", "text");
+    let mut document = open(&sandbox, "file.txt");
+    assert_eq!(
+        super::history_bound_line(&catalog, &document),
+        None,
+        "a fresh document has not hit the bound"
+    );
+
+    for index in 0..=tekstide_core::content::UNDO_MAX_DEPTH {
+        document.record_edit_operation(EditOperation::Insert {
+            at: TextCursor::default(),
+            inserted: index.to_string(),
+        });
+    }
+    let line = super::history_bound_line(&catalog, &document)
+        .expect("one edit past the bound must produce a disclosure line");
+    assert!(
+        line.contains(&tekstide_core::content::UNDO_MAX_DEPTH.to_string()),
+        "the disclosure must name the real limit, not a vague amount: {line}"
     );
 }
 

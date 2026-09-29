@@ -715,6 +715,9 @@ fn generic_args() -> CatalogArgs<'static> {
         // covers both keys' transcript-count selector; no new entry
         // needed for it.
         .number("bytes", 1u64)
+        // RFC-057 D3: `editor-history-bound-reached`'s `$limit` --
+        // `UNDO_MAX_DEPTH`, a real trusted number, never untrusted text.
+        .number("limit", 1u32)
         // RFC-041 PR-041-B: `change-review-content-non-text`'s real byte
         // length and `change-review-content-error-too-large`'s length
         // against its own bound -- both real, trusted numbers (never

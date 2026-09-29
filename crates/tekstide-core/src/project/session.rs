@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
 use crate::content::{
-    ExternalChangeDecision, SaveDecision, TextCursor, TextDocumentOpenPolicy, TextViewport,
+    EditOperation, ExternalChangeDecision, SaveDecision, TextCursor, TextDocumentOpenPolicy,
+    TextViewport,
 };
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
@@ -1586,6 +1587,33 @@ impl ProjectSession {
         viewport: TextViewport,
     ) -> Result<(), ProjectContentError> {
         self.content_workspace.set_active_viewport(viewport)
+    }
+
+    /// RFC-057 D3: records a real edit for undo. **Records no activity
+    /// and does not sync file state** -- the edit's own `replace_active_text`
+    /// call already did both, the same "this bookkeeping call touches
+    /// nothing `set_active_viewport` doesn't" reasoning as that method's
+    /// own doc.
+    pub fn record_active_edit_operation(
+        &mut self,
+        operation: EditOperation,
+    ) -> Result<(), ProjectContentError> {
+        self.content_workspace
+            .record_active_edit_operation(operation)
+    }
+
+    /// Pops and returns the active document's most recent undo entry.
+    /// **Records no activity and does not sync file state on its own**:
+    /// popping the stack is not yet a text change -- the caller applies
+    /// the inverse through [`Self::replace_active_text`] (which does
+    /// both), the same two-step shape an ordinary edit already uses.
+    pub fn undo_active_document(&mut self) -> Result<Option<EditOperation>, ProjectContentError> {
+        self.content_workspace.undo_active_document()
+    }
+
+    /// The mirror of [`Self::undo_active_document`].
+    pub fn redo_active_document(&mut self) -> Result<Option<EditOperation>, ProjectContentError> {
+        self.content_workspace.redo_active_document()
     }
 
     pub fn save_active_text_document(&mut self) -> Result<SaveDecision, ProjectContentError> {

@@ -2,9 +2,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::content::{
-    ExternalChangeDecision, SaveDecision, TextCursor, TextDocument, TextDocumentEditError,
-    TextDocumentOpenError, TextDocumentOpenPolicy, TextDocumentRefreshError, TextDocumentSaveError,
-    TextDocumentState, TextViewport,
+    EditOperation, ExternalChangeDecision, SaveDecision, TextCursor, TextDocument,
+    TextDocumentEditError, TextDocumentOpenError, TextDocumentOpenPolicy, TextDocumentRefreshError,
+    TextDocumentSaveError, TextDocumentState, TextViewport,
 };
 use crate::project::explorer_tree::{
     ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
@@ -276,6 +276,42 @@ impl ProjectContentWorkspace {
         };
         document.set_viewport(viewport);
         Ok(())
+    }
+
+    /// RFC-057 D3: records a real edit for undo, the twin of
+    /// [`Self::set_active_cursor`] for the same reason -- recording an
+    /// operation takes part in no dirty/save/conflict computation itself
+    /// (the edit's own `replace_active_text` call already updated
+    /// `self.status`), so this never touches it either.
+    pub fn record_active_edit_operation(
+        &mut self,
+        operation: EditOperation,
+    ) -> Result<(), ProjectContentError> {
+        let Some(document) = self.active_document.as_mut() else {
+            return Err(ProjectContentError::NoActiveDocument);
+        };
+        document.record_edit_operation(operation);
+        Ok(())
+    }
+
+    /// Pops the active document's most recent undo entry, for the caller
+    /// to invert and apply via [`Self::replace_active_text`]/
+    /// [`Self::set_active_cursor`] -- the same two-step shape an ordinary
+    /// edit already uses. `Ok(None)` (not an error) when there is nothing
+    /// to undo.
+    pub fn undo_active_document(&mut self) -> Result<Option<EditOperation>, ProjectContentError> {
+        let Some(document) = self.active_document.as_mut() else {
+            return Err(ProjectContentError::NoActiveDocument);
+        };
+        Ok(document.undo_operation())
+    }
+
+    /// The mirror of [`Self::undo_active_document`].
+    pub fn redo_active_document(&mut self) -> Result<Option<EditOperation>, ProjectContentError> {
+        let Some(document) = self.active_document.as_mut() else {
+            return Err(ProjectContentError::NoActiveDocument);
+        };
+        Ok(document.redo_operation())
     }
 
     pub fn refresh_active_document(

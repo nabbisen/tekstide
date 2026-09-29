@@ -74,6 +74,8 @@ terminal, and a dialog still swallows every key but its own.
 | `launch_terminal` | `Ctrl+Alt+T` |
 | `paste_into_terminal` | `Ctrl+Shift+V` |
 | `save_active_document` | `Ctrl+S` |
+| `undo_active_document` | `Ctrl+Z` |
+| `redo_active_document` | `Ctrl+Shift+Z` |
 | `launch_agent_run` | `Ctrl+Alt+A` |
 | `open_current_agent_run_detail` | `Ctrl+Alt+R` |
 | `open_approval_history` | `Ctrl+Alt+H` |

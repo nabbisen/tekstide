@@ -121,6 +121,52 @@ fn save_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule
 }
 
 #[test]
+fn undo_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::UndoActiveDocument)
+        .expect("Undo Active Document should have a keyboard policy");
+
+    assert_eq!(rule.default_binding(), Some("Ctrl+Z"));
+    assert_eq!(rule.status(), KeybindingStatus::Bound);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::UndoActiveDocument)
+        .filter(|other| other.default_binding() == rule.default_binding())
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Z must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
+#[test]
+fn redo_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::RedoActiveDocument)
+        .expect("Redo Active Document should have a keyboard policy");
+
+    assert_eq!(rule.default_binding(), Some("Ctrl+Shift+Z"));
+    assert_eq!(rule.status(), KeybindingStatus::Bound);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::RedoActiveDocument)
+        .filter(|other| other.default_binding() == rule.default_binding())
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Shift+Z must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
+#[test]
 fn launch_agent_run_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
     let policy = KeybindingPolicy::linux_mvp();
     let rule = policy
@@ -417,6 +463,8 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+T",
             "Ctrl+Shift+V",
             "Ctrl+S",
+            "Ctrl+Z",
+            "Ctrl+Shift+Z",
             "Ctrl+Alt+A",
             "Ctrl+Alt+N",
             "Ctrl+Alt+R",
@@ -618,8 +666,8 @@ fn every_advertised_chord_round_trips() {
         checked += 1;
     }
     assert_eq!(
-        checked, 16,
-        "sixteen chords are held (fifteen bound, one reserved)"
+        checked, 18,
+        "eighteen chords are held (seventeen bound, one reserved)"
     );
 }
 

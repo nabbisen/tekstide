@@ -21,7 +21,9 @@ use crate::theme::text;
 use iced::widget::{column, container};
 use iced::{Element, Length, Size};
 
-use tekstide_core::content::{TextCursor, TextDocument, TextDocumentState, TextViewport};
+use tekstide_core::content::{
+    EditOperation, TextCursor, TextDocument, TextDocumentState, TextViewport,
+};
 use tekstide_core::project::ProjectContentStatus;
 use tekstide_core::text_safety;
 
@@ -73,6 +75,20 @@ pub(crate) fn cursor_line(catalog: &Catalog, document: &TextDocument) -> String 
             .number("line", (cursor.line + 1) as u32)
             .number("column", (cursor.column + 1) as u32),
     )
+}
+
+/// RFC-057 D3: the undo depth bound is **stated when reached**, not
+/// silently forgotten -- this is that statement. `None` while the bound
+/// has not been hit, the same "no line to show" shape [`open_error_line`]
+/// already uses for its own conditional line. Factored out from [`view`]
+/// for the same testability reason as [`chrome_line`].
+pub(crate) fn history_bound_line(catalog: &Catalog, document: &TextDocument) -> Option<String> {
+    document.undo_depth_bound_reached().then(|| {
+        catalog.get_with_args(
+            "editor-history-bound-reached",
+            &CatalogArgs::new().number("limit", tekstide_core::content::UNDO_MAX_DEPTH as u32),
+        )
+    })
 }
 
 /// `TextDocumentOpenError`'s own `Display` embeds the target's relative
@@ -437,8 +453,8 @@ fn split_line_at_cursor(text: &str, cursor: TextCursor) -> EditResult {
 /// joining the previous line) which always produces `Some`.
 fn backspace_at_cursor(text: &str, cursor: TextCursor) -> Option<EditResult> {
     let (line, column) = clamp_cursor(text, cursor);
-    let mut lines: Vec<String> = lines_of(text).into_iter().map(str::to_owned).collect();
     if column > 0 {
+        let mut lines: Vec<String> = lines_of(text).into_iter().map(str::to_owned).collect();
         let mut chars: Vec<char> = lines[line].chars().collect();
         chars.remove(column - 1);
         lines[line] = chars.into_iter().collect();
@@ -450,46 +466,154 @@ fn backspace_at_cursor(text: &str, cursor: TextCursor) -> Option<EditResult> {
             },
         })
     } else if line > 0 {
-        let previous_len = lines[line - 1].chars().count();
-        let current = lines.remove(line);
-        lines[line - 1].push_str(&current);
-        Some(EditResult {
-            text: lines.join("\n"),
-            cursor: TextCursor {
-                line: line - 1,
-                column: previous_len,
-            },
-        })
+        Some(join_lines_at(text, line))
     } else {
         None
     }
 }
 
-/// RFC-006 Amendment 1: turns a keypress into a real edit at the
-/// document's own cursor position -- inserting, splitting, or removing
-/// exactly where the rendered [`cursor_line`] says it will, replacing
-/// PR-019-D's original append-only behaviour (kept append-only only
-/// because `ProjectContentWorkspace` had no cursor-write path at all;
-/// that gap is closed, so this now inserts and deletes at the real
+/// The inverse of [`insert_at`]: removes `count` characters starting at
+/// `cursor`, landing the cursor back at `cursor` -- used only by
+/// [`apply_undo`] to invert an [`EditOperation::Insert`]. Never crosses a
+/// line boundary: `insert_at` is only ever called with single-line text
+/// (a typed character, `Space`), so an undo of it never needs to either.
+fn remove_at(text: &str, cursor: TextCursor, count: usize) -> EditResult {
+    let (line, column) = clamp_cursor(text, cursor);
+    let mut lines: Vec<String> = lines_of(text).into_iter().map(str::to_owned).collect();
+    let mut chars: Vec<char> = lines[line].chars().collect();
+    let end = (column + count).min(chars.len());
+    chars.drain(column..end);
+    lines[line] = chars.into_iter().collect();
+    EditResult {
+        text: lines.join("\n"),
+        cursor: TextCursor { line, column },
+    }
+}
+
+/// Joins `line` into the line before it -- the same join
+/// [`backspace_at_cursor`]'s own start-of-line case performs (factored
+/// out so [`apply_undo`] can reuse it to invert an
+/// [`EditOperation::Enter`] without duplicating the logic), and also
+/// [`split_line_at_cursor`]'s own inverse.
+fn join_lines_at(text: &str, line: usize) -> EditResult {
+    let mut lines: Vec<String> = lines_of(text).into_iter().map(str::to_owned).collect();
+    let previous_len = lines[line - 1].chars().count();
+    let current = lines.remove(line);
+    lines[line - 1].push_str(&current);
+    EditResult {
+        text: lines.join("\n"),
+        cursor: TextCursor {
+            line: line - 1,
+            column: previous_len,
+        },
+    }
+}
+
+/// [`apply_edit_key`]'s own result: the text/cursor half every caller
+/// needs ([`EditResult`]) plus the [`EditOperation`] that produced it, so
+/// a caller can record it for undo (RFC-057 D3) without re-deriving what
+/// happened from the two text values alone -- the same "compute
+/// everything together instead of recomputing one half from a stale copy
+/// of the other" reasoning [`EditResult`]'s own doc already states.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditOutcome {
+    pub result: EditResult,
+    pub operation: EditOperation,
+}
+
+/// RFC-006 Amendment 1 / RFC-057 D3: turns a keypress into a real edit at
+/// the document's own cursor position -- inserting, splitting, or
+/// removing exactly where the rendered [`cursor_line`] says it will,
+/// replacing PR-019-D's original append-only behaviour (kept append-only
+/// only because `ProjectContentWorkspace` had no cursor-write path at
+/// all; that gap is closed, so this now inserts and deletes at the real
 /// position rather than always at the end). `None` if the key is not an
 /// edit key, or produces no edit (Backspace at the very start).
 pub(crate) fn apply_edit_key(
     text: &str,
     cursor: TextCursor,
     key: &iced::keyboard::Key,
-) -> Option<EditResult> {
+) -> Option<EditOutcome> {
+    let (line, column) = clamp_cursor(text, cursor);
+    let at = TextCursor { line, column };
     match key {
-        iced::keyboard::Key::Character(typed) => Some(insert_at(text, cursor, typed)),
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-            Some(split_line_at_cursor(text, cursor))
-        }
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
-            Some(insert_at(text, cursor, " "))
-        }
+        iced::keyboard::Key::Character(typed) => Some(EditOutcome {
+            result: insert_at(text, cursor, typed),
+            operation: EditOperation::Insert {
+                at,
+                inserted: typed.to_string(),
+            },
+        }),
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => Some(EditOutcome {
+            result: split_line_at_cursor(text, cursor),
+            operation: EditOperation::Enter { at },
+        }),
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => Some(EditOutcome {
+            result: insert_at(text, cursor, " "),
+            operation: EditOperation::Insert {
+                at,
+                inserted: " ".to_owned(),
+            },
+        }),
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-            backspace_at_cursor(text, cursor)
+            let result = backspace_at_cursor(text, cursor)?;
+            let operation = if column > 0 {
+                let removed = lines_of(text)[line].chars().nth(column - 1).expect(
+                    "backspace_at_cursor returned Some for column > 0, so this character exists",
+                );
+                EditOperation::RemoveChar { at, removed }
+            } else {
+                let previous_len = lines_of(text)[line - 1].chars().count();
+                EditOperation::JoinLines { at, previous_len }
+            };
+            Some(EditOutcome { result, operation })
         }
         _ => None,
+    }
+}
+
+/// RFC-057 D3: inverts an [`EditOperation`] against `text` -- the
+/// operation's own stored fields tell each variant exactly how to undo
+/// itself, never a generic diff. The resulting cursor is always
+/// `operation`'s own `at`, the invariant [`EditOperation`]'s own doc
+/// states every variant holds.
+pub(crate) fn apply_undo(text: &str, operation: &EditOperation) -> EditResult {
+    match operation {
+        EditOperation::Insert { at, inserted } => remove_at(text, *at, inserted.chars().count()),
+        EditOperation::Enter { at } => join_lines_at(text, at.line + 1),
+        EditOperation::RemoveChar { at, removed } => {
+            let mut buffer = [0u8; 4];
+            insert_at(
+                text,
+                TextCursor {
+                    line: at.line,
+                    column: at.column - 1,
+                },
+                removed.encode_utf8(&mut buffer),
+            )
+        }
+        EditOperation::JoinLines { at, previous_len } => split_line_at_cursor(
+            text,
+            TextCursor {
+                line: at.line - 1,
+                column: *previous_len,
+            },
+        ),
+    }
+}
+
+/// RFC-057 D3: reapplies an [`EditOperation`] to `text` -- literally the
+/// same functions [`apply_edit_key`] used to produce it in the first
+/// place, called again at the operation's own `at`. No new logic: redo is
+/// "do it again," not a third implementation of what the edit was.
+pub(crate) fn apply_redo(text: &str, operation: &EditOperation) -> EditResult {
+    match operation {
+        EditOperation::Insert { at, inserted } => insert_at(text, *at, inserted),
+        EditOperation::Enter { at } => split_line_at_cursor(text, *at),
+        EditOperation::RemoveChar { at, .. } => backspace_at_cursor(text, *at)
+            .expect("RemoveChar was recorded from a real backspace at column > 0"),
+        EditOperation::JoinLines { at, .. } => backspace_at_cursor(text, *at)
+            .expect("JoinLines was recorded from a real backspace at column 0, line > 0"),
     }
 }
 
@@ -672,18 +796,27 @@ pub fn view<'a, Message: 'a + Clone>(
                     .clip(true),
                 on_body_measured,
             );
-            column![
-                text(chrome_line(catalog, document)).size(theme.font_size_body()),
-                text(cursor_line(catalog, document)).size(theme.font_size_status()),
+            let mut chrome: Vec<Element<'a, Message>> = vec![
+                text(chrome_line(catalog, document))
+                    .size(theme.font_size_body())
+                    .into(),
+                text(cursor_line(catalog, document))
+                    .size(theme.font_size_status())
+                    .into(),
+            ];
+            if let Some(line) = history_bound_line(catalog, document) {
+                chrome.push(text(line).size(theme.font_size_status()).into());
+            }
+            chrome.push(
                 crate::theme::button(
                     *theme,
-                    text(catalog.get("editor-save-button")).size(theme.font_size_body())
+                    text(catalog.get("editor-save-button")).size(theme.font_size_body()),
                 )
-                .on_press(on_save),
-                body,
-            ]
-            .spacing(6)
-            .into()
+                .on_press(on_save)
+                .into(),
+            );
+            chrome.push(body.into());
+            column(chrome).spacing(6).into()
         }
         None => {
             let lines = empty_lines(catalog, status);

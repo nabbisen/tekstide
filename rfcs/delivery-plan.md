@@ -189,6 +189,19 @@ Two ways to close the gap, and the choice is the owner's because it withdraws or
 Implementer's recommendation: the first — the principle is already in the book, and the editor now meets its own premise for it.
 Whichever is chosen, the changelog and `configuration.md` must describe the one behaviour that ships, not both.
 
+### Requirements gap: no `REQ-EDIT` names undo (2026-09-29, RFC-057 PR-057-D, D4)
+
+**Disclosed, not minted.** PR-057-D ships undo/redo — operations, not snapshots (D3), bounded at 500 edits with the bound
+stated when reached, restoring text and cursor, and recorded so it cannot reach back across an external-change reload. No
+`REQ-EDIT` requirement names it: `REQ-EDIT-001`/`-002` cover opening and line numbers, `REQ-EDIT-003` covers syntax
+highlighting (still an owner decision, unrelated). `NFR-REL-005` is the closest existing text and only *assumes* undo exists,
+the same gap the task breakdown named going in (`what-the-editor-must-not-do.md` §3's own four-row table is the actual
+specification this slice was built against, in the requirement's absence).
+
+Not treated as blocking, and not fixed by writing a new `REQ-EDIT` row into the requirements document from inside this
+implementer's own slice — minting a requirement is the owner's call, not something a PR should back into to make its own
+checklist read clean. Revisit when the owner next touches `REQ-EDIT`'s numbering (or names this the moment to).
+
 ### Open question: does exporting a report deserve an audit record? (2026-09-25, RFC-056 D11)
 
 **Decided *not* in RFC-056, and recorded rather than dropped.** Exporting a report writes
