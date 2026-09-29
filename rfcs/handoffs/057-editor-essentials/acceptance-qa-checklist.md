@@ -75,11 +75,15 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ### Required at review 443
 
-- [ ] **Q3: the width approximation gets a boundary, not a disclaimer.** `CHAR_WIDTH_FACTOR = 0.6`
+- [x] **Q3: the width approximation gets a boundary, not a disclaimer.** `CHAR_WIDTH_FACTOR = 0.6`
       approximates a face that capture `01-` shows is **proportional by default**. Drive the
       every-column test with a line of wide characters (`W`) and one of narrow (`i`) and report
       whether the cursor stays inside the window — and if it leaves, by how many columns. A number.
       If it can leave, the book says so where `ui_font` is documented.
+      *(`W` overflows by ~51 columns, measured against real `iced` layout and captured live — the
+      caret vanishes at column 81 while the header still reports it. `i` never overflows. The book's
+      `configuration.md` discloses it beside the family setting. Test `#[ignore]`d, reason stated:
+      a real, disclosed, structural finding pending the owner's decision, not a load flake.)*
 - [ ] **Owner decision, surfaced at 443, to settle before `0.28.0` ships:** the book says the family
       applies *"including the editor's"* while the terminal and tree keep a fixed-width face
       *"because a column of code has to line up"*. The editor now has a gutter and column arithmetic,

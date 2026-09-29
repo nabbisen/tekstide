@@ -167,6 +167,28 @@ changed for it in RFC-056; it is a frame-layout change, it invalidates every GUI
 the top of the window, and it wants its own small slice rather than a corner of someone else's.
 Recorded here the way the Project Board's cards were, so it is not absorbed invisibly.
 
+### Owner decision needed: does the editor's font family include the body, now that it has column arithmetic? (2026-09-29, RFC-057 review 443)
+
+**Not decided in PR-057-C, and not blocking PR-057-D.** `docs/src/users/configuration.md` says the configured font family
+applies to the interface's own text *"including the editor's,"* and that the terminal and file tree keep a fixed-width face
+*"because a column of code has to line up whatever you read prose in."* That reason was written before the editor had a gutter
+or any column arithmetic of its own; PR-057-C gave it both, and its horizontal window (Q2) now depends on an **approximated**
+character width to keep the cursor visible while scrolling sideways. Falsified against real `iced` text layout at the default
+face (`crates/tekstide/src/shell/tests/editor_column_width.rs`, review 443's required Q3): a line of narrow characters never
+loses the cursor, but a line of wide ones can leave it **~51 columns outside the window that is actually drawn** — captured
+live, the caret vanishes while the header still reports a real column number (`handoffs/057-editor-essentials/evidence/pr-057-c/06-`,
+`07-`).
+
+Two ways to close the gap, and the choice is the owner's because it withdraws or keeps a shipped, documented behaviour:
+
+- **The editor body joins the terminal and the tree on the fixed-width side.** The book's own stated reason already applies to
+  it. Cost: a user who sets a proportional family stops getting it in the editor.
+- **Keep the promise as written and measure real text** rather than approximating it, so a proportional face works without this
+  gap. More work; the only option that keeps the configuration page's sentence true as written.
+
+Implementer's recommendation: the first — the principle is already in the book, and the editor now meets its own premise for it.
+Whichever is chosen, the changelog and `configuration.md` must describe the one behaviour that ships, not both.
+
 ### Open question: does exporting a report deserve an audit record? (2026-09-25, RFC-056 D11)
 
 **Decided *not* in RFC-056, and recorded rather than dropped.** Exporting a report writes

@@ -221,3 +221,32 @@ A mouse click on any control (every step was a key, matching this project's esta
 ### Gate
 
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `703 + 16 + 1039` = 1,758 passed, 0 failed, 0 entries left after each** (loads at the end 1.50, 2.09, 3.62 — a quiet machine). No intermittent.
+
+## PR-057-C review 443, Q3 — the width approximation, falsified
+
+### The number
+
+`cargo test -p tekstide editor_column_width -- --ignored --nocapture`, real `iced` text layout (the same technique as `editor_baseline`'s harness), default face, 880px region, 14px font:
+
+```
+wide (W): measured 12.927 px/char vs approximated 8.400 px/char (+53.9%); max caret overflow 427.6 px (50.91 columns)
+narrow (i): measured 3.534 px/char vs approximated 8.400 px/char (-57.9%); max caret overflow 0.0 px (0.00 columns)
+```
+
+**Not a rounding error.** A line of `W` can leave the caret **~51 columns outside the region that is actually drawn**, walked at every column of a 300-character line — the worst case, not a sampled one. A line of `i` never overflows: the approximation is safe in that direction, wasteful (draws fewer characters than would fit) rather than wrong.
+
+### Live, both sides of the finding
+
+`06-…`: `wide.txt` (200 `W`s), cursor at column 16 — inside the window that has not needed to scroll yet, and the caret is visible. `07-…`: the same file, cursor at column 81 — **the header still reads *Line 1, Column 81*, and there is no caret anywhere in the row.** The horizontal window's own char-index arithmetic considers the cursor "inside" (`caret_row_position` returns `Some`), but the real, rendered row is wider than the region, so the caret's real pixel position is off the right edge of what is drawn. This is the defect the numbers above measure, seen.
+
+### Why the test is `#[ignore]`d, not asserted
+
+The overflow is real, structural and disclosed — not a machine-load flake like `NFR-PERF-003`'s own reason for being `#[ignore]`d, but the same shape of answer: a number that must be published, not a threshold the ordinary gate should pass or fail on while the underlying question (join the fixed-width side, or measure real text) is the owner's to decide, not this slice's. A tolerance loose enough to pass today would either be meaningless or would read as tolerating the defect; the honest tolerance fails every gate until the owner's decision is implemented. The test is real, runnable, produces the same numbers reported here, and stays in the suite for whenever that decision lands.
+
+### The book
+
+`docs/src/users/configuration.md`, beside the paragraph review 443 named (`ui_font`'s own family setting): a new paragraph states the approximation, the measured direction (`i` safe, `W` not), the ~50-column figure, and that it is a known, unfixed limitation.
+
+### Left for the owner (not blocking D)
+
+Recorded in `delivery-plan.md`'s coverage table for `REQ-EDIT-002`/`003` area: whether the editor's body joins the terminal and file tree on the fixed-width side (my recommendation, per review 443, because it costs nothing to implement here and the book's stated reason already applies), or the horizontal window is changed to measure real text. Either changes the changelog; neither is decided by this slice.
