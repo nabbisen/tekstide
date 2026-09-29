@@ -165,9 +165,9 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
       pins `0.27.0`, correctly, until the version bump that release-checklist.md's own process owns.)*
 - [x] Commits are pushed once the gate is green. — **Reviewer, at 447:** this is a per-slice
       step, not a release-time one, and every slice A–E was pushed after its own gate. The pin
-      bump below *is* release-time and is correctly left unticked.
-      *(Every slice's own commits are pushed as they land; this box is the release's own final push,
-      not yet due for the same reason as the pin above.)*
+      bump above *is* release-time and is correctly left unticked.
+      *(Every implementer commit was pushed once its own gate went green, including this RFC's
+      tail: `1f7003d` (D), `d517276` (the review-445 fix), `ec9bb0b` (E).)*
 
 ## Final Acceptance Decision
 
