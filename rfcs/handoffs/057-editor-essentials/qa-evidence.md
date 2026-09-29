@@ -250,3 +250,7 @@ The overflow is real, structural and disclosed — not a machine-load flake like
 ### Left for the owner (not blocking D)
 
 Recorded in `delivery-plan.md`'s coverage table for `REQ-EDIT-002`/`003` area: whether the editor's body joins the terminal and file tree on the fixed-width side (my recommendation, per review 443, because it costs nothing to implement here and the book's stated reason already applies), or the horizontal window is changed to measure real text. Either changes the changelog; neither is decided by this slice.
+
+### Gate (Q3 follow-up)
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `mdbook build docs`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `703 + 16 + 1039` = 1,758 passed, 0 failed, 0 entries left after each** (loads 2.5, 4.1, 5.4). `editor_column_width`'s own two tests: one ordinary (sanity only, runs every gate), one `#[ignore]`d (the measurement, run by hand for this evidence). No intermittent.
