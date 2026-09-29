@@ -152,6 +152,20 @@ above already describes, from the other end.
 
 ## Package Smoke
 
+- [ ] **No `.rs` file outside `src/`, `tests/`, `examples/`, `benches/`.** Added review 445, RFC-057
+      PR-057-D: `crates/tekstide/typing-measurement-sample.rs` had lived at the crate root since the
+      `0.4.0` candidate — deliberately excluded from compilation (cargo only builds `src/`,
+      `examples/`, `benches/`, and *direct children* of `tests/`, never a crate-root file), but that
+      placement was also invisible to every mechanical scan and every reviewer's file-list diff for
+      twenty-three releases. It is real, load-bearing content (`include_str!`-ed into the
+      typing-measurement surface, `crates/tekstide/src/shell.rs`'s own `TYPING_MEASUREMENT_DOCUMENT`)
+      that **must** ship in the package for the crate to build from the published tarball — deleting
+      it would have broken that surface. Relocated instead, to `tests/fixtures/typing-measurement-sample.rs`:
+      a *subdirectory* of `tests/`, so cargo still never auto-builds it as its own integration test
+      binary (only direct children of `tests/` get that treatment), and it now reads correctly in a
+      directory listing. The check: `tar tzf target/package/<crate>-<version>.crate | grep -E
+      '\.rs$'` and confirm every path starts with one of the four directories above — run against
+      **both** packages, since either crate could grow a stray file the same way this one did.
 - [ ] Inspect generated package contents for missing README, license, Cargo manifests, and
       source files. **Name the files and check the archive, not the repository.** `LICENSE`
       and `NOTICE` live at the workspace root; cargo only auto-includes them from the

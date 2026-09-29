@@ -105,17 +105,30 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 
 ### Required at review 445
 
-- [ ] **`crates/tekstide/typing-measurement-sample.rs` is deleted or relocated.** 1,472 tracked
+- [x] **`crates/tekstide/typing-measurement-sample.rs` is deleted or relocated.** 1,472 tracked
       lines, moved there at the `0.4.0` candidate and untouched for twenty-three releases; not
       compiled (crate root, not `src/`); invisible to every mechanical scan (they walk `src/`);
       seven `use crate::…` imports naming *core* modules from inside the *app* crate; **and it ships
       in every published archive, including `0.27.0`.** Not RFC-057's doing — found tracing
       `replace_text`'s callers at review 445.
-- [ ] **A package check**: the archive carries no `.rs` outside `src/`, `tests/`, `examples/`,
+      *(Relocated, not deleted — the file is real, load-bearing content
+      (`crates/tekstide/src/shell.rs`'s `TYPING_MEASUREMENT_DOCUMENT`, RFC-015 PR-015-F's
+      typing-measurement surface, `include_str!`-ed) and deleting it would have broken that surface.
+      Now `crates/tekstide/tests/fixtures/typing-measurement-sample.rs` — a subdirectory of `tests/`,
+      so cargo still never auto-builds it as an integration test binary, and it reads correctly in a
+      directory listing. See the response to review 445.)*
+- [x] **A package check**: the archive carries no `.rs` outside `src/`, `tests/`, `examples/`,
       `benches/`. The reviewer's entry-list diff compares releases and is blind to a file that has
       always been wrong.
-- [ ] **Before PR-057-E starts**: the capture path works. E is a purely visual change with no state
+      *(Added to `release-checklist.md`'s Package Smoke section, with the exact `tar tzf` command;
+      verified once by hand against a real `cargo package -p tekstide --locked --no-verify` tarball —
+      every `.rs` path now starts with `src/` or `tests/`.)*
+- [x] **Before PR-057-E starts**: the capture path works. E is a purely visual change with no state
       to assert, so an unresolved `niri` screenshot gap blocks it rather than inconveniencing it.
+      *(Resolved: `screenshot-window` always copies to the clipboard regardless of niri's own
+      `screenshot-path` config (`null` on this machine, which silently drops the on-disk write even
+      with `-d true`) — `wl-paste --type image/png > file.png` right after the action produces the
+      file. Verified against a real, focused Tekstide window. Recorded in memory for future sessions.)*
 
 ## Whole-RFC
 

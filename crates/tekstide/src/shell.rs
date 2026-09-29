@@ -72,7 +72,20 @@ use crate::theme::Theme;
 /// discovered by `cargo package`'s verification step during 0.4.0 RC prep,
 /// not by inspection. Only loaded into `State.typing_doc` when actually
 /// measuring `Typing` (see `State::new`); otherwise never referenced.
-const TYPING_MEASUREMENT_DOCUMENT: &str = include_str!("../typing-measurement-sample.rs");
+///
+/// **Relocated review 445**: this lived at the crate root
+/// (`typing-measurement-sample.rs`, chosen at 0.4.0 only so cargo would
+/// never try to compile it as real source, since its content -- a frozen
+/// `ProjectSession` snapshot -- names `crate::` paths that are valid in
+/// `tekstide-core`, not here) rather than in a conventional location,
+/// which made it invisible to every scan that walks `src/` and left it
+/// looking abandoned rather than load-bearing. `tests/fixtures/` is
+/// **not** auto-discovered by cargo as an integration test binary --
+/// only files directly inside `tests/` are, never a subdirectory -- so
+/// this stays exactly as inert as it always needed to be, in a location
+/// a directory listing reads correctly.
+const TYPING_MEASUREMENT_DOCUMENT: &str =
+    include_str!("../tests/fixtures/typing-measurement-sample.rs");
 
 /// The two focusable targets of the layer-composition demo modal --
 /// still scaffolding (see the module doc), but now real enough for a
