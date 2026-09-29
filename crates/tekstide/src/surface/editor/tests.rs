@@ -11,9 +11,9 @@ use tekstide_core::project::{ProjectContentStatus, ProjectId, ProjectSession};
 use tekstide_core::content::TextCursor;
 
 use super::{
-    apply_edit_key, caret_row_position, caret_split, chrome_line, cursor_line,
+    RowPlan, apply_edit_key, caret_row_position, caret_split, chrome_line, cursor_line,
     document_state_symbol, empty_lines, gutter_digits, gutter_lines, navigate_cursor,
-    open_error_line, rows_that_fit, viewport_following, window_rows, windowed_line,
+    open_error_line, row_plan, rows_that_fit, viewport_following, window_rows, windowed_line,
 };
 use crate::i18n::{Catalog, LocalePreference};
 
@@ -432,6 +432,43 @@ fn the_caret_position_is_the_real_cursor_and_nothing_independently_derived() {
         ("h\u{e9}l", "lo"),
         "the split is at the same char-indexed 3, agreeing with the position above"
     );
+}
+
+/// **D2, held where `view` actually reads it**: the row the caret belongs to
+/// gets `RowPlan::WithCaret`, split at the real column, contributing no
+/// character; every other row -- and every row when the cursor is off this
+/// window -- gets `RowPlan::Plain`, the row's text completely unmodified.
+/// `view` only ever builds an element from what this function returns, so an
+/// ablation that puts a literal character into the plan (a plausible mistake:
+/// "just append a `|`") fails here rather than only being visible in a
+/// screenshot.
+#[test]
+fn row_plan_puts_the_caret_only_on_its_own_row_and_never_as_a_character() {
+    let line = "hello world";
+    assert_eq!(
+        row_plan(line, Some((2, 5)), 0),
+        RowPlan::Plain(line),
+        "a different row"
+    );
+    assert_eq!(
+        row_plan(line, None, 0),
+        RowPlan::Plain(line),
+        "the cursor is off this window"
+    );
+    assert_eq!(
+        row_plan(line, Some((3, 5)), 3),
+        RowPlan::WithCaret {
+            before: "hello",
+            after: " world"
+        }
+    );
+    // Every character of the row is in exactly one half, and neither half
+    // gained a character the row did not have.
+    if let RowPlan::WithCaret { before, after } = row_plan(line, Some((0, 5)), 0) {
+        assert_eq!(format!("{before}{after}"), line);
+    } else {
+        panic!("expected a caret at row 0");
+    }
 }
 
 /// A caret outside the drawn window (a transient state; `viewport_following`

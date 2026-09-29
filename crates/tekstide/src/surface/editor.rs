@@ -318,6 +318,36 @@ pub(crate) fn caret_split(row: &str, column: usize) -> (&str, &str) {
     (&row[..byte], &row[byte..])
 }
 
+/// What one drawn row's content should be: plain text, or text with the caret
+/// spliced in as a **position to build an element at**, never as a character.
+/// A pure decision, factored out of `view` so it is directly testable without
+/// `iced` (D8) -- and so the requirement it holds (D2: the caret is an
+/// element) has a test that can actually fail if `view` stopped calling it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RowPlan<'a> {
+    Plain(&'a str),
+    WithCaret { before: &'a str, after: &'a str },
+}
+
+/// `windowed` is one row's already horizontally-windowed text (D2/D9); `at`
+/// is [`caret_row_position`]'s answer; `row_index` is this row's own position
+/// in the drawn window. The caret is planted only on the one row it belongs
+/// to -- every other row, including every row when the cursor is off window,
+/// is plain.
+pub(crate) fn row_plan(
+    windowed: &str,
+    at: Option<(usize, usize)>,
+    row_index: usize,
+) -> RowPlan<'_> {
+    match at {
+        Some((caret_row, caret_column)) if caret_row == row_index => {
+            let (before, after) = caret_split(windowed, caret_column);
+            RowPlan::WithCaret { before, after }
+        }
+        _ => RowPlan::Plain(windowed),
+    }
+}
+
 /// The caret: an **element**, never a character spliced into the text (D2,
 /// `what-the-editor-must-not-do.md` §1). A fixed-width, fixed-height coloured
 /// container -- it contributes no character to any string this module
@@ -593,14 +623,15 @@ pub fn view<'a, Message: 'a + Clone>(
                     // see (review 442).
                     let windowed =
                         windowed_line(line, viewport.first_visible_column, column_capacity);
-                    let row_body: Element<'a, Message> = match caret_at {
-                        Some((caret_row, caret_column)) if caret_row == row_index => {
-                            // D2: the caret is composed in, as its own
-                            // element -- the text on either side of it is
-                            // still exactly the file's own characters, never
-                            // a character standing in for the caret.
-                            let (before, after) = caret_split(windowed, caret_column);
-                            iced::widget::row![
+                    // D2: the caret is composed in, as its own element -- the
+                    // text on either side of it is still exactly the file's
+                    // own characters, never a character standing in for the
+                    // caret. `row_plan` decides *whether and where*, as a pure
+                    // function this module's tests can drive without `iced`;
+                    // this match only ever builds what `row_plan` said.
+                    let row_body: Element<'a, Message> =
+                        match row_plan(windowed, caret_at, row_index) {
+                            RowPlan::WithCaret { before, after } => iced::widget::row![
                                 text(before.to_owned())
                                     .size(theme.font_size_body())
                                     .wrapping(iced::widget::text::Wrapping::None),
@@ -609,13 +640,12 @@ pub fn view<'a, Message: 'a + Clone>(
                                     .size(theme.font_size_body())
                                     .wrapping(iced::widget::text::Wrapping::None),
                             ]
-                            .into()
-                        }
-                        _ => text(windowed.to_owned())
-                            .size(theme.font_size_body())
-                            .wrapping(iced::widget::text::Wrapping::None)
                             .into(),
-                    };
+                            RowPlan::Plain(text_only) => text(text_only.to_owned())
+                                .size(theme.font_size_body())
+                                .wrapping(iced::widget::text::Wrapping::None)
+                                .into(),
+                        };
                     container(
                         iced::widget::row![
                             container(
