@@ -150,6 +150,15 @@ board says so. Case does not matter (`dejavu serif` finds `DejaVu Serif`). The f
 the interface's own text, including the editor's; **the terminal and the file tree keep a
 fixed-width face**, because a column of code has to line up whatever you read prose in.
 
+**The editor's own horizontal scrolling assumes a roughly even character width, and a
+proportional family — the default included — does not have one.** When a long line scrolls
+sideways to keep your cursor on screen, the width of the window it scrolls within is an
+approximation, not the family's real, measured metrics. Checked against the default face: a line of
+narrow characters never loses the cursor, but a line of wide characters (a capital `W`, repeated)
+can leave the cursor **over 50 columns outside the window that is actually drawn** — effectively off
+screen, while the status line still reports a real column number. This is a known limitation, not
+yet fixed; if your cursor seems to vanish while typing, this is why.
+
 Every one of these falls back **on its own**: one bad colour does not cost you the rest of the
 file.
 
