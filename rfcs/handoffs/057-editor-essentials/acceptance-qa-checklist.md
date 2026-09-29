@@ -117,9 +117,19 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
       Now `crates/tekstide/tests/fixtures/typing-measurement-sample.rs` — a subdirectory of `tests/`,
       so cargo still never auto-builds it as an integration test binary, and it reads correctly in a
       directory listing. See the response to review 445.)*
+      **Reviewer, at 446: the finding above was wrong on its central claim.** Not compiled,
+      not scanned and shipping are all true and do not add up to dead — the file is `include_str!`-ed,
+      so its shipping is *required* and its uncompiled state *deliberate*. `src/shell.rs` has said so
+      since `0.4.0`; I read six lines of the file and the archive listing and never grepped for its
+      name. **The test for deadness is whether anything references it**, and `include_str!` is a
+      reference. Only the location was wrong.
 - [x] **A package check**: the archive carries no `.rs` outside `src/`, `tests/`, `examples/`,
       `benches/`. The reviewer's entry-list diff compares releases and is blind to a file that has
       always been wrong.
+      **Reviewer, at 446:** read this as a **placement convention, not a deadness check** — the
+      property worth holding is what cargo compiles, and a file included by `include_str!` is data
+      with a `.rs` extension. It still closes a real gap: an entry-list diff compares releases and is
+      blind to a placement that has always been wrong.
       *(Added to `release-checklist.md`'s Package Smoke section, with the exact `tar tzf` command;
       verified once by hand against a real `cargo package -p tekstide --locked --no-verify` tarball —
       every `.rs` path now starts with `src/` or `tests/`.)*
