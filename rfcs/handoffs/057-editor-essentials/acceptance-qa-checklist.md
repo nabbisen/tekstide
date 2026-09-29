@@ -92,7 +92,16 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
       caret vanishes at column 81 while the header still reports it. `i` never overflows. The book's
       `configuration.md` discloses it beside the family setting. Test `#[ignore]`d, reason stated:
       a real, disclosed, structural finding pending the owner's decision, not a load flake.)*
-- [ ] **Owner decision, surfaced at 443, to settle before `0.28.0` ships:** the book says the family
+- [x] **Owner decision, ruled 2026-09-29 — and neither option I offered.** *The editor body stays
+      user-configurable; its default becomes fixed-width.* Better than both: a monospace face has one
+      advance width, so `CHAR_WIDTH_FACTOR = 0.6` is right **by construction** for anyone who does not
+      change it, and review 444's ~51-column caret loss stops being shipped by default. A user who
+      chooses a proportional family still gets it, and inherits an approximation the book already
+      discloses with its measured number.
+- [ ] **To implement before the `0.28.0` candidate:** the editor body defaults to a fixed-width face
+      while still honouring a configured `family`; `configuration.md`'s paragraph and the changelog
+      say so; review 444's disclosure stays, reframed as the consequence of a choice rather than the
+      default anyone gets. The original wording of this box: the book says the family
       applies *"including the editor's"* while the terminal and tree keep a fixed-width face
       *"because a column of code has to line up"*. The editor now has a gutter and column arithmetic,
       so it meets that reason. Either it joins the fixed-width side (recommended), or the horizontal

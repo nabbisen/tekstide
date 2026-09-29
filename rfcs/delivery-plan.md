@@ -116,6 +116,35 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
 | `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### Reserved RFC-064: does `iced::widget::text_editor` replace what RFC-057 built by hand? (2026-09-29)
+
+**Asked by the owner at RFC-057's font ruling — "any iced widget or other element useful in this
+case?" — and the answer is yes, in the version we already use.** `iced_widget 0.14.2` ships
+`text_editor`, with `Content::{with_text, text, cursor, line, lines, line_count, selection,
+perform}`, plus `font(..)`, `line_height(..)`, `wrapping(..)` and `highlight(..)`/`highlight_with(..)`.
+
+**What it would bring:** a caret placed from **real font metrics**, so the 0.6 approximation and its
+measured ~51-column failure disappear for *any* family — which is exactly the problem that prompted
+the question; **selection, word/line/select-all, click and drag**, closing the four-key vocabulary gap
+measured at RFC-057; **soft wrap as a setting** rather than a rewrite; and **syntax highlighting
+(`REQ-EDIT-003`)**, the one gap the owner has carried as an open 1.0 decision. No new third-party
+dependency — it is iced's own crate.
+
+**What it would cost, stated as plainly:** `Content` owns the text, while `TextDocument` owns it today
+along with dirty tracking, external-change detection, save, snapshot hashing and undo.
+`Content::text()` returns a whole `String`, which is the same O(file) copy per read that `0.28.0`
+deliberately left out — to be measured, never assumed. It would retire much of PR-057-B and -C (rows,
+the viewport, the gutter's alignment, the caret element). And **D8's "one drawn line is one assertable
+string" goes away**, because the widget draws internally — the property that has caught most of this
+project's GUI defects, named as a risk in both RFC-052 and RFC-057.
+
+**Undo survives either way**: `text::editor::Action` has no `Undo` variant, so PR-057-D's operation
+log transfers rather than being wasted.
+
+Evaluated under RFC-052 D3's rule — measured against our properties, read from what it **draws** — not
+adopted on a feature list. Not scheduled; it touches three open items at once, which is why it gets a
+number rather than a note.
+
 ### Accessible names are blocked at the substrate — and what is available instead (2026-09-26)
 
 **Measured, not taken on report.** `iced 0.14.0`'s manifest declares no accessibility feature, and
@@ -172,7 +201,24 @@ Help) now share one row; the project tab strip is the row below it. Every prior 
 RFC-057's own evidence packs that shows the top of the window is named as superseded on the header
 only (`qa-evidence.md` § PR-057-E) — none were retaken, since none were evidence *for* the header.
 
-### Owner decision needed: does the editor's font family include the body, now that it has column arithmetic? (2026-09-29, RFC-057 review 443)
+
+**Ruled by the owner 2026-09-29, and neither of the two options I put up.** *"In my mental model, the
+fonts should be configured by users. However, only when it is reasonable… I agree with you that the
+default font should be fixed-width one."*
+
+**The editor body stays user-configurable, and its default becomes fixed-width.** This is better than
+either option I offered, and for a reason worth writing down: it puts the **correct** behaviour on the
+path nobody has to choose. A monospace face has one advance width, so `CHAR_WIDTH_FACTOR = 0.6`
+becomes right by construction for every user who does not change it, and the ~51-column caret loss
+measured at review 444 stops being something the product ships by default. A user who does set a
+proportional family still gets it, and inherits an approximation the book already discloses with its
+measured number. Nothing is taken away from anyone.
+
+**To implement:** the editor body's default face becomes fixed-width while continuing to honour a
+configured `family`; `configuration.md`'s paragraph and the `0.28.0` changelog describe that, and the
+review-444 disclosure stays, reframed as the consequence of a choice rather than a default.
+
+### Owner decision, ruled 2026-09-29: does the editor's font family include the body, now that it has column arithmetic? (2026-09-29, RFC-057 review 443)
 
 **Not decided in PR-057-C, and not blocking PR-057-D.** `docs/src/users/configuration.md` says the configured font family
 applies to the interface's own text *"including the editor's,"* and that the terminal and file tree keep a fixed-width face
