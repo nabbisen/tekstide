@@ -11,8 +11,8 @@ use tekstide_core::project::{ProjectContentStatus, ProjectId, ProjectSession};
 use tekstide_core::content::TextCursor;
 
 use super::{
-    RowPlan, apply_edit_key, caret_row_position, caret_split, chrome_line, cursor_line,
-    document_state_symbol, empty_lines, gutter_digits, gutter_lines, navigate_cursor,
+    RowPlan, apply_edit_key, caret_row_position, caret_split, chrome_line, columns_that_fit,
+    cursor_line, document_state_symbol, empty_lines, gutter_digits, gutter_lines, navigate_cursor,
     open_error_line, row_plan, rows_that_fit, viewport_following, window_rows, windowed_line,
 };
 use crate::i18n::{Catalog, LocalePreference};
@@ -304,6 +304,30 @@ fn the_gutter_does_not_shift_the_text_column_while_scrolling_across_a_power_of_t
 fn gutter_lines_are_real_line_indices_not_window_positions() {
     let lines = gutter_lines(9_997, 4, 5);
     assert_eq!(lines, vec![" 9998", " 9999", "10000", "10001"]);
+}
+
+/// The text region shrinks as the gutter widens: at a fixed measured width,
+/// more line-number digits leave fewer columns for the file's own text --
+/// otherwise a wide gutter would overlap the text it sits beside.
+#[test]
+fn columns_that_fit_reserves_room_for_the_gutter_it_is_told_about() {
+    assert_eq!(
+        columns_that_fit(None, 14.0, 5),
+        super::DEFAULT_WINDOW_COLUMNS,
+        "before the first layout"
+    );
+    let pitch = super::column_pitch(14.0);
+    let narrower = columns_that_fit(Some(pitch * 50.0), 14.0, 6);
+    let wider_gutter_room = columns_that_fit(Some(pitch * 50.0), 14.0, 1);
+    assert!(
+        narrower < wider_gutter_room,
+        "a 6-digit gutter must leave fewer text columns than a 1-digit one at the same width: {narrower} vs {wider_gutter_room}"
+    );
+    assert_eq!(
+        columns_that_fit(Some(0.0), 14.0, 1),
+        1,
+        "a window always holds a column"
+    );
 }
 
 #[test]
