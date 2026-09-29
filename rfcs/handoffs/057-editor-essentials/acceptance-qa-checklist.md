@@ -163,7 +163,9 @@ Tick a box when the evidence is in `qa-evidence.md`, not when the code looks rig
 - [ ] The core pin bumps with the version (`the_workspace_pins_tekstide_core_to_its_own_version`).
       *(Release-time step, not yet due — `0.28.0` has not been cut. `[workspace.dependencies]` still
       pins `0.27.0`, correctly, until the version bump that release-checklist.md's own process owns.)*
-- [ ] Commits are pushed once the gate is green.
+- [x] Commits are pushed once the gate is green. — **Reviewer, at 447:** this is a per-slice
+      step, not a release-time one, and every slice A–E was pushed after its own gate. The pin
+      bump below *is* release-time and is correctly left unticked.
       *(Every slice's own commits are pushed as they land; this box is the release's own final push,
       not yet due for the same reason as the pin above.)*
 
