@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 026 | [File Watcher and Multi-Document Model](./proposed/026-file-watcher-and-multi-document-model.md) | **Proposed 2026-09-30**, awaiting the owner. `0.29.0`, **M13 proper**. The explorer reads a folder once and never again; one document is open at a time. Two things changed since this was scheduled: **RFC-055 made a re-scan a subprocess**, so batching is mandatory rather than nice, and **RFC-055's ignore answer makes the watch budget affordable** — this repository is 18,974 directories, 1,485 without the ignored ones. The watcher watches what the user opened. `REQ-FILE-003`, `004`, `NFR-PERF-007` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 026 | [File Watcher and Multi-Document Model](./accepted/026-file-watcher-and-multi-document-model.md) | **Accepted 2026-09-30; D1–D8 as written, plus D9–D12.** `0.29.0`, **M13 proper**. Two facts postdate the scheduling: **RFC-055 made a re-scan a subprocess** (so D3's batching is mandatory) and **its ignore answer makes the watch scope affordable** (18,974 directories here, 1,485 without the ignored ones, and `ExplorerTree::expanded` already tracks what the user opened). **D11 proves the batching before the dependency exists**; D9 pins D6's “the ones that count” to exactly two functions with one reader each. [Handoff pack](./handoffs/026-file-watcher/README.md) |
 | — | *(none: nothing is currently accepted and unbuilt)* | |
 
 
@@ -114,6 +114,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
 | 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; **implemented and closed 2026-09-24, closing M12** |
+| 026 | [File Watcher and Multi-Document Model](./handoffs/026-file-watcher/README.md) — **M13**; the explorer reads a folder once and never again |
 | 057 | [Editor Essentials](./handoffs/057-editor-essentials/README.md) — **M10 remainder**; **implemented and closed 2026-09-30** |
 | 056 | [AgentRun Report And Classification](./handoffs/056-agentrun-report/README.md) — **agent remainder**; **implemented and closed 2026-09-25** |
 | 055 | [Ignore Rules In The Explorer](./handoffs/055-explorer-ignore-rules/README.md) — **M12 remainder tail**; **implemented and closed 2026-09-25** |

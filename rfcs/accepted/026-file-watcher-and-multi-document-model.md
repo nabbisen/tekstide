@@ -1,6 +1,6 @@
 # RFC-026: File Watcher and Multi-Document Model
 
-Status: **Proposed 2026-09-30.** `0.29.0` in the authorised schedule, and **M13 proper**. Closes
+Status: **Accepted by the human owner 2026-09-30.** D1–D8 as written, plus D9–D12 — see *Decided on acceptance*. Proposed 2026-09-30. `0.29.0` in the authorised schedule, and **M13 proper**. Closes
 `REQ-FILE-003` (the explorer updates when files change externally), `REQ-FILE-004` (watching is
 debounced and does not block editor input), `NFR-PERF-007` (batched under churn), and the
 single-document limit that "multi-document editing" in the 1.0 list depends on.
@@ -137,3 +137,36 @@ discovered: the watcher (`REQ-FILE-003`, `004`, `NFR-PERF-007`) can ship as `0.2
 multi-document model as `0.30.0` and RFC-027's crash recovery moving one release later. Taking that
 option is a scheduling decision for the architect at review, on evidence — not a scramble at the
 candidate.
+
+## Decided on acceptance (2026-09-30)
+
+**D1–D8 as written.** Four additions, one of which makes D6 checkable instead of hopeful.
+
+**D9 — "the ones that count" is exactly two functions, and here they are.** `open_buffer_count()` and
+`dirty_file_count()` (`project/content.rs:359` and `:363`) are each literally
+`u32::from(<one Option>)`, and each has **one reader**, at `session.rs:1736–1737`. So the
+multi-document change is two function bodies and what they feed — not seventy-four sites. D6 was a
+hope when I wrote it; this makes it a claim a reviewer can check. **If a third counter turns up during
+the work, that is a finding to report, not a detail to absorb.**
+
+**D10 — The watcher is a subscription, in the shape the scan worker already has.** The explorer scan
+runs off-thread through `explorer_scan_subscription` with newer-scan-wins, and its results arrive as
+messages. The watcher is the same: events become messages, and nothing about watching touches the
+render thread. Do not invent a second threading model beside the one that works.
+
+**D11 — The batching is proved before any watcher exists.** R2's measurement — a thousand files
+costing one scan per window — is a property of **our** debouncer, which we write, not of the
+dependency. Build and falsify it against a simulated event stream first. Then D4's evaluation is
+about the watcher alone, judged against a number that already exists. This is RFC-057 D11's lesson
+applied to a dependency instead of a rewrite: the baseline comes first or the comparison is
+unfalsifiable.
+
+**D12 — What D4's evaluation must record, since it says measure.** The candidate as of today:
+**`notify 8.2.0`**, MSRV **1.77** (comfortably under our 1.90 floor, so no pressure there), licence
+**CC0-1.0** — unlike every other direct dependency we carry — and its last stable release
+**2025-08-03**, more than a year before this RFC. None of those three disqualifies it and all three
+belong in `dependency-advisories.md` at adoption, beside the answer to the question that actually
+decides it: **what it does when the kernel refuses another watch.**
+
+**Ships as `0.29.0`**, with the split point in *If this is larger than it looks* left open as an
+architect's decision at review.
