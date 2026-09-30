@@ -110,6 +110,21 @@ impl Theme {
     /// **RFC-057, the owner's font ruling.** The editor body's own face --
     /// see the field's own doc for what makes this different from
     /// [`Self::font`].
+    ///
+    /// **The rule for which text takes this instead of [`Self::font`]**
+    /// (review 448, generalising the four call sites `surface::editor`
+    /// gives it): anything that takes part in the body's own column
+    /// arithmetic shares the body's face; anything that does not is
+    /// interface text and follows the user's configured family. The
+    /// gutter is not a judgement call under this rule -- its width is
+    /// digit-count × column pitch, the same approximation the rows use,
+    /// so a gutter on a different face than the rows it numbers would
+    /// make that width wrong and shift the text column as the digit
+    /// count grows (R5, captured crossing 9999 → 10000 in PR-057-C).
+    /// `chrome_line`/`cursor_line`/the Save button/the empty state take
+    /// no part in the column arithmetic, so they stay on [`Self::font`]
+    /// -- keeping the user's choice reaching the interface, which is
+    /// what the setting is for.
     pub fn editor_font(&self) -> Font {
         self.editor_font
     }
