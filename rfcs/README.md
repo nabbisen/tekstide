@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 026 | [File Watcher and Multi-Document Model](./proposed/026-file-watcher-and-multi-document-model.md) | **Proposed 2026-09-30**, awaiting the owner. `0.29.0`, **M13 proper**. The explorer reads a folder once and never again; one document is open at a time. Two things changed since this was scheduled: **RFC-055 made a re-scan a subprocess**, so batching is mandatory rather than nice, and **RFC-055's ignore answer makes the watch budget affordable** — this repository is 18,974 directories, 1,485 without the ignored ones. The watcher watches what the user opened. `REQ-FILE-003`, `004`, `NFR-PERF-007` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -48,7 +49,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 
 | RFC | Title | Milestone |
 | --- | --- | --- |
-| 026 | File Watcher and Multi-Document Model | M13 |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 |
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
