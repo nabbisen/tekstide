@@ -1,15 +1,15 @@
 ---
 title: "RFC-057: Editor Essentials — implementation handoff"
 rfc: "RFC-057"
-rfc_file: "../../accepted/057-editor-essentials.md"
-source_rfc_status: "Accepted 2026-09-26 — M10 remainder"
+rfc_file: "../../done/057-editor-essentials.md"
+source_rfc_status: "Implemented and closed 2026-09-30 — M10 remainder"
 target_milestone: "M10 remainder"
 created: "2026-09-26"
 ---
 
 # The editor draws the whole file, every frame
 
-Source RFC: [RFC-057](../../accepted/057-editor-essentials.md)
+Source RFC: [RFC-057](../../done/057-editor-essentials.md)
 
 ## What this is
 
@@ -27,7 +27,7 @@ undo. E is the owner's two-row header, its own slice because it is not editor wo
 
 ## Read these first, in this order
 
-1. [The RFC](../../accepted/057-editor-essentials.md) — nine measurements, D1–D7, and *Decided on
+1. [The RFC](../../done/057-editor-essentials.md) — nine measurements, D1–D7, and *Decided on
    acceptance* (D8–D11). **D11 reverses the obvious order of the work.**
 2. [What the editor must not do](./what-the-editor-must-not-do.md) — the risk document.
 3. [The PR plan](./task-breakdown-pr-plan.md).

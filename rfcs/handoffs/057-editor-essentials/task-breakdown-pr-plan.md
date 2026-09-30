@@ -1,8 +1,8 @@
 ---
 title: "RFC-057 — task breakdown and PR plan"
 rfc: "RFC-057"
-rfc_file: "../../accepted/057-editor-essentials.md"
-source_rfc_status: "Accepted 2026-09-26 — M10 remainder"
+rfc_file: "../../done/057-editor-essentials.md"
+source_rfc_status: "Implemented and closed 2026-09-30 — M10 remainder"
 target_milestone: "M10 remainder"
 created: "2026-09-26"
 ---

@@ -1,6 +1,6 @@
 # RFC-057: Editor Essentials
 
-Status: **Accepted by the human owner 2026-09-26.** D1–D7 as written, plus D8–D11 — see *Decided on acceptance*. Proposed 2026-09-26. `0.28.0` in the authorised schedule. Finishes `REQ-EDIT-002` (line
+Status: **Implemented and closed 2026-09-30.** Accepted by the human owner 2026-09-26: D1–D7 as written, plus D8–D11 — see *Decided on acceptance* and *Closed*. Proposed 2026-09-26. `0.28.0` in the authorised schedule. Finishes `REQ-EDIT-002` (line
 numbers beside the cursor position it already shows), draws a caret, and adds **undo**, which no
 requirement names and `NFR-REL-005` assumes.
 
@@ -146,3 +146,48 @@ baseline already misses p95 ≤ 16 ms, that number is published whatever it impl
 the work.
 
 **Ships as `0.28.0`.**
+
+## Closed (2026-09-30)
+
+Five slices and the owner's font ruling. **The editor draws the rows that fit, numbers them from the
+file's own index, shows a caret that is an element rather than a character, follows the cursor
+sideways on a line too long for the window, and undoes by operation — and the one defect the slice
+measured in itself is now closed too.**
+
+**The baseline was measured before anything changed (D11), and that is why "it got faster" is a claim
+with a number behind it, not an assertion:** p95 14.285 ms → 7.876 ms at 100,000 lines, `layout`
+9.896 ms → 0.050 ms. Slice A changed no product code — it exists only to make the comparison honest.
+
+**Three ablations found nothing, and were reported as findings rather than discarded.** A worker
+whose own guard could have stopped it from asking git a second time; the first attempt at C3, which
+targeted code inside `view` itself — a function nothing in this crate's tests call directly — and
+failed nothing, until the decision it was testing was factored into `row_plan`, a pure function, and
+the same ablation then failed alone; and two modal guards that, ablated, only repeated a check a
+sibling gate already made. Each is recorded where it was found (`qa-evidence.md`) rather than quietly
+removed, because a property this project's own tests cannot see failing is a testability gap, not a
+clean result.
+
+**An approximation was falsified rather than defended.** `CHAR_WIDTH_FACTOR = 0.6`, checked against
+real `iced` text layout at the shipped default: `W` overflowed the horizontal window by 50.91 columns,
+`i` by zero — a real, disclosed, structural finding, `#[ignore]`d rather than asserted, because an
+honest tolerance would have failed every gate on a defect no threshold should tolerate. The owner's
+ruling — the editor body defaults to fixed-width, still honouring a configured family — made the
+question moot for anyone who configures nothing: measured against the shipped default, the same
+approximation is **0.0 % off, zero overflow**. The risk returns, disclosed with its number, only for
+whoever configures a proportional family.
+
+**What is left open, named rather than absorbed silently:**
+
+- **The per-keystroke whole-document copy** is now ~80 % of what typing costs at 100,000 lines — the
+  budget has threefold headroom regardless, and this was deliberately left alone rather than pulled
+  into scope B did not ask for.
+- **The proportional-family approximation**, disclosed in `configuration.md` with its measured number,
+  for whoever configures one.
+- **RFC-063** (querying the live UI) and **RFC-064** (whether `iced::widget::text_editor` replaces
+  what this RFC built by hand) — reserved, not scheduled, each evaluated under RFC-052 D3's rule
+  rather than adopted on a feature list.
+- **The requirements gap**: no `REQ-EDIT` names undo. `NFR-REL-005` records it; nothing mints a new
+  requirement from inside this RFC's own implementation.
+
+`REQ-EDIT-002` is met. `NFR-REL-005` records undo. `NFR-PERF-003` has a measured number for the first
+time, and the number the release was built against.
