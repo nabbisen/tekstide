@@ -1185,3 +1185,20 @@ anything else. The other tests that write executable scripts (`marker_script`) h
 **A new trigger for the already-documented `SocketPathTooLong` class (2026-08-24's environment note), not a new cause.** The first two attempts at this response's three-run gate used `TMPDIR=$(mktemp -d /dev/shm/tekgate.XXXXXX)` — visibly under `/dev/shm`, the guidance that note already gives — and **every** approval/agent-run-adjacent test failed en route (22–34 of them per run, reproduced identically against a clean `git worktree` at this response's own base commit, so confirmed not-the-slice before anything else was tried). The captured message was the same one the 2026-08-24 note names: `Runtime(AdapterApproval(Bind(SocketPathTooLong)))`. The difference from that note's own case: this `TMPDIR` was never repo-relative, and `/dev/shm` was exactly the fix it recommends — but `mktemp`'s own `XXXXXX` suffix (six extra characters) was enough, once a project label and a run id nest under it, to cross the 108-byte `AF_UNIX` limit anyway. **The actual guidance is narrower than "short": a fixed, short literal (`/dev/shm/tk1`, as used successfully here) leaves more of the 108 bytes to the path segments the product itself controls than a `mktemp -d` pattern does, even one that looks short at a glance.**
 
 With a fixed short `TMPDIR` per run, two of three runs were clean outright (`712 + 16 + 1045`). The middle run failed once: `approval::tests::channel::bind_recovers_from_a_stale_socket_file` — **row 1**, the original. Passed immediately in isolation. Redone once more under the same fixed `TMPDIR` and it recurred a second time, back to back — above row 1's own ~2% baseline for two single-run occurrences in a row, but the 2026-08-23 entry already anticipated exactly this ("repeated `cargo build`/`cargo test` invocations in one sitting are plausible load, not a new cause") and a third attempt came back clean. **The gate was redone, not counted** (final accepted runs: `712 + 16 + 1045`, `712 + 16 + 1045` after the row-1 redo, `712 + 16 + 1045`). Not the slice either time: PR-057-D's changes are confined to `content::document`/`content::undo`/`content::snapshot`, `surface::editor`'s edit/undo functions, and the `UndoActiveDocument`/`RedoActiveDocument` keybinding wiring — nothing here touches the approval socket or its stale-file recovery path.
+
+## 2026-09-30 — `change_review_content_view_build_cost_by_line_count_measurement`, the reviewer's `0.28.0` gate
+
+Failed once, in run 3 of a three-run verification gate on the `0.28.0` candidate (`fcdeda0`):
+**503 ms against the 500 ms budget at 50,000 lines — a 0.6 % overshoot** — with machine load climbing
+14.81 → 16.13 → **21.48** across the three runs, most of it the gate's own parallelism. Its own
+message names load as the likely cause and it is right.
+
+**Redone, not counted.** The repeat was clean three times running (1,774 each, 0 fixture entries) at
+loads **25.73 / 20.68 / 19.92 — higher than the run that failed**, which is what a marginal
+wall-clock threshold looks like rather than a load cliff.
+
+**This test has now cost a gate attempt in three separate releases** (`0.26.0` per the row above,
+the implementer's own `0.28.0` attempt, and this one). It measures the machine, and the fix recorded
+in `delivery-plan.md` — assert a **ratio against a reference workload timed in the same process** —
+is still unscheduled. RFC-057 PR-057-A's `#[ignore]`d baseline and snora 0.52.0's CI ratio are both
+worked examples of the two halves.
