@@ -1,8 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.28.0 - The Editor Knows Where You Are
 
-### Added — line numbers, a real caret, and a line too long for the window scrolls sideways
+Status: release candidate; not yet published or tagged.
+
+The editor used to draw the whole file as one string every frame, showed no line number, drew no
+caret, and could not take back a keystroke. It now draws the rows that fit the window, numbers them
+from the file's own index, shows a caret that is an element rather than a character, follows the
+cursor sideways when a line runs past the right edge, and undoes and redoes by operation — bounded,
+and it says so once the bound is reached. The title and the two global actions now share one row
+above the project tabs, and the editor body's own default font is fixed-width, which is what makes
+the sideways-scroll math exact rather than approximate for anyone who configures nothing. Checked by
+running the release binary: a 200-character line of the widest ordinary character, cursor moved to
+the exact column a proportional font used to lose the caret at — the caret stayed on screen.
+
+### Added — line numbers, a real caret, sideways scrolling, and undo
 
 - **The editor has line numbers.** They read the file's own line index, not the row's position on screen, and the gutter is sized to
   the whole file's own digit count — a file crossing 10,000 lines does not shift its text column as you scroll past the boundary
@@ -11,9 +23,8 @@
   contains a look-alike glyph (a full block, the character someone might reach for to draw a caret by hand) shows the real caret and
   the glyph as two visibly different things, at the same time, on adjacent lines.
 - **A line wider than the editor now scrolls sideways to follow the cursor**, on the same rule the vertical scroll already
-  used — the least movement that keeps the cursor on screen. **This corrects PR-057-B's own entry below**, "clipped at its right
-  edge, not wrapped, ... so the end of a very long line is not visible": that was true for one release and is no longer. A user
-  typing past the right edge of a long line could type into text they could not see; they cannot now, at any column.
+  used — the least movement that keeps the cursor on screen. A user typing past the right edge of a long line could type into text
+  they could not see; they cannot now, at any column.
 - **Lines still do not wrap.** One line is one drawn row; a long line's own width is windowed, the same way the file's height already
   is, rather than broken across more than one row — wrapping would trade away the exact per-row arithmetic the vertical window
   depends on.
@@ -23,15 +34,12 @@
   Undoing all the way back to the text a file was opened with returns it to a clean, unmodified state, and undo does not reach
   back across a reload of the file's real, current content on disk.
 
-### Changed — the editor draws only the lines that fit
+### Changed — the editor draws only the lines that fit, and the window is two rows
 
 - **The editor draws the lines that fit the window, not the whole file, and the window follows the cursor.** Typing in a 100,000-line
   file now takes **p95 5.3–6.8 ms and p99 5.3–6.8 ms** (down from 14.0–16.3 and 14.0–16.6 ms; painting is still not in the figure),
   across two batches of three runs. Each keystroke still copies the document once to apply the edit; that is now most of the cost and is
   not changed here. Arrow keys cost slightly more than before (2.8 ms against 1.8 at 100,000 lines: they now keep the window on the cursor).
-- **A line wider than the editor is clipped at its right edge, not wrapped**, and there is still no horizontal scrolling, so the end of a
-  very long line is not visible. Drawing one row per line is what makes the window exact; soft wrap is not part of this release.
-  **Corrected above: the editor now scrolls sideways to keep the cursor visible on a long line, and does not leave it clipped.**
 - **The window moves only by the cursor**: there is still no scrollbar and no mouse wheel, and navigation is still the four arrow keys.
 - **The top of the window is two rows, not three.** The title and the two global actions (Trust Settings, Help) now share one row;
   the project tabs are the row below it, instead of a third row of their own underneath both.
@@ -44,20 +52,31 @@
 
 ### Measured — typing in a very large file
 
-- **Typing in a 100,000-line file is at the 16 ms budget with no headroom.** Measured on a release build against a 3.3 MB, 100,000-line file
-  (`NFR-PERF-003`: p95 ≤ 16 ms, p99 ≤ 33 ms), the code Tekstide runs on a keystroke — applying the edit, building the view, laying out the
-  text — takes **p95 14.0–16.3 ms and p99 14.0–16.6 ms** over three runs; typing at the start of the file was over the 16 ms line in two of them.
-  **That is a lower bound:** painting and presenting the frame are not in it. The cost grows with the length of the file, not with the edit
-  (1,000 lines 0.4 ms, 10,000 lines 1.7 ms, 100,000 lines 15.8 ms), because each keystroke copies and re-splits the whole document. Nothing changed
-  in the editor; this is the baseline the next slices are judged against.
+- **Typing in a 100,000-line file is at the 16 ms budget with no headroom, at the baseline this release started from.** Measured on
+  a release build against a 3.3 MB, 100,000-line file (`NFR-PERF-003`: p95 ≤ 16 ms, p99 ≤ 33 ms), the code Tekstide ran on a keystroke
+  before any change in this release — applying the edit, building the view, laying out the text — took **p95 14.0–16.3 ms and p99
+  14.0–16.6 ms** over three runs; typing at the start of the file was over the 16 ms line in two of them. **That was a lower bound:**
+  painting and presenting the frame were not in it. The cost grew with the length of the file, not with the edit (1,000 lines 0.4 ms,
+  10,000 lines 1.7 ms, 100,000 lines 15.8 ms), because each keystroke copied and re-split the whole document. This was measured first,
+  before anything else in this release changed, so the numbers above it are a claim with something to compare against.
 - **A file of 100,000 lines can only be opened if its lines average under 42 bytes**, because the editor refuses anything over 4 MiB. A file whose
   lines average 51 bytes (this project's first test fixture) is refused at that many lines, so the requirement's "100,000-line file" and the size cap
   disagree for any file with longer lines. Neither has been changed.
-- **The editor shows about 48 lines of a large file and has no scrollbar**, no line numbers and no visible caret; the header says *Line N, Column M*.
-  **Corrected below: the line numbers and the caret are added in this same release, in the entry above.** There is still no scrollbar.
-- **The column width used to fit a proportional font's characters is an approximation** (the same kind of approximation row height already used
+- **The column width used to fit a character is an approximation** (the same kind of approximation row height already used
   for line pitch), not a measurement of the actual, per-character width `cosmic-text` will lay out — a window sized from it can hold very
-  slightly more or fewer characters than the region's real pixel width allows.
+  slightly more or fewer characters than the region's real pixel width allows. Exact for the shipped fixed-width default (see *Changed*,
+  above); still an approximation, with its own measured risk, for a configured proportional family.
+
+### What this release does not do
+
+- **Each keystroke still copies the whole document once to apply the edit.** This is now roughly 80% of what typing costs at
+  100,000 lines, and the budget has threefold headroom regardless — left alone deliberately, not overlooked.
+- **Lines still do not wrap**, there is still no scrollbar and no mouse wheel, and navigation is still the four arrow keys.
+- **The editor's own vocabulary is still four keys.** No selection, no clipboard, no delete-forward.
+- **No syntax highlighting.** An owner decision to make, not a silent deferral.
+- **A configured proportional font family still loses the approximation's safety.** Checked against the default face: a line of
+  wide characters (a capital `W`, repeated) can leave the cursor **over 50 columns outside the window that is actually drawn**,
+  disclosed in `configuration.md` beside the family setting. The shipped default does not have this risk (see *Changed*, above).
 
 ## 0.27.0 - A Run That Still Exists Tomorrow
 
