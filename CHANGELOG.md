@@ -2,7 +2,7 @@
 
 ## 0.28.0 - The Editor Knows Where You Are
 
-Status: release candidate; not yet published or tagged.
+Status: **released on 2026-09-30.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.28.0` at `db1057d`. Post-publish: `0.28.0` passes all three checks, and **`0.27.0` still installs now that a newer core exists** — the first release whose predecessor the pin protected.
 
 The editor used to draw the whole file as one string every frame, showed no line number, drew no
 caret, and could not take back a keystroke. It now draws the rows that fit the window, numbers them
