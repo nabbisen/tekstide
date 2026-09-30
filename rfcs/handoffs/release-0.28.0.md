@@ -32,8 +32,12 @@ The Closed section should carry what only this RFC can tell the next reader:
 
 - **The baseline was measured before anything changed** (D11), and that is why "it got faster" is a
   claim with a number behind it: p95 14.285 ms → 7.876 ms at 100,000 lines, layout 9.896 → 0.050.
-- **Three ablations that found nothing, and were reported as findings** — the worker that could have
-  stopped asking git, the C3 ablation inside `view`, and the two modal guards that repeat a gate.
+- **An ablation that found nothing, and was reported as the finding** — the first C3 attempt, which
+  targeted code inside `view` that nothing tests directly, until the decision was factored into
+  `row_plan` and the same ablation failed alone. *(Corrected 2026-09-30: this list first named three,
+  and two of them — the git-asking worker and the modal guards — belong to RFC-055 PR-055-B and
+  RFC-056 PR-056-D. The implementer flagged that they could not be verified rather than writing them
+  in unchecked.)*
 - **An approximation falsified rather than defended**: `W` overflows by 50.91 columns, `i` by zero,
   and the owner's ruling made the shipped default exact (0.0 % off).
 - **What is left open**: the per-keystroke whole-document copy (now ~80 % of the remaining cost, and

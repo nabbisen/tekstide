@@ -158,14 +158,20 @@ measured in itself is now closed too.**
 with a number behind it, not an assertion:** p95 14.285 ms → 7.876 ms at 100,000 lines, `layout`
 9.896 ms → 0.050 ms. Slice A changed no product code — it exists only to make the comparison honest.
 
-**Three ablations found nothing, and were reported as findings rather than discarded.** A worker
-whose own guard could have stopped it from asking git a second time; the first attempt at C3, which
-targeted code inside `view` itself — a function nothing in this crate's tests call directly — and
-failed nothing, until the decision it was testing was factored into `row_plan`, a pure function, and
-the same ablation then failed alone; and two modal guards that, ablated, only repeated a check a
-sibling gate already made. Each is recorded where it was found (`qa-evidence.md`) rather than quietly
-removed, because a property this project's own tests cannot see failing is a testability gap, not a
-clean result.
+**An ablation found nothing, and that was reported as the finding rather than discarded.** The first
+attempt at C3 targeted code inside `view` itself — a function nothing in this crate's tests call
+directly — and failed nothing, until the decision it was testing was factored into `row_plan`, a pure
+function, and the same ablation then failed alone. It is recorded where it was found
+(`qa-evidence.md`) rather than quietly removed, because a property this project's own tests cannot
+see failing is a testability gap, not a clean result.
+
+*(Corrected 2026-09-30, before publishing. `release-0.28.0.md` told the implementer to record
+**three** such ablations here. Two of them are not this RFC's: the worker that could have stopped
+asking git is **RFC-055 PR-055-B** (review 432), and the two modal guards are **RFC-056 PR-056-D**
+(review 439). The implementer could not verify either, said so in the candidate rather than
+fabricating detail or silently dropping what the scoping document asked for, and was right on both
+counts — the architect had misattributed two other RFCs' findings to this one. The scoping document
+is corrected too.)*
 
 **An approximation was falsified rather than defended.** `CHAR_WIDTH_FACTOR = 0.6`, checked against
 real `iced` text layout at the shipped default: `W` overflowed the horizontal window by 50.91 columns,
