@@ -62,6 +62,13 @@ measurement with no number in the evidence is not ticked.
       refines the message. *(`WatchScope::reconcile` never inspects a refusal; a test proves two
       different refusals give the same state. A panic is caught in `guard_watch_call` and tested with a
       real panic.)*
+- [ ] **C1′ (review 453, correcting C1): the desired set contains only directories that exist.**
+      `reconcile` hands `desired` straight to `notify.watch()` with no existence check, so a directory
+      deleted before it is watched becomes a `WatchRefusal` and stops **all** watching — and that is
+      the normal event a watcher exists to observe, not a rare race. A path that is gone is not a
+      refusal; there is nothing to watch. Check existence **ourselves**, so the branch is on a fact we
+      establish and never on a library's error variant — which is what C1 was protecting. The
+      residual race (exists when checked, gone when watched) is **named**, not engineered away.
 - [ ] **C2 (review 452): no path in the sidebar line.** *(A constraint on the sentence, which is not
       written yet. Ticked when the sentence exists and is checked against it.)*
 - [ ] **C3 (review 452): do not echo notify's error string as product text.** *(Same: the refusal's
