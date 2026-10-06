@@ -74,8 +74,10 @@ measurement with no number in the evidence is not ticked.
       refusal; there is nothing to watch. Check existence **ourselves**, so the branch is on a fact we
       establish and never on a library's error variant — which is what C1 was protecting. The
       residual race (exists when checked, gone when watched) is **named**, not engineered away.
-- [ ] **C2 (review 452): no path in the sidebar line.** *(A constraint on the sentence, which is not
-      written yet. Ticked when the sentence exists and is checked against it.)*
+- [x] **C2 (review 452): no path in the sidebar line.** *(The sentence is Option C, verbatim, as the
+      trusted catalog messages `watch-stopped-sidebar` and `watch-stopped-sidebar-action`, with no
+      arguments: no untrusted value can reach it, so the rule holds by construction. Width-tested with the
+      ignore-rule sentences: `the_watch_stopped_sentence_fits_the_sidebar`. Its on-screen display is B2.)*
 - [x] **The sentence, chosen at review 454: C, verbatim.** *"Folders are no longer updating."* (31)
       and *"Reopen the project to resume."* (29) — the only candidate whose **both** lines fit
       `SIDEBAR_COLUMNS = 32`. The implementer's pick (A) had a 68-character second line that would
@@ -86,9 +88,9 @@ measurement with no number in the evidence is not ticked.
       say so in the catalog comment, so nobody later adds a `$path` to be helpful.
 - [x] **No positive-state line** (ruled at 454): when watching works the sidebar says nothing about
       it. The sidebar already spends four reserved lines; only the stopped state speaks.
-- [ ] **C3 (review 452): do not echo notify's error string as product text.** *(Same: the refusal's
-      detail is for logs only, enforced by its type. The sentence itself, consequence first, comes with
-      the on-screen wiring.)*
+- [x] **C3 (review 452): do not echo notify's error string as product text.** *(The refusal's detail is
+      for logs only, enforced by its type; the sentence says the consequence first and names no cause.
+      Its on-screen display is B2.)*
 - [x] `dependency-advisories.md` carries the new crate the way it carries the existing three.
       *(A section for the five Linux crates, the platform-only lock entries, and the 9.0 re-check row;
       `cargo audit`: zero vulnerabilities, the same three warnings.)*

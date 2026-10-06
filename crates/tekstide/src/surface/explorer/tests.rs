@@ -1445,3 +1445,24 @@ fn the_ignore_rule_sentences_fit_the_sidebar() {
         }
     }
 }
+
+/// RFC-026 review 454: the watch-stopped sentence is held to the same sidebar width as
+/// the ignore-rule sentences, and both of its lines must fit (Option C was chosen on
+/// exactly this measurement).
+#[test]
+fn the_watch_stopped_sentence_fits_the_sidebar() {
+    const SIDEBAR_COLUMNS: usize = 32;
+    let catalog = real_catalog();
+    for key in ["watch-stopped-sidebar", "watch-stopped-sidebar-action"] {
+        let line = catalog.get(key);
+        assert!(
+            !line.starts_with("[missing") && line != key,
+            "{key} must resolve to real text"
+        );
+        assert!(
+            line.chars().count() <= SIDEBAR_COLUMNS,
+            "{} columns is clipped in the sidebar: {line:?}",
+            line.chars().count()
+        );
+    }
+}

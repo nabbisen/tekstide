@@ -242,3 +242,24 @@ reconciled through `NotifyBackend`).
 
 **Gate.** fmt, clippy, `rfc_docs_invariants` 16: clean. Three consecutive full-workspace runs —
 **three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`: `713 + 16 + 1059` = 1,788 passed, 1 ignored (the measurement), 0 failed, 0 entries left after each**, at load 6–13.
+
+## Review 454 — the sidebar sentence (Option C)
+
+**Chosen by measurement, not preference.** Six candidates measured against the sidebar's 32-column rule
+(the rule `the_ignore_rule_sentences_fit_the_sidebar` already enforces). Option A's second line is 68
+characters and clips the action — the one thing the sentence exists to say. Option B's second line
+misses by one character. **Option C is the only candidate where both lines fit**: *Folders are no
+longer updating.* (31) and *Reopen the project to resume.* (29).
+
+**Catalog, trusted.** `watch-stopped-sidebar` and `watch-stopped-sidebar-action`, no arguments.
+Consequence first, no cause, no library wording. C2 holds by construction: there is no untrusted value
+in the sentence to escape.
+
+**Shown only when watching has stopped.** The review's ruling: no positive-state line.
+
+**Tested.** `the_watch_stopped_sentence_fits_the_sidebar` — both lines resolve to real text and fit 32
+columns. The on-screen display is B2.
+
+**Gate.** `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `rfc_docs_invariants` 16: clean.
+Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`: `714 + 16 + 1059` = 1,789
+passed, 1 ignored (the measurement), 0 failed, 0 entries left after each, at load 12.

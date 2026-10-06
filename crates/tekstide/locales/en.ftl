@@ -676,6 +676,13 @@ explorer-ignore-rule = { $placement ->
 # for the ignore marks.
 explorer-ignore-age = Marks are as old as the scan
 
+# RFC-026 review 454: shown only when watching has stopped, never as a positive state.
+# Trusted, fixed text with no arguments, so no untrusted value can reach it (C2 by
+# construction). Consequence first, then the action; no cause, and no library wording (C3).
+# Two lines, one key each, because a sidebar line is one string.
+watch-stopped-sidebar = Folders are no longer updating.
+watch-stopped-sidebar-action = Reopen the project to resume.
+
 # The sidebar draws only the rows that fit; this says which ones.
 explorer-rows-position = Rows { $first }–{ $last } of { $total }
 
