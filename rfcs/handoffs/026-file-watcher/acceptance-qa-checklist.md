@@ -103,6 +103,10 @@ measurement with no number in the evidence is not ticked.
       screen saying watching stopped and why.
       *(Forced and tested against a fake backend — `a_refused_watch_stops_watching_and_drops_every_watch_without_crashing`.
       **The sentence on screen is not written yet**, so this box stays open.)*
+- [ ] **The policy guarantee lands with the wiring, not with its test** (ruled at review 455):
+      `desired_directories` is `root.join(relative)` with **no policy consulted**, is `pub`, and takes
+      arbitrary paths. D7 is a guarantee, so step 1 takes paths the explorer's access policy has
+      admitted — the hostile fixture below *proves* the property and must not be where it arrives.
 - [ ] Hostile fixture: a symlink leaving the root is not watched; a loop does not recurse.
 - [ ] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
       already has.
