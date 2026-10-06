@@ -380,6 +380,35 @@ fn a_watched_directory_that_is_deleted_later_is_dropped_without_stopping() {
     assert_eq!(scope.state(), &WatchState::Live);
 }
 
+/// Review 453, on the real filesystem: a directory the expanded tree still lists, but
+/// which a clean has removed, does not stop watching. The production backend answers
+/// the existence question itself.
+#[test]
+fn a_real_directory_removed_before_reconciling_does_not_stop_watching() {
+    let base = Path::new("/dev/shm/tekwatch-gone");
+    let _ = std::fs::remove_dir_all(base);
+    std::fs::create_dir_all(base.join("keep")).unwrap();
+    std::fs::create_dir_all(base.join("build")).unwrap();
+
+    let (sender, _receiver) = std::sync::mpsc::channel();
+    let mut backend = super::NotifyBackend::new(sender).expect("notify starts on Linux");
+    let desired = desired_directories(base, &[PathBuf::from("keep"), PathBuf::from("build")], &[]);
+    let mut scope = WatchScope::new();
+
+    std::fs::remove_dir_all(base.join("build")).unwrap();
+    let change = scope.reconcile(&desired, &mut backend);
+
+    assert_eq!(
+        scope.state(),
+        &WatchState::Live,
+        "a removed directory is not a refusal"
+    );
+    assert_eq!(change.added, 2, "the base and keep are watched");
+    assert!(!scope.is_watched(&base.join("build")));
+    scope.reconcile(&BTreeSet::new(), &mut backend);
+    let _ = std::fs::remove_dir_all(base);
+}
+
 /// RFC-026 review 450: `GIT_SUBPROCESSES_PER_SCAN` checked against a real scan, not
 /// taken on the strength of its provenance.
 ///
