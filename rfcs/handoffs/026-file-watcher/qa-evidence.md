@@ -290,3 +290,49 @@ expanded folders and the active document's folder — the open set is plural onl
 end to end. These are steps 2–4, and step 2 depends on a decision about who owns the watcher (review 456).
 
 **Gate.** fmt, clippy, `rfc_docs_invariants` 16 clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`: `714 + 16 + 1061` = 1,791 passed, 0 failed, 0 entries left after each, at load 15–20.
+
+## Review 456 — step 2: one watch owner per project, its event stream, reconciled on triggers
+
+**Decision (a), per project** (review 456's ruling). `ProjectWatcher` in `tekstide-core` owns the
+platform backend, the watch scope and the event receiver together. The app keeps one per open project
+in `State::project_watches`, keyed by project id, with a generation so a reopened project is a new
+subscription. Closing the project removes the entry, which drops the backend, its sender, and every
+watch. The app never names `notify`: `WatchEvents` is the opaque receiver.
+
+**Event stream (D10).** `project_watch_subscription` has the shape `explorer_scan_subscription` uses:
+hashed on (project, generation) with the receiver left out of the identity, a dedicated OS thread
+blocked on `WatchEvents::wait_for_event`, one `Message::ProjectWatchWoke` per event. The thread ends
+when the owner is dropped. Step 2 only wakes; `update` has no feed into the batcher yet (step 3).
+
+**Reconcile on triggers only.** `reconcile_project_watch` is called from six sites: project open (the
+three add-project arms), a folder toggle, a document open, and a scan finishing. It is not called from
+`update` unconditionally, because each call costs a `directory_exists` per desired directory. The cost
+is written in its doc comment.
+
+**Proofs.**
+
+- `a_change_in_a_watched_directory_reaches_the_owner_event_stream` — a real file created in a real
+  watched directory (`/dev/shm/tekwatch-owner-events`) reaches the owner's stream.
+- `dropping_the_owner_ends_its_event_stream` — dropping the owner returns `false` from the waiting
+  thread: closing a project ends its stream (R6 by ownership).
+- `a_platform_that_never_started_stops_watching_on_the_first_reconcile` — a platform that refused to
+  start reconciles to `Stopped` with its reason kept, and offers no stream.
+- `a_project_is_watched_from_open_and_its_owner_is_removed_on_close` (app) — opening a project creates
+  its owner with exactly the root watched; closing it removes the owner.
+
+**Ablation.** The close-side owner removal in `attempt_close_project_tab` taken out (`ablate.sh` on a
+clean tree, after the commit): `a_project_is_watched_from_open_and_its_owner_is_removed_on_close`
+fails with "closing the project must drop its watch owner". Restored; the tree was clean afterwards.
+
+**Not yet.** The batcher's feed from the events (step 3); the hostile fixture end to end (step 4); the
+sentence on screen when watching stops (step 5). The live count across expand, collapse and close is
+not measured in the running app: the policy is proved in core, and the app-level check covers only
+open and close.
+
+**Known cost, not measured.** `reconcile_project_watch` runs in `update` on its triggers and calls
+`watched_directories()` (canonicalising each expanded folder) and `directory_exists` per desired
+directory. The review allowed it on triggers; no per-trigger timing is recorded yet.
+
+**Gate.** `cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, and `git diff --cached
+--check` clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`
+(`/dev/shm/tkN`): each run `1795 passed, 0 failed, 4 ignored`, 0 entries left after each, at load ~9.

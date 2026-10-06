@@ -98,6 +98,8 @@ measurement with no number in the evidence is not ticked.
       *(Step 1 (review 455): the session computes the admitted set from its own tree and document —
       `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated. The app does not reconcile
       it yet: that needs the watcher's owner decided, see review 456.)*
+      *(Step 2: reconciled on the triggers, and the owner exists per project. The live count across
+      expand, collapse and close is not measured in the running app, so the box stays open.)*
       expanding, collapsing and closing a project — a scope that only grows is a defect.
       *(The policy is proven: `expanding_collapsing_and_closing_move_the_watched_count_exactly`. **Not
       yet wired** to the live explorer tree and the open-document set — that is the next step, so the
@@ -106,27 +108,40 @@ measurement with no number in the evidence is not ticked.
       screen saying watching stopped and why.
       *(Forced and tested against a fake backend — `a_refused_watch_stops_watching_and_drops_every_watch_without_crashing`.
       **The sentence on screen is not written yet**, so this box stays open.)*
-- [ ] **The policy guarantee lands with the wiring, not with its test** (ruled at review 455):
+- [x] **The policy guarantee lands with the wiring, not with its test** (ruled at review 455):
       `desired_directories` is `root.join(relative)` with **no policy consulted**, is `pub`, and takes
       arbitrary paths. D7 is a guarantee, so step 1 takes paths the explorer's access policy has
       admitted — the hostile fixture below *proves* the property and must not be where it arrives.
+      *(Step 2 (review 456): the live reconcile takes only `watched_directories()`, which admits every
+      directory through `WatchedDirectory::admit`. Nothing else reaches the owner. Proved by
+      `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated at step 1.)*
 - [ ] Hostile fixture: a symlink leaving the root is not watched; a loop does not recurse.
       *(Step 1 (review 455): the access policy is the only way into the scope — `WatchedDirectory` is
       constructible only through `admit` — and `the_access_policy_decides_what_the_scope_may_ever_hold`
       refuses a real escaping symlink and admits an in-root one. Non-recursion is by construction (single
       directories only). The end-to-end fixture, with a live tree and a live watch, is step 4: still open.)*
-- [ ] **Ownership is per project** (ruled at review 456): each open project owns its backend, scope
+- [x] **Ownership is per project** (ruled at review 456): each open project owns its backend, scope
       and receiver. Measured against (b), one process-wide watcher: the watch budget is **per user**
       (524,288), so (b) shares nothing that is scarce; instances are 1,024, so (a) costs one per
       project. What (b) would share is the **failure** — a refusal in one project stopping them all,
       which contradicts *"Reopen the project to resume."* R6 holds by ownership, not by a cleanup step.
-- [ ] **Reconcile is trigger-driven and invents no trigger**: a toggle, a scan finishing, a document
+      *(Implemented at step 2: `ProjectWatcher` owns backend, scope and receiver; `State::project_watches`
+      holds one per open project and close removes it. `dropping_the_owner_ends_its_event_stream`;
+      `a_project_is_watched_from_open_and_its_owner_is_removed_on_close`, ablated: the close removal taken
+      out fails it.)*
+- [x] **Reconcile is trigger-driven and invents no trigger**: a toggle, a scan finishing, a document
       opening or closing — **and project open**, which the plan left out and which is when the root
       first becomes desired. It must **not** become an unconditional call in `update`: it costs a
       `directory_exists` syscall per desired directory, so a hundred expanded folders is a hundred
       stat calls per invocation. Say so where it lives.
+      *(Step 2: six call sites, `grep -n reconcile_project_watch crates/tekstide/src/shell.rs`: project open
+      (three arms), folder toggle, document open, scan finished. The cost is in `reconcile_project_watch`'s
+      doc comment. Not per frame.)*
 - [ ] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
       already has.
+      *(Step 2: the event thread is off the render thread, and the subscription has the explorer's shape.
+      Left open because reconcile runs in `update` on its triggers, doing filesystem calls there. The review
+      allowed that on triggers, but no per-trigger cost is measured yet.)*
 
 ## PR-026-C — the change arrives
 
