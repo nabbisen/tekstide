@@ -14,12 +14,19 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-026-A — the batching
 
-- [ ] A simulated burst of **1,000 events into one directory yields one scan request per window**.
+- [x] A simulated burst of **1,000 events into one directory yields one scan request per window**.
       Both numbers written down: scan requests, **and git subprocesses**.
-- [ ] Ablated: remove the batching and the count becomes 1,000.
+      *(1 scan request, 2 git subprocesses; five windows: 5 and 10. `qa-evidence.md` § PR-026-A.)*
+- [x] Ablated: remove the batching and the count becomes 1,000.
+      *(`ablate.sh`: 1,000 scan requests and 2,000 git subprocesses for both streams.)*
 - [ ] The window is a stated constant and the book names it.
-- [ ] Events for different directories do not silently merge.
-- [ ] No dependency added in this slice, and no watcher wired.
+      *(The constant is stated in code: `SCAN_WINDOW = 250 ms`. **Not yet in the book**, deliberately:
+      it is an internal number until a watcher exists to make it visible. The book names it in the slice
+      that makes watching user-visible — B or C. Left unticked until then, rather than documenting
+      behaviour the product does not yet have.)*
+- [x] Events for different directories do not silently merge.
+      *(`events_for_different_directories_do_not_silently_merge`.)*
+- [x] No dependency added in this slice, and no watcher wired.
 
 ## PR-026-B — the watcher and its dependency
 
