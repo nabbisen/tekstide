@@ -10,19 +10,24 @@
 
 - `SCAN_WINDOW = 250 ms` — the window, a stated constant (D3). A window opens at the first change in a directory that has none open and closes exactly `SCAN_WINDOW` later. It is measured from the first change, not reset by each one, so a burst longer than the window yields one scan per window instead of starving until the burst ends.
 - `GIT_SUBPROCESSES_PER_SCAN = 2` — the second count RFC-026 asks every batching claim to carry. One scan request costs the gate's configuration query and one `check-ignore` (measurement 8, review 431). The batcher runs no git itself; the count is the cost of each request it issues.
-- `record(path, at)` — keys a change by its parent directory. Changes in an open window collapse into it; different directories never share one.
+- `record(directory, at)` — takes the directory a change happened in, as the caller names it (review 450: the batcher derives nothing from a path). Changes in an open window collapse into it; different directories never share one.
 - `drain_due(now)` — returns each closed window as one `ScanRequest { directory, coalesced_events }`, in path order.
 
 ### The numbers
 
 Both counts, for each claim, as the test prints them (`cargo test -p tekstide-core --lib project::watch -- --nocapture`):
 
-| Stream | Scan requests | Git subprocesses |
+| Stream | Scan requests | Git subprocesses (steady state) |
 | --- | --- | --- |
 | 1,000 events into one directory, inside one window | **1** | **2** |
 | 1,000 events into one directory, spread over five windows | **5** | **10** |
 | Ablated — batching removed (below), the same 1,000-event burst | **1,000** | **2,000** |
 | Ablated — batching removed, the five-window stream | **1,000** | **2,000** |
+
+**The git figures are steady state, and the first scan in a process costs one more.** The
+verified git executable is cached per process, so the first scan also runs `git --version` once.
+Measured against a real scan at review 450 (see below): **3** on the first scan, **2** on every
+scan after it. The batching tests count steady state; the one-time extra is not in them.
 
 The burst is a real one, not a loop with nothing between events: its thousand changes are spread through the first half of the window, one every 125 µs, and the batcher is driven the way a real loop drives it (drain, then record, then drain at the end).
 
@@ -50,3 +55,46 @@ No clock is read by any test: every instant is constructed, so the numbers do no
 ### Gate
 
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `713 + 16 + 1049` = 1,778 passed, 0 failed, 0 entries left after each.** No intermittent.
+
+## Review 450 — the two required items
+
+### 1. The batcher takes the directory it is given
+
+`ScanBatcher::record` used to derive its key as `path.parent().unwrap_or(Path::new(""))`, so a path with no parent became the empty path and went on to a scanner. It now takes the directory the caller names, and derives nothing:
+
+```rust
+pub fn record(&mut self, directory: PathBuf, at: Instant)
+```
+
+The residual is stated, not hidden: a `PathBuf` can still hold `""`. The batcher does not invent that value — a caller has to hand it — and the only caller (slice B) computes the directory from a real event path under the project root. A stricter newtype would need that root context, so it belongs with B, not here.
+
+The four tests were reshaped to name directories directly, and pass.
+
+### 2. `GIT_SUBPROCESSES_PER_SCAN` against a real scan
+
+Measured, not assumed. `measured_git_subprocesses_per_real_scan` (`#[ignore]`d; run with `cargo test -p tekstide-core --lib measured_git_subprocesses_per_real_scan -- --ignored --nocapture`) runs the explorer's own scan request, through its public oracle seam, with a logging `git` shim as the executable, and counts every subprocess the ignore step spawns:
+
+| Scan | Git subprocesses |
+| --- | --- |
+| First scan in this process | **3**: `git --version`, `git config --list --null`, `git check-ignore -z --stdin` |
+| Second scan, warm | **2**: `git config --list --null`, `git check-ignore -z --stdin` |
+| Third scan, warm | **2**: the same two |
+
+**What this corrects.** `GIT_SUBPROCESSES_PER_SCAN = 2` is right for steady state, which is what every batching count in this file assumes. It is wrong for the first scan in a process, which costs 3. The constant's doc comment now states both. The burst and five-window figures above are steady state; with a cold process add one.
+
+**Why the shim is not on the product's own `PATH`.** My first attempt put the shim first on `PATH` and recorded nothing. That is the product working correctly: `resolve_git_executable` tries its reviewed system directories before it reads `PATH`, so a `git` earlier on `PATH` is never reached on this machine. The measurement therefore drives the same ignore step with the shim as the explicit executable, through the seam `ExplorerScanRequest::run_with_oracle` already exposes. The directory read and the ignore step are otherwise the production code.
+
+### Ablation, re-run on the new signature
+
+The batching ablation (every change its own immediately-due scan) on a clean tree, after the signature change:
+
+| Stream | Scan requests |
+| --- | --- |
+| 1,000 events, one window | **1,000** (was 1) |
+| 1,000 events, five windows | **1,000** (was 5) |
+
+Both restored by `ablate.sh`; the tree was clean afterwards.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `713 + 16 + 1049` = 1,778 passed, 1 ignored (the measurement), 0 failed, 0 entries left after each**, at machine load 22–25. The first attempt had two runs fail one load-sensitive timing test, `change_review_content_view_build_cost_by_line_count_measurement`, at the same load; registered in `test-process-leak.md` (2026-10-06) and the gate redone rather than counted.

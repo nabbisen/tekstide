@@ -33,14 +33,21 @@ measurement with no number in the evidence is not ticked.
 
 ### Required at review 450
 
-- [ ] **`record` cannot be handed a non-directory.** It derives `path.parent().unwrap_or(Path::new(""))`,
+- [x] **`record` cannot be handed a non-directory.** It derives `path.parent().unwrap_or(Path::new(""))`,
       so `/` or a bare relative name silently becomes the empty path and then
       `ScanRequest { directory: "" }`. Unreachable from a real watcher, but B is about to feed it real
       events. **Make it unrepresentable** — take the directory B computes anyway, rather than deriving
       one and needing a fallback.
-- [ ] **Verify `GIT_SUBPROCESSES_PER_SCAN = 2` against a real scan.** Its provenance is recorded
+      *(`record(directory: PathBuf, at)` derives nothing. Residual, stated in `qa-evidence.md`: a
+      `PathBuf` can still hold `""`; the batcher invents none, and B's caller must not hand it one.
+      A stricter newtype needs B's root context.)*
+- [x] **Verify `GIT_SUBPROCESSES_PER_SCAN = 2` against a real scan.** Its provenance is recorded
       (measurement 8, review 431) but it describes something nobody has run in A. If the real figure
       differs, **A's evidence numbers are corrected**, not left standing.
+      *(Measured through the explorer's own scan seam: **2 on every warm scan, 3 on the first scan in a
+      process** (`git --version`, cached per process). Steady state is 2, as the batching counts assume;
+      the one-time extra is stated in the constant's doc comment and in `qa-evidence.md`. The
+      measurement is `measured_git_subprocesses_per_real_scan`, `#[ignore]`d, run by hand.)*
 
 ## PR-026-B — the watcher and its dependency
 

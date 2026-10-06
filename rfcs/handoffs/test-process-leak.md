@@ -1202,3 +1202,14 @@ the implementer's own `0.28.0` attempt, and this one). It measures the machine, 
 in `delivery-plan.md` — assert a **ratio against a reference workload timed in the same process** —
 is still unscheduled. RFC-057 PR-057-A's `#[ignore]`d baseline and snora 0.52.0's CI ratio are both
 worked examples of the two halves.
+
+## Recurrence, 2026-10-06 — RFC-026 PR-026-A's review-450 gate (implementer's run)
+
+`shell::tests::change_review_content_view_build_cost_by_line_count_measurement` (the load-sensitive
+500 ms build-cost budget, registered at review 338) failed in **two of the first three** full-workspace
+runs of this gate, both at machine load about 25 (other sessions' builds on the shared machine). It
+passed immediately in isolation at load 25 and in all three runs of the accepted gate at loads 22–25.
+Not the slice: the change touches `project/watch` only, which nothing in the change-review view reads.
+The failure message was not captured in the first two runs, which is the cost of filtering the gate's
+output; the next attempt kept the full logs. **The gate was redone, not counted.** This is the test
+that has now cost a gate attempt in three releases; the ratio fix is still unscheduled.
