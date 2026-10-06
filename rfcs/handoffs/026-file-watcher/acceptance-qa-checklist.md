@@ -19,7 +19,10 @@ measurement with no number in the evidence is not ticked.
       *(1 scan request, 2 git subprocesses; five windows: 5 and 10. `qa-evidence.md` § PR-026-A.)*
 - [x] Ablated: remove the batching and the count becomes 1,000.
       *(`ablate.sh`: 1,000 scan requests and 2,000 git subprocesses for both streams.)*
-- [ ] The window is a stated constant and the book names it.
+- [x] The window is a stated constant (`SCAN_WINDOW = 250 ms`), with its reasoning in the doc
+      comment. **The book half moved to C at review 450** — nothing feeds the batcher yet, so no user
+      can observe the window, and naming it in the book would describe behaviour the product does not
+      have. The implementer declined to tick it and said why; that was right.
       *(The constant is stated in code: `SCAN_WINDOW = 250 ms`. **Not yet in the book**, deliberately:
       it is an internal number until a watcher exists to make it visible. The book names it in the slice
       that makes watching user-visible — B or C. Left unticked until then, rather than documenting
@@ -27,6 +30,17 @@ measurement with no number in the evidence is not ticked.
 - [x] Events for different directories do not silently merge.
       *(`events_for_different_directories_do_not_silently_merge`.)*
 - [x] No dependency added in this slice, and no watcher wired.
+
+### Required at review 450
+
+- [ ] **`record` cannot be handed a non-directory.** It derives `path.parent().unwrap_or(Path::new(""))`,
+      so `/` or a bare relative name silently becomes the empty path and then
+      `ScanRequest { directory: "" }`. Unreachable from a real watcher, but B is about to feed it real
+      events. **Make it unrepresentable** — take the directory B computes anyway, rather than deriving
+      one and needing a fallback.
+- [ ] **Verify `GIT_SUBPROCESSES_PER_SCAN = 2` against a real scan.** Its provenance is recorded
+      (measurement 8, review 431) but it describes something nobody has run in A. If the real figure
+      differs, **A's evidence numbers are corrected**, not left standing.
 
 ## PR-026-B — the watcher and its dependency
 
@@ -48,6 +62,8 @@ measurement with no number in the evidence is not ticked.
       reopening it.
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
       baseline harness.
+- [ ] **The book names the batching window** (moved here from A at review 450): by this slice a user
+      can observe it, so it describes real behaviour rather than an internal constant.
 - [ ] Unsaved edits survive an external change; **no silent reload**; a deleted open file is a state
       the product can say.
 - [ ] A reload takes the undo history with the document, and the product does not pretend otherwise.
