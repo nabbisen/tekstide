@@ -51,31 +51,34 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-026-B — the watcher and its dependency
 
-- [x] **D4's evaluation recorded before adoption** — brought at review 452 with `Cargo.toml`
-      untouched, and **adopted at review 452** with three conditions (C1–C3 below). The release-date
-      fact the implementer refused to stand behind was settled by the architect: `8.2.0` is the latest
-      stable (2025-08-03) **but five 9.0 release candidates exist, the newest 2026-08-30** — the crate
-      is maintained, and D12's "over a year old" framing was the architect's and was misleading. The
-      **9.0 line** is the re-check row, not a date. Original wording:, including `notify`'s MSRV, its **CC0-1.0** licence
-      (unlike every other direct dependency) and its last stable date — and the answer to **what it
-      does when the kernel refuses another watch**, read from what it does.
-- [ ] **C1 (review 452): the wrapper does not depend on which error it gets.** Any non-success from
+- [x] **D4's evaluation recorded before adoption**, including `notify`'s MSRV, its **CC0-1.0** licence
+      (unlike every other direct dependency), its last stable date, and the answer to **what it does
+      when the kernel refuses another watch**, read from what it does.
+      *(Recorded at review 452 with `Cargo.toml` untouched, then adopted at 452. The last-stable date
+      was settled by the architect from crates.io: `8.2.0`, 2025-08-03, with the 9.0 release candidates
+      as the re-check row — `d4-notify-evaluation.md`, `qa-evidence.md` § Slice B.)*
+- [x] **C1 (review 452): the wrapper does not depend on which error it gets.** Any non-success from
       `watch()` — any variant, and a caught panic per H1 — means *watching stopped*; the variant only
-      refines the message. This is what makes H2's "evidenced by reading, not by a test" acceptable:
-      the degradation is total, so the source reading is decoration rather than load-bearing.
-- [ ] **C2 (review 452): no path in the sidebar line.** The path is attacker-influenced, the sidebar
-      is ~33 monospace columns (measured at RFC-055), and a clipped path is a defect we already ship
-      as a known limitation.
-- [ ] **C3 (review 452): do not echo notify's error string as product text.** "OS file watch limit
-      reached" names a cause to a reader who did not ask one. RFC-055's vocabulary states the
-      **consequence first** — the explorer has stopped keeping up, and what to do — and the cause
-      second if at all.
-
-- [ ] `dependency-advisories.md` carries the new crate the way it carries the existing three.
+      refines the message. *(`WatchScope::reconcile` never inspects a refusal; a test proves two
+      different refusals give the same state. A panic is caught in `guard_watch_call` and tested with a
+      real panic.)*
+- [ ] **C2 (review 452): no path in the sidebar line.** *(A constraint on the sentence, which is not
+      written yet. Ticked when the sentence exists and is checked against it.)*
+- [ ] **C3 (review 452): do not echo notify's error string as product text.** *(Same: the refusal's
+      detail is for logs only, enforced by its type. The sentence itself, consequence first, comes with
+      the on-screen wiring.)*
+- [x] `dependency-advisories.md` carries the new crate the way it carries the existing three.
+      *(A section for the five Linux crates, the platform-only lock entries, and the 9.0 re-check row;
+      `cargo audit`: zero vulnerabilities, the same three warnings.)*
 - [ ] Watch scope is `expanded` + the root + open documents' folders. **Counted before and after**
       expanding, collapsing and closing a project — a scope that only grows is a defect.
+      *(The policy is proven: `expanding_collapsing_and_closing_move_the_watched_count_exactly`. **Not
+      yet wired** to the live explorer tree and the open-document set — that is the next step, so the
+      box stays open.)*
 - [ ] **Budget exhaustion forced in a test**: no crash, today's fallback behaviour, and a sentence on
       screen saying watching stopped and why.
+      *(Forced and tested against a fake backend — `a_refused_watch_stops_watching_and_drops_every_watch_without_crashing`.
+      **The sentence on screen is not written yet**, so this box stays open.)*
 - [ ] Hostile fixture: a symlink leaving the root is not watched; a loop does not recurse.
 - [ ] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
       already has.

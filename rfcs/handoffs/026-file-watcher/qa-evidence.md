@@ -149,3 +149,71 @@ Read from `src/inotify.rs`, not from the documentation:
   verify the date from crates.io and tick it.
 - The `dependency-advisories.md` row, the watch scope, the budget-exhaustion test, the hostile
   fixture, and the subscription are all unbuilt: they follow the architect's decision, not this one.
+
+## Slice B1 — `notify` adopted; the wrapper and the scope, tested
+
+**Adopted at review 452.** `notify` 8.2.0, default features off, in `tekstide-core`'s dependencies.
+
+### The dependency, as the lock records it
+
+- **Linux build: five new crates**, as the evaluation said: `notify`, `notify-types`, `inotify`,
+  `inotify-sys`, `mio` (confirmed with `cargo tree -p tekstide-core -e normal,build --target
+  x86_64-unknown-linux-gnu`).
+- **Lock: 18 new entries**, because `Cargo.lock` records every platform. The other 13 are `kqueue`,
+  `kqueue-sys`, `windows-sys`, `windows-targets`, eight `windows_*`, and `wasi`. None is compiled on
+  Linux. The advisories register states both counts.
+- **`cargo audit`:** zero vulnerabilities; the warnings are the three the register already carries.
+
+### The seam (`project/watch/backend.rs`)
+
+- `WatchBackend` — two methods, non-recursive, per directory. Every platform call goes through it.
+- `WatchRefusal` — **one shape for every cause** (review 452, C1). `detail` is for logs and tests; the
+  type offers no way to branch on the cause.
+- `NotifyBackend` — notify's recommended watcher. Its event handler does nothing but send into a
+  channel, and drops a send error: there is no panic path on notify's thread (H1).
+- `guard_watch_call` — runs each watch call under `catch_unwind` and turns a panic into a refusal (H1).
+  Tested with a real panic.
+
+### The scope (`project/watch/scope.rs`)
+
+- `WatchScope::reconcile(desired, backend)` makes the watched set **equal** the desired set: removals
+  first, so a shrinking scope frees budget before a growing one needs it. The first refusal stops
+  watching: every watch is dropped, the state becomes `Stopped`, and the call ends.
+- `resume()` — the only way out of `Stopped`. A reconcile does not retry the platform on its own.
+- `desired_directories(root, expanded, open_documents)` — the root, the expanded folders and the
+  open documents' folders (D1). Relative paths are joined onto the root.
+
+### Tests (seven new, plus the real-kernel one)
+
+| Test | Proves |
+| --- | --- |
+| `expanding_collapsing_and_closing_move_the_watched_count_exactly` | the count moves by exactly what each step names; closing removes all of them (R6) |
+| `an_open_documents_folder_is_watched_without_being_expanded` | D1's third input |
+| `a_refused_watch_stops_watching_and_drops_every_watch_without_crashing` | a forced budget exhaustion (R3): stopped, empty, nothing left on the platform, no panic |
+| `the_degradation_does_not_depend_on_which_refusal_it_gets` | C1: two different refusals, identical state |
+| `a_stopped_scope_does_not_retry_until_it_is_resumed` | no silent retry; a reopen places the watches again |
+| `a_panic_inside_a_watch_call_is_a_refusal_not_a_crash` | H1, with a real panic |
+| `the_real_backend_places_and_removes_a_watch_on_a_real_directory` | the production backend against the real kernel, on a directory this process owns |
+
+The real-kernel refusal (`ENOSPC`) is **not** a test: the limit cannot be lowered here (H2, and review
+452 accepted that). The degradation is tested through the fake, whose refusal the policy handles exactly
+as it handles the real one.
+
+### Ablation
+
+`ablate.sh` on a clean tree: the first refusal does not stop watching (`Err(_refusal) => {}`). Three
+tests fail — `a_refused_watch_stops…`, `the_degradation_does_not_depend…`, and
+`a_stopped_scope_does_not_retry…`. Restored by the script; the tree was clean afterwards.
+
+### Not in this slice
+
+The scope is **not yet wired** to the live explorer tree or the open-document set; the sidebar
+sentence is not written; the event subscription (D10) and the batcher's first real feed are not built;
+the hostile fixture is not run. Each is a later B step, and each keeps its checklist box open until it is
+done.
+
+### Gate
+
+`cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `rfc_docs_invariants` 16:
+clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `713 + 16 + 1056`
+= 1,785 passed, 1 ignored (the measurement), 0 failed, 0 entries left after each**, at load 6–9.
