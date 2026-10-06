@@ -617,3 +617,74 @@ fn the_session_wires_the_expanded_folders_into_the_desired_set() {
     );
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// B2 step 2 (review 456): a real change in a directory the owner watches reaches its
+/// event stream. The kernel reports it; the owner only forwards that it happened.
+#[test]
+fn a_change_in_a_watched_directory_reaches_the_owner_event_stream() {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    let directory = Path::new("/dev/shm/tekwatch-owner-events");
+    let _ = std::fs::remove_dir_all(directory);
+    std::fs::create_dir_all(directory).unwrap();
+
+    let mut watcher = super::ProjectWatcher::open();
+    let desired = BTreeSet::from([WatchedDirectory::for_test(directory)]);
+    watcher.reconcile(&desired);
+    assert_eq!(watcher.state(), &WatchState::Live);
+    assert_eq!(watcher.scope().watched_count(), 1);
+
+    let events = watcher.events().expect("notify starts on Linux");
+    let (sender, reported) = channel();
+    std::thread::spawn(move || sender.send(events.wait_for_event()).unwrap());
+    std::fs::write(directory.join("created.txt"), b"x").unwrap();
+
+    assert_eq!(
+        reported.recv_timeout(Duration::from_secs(10)),
+        Ok(true),
+        "the kernel reports the new file, and the owner forwards that it happened"
+    );
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+/// R6 by ownership (review 456): dropping the owner (closing the project) ends the event
+/// stream, so nothing is left waiting on a project that no longer exists.
+#[test]
+fn dropping_the_owner_ends_its_event_stream() {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    let watcher = super::ProjectWatcher::open();
+    let events = watcher.events().expect("notify starts on Linux");
+    let (sender, reported) = channel();
+    std::thread::spawn(move || sender.send(events.wait_for_event()).unwrap());
+
+    drop(watcher);
+
+    assert_eq!(
+        reported.recv_timeout(Duration::from_secs(10)),
+        Ok(false),
+        "closing the project ends the stream: the watches and their sender went with the owner"
+    );
+}
+
+/// A platform that never started is not silent: the first reconcile records the same
+/// stop a runtime refusal would, with the reason kept for logs.
+#[test]
+fn a_platform_that_never_started_stops_watching_on_the_first_reconcile() {
+    // A directory that exists: a missing one is dropped before the platform is asked.
+    let root = Path::new("/dev/shm");
+    let desired = desired_directories(root, &[], &[]);
+    let mut watcher = super::ProjectWatcher::refused_for_test(WatchRefusal::new("no inotify"));
+    assert!(watcher.events().is_none());
+
+    watcher.reconcile(&desired);
+
+    assert_eq!(watcher.state(), &WatchState::Stopped);
+    assert_eq!(
+        watcher.scope().last_refusal().map(WatchRefusal::detail),
+        Some("no inotify")
+    );
+}

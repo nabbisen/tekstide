@@ -48,9 +48,9 @@ pub use session::{
     TranscriptRetentionCleanup, agent_run_status_is_active, terminal_status_is_active,
 };
 pub use watch::{
-    GIT_SUBPROCESSES_PER_SCAN, NotifyBackend, SCAN_WINDOW, ScanBatcher, ScanRequest, ScopeChange,
-    WatchAdmissionError, WatchBackend, WatchRefusal, WatchScope, WatchState, WatchedDirectory,
-    desired_directories,
+    GIT_SUBPROCESSES_PER_SCAN, NotifyBackend, ProjectWatcher, SCAN_WINDOW, ScanBatcher,
+    ScanRequest, ScopeChange, WatchAdmissionError, WatchBackend, WatchEvents, WatchRefusal,
+    WatchScope, WatchState, WatchedDirectory, desired_directories,
 };
 
 #[cfg(test)]

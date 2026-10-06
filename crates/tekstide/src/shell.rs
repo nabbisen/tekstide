@@ -835,6 +835,13 @@ pub struct State {
     /// a bound endpoint for a `Managed` profile (response 227's found
     /// defect, now fixed one layer down). Polled by `ApprovalPollTick`.
     approval_channels: Vec<ApprovalChannelServing>,
+    /// RFC-026 D10 (review 456, decision (a)): one watch owner per open project.
+    /// Closing a project removes its entry, which drops its watches and ends its
+    /// event stream. Reconciled only on a trigger (see [`reconcile_project_watch`]).
+    project_watches: std::collections::BTreeMap<tekstide_core::project::ProjectId, ProjectWatch>,
+    /// The source of each [`ProjectWatch::generation`], so a closed-and-reopened
+    /// project never shares a subscription identity with its predecessor.
+    watch_generation: u64,
     /// `ApprovalRequest` (the domain/audit-facing type, mirrored into
     /// `ProjectSession.approval_requests`) carries no reference back to
     /// the wire `ProposalId` `ApprovalCoordinator`'s own map is keyed
@@ -1347,6 +1354,8 @@ impl State {
             approval_history_highlight: 0,
             approval_coordinator: tekstide_core::approval::ApprovalCoordinator::new(),
             approval_channels: Vec::new(),
+            project_watches: std::collections::BTreeMap::new(),
+            watch_generation: 0,
             approval_proposal_ids: std::collections::HashMap::new(),
             panes_region: None,
             agent_run_change_baselines: std::collections::HashMap::new(),
@@ -1689,6 +1698,13 @@ pub enum Message {
         project_id: tekstide_core::project::ProjectId,
         completed: tekstide_core::project::ExplorerScanCompleted,
     },
+    /// RFC-026 D10, B2 step 2: the platform reported something in one project's
+    /// watched directories ([`project_watch_subscription`]). Step 2 only wakes; the
+    /// batcher's feed from these events is B2 step 3.
+    ProjectWatchWoke {
+        project_id: tekstide_core::project::ProjectId,
+        generation: u64,
+    },
     /// RFC-052 PR-052-B: the size the layout engine gave the explorer's
     /// sidebar, published by [`crate::surface::frame::MeasureSize`] when it
     /// changes.
@@ -1932,6 +1948,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::RunRecordTick
         | Message::PanesRegionMeasured(_)
         | Message::ExplorerScanFinished { .. }
+        | Message::ProjectWatchWoke { .. }
         | Message::ExplorerViewportMeasured(_)
         | Message::EditorViewportMeasured(_)
         | Message::PathFieldPasteResolved(_) => None,
@@ -2744,8 +2761,12 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
                 project.apply_explorer_scan(completed);
             }
+            reconcile_project_watch(state, &project_id);
             settle_explorer_highlight(state);
         }
+        // RFC-026 B2 step 2: nothing reads these yet. Step 3 feeds the batcher from
+        // the events the watcher holds; a stale generation is then dropped there.
+        Message::ProjectWatchWoke { .. } => {}
         Message::ExplorerViewportMeasured(size) => {
             state.explorer_viewport = Some(size);
             settle_explorer_highlight(state);
@@ -4317,9 +4338,16 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
             if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
                 project.toggle_explorer_directory(&path);
             }
+            reconcile_project_watch(state, &project_id);
         }
         Action::Open(path) => {
-            let _ = state.app_shell.open_active_project_text_document(path);
+            if state
+                .app_shell
+                .open_active_project_text_document(path)
+                .is_ok()
+            {
+                reconcile_project_watch(state, &project_id);
+            }
         }
         Action::None => {}
     }
@@ -4738,6 +4766,7 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
     match state.app_shell.add_project_from_path(&root_path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id.clone());
+            reconcile_project_watch(state, &project_id);
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             // RFC-045 PR-045-B, D6: "projects opened after load"
             // includes this one. Applied here rather than centrally
@@ -4987,7 +5016,13 @@ fn attempt_close_project_tab(state: &mut State, project_id: tekstide_core::proje
     };
     match state.app_shell.state().assess_project_close(&project_id) {
         tekstide_core::close::CloseAssessment::SafeToClose => {
-            let _ = state.app_shell.state_mut().close_project(&project_id);
+            let closed = matches!(
+                state.app_shell.state_mut().close_project(&project_id),
+                Ok(tekstide_core::close::CloseAssessment::SafeToClose)
+            );
+            if closed {
+                state.project_watches.remove(&project_id);
+            }
             finish_project_close_navigation(state);
         }
         tekstide_core::close::CloseAssessment::NeedsConfirmation { reasons } => {
@@ -5082,6 +5117,9 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
     }
 
     if closed {
+        // Closing the project drops its watch owner: its watches and its event
+        // stream go with it (RFC-026 R6, by ownership).
+        state.project_watches.remove(&project_id);
         finish_project_close_navigation(state);
     }
     // If `close_project` still refused (something other than terminals
@@ -5359,6 +5397,7 @@ fn attempt_open_project_from_path_field(state: &mut State) {
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id.clone());
+            reconcile_project_watch(state, &project_id);
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             // RFC-045 PR-045-B, D6: "projects opened after load"
             // includes this one. Applied here rather than centrally
@@ -5502,6 +5541,7 @@ fn choose_current_browsed_directory(state: &mut State) {
     match state.app_shell.add_project_from_path(&path) {
         Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
             record_new_project_added(state, project_id.clone());
+            reconcile_project_watch(state, &project_id);
             verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
             // RFC-045 PR-045-B, D6: "projects opened after load"
             // includes this one. Applied here rather than centrally
@@ -7017,6 +7057,100 @@ fn git_summary_subscription(
     )
 }
 
+/// RFC-026 D10 (review 456, decision (a)): one open project's watch owner and the
+/// generation that identifies its subscription.
+struct ProjectWatch {
+    generation: u64,
+    watcher: tekstide_core::project::ProjectWatcher,
+}
+
+/// Brings one open project's watches to its desired set (RFC-026 D1, D7). Called only
+/// on a trigger, never per frame: each call asks the filesystem whether every desired
+/// directory still exists, so a hundred expanded folders is a hundred stat calls. The
+/// triggers are a folder toggle, a scan finishing, a document opening, and a project
+/// opening. The owner is created here on first use, so a project is watched from the
+/// moment it is opened. The admission refusals are not applied and not shown (C3).
+fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::project::ProjectId) {
+    let Some(project) = state.app_shell.state().project(project_id) else {
+        return;
+    };
+    let (desired, _refusals) = project.watched_directories();
+    if !state.project_watches.contains_key(project_id) {
+        state.watch_generation += 1;
+        let generation = state.watch_generation;
+        state.project_watches.insert(
+            project_id.clone(),
+            ProjectWatch {
+                generation,
+                watcher: tekstide_core::project::ProjectWatcher::open(),
+            },
+        );
+    }
+    if let Some(watch) = state.project_watches.get_mut(project_id) {
+        watch.watcher.reconcile(&desired);
+    }
+}
+
+/// RFC-026 D10, B2 step 2: one project's watch event stream, the shape
+/// [`explorer_scan_subscription`] uses. A dedicated OS thread blocks on the platform's
+/// events and forwards one wake per event; nothing blocks the render thread, and the
+/// async block only keeps the stream alive.
+fn project_watch_subscription(
+    project_id: tekstide_core::project::ProjectId,
+    generation: u64,
+    events: tekstide_core::project::WatchEvents,
+) -> Subscription<Message> {
+    Subscription::run_with(
+        ProjectWatchSource {
+            project_id,
+            generation,
+            events,
+        },
+        project_watch_stream,
+    )
+}
+
+/// Identity is (project, generation): a reopened project is a new generation and so a
+/// new subscription, and a rebuild of `subscription()` does not start a second thread.
+/// The receiver is not hashable, so it is left out of the identity.
+struct ProjectWatchSource {
+    project_id: tekstide_core::project::ProjectId,
+    generation: u64,
+    events: tekstide_core::project::WatchEvents,
+}
+
+impl std::hash::Hash for ProjectWatchSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.project_id.hash(state);
+        self.generation.hash(state);
+    }
+}
+
+fn project_watch_stream(
+    source: &ProjectWatchSource,
+) -> impl iced::futures::Stream<Item = Message> + use<> {
+    let project_id = source.project_id.clone();
+    let generation = source.generation;
+    let events = source.events.clone();
+    iced::stream::channel(1, async move |mut output| {
+        std::thread::spawn(move || {
+            // `wait_for_event` returns false once the project's owner is dropped, which
+            // is the project closing; the thread then ends rather than waiting forever.
+            while events.wait_for_event() {
+                let sent =
+                    iced::futures::executor::block_on(output.send(Message::ProjectWatchWoke {
+                        project_id: project_id.clone(),
+                        generation,
+                    }));
+                if sent.is_err() {
+                    return;
+                }
+            }
+        });
+        std::future::pending::<()>().await;
+    })
+}
+
 /// RFC-052 PR-052-B: one directory scan on a dedicated OS thread, the shape
 /// [`git_summary_subscription`] uses: the blocking work happens on a thread
 /// the render loop never waits for, the async block only keeps the stream
@@ -7441,6 +7575,18 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     for project in state.app_shell.state().projects() {
         for request in project.explorer_scan_requests() {
             subscriptions.push(explorer_scan_subscription(project.id().clone(), request));
+        }
+    }
+    // RFC-026 D10, B2 step 2: one long-lived subscription per open project whose
+    // watcher started. It is offered for as long as the project's owner exists, so
+    // closing the project (which removes the owner) is what ends it.
+    for (project_id, watch) in &state.project_watches {
+        if let Some(events) = watch.watcher.events() {
+            subscriptions.push(project_watch_subscription(
+                project_id.clone(),
+                watch.generation,
+                events,
+            ));
         }
     }
     if subscriptions.is_empty() {

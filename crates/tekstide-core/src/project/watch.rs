@@ -12,10 +12,12 @@ use std::time::{Duration, Instant};
 
 mod backend;
 mod directory;
+mod owner;
 mod scope;
 
 pub use backend::{NotifyBackend, WatchBackend, WatchRefusal};
 pub use directory::{WatchAdmissionError, WatchedDirectory, desired_directories};
+pub use owner::{ProjectWatcher, WatchEvents};
 pub use scope::{ScopeChange, WatchScope, WatchState};
 
 /// The batching window (D3). Stated, not tuned: at most one scan request per

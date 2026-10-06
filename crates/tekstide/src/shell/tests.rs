@@ -20166,3 +20166,36 @@ fn every_route_that_opens_a_project_applies_the_configured_settings() {
     // One definition and four call sites (boot and the three mid-session routes).
     assert_eq!(calls, 5, "{calls}");
 }
+
+/// RFC-026 D10, B2 step 2 (review 456, decision (a)): a project is watched from the
+/// moment it opens, with its root as the first desired directory, and closing it removes
+/// its watch owner, so its watches and its event stream go with it (R6 by ownership).
+#[test]
+fn a_project_is_watched_from_open_and_its_owner_is_removed_on_close() {
+    let (mut state, project_id) = state_with_a_real_project("watch-owner-lifecycle");
+
+    super::reconcile_project_watch(&mut state, &project_id);
+    let watch = state
+        .project_watches
+        .get(&project_id)
+        .expect("opening a project creates its watch owner");
+    assert_eq!(
+        watch.watcher.scope().watched_count(),
+        1,
+        "the project root is always desired, so exactly the root is watched"
+    );
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+
+    assert!(
+        state.app_shell.state().project(&project_id).is_none(),
+        "the project must actually be gone"
+    );
+    assert!(
+        !state.project_watches.contains_key(&project_id),
+        "closing the project must drop its watch owner"
+    );
+}
