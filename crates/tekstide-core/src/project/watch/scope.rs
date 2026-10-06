@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::backend::{WatchBackend, WatchRefusal};
+use super::directory::WatchedDirectory;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WatchState {
@@ -75,7 +76,7 @@ impl WatchScope {
     /// one needs it. The first refusal stops watching and ends the call.
     pub fn reconcile(
         &mut self,
-        desired: &BTreeSet<PathBuf>,
+        desired: &BTreeSet<WatchedDirectory>,
         backend: &mut dyn WatchBackend,
     ) -> ScopeChange {
         let mut change = ScopeChange::default();
@@ -84,8 +85,8 @@ impl WatchScope {
         }
         let desired: BTreeSet<PathBuf> = desired
             .iter()
+            .map(|directory| directory.path().to_path_buf())
             .filter(|directory| backend.directory_exists(directory))
-            .cloned()
             .collect();
         let desired = &desired;
 
@@ -127,20 +128,4 @@ impl WatchScope {
         self.state = WatchState::Stopped;
         self.last_refusal = Some(refusal);
     }
-}
-
-/// The directories that should be watched for one open project: its root, the
-/// expanded folders, and the folders of open documents (D1). All relative paths are
-/// joined onto `root`; the root is always included while the project is open.
-pub fn desired_directories(
-    root: &Path,
-    expanded: &[PathBuf],
-    open_document_directories: &[PathBuf],
-) -> BTreeSet<PathBuf> {
-    let mut desired = BTreeSet::new();
-    desired.insert(root.to_path_buf());
-    for relative in expanded.iter().chain(open_document_directories) {
-        desired.insert(root.join(relative));
-    }
-    desired
 }

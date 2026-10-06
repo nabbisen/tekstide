@@ -49,7 +49,8 @@ pub use session::{
 };
 pub use watch::{
     GIT_SUBPROCESSES_PER_SCAN, NotifyBackend, SCAN_WINDOW, ScanBatcher, ScanRequest, ScopeChange,
-    WatchBackend, WatchRefusal, WatchScope, WatchState, desired_directories,
+    WatchAdmissionError, WatchBackend, WatchRefusal, WatchScope, WatchState, WatchedDirectory,
+    desired_directories,
 };
 
 #[cfg(test)]

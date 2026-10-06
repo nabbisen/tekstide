@@ -225,6 +225,19 @@ impl ProjectSession {
         &self.content_workspace
     }
 
+    /// RFC-026 D1 and D7: the directories this project should be watching, every one
+    /// admitted by the access policy, and the refusals the policy gave for the rest.
+    pub fn watched_directories(
+        &self,
+    ) -> (
+        std::collections::BTreeSet<super::watch::WatchedDirectory>,
+        Vec<(PathBuf, super::watch::WatchAdmissionError)>,
+    ) {
+        let root = ProjectRootHandle::from_project_session(self);
+        let (expanded, open_document_directories) = self.content_workspace.watch_inputs();
+        super::watch::desired_directories(&root, &expanded, &open_document_directories)
+    }
+
     pub fn file_state(&self) -> &ProjectFileState {
         &self.file_state
     }

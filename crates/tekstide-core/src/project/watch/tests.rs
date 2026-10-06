@@ -142,7 +142,26 @@ fn a_window_closes_exactly_one_window_after_the_change_that_opened_it() {
 use std::collections::BTreeSet;
 
 use super::backend::{WatchBackend, WatchRefusal, guard_watch_call};
-use super::{WatchScope, WatchState, desired_directories};
+use super::directory::WatchedDirectory;
+use super::{WatchScope, WatchState};
+
+/// The scope tests build their desired set without a real project: the policy is
+/// tested separately, against a real root, below.
+fn desired_directories(
+    root: &Path,
+    expanded: &[PathBuf],
+    open_document_directories: &[PathBuf],
+) -> BTreeSet<WatchedDirectory> {
+    std::iter::once(root.to_path_buf())
+        .chain(expanded.iter().map(|relative| root.join(relative)))
+        .chain(
+            open_document_directories
+                .iter()
+                .map(|relative| root.join(relative)),
+        )
+        .map(WatchedDirectory::for_test)
+        .collect()
+}
 
 /// A backend that places watches in a set, and refuses once `budget` are placed --
 /// the stand-in for the kernel's per-user limit (RFC-026 H2), which a test cannot
@@ -230,7 +249,8 @@ fn expanding_collapsing_and_closing_move_the_watched_count_exactly() {
 fn an_open_documents_folder_is_watched_without_being_expanded() {
     let root = Path::new("/project");
     let desired = desired_directories(root, &[], &[PathBuf::from("notes")]);
-    assert_eq!(desired, dirs(&["/project", "/project/notes"]));
+    let paths: BTreeSet<PathBuf> = desired.iter().map(|d| d.path().to_path_buf()).collect();
+    assert_eq!(paths, dirs(&["/project", "/project/notes"]));
 }
 
 /// Budget exhaustion, forced (R3): the refusal stops watching, drops every watch the
@@ -504,4 +524,96 @@ fn measured_git_subprocesses_per_real_scan() {
         !warm.is_empty(),
         "the shim recorded nothing: the measurement would be vacuous"
     );
+}
+
+// --- RFC-026 D7 (review 455): admission goes through the access policy, on a real root ---
+
+fn real_session(label: &str) -> (crate::project::ProjectSession, PathBuf) {
+    use crate::project::root::{ProjectRootValidator, SymlinkPolicy};
+    use crate::project::{ProjectId, ProjectSession};
+
+    let base = PathBuf::from(format!("/dev/shm/tekadmit-{label}"));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(base.join("outside")).unwrap();
+    std::fs::write(project.join("file.txt"), "f").unwrap();
+    std::os::unix::fs::symlink(base.join("outside"), project.join("link-out")).unwrap();
+    std::os::unix::fs::symlink(project.join("src"), project.join("link-in")).unwrap();
+
+    let valid = ProjectRootValidator
+        .validate(&project, SymlinkPolicy::FailClosed)
+        .expect("the admission project root validates");
+    let session = ProjectSession::new(
+        ProjectId::for_test(1),
+        valid.display_name,
+        valid.selected_path,
+        valid.canonical_path,
+    );
+    (session, base)
+}
+
+fn real_root(session: &crate::project::ProjectSession) -> crate::project::root::ProjectRootHandle {
+    crate::project::root::ProjectRootHandle::from_project_session(session)
+}
+
+/// The policy admits a real directory by its canonical path, and admits an in-root
+/// symlink to one, but refuses a symlink that leaves the root, a file, and nothing else.
+#[test]
+fn the_access_policy_decides_what_the_scope_may_ever_hold() {
+    use super::{WatchAdmissionError, WatchedDirectory};
+
+    let (session, base) = real_session("admit");
+    let root = real_root(&session);
+    let project = base.join("project");
+
+    let src = WatchedDirectory::admit(&root, "src").expect("a real directory inside the root");
+    assert_eq!(
+        src.path(),
+        std::fs::canonicalize(project.join("src")).unwrap()
+    );
+
+    let inside = WatchedDirectory::admit(&root, "link-in")
+        .expect("a symlink that stays inside the root is admitted");
+    assert_eq!(
+        inside, src,
+        "it is watched by its canonical path, so it is the same directory"
+    );
+
+    assert!(
+        WatchedDirectory::admit(&root, "link-out").is_err(),
+        "a symlink leaving the root is never admitted"
+    );
+    assert!(matches!(
+        WatchedDirectory::admit(&root, "file.txt"),
+        Err(WatchAdmissionError::NotADirectory)
+    ));
+    assert!(
+        WatchedDirectory::admit(&root, "").is_ok(),
+        "the root itself is admitted"
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The session computes the scope's desired set from its own tree and documents: an
+/// expanded folder is wanted, a refused path is reported and left out.
+#[test]
+fn the_session_wires_the_expanded_folders_into_the_desired_set() {
+    let (mut session, base) = real_session("wire");
+    let _ = session.toggle_explorer_directory(Path::new("src"));
+    let _ = session.toggle_explorer_directory(Path::new("link-out"));
+
+    let (desired, refused) = session.watched_directories();
+    let paths: BTreeSet<PathBuf> = desired.iter().map(|d| d.path().to_path_buf()).collect();
+    assert!(
+        paths.contains(&std::fs::canonicalize(base.join("project/src")).unwrap()),
+        "the expanded src is wanted: {paths:?}"
+    );
+    assert!(
+        refused
+            .iter()
+            .any(|(path, _)| path == Path::new("link-out")),
+        "the escaping symlink is refused and reported, not silently watched: {refused:?}"
+    );
+    let _ = std::fs::remove_dir_all(&base);
 }

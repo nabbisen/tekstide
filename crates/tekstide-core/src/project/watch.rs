@@ -11,10 +11,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 mod backend;
+mod directory;
 mod scope;
 
 pub use backend::{NotifyBackend, WatchBackend, WatchRefusal};
-pub use scope::{ScopeChange, WatchScope, WatchState, desired_directories};
+pub use directory::{WatchAdmissionError, WatchedDirectory, desired_directories};
+pub use scope::{ScopeChange, WatchScope, WatchState};
 
 /// The batching window (D3). Stated, not tuned: at most one scan request per
 /// directory per window, where a window opens at the first change in a directory

@@ -87,6 +87,29 @@ impl ProjectContentWorkspace {
         self.active_document.as_ref()
     }
 
+    /// RFC-026 D1's inputs to the watch scope: the expanded folders and the folder of
+    /// the open document, both relative to the project root. The open set is plural
+    /// only from RFC-026 slice D; until then the active document's folder is the one.
+    pub fn watch_inputs(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        let expanded = self
+            .explorer_tree
+            .expanded_directories()
+            .map(Path::to_path_buf)
+            .collect();
+        let open_document_directories = self
+            .active_document
+            .iter()
+            .filter_map(|document| {
+                document
+                    .target()
+                    .selected_relative_path
+                    .parent()
+                    .map(Path::to_path_buf)
+            })
+            .collect();
+        (expanded, open_document_directories)
+    }
+
     pub fn active_file_launch_assessment(&self) -> ProjectActiveFileLaunchAssessment {
         let Some(document) = self.active_document.as_ref() else {
             return ProjectActiveFileLaunchAssessment {

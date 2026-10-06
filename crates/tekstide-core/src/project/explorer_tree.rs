@@ -201,6 +201,12 @@ impl ExplorerTree {
         self.expanded.contains(path)
     }
 
+    /// Every expanded directory, relative to the project root, in path order. The
+    /// watch scope's first input (RFC-026 D1).
+    pub fn expanded_directories(&self) -> impl Iterator<Item = &Path> {
+        self.expanded.iter().map(PathBuf::as_path)
+    }
+
     /// Directories whose scan is in flight, with the generation to hand
     /// back. Stable order, so a caller building one worker per entry builds
     /// them in the same order every time.
