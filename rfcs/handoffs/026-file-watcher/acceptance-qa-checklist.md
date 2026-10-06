@@ -95,6 +95,9 @@ measurement with no number in the evidence is not ticked.
       *(A section for the five Linux crates, the platform-only lock entries, and the 9.0 re-check row;
       `cargo audit`: zero vulnerabilities, the same three warnings.)*
 - [ ] Watch scope is `expanded` + the root + open documents' folders. **Counted before and after**
+      *(Step 1 (review 455): the session computes the admitted set from its own tree and document —
+      `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated. The app does not reconcile
+      it yet: that needs the watcher's owner decided, see review 456.)*
       expanding, collapsing and closing a project — a scope that only grows is a defect.
       *(The policy is proven: `expanding_collapsing_and_closing_move_the_watched_count_exactly`. **Not
       yet wired** to the live explorer tree and the open-document set — that is the next step, so the
@@ -108,6 +111,10 @@ measurement with no number in the evidence is not ticked.
       arbitrary paths. D7 is a guarantee, so step 1 takes paths the explorer's access policy has
       admitted — the hostile fixture below *proves* the property and must not be where it arrives.
 - [ ] Hostile fixture: a symlink leaving the root is not watched; a loop does not recurse.
+      *(Step 1 (review 455): the access policy is the only way into the scope — `WatchedDirectory` is
+      constructible only through `admit` — and `the_access_policy_decides_what_the_scope_may_ever_hold`
+      refuses a real escaping symlink and admits an in-root one. Non-recursion is by construction (single
+      directories only). The end-to-end fixture, with a live tree and a live watch, is step 4: still open.)*
 - [ ] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
       already has.
 

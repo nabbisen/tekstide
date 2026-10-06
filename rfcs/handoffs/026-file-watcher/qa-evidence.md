@@ -263,3 +263,30 @@ columns. The on-screen display is B2.
 **Gate.** `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `rfc_docs_invariants` 16: clean.
 Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`: `714 + 16 + 1059` = 1,789
 passed, 1 ignored (the measurement), 0 failed, 0 entries left after each, at load 12.
+
+## Review 455 — step 1: the scope takes only admitted directories, wired from the session
+
+**The guarantee (D7).** `WatchedDirectory` can be built only through `admit`, which runs the explorer's
+own access policy (`ProjectFileAccessPolicy::resolve_existing`) and then checks containment, symlink
+status and that the target is a directory. The scope accepts nothing else. The test-only `for_test`
+constructor is `#[cfg(test)]` and cannot reach production.
+
+**Wiring.** `ExplorerTree::expanded_directories` (new), `ProjectContentWorkspace::watch_inputs` (the
+expanded folders and the active document's folder — the open set is plural only from slice D), and
+`ProjectSession::watched_directories`, which returns the admitted set and the refusals with their reasons.
+
+**Proofs, on a real project root** (`/dev/shm/tekadmit-*`, with a real escaping symlink and an in-root one):
+
+- `the_access_policy_decides_what_the_scope_may_ever_hold` — a real directory is admitted by its
+  canonical path; an in-root symlink to it is the same directory; a symlink leaving the root is refused;
+  a file is refused as not a directory; the root itself is admitted.
+- `the_session_wires_the_expanded_folders_into_the_desired_set` — an expanded folder is wanted, and the
+  escaping symlink is refused and **reported**, not silently watched.
+
+**Ablation.** The expanded folders removed from `watch_inputs`: the session test fails. Restored by
+`ablate.sh`; the tree was clean afterwards.
+
+**Not yet.** The app does not reconcile the scope; no subscription; no batcher feed; the hostile fixture
+end to end. These are steps 2–4, and step 2 depends on a decision about who owns the watcher (review 456).
+
+**Gate.** fmt, clippy, `rfc_docs_invariants` 16 clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`: `714 + 16 + 1061` = 1,791 passed, 0 failed, 0 entries left after each, at load 15–20.
