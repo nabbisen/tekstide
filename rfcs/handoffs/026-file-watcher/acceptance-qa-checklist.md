@@ -62,7 +62,12 @@ measurement with no number in the evidence is not ticked.
       refines the message. *(`WatchScope::reconcile` never inspects a refusal; a test proves two
       different refusals give the same state. A panic is caught in `guard_watch_call` and tested with a
       real panic.)*
-- [ ] **C1′ (review 453, correcting C1): the desired set contains only directories that exist.**
+- [x] **C1′ (review 453, correcting C1): the desired set contains only directories that exist.**
+      *(`WatchScope::reconcile` filters `desired` through `WatchBackend::directory_exists` before the
+      platform is asked. Proved with a fake (`a_directory_that_has_gone…`, and the deleted-later case) and
+      on the real filesystem (`a_real_directory_removed_before_reconciling…`). The ablation (filter
+      removed) fails both fake tests. The residual race — exists when checked, gone when watched — is
+      named in `scope.rs` and in `qa-evidence.md`, not engineered away.)*
       `reconcile` hands `desired` straight to `notify.watch()` with no existence check, so a directory
       deleted before it is watched becomes a `WatchRefusal` and stops **all** watching — and that is
       the normal event a watcher exists to observe, not a rare race. A path that is gone is not a

@@ -217,3 +217,28 @@ done.
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `rfc_docs_invariants` 16:
 clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `713 + 16 + 1056`
 = 1,785 passed, 1 ignored (the measurement), 0 failed, 0 entries left after each**, at load 6–9.
+
+## Review 453 — the existence check (C1′)
+
+**The correction.** C1 said a non-success from `watch()` means *watching stopped*. Review 453 found
+that the normal case — a directory a user expanded and a clean later removed — reaches that path, and
+stops **all** watching for a fact that is not a refusal at all: there is nothing to watch.
+
+**The change.** `WatchBackend::directory_exists` — checked by the policy before every watch. In
+`WatchScope::reconcile`, `desired` is filtered through it before the diff, so a gone directory is simply
+not desired, and a watched one that disappears is dropped as an ordinary removal. The branch is on a
+fact the policy establishes itself, never on a library's error variant, which is what C1 protects.
+
+**The residual, named.** A directory that exists when checked and is gone when the platform is asked is
+still a refusal, and still stops watching. It is rare and it is written down in `scope.rs`, so a report
+of a spurious stop has a known first suspect.
+
+**Tests.** Two fake-backed (`a_directory_that_has_gone_is_not_watched_and_does_not_stop_watching`,
+`a_watched_directory_that_is_deleted_later_is_dropped_without_stopping`) and one on the real filesystem
+(`a_real_directory_removed_before_reconciling_does_not_stop_watching`, a real directory removed, then
+reconciled through `NotifyBackend`).
+
+**Ablation.** The existence filter removed: both fake-backed tests fail. Restored by `ablate.sh`.
+
+**Gate.** fmt, clippy, `rfc_docs_invariants` 16: clean. Three consecutive full-workspace runs —
+**three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`: `713 + 16 + 1059` = 1,788 passed, 1 ignored (the measurement), 0 failed, 0 entries left after each**, at load 6–13.
