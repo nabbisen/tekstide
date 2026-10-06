@@ -76,6 +76,16 @@ measurement with no number in the evidence is not ticked.
       residual race (exists when checked, gone when watched) is **named**, not engineered away.
 - [ ] **C2 (review 452): no path in the sidebar line.** *(A constraint on the sentence, which is not
       written yet. Ticked when the sentence exists and is checked against it.)*
+- [x] **The sentence, chosen at review 454: C, verbatim.** *"Folders are no longer updating."* (31)
+      and *"Reopen the project to resume."* (29) — the only candidate whose **both** lines fit
+      `SIDEBAR_COLUMNS = 32`. The implementer's pick (A) had a 68-character second line that would
+      have clipped the action away, and B missed by one character; the existing
+      `the_ignore_rule_sentences_fit_the_sidebar` would have caught either. C is also the only one
+      whose first line says *what* is stale, so a reader can tell the editor is unaffected.
+      `watch-stopped-sidebar`, **trusted text with no arguments**, so C2 holds by construction —
+      say so in the catalog comment, so nobody later adds a `$path` to be helpful.
+- [x] **No positive-state line** (ruled at 454): when watching works the sidebar says nothing about
+      it. The sidebar already spends four reserved lines; only the stopped state speaks.
 - [ ] **C3 (review 452): do not echo notify's error string as product text.** *(Same: the refusal's
       detail is for logs only, enforced by its type. The sentence itself, consequence first, comes with
       the on-screen wiring.)*
