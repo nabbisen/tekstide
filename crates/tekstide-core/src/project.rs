@@ -9,6 +9,7 @@ pub mod recent;
 pub mod root;
 mod runtime;
 mod session;
+pub mod watch;
 
 pub use change_detection::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
@@ -46,6 +47,7 @@ pub use session::{
     RunRecordPersistSummary, RunRecordWrite, RunRecordsSetAside, TranscriptLoadSummary,
     TranscriptRetentionCleanup, agent_run_status_is_active, terminal_status_is_active,
 };
+pub use watch::{GIT_SUBPROCESSES_PER_SCAN, SCAN_WINDOW, ScanBatcher, ScanRequest};
 
 #[cfg(test)]
 mod tests;
