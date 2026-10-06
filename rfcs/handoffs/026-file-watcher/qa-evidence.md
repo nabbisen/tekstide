@@ -98,3 +98,54 @@ Both restored by `ablate.sh`; the tree was clean afterwards.
 ### Gate
 
 `cargo fmt --all --check`, `clippy --workspace --all-targets -D warnings`, `rfc_docs_invariants` 16: clean. **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR`: `713 + 16 + 1049` = 1,778 passed, 1 ignored (the measurement), 0 failed, 0 entries left after each**, at machine load 22–25. The first attempt had two runs fail one load-sensitive timing test, `change_review_content_view_build_cost_by_line_count_measurement`, at the same load; registered in `test-process-leak.md` (2026-10-06) and the gate redone rather than counted.
+
+## Slice B — D4's evaluation, before any adoption
+
+**No dependency added. `Cargo.toml` and `Cargo.lock` unchanged.** The evaluation is in
+`d4-notify-evaluation.md` in this folder; this section is its evidence summary.
+
+### What was read, and how
+
+`notify` 8.2.0 was fetched with `cargo fetch` into a scratch project under `/dev/shm`, and its source
+was read from `~/.cargo/registry`. Nothing was compiled into tekstide and nothing was run. The
+dependency tree was taken with `cargo tree -e normal,build` on Linux, default features.
+
+### The three facts
+
+- **MSRV 1.77** (`rust-version`) — verified, under our 1.90 floor.
+- **Licence CC0-1.0**, with `LICENSE-CC0` in the crate — verified.
+- **Last stable release 2025-08-03** — **not verified here.** The crates.io API returned HTTP 403 and the
+  crate has no changelog. The date is carried from RFC-026 D12 and is left unverified in the record.
+
+### What it adds
+
+Five new crates in our lock on Linux: `notify` (CC0-1.0), `notify-types`, `inotify`, `inotify-sys`
+(ISC), `mio` (MIT). Five reused: `libc`, `log`, `walkdir`, `same-file`, `bitflags`. The optional
+`crossbeam-channel` and `flume` are off by default and absent from the tree.
+
+### What it does when the kernel refuses another watch
+
+Read from `src/inotify.rs`, not from the documentation:
+
+- A non-recursive `watch()` returns `ErrorKind::MaxFilesWatch` (from `ENOSPC`, path attached) **to
+  the caller, synchronously**, over a reply channel. The watch is not recorded, so no partial state.
+- A recursive watch can fail halfway with the earlier directories already watched. Not used.
+- The per-user inotify instance limit (1,024 here) fails at construction.
+
+### Two hazards the design must answer
+
+- **H1 — no `catch_unwind` on notify's event thread.** A handler panic, or a `poll(2)` failure
+  (`panic!("poll failed")`), kills the loop, and every later `watch`/`unwatch` panics in our thread
+  at `unwrap()`. The handler must be panic-free, and the wrapper must catch a panic from a watch call
+  and turn it into D2's sentence.
+- **H2 — the real refusal cannot be forced on this machine.** `max_user_watches` is 524,288 and only
+  root can change it. The exhaustion test therefore runs against a fake `WatchBackend` that refuses on
+  demand. The real `ENOSPC` path is **evidenced by reading the source, not by a test**.
+
+### Checklist
+
+- [ ] **D4 recorded before adoption** — the record exists; **the box stays unticked** because the last
+  stable date is unverified. A box naming a fact with no evidence is not ticked. The reviewer can
+  verify the date from crates.io and tick it.
+- The `dependency-advisories.md` row, the watch scope, the budget-exhaustion test, the hostile
+  fixture, and the subscription are all unbuilt: they follow the architect's decision, not this one.
