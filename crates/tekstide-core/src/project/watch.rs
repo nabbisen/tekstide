@@ -10,6 +10,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+mod backend;
+mod scope;
+
+pub use backend::{NotifyBackend, WatchBackend, WatchRefusal};
+pub use scope::{ScopeChange, WatchScope, WatchState, desired_directories};
+
 /// The batching window (D3). Stated, not tuned: at most one scan request per
 /// directory per window, where a window opens at the first change in a directory
 /// that has none open. A burst longer than the window yields one request per

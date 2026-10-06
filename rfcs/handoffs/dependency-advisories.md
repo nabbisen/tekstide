@@ -134,3 +134,35 @@ model: *anything snora publishes describes snora's graph, never a bound on an ad
 
 **The rule matches how this register already works**: every row here was judged against our own graph
 with `cargo tree`, never taken from an upstream list.
+
+## 2026-10-06 — RFC-026 slice B: `notify` 8.2.0 adopted (review 452)
+
+**What was added, and why.** `notify` (default features off) watches the project's expanded folders
+for changes, so the explorer and an open document can see a file created, renamed or deleted without
+the user reopening anything. Non-recursive per-directory watches only. Evaluation: `rfcs/handoffs/026-file-watcher/d4-notify-evaluation.md`.
+
+**Linux build (what ships and runs), five new crates:**
+
+| Crate | Version | Licence | Role |
+| --- | --- | --- | --- |
+| `notify` | 8.2.0 | CC0-1.0 | the watcher |
+| `notify-types` | 2.1.0 | MIT OR Apache-2.0 | event types |
+| `inotify` | 0.11.5 | ISC | the Linux backend |
+| `inotify-sys` | 0.1.8 | ISC | its FFI |
+| `mio` | 1.2.4 | MIT | notify's event loop |
+
+**Lock-only, not built on Linux (`Cargo.lock` records every platform):** `kqueue` 1.2.1 and
+`kqueue-sys` 1.1.2 (BSD and macOS); `windows-sys` 0.60.2, `windows-targets` 0.53.5, eight
+`windows_*` 0.53.1, and `wasi` 0.11.1 (Windows). None is compiled into a Linux build.
+
+**Re-check row — the 9.0 line.** `notify` 9.0.0 has been in release candidates since 2026-01-25
+(newest `9.0.0-rc.5`, 2026-08-30, MSRV 1.88, under our 1.90 floor). Retirement condition for the
+8.x pin: a stable 9.0 release and a migration, or a reason to stay. **Not a release-date check.**
+
+**What `notify` does when the kernel refuses another watch** (read from `src/inotify.rs`, 8.2.0): a
+non-recursive `watch()` returns an error to the caller and records nothing. Our code treats **any**
+refusal the same way — see RFC-026 review 452, C1. A panic on notify's event thread is not contained
+by the library; our wrapper catches it per call.
+
+**Gate at adoption:** `cargo audit` — zero vulnerabilities; the warnings are the three already in this
+register (`paste`, `ttf-parser`, `lru`), with no new one.

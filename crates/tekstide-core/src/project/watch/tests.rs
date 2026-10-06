@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::{GIT_SUBPROCESSES_PER_SCAN, SCAN_WINDOW, ScanBatcher, ScanRequest};
@@ -135,6 +135,194 @@ fn a_window_closes_exactly_one_window_after_the_change_that_opened_it() {
         "a change at the close opens a new window"
     );
     assert_eq!(batcher.drain_due(t0 + SCAN_WINDOW * 2).len(), 1);
+}
+
+// --- RFC-026 slice B: the scope, the refusal, and the platform seam -----------------
+
+use std::collections::BTreeSet;
+
+use super::backend::{WatchBackend, WatchRefusal, guard_watch_call};
+use super::{WatchScope, WatchState, desired_directories};
+
+/// A backend that places watches in a set, and refuses once `budget` are placed --
+/// the stand-in for the kernel's per-user limit (RFC-026 H2), which a test cannot
+/// lower on a development machine.
+struct FakeBackend {
+    placed: BTreeSet<PathBuf>,
+    budget: usize,
+    refusal_detail: &'static str,
+}
+
+impl FakeBackend {
+    fn with_budget(budget: usize) -> Self {
+        Self {
+            placed: BTreeSet::new(),
+            budget,
+            refusal_detail: "the fake backend's budget is exhausted",
+        }
+    }
+}
+
+impl WatchBackend for FakeBackend {
+    fn watch_directory(&mut self, directory: &Path) -> Result<(), WatchRefusal> {
+        if self.placed.len() >= self.budget {
+            return Err(WatchRefusal::new(self.refusal_detail));
+        }
+        self.placed.insert(directory.to_path_buf());
+        Ok(())
+    }
+
+    fn unwatch_directory(&mut self, directory: &Path) {
+        self.placed.remove(directory);
+    }
+}
+
+fn dirs(paths: &[&str]) -> BTreeSet<PathBuf> {
+    paths.iter().map(PathBuf::from).collect()
+}
+
+/// Expanding, collapsing and closing a project move the watched count by exactly the
+/// directories each one names (R6, and the "scope that only grows is a defect" rule).
+/// Counted before and after every step, not inferred.
+#[test]
+fn expanding_collapsing_and_closing_move_the_watched_count_exactly() {
+    let root = Path::new("/project");
+    let mut scope = WatchScope::new();
+    let mut backend = FakeBackend::with_budget(100);
+
+    let desired = desired_directories(root, &[], &[]);
+    scope.reconcile(&desired, &mut backend);
+    assert_eq!(
+        scope.watched_count(),
+        1,
+        "the root alone, before any expansion"
+    );
+
+    let desired = desired_directories(root, &[PathBuf::from("src"), PathBuf::from("src/bin")], &[]);
+    let change = scope.reconcile(&desired, &mut backend);
+    assert_eq!(change.added, 2);
+    assert_eq!(scope.watched_count(), 3, "root, src, src/bin");
+
+    let desired = desired_directories(root, &[PathBuf::from("src")], &[]);
+    let change = scope.reconcile(&desired, &mut backend);
+    assert_eq!(change.removed, 1, "collapsing src/bin removes its watch");
+    assert_eq!(scope.watched_count(), 2);
+    assert!(!scope.is_watched(&root.join("src/bin")));
+
+    let change = scope.reconcile(&BTreeSet::new(), &mut backend);
+    assert_eq!(change.removed, 2, "closing the project removes every watch");
+    assert_eq!(scope.watched_count(), 0);
+    assert!(
+        backend.placed.is_empty(),
+        "the platform holds nothing for a closed project"
+    );
+}
+
+/// An open document's folder is watched without being expanded (D1).
+#[test]
+fn an_open_documents_folder_is_watched_without_being_expanded() {
+    let root = Path::new("/project");
+    let desired = desired_directories(root, &[], &[PathBuf::from("notes")]);
+    assert_eq!(desired, dirs(&["/project", "/project/notes"]));
+}
+
+/// Budget exhaustion, forced (R3): the refusal stops watching, drops every watch the
+/// scope held, and says so. No panic reaches the caller.
+#[test]
+fn a_refused_watch_stops_watching_and_drops_every_watch_without_crashing() {
+    let root = Path::new("/project");
+    let expanded: Vec<PathBuf> = (0..10).map(|i| PathBuf::from(format!("d{i}"))).collect();
+    let desired = desired_directories(root, &expanded, &[]);
+    let mut scope = WatchScope::new();
+    let mut backend = FakeBackend::with_budget(4);
+
+    scope.reconcile(&desired, &mut backend);
+
+    assert_eq!(scope.state(), &WatchState::Stopped);
+    assert_eq!(
+        scope.watched_count(),
+        0,
+        "every watch is dropped, not left half-placed"
+    );
+    assert!(
+        backend.placed.is_empty(),
+        "the platform holds none of them either"
+    );
+    assert!(scope.last_refusal().is_some(), "the cause is kept for logs");
+}
+
+/// C1: the degradation depends on the fact of a refusal, not its wording. Two
+/// different refusals produce the same state, the same empty scope, and no retry.
+#[test]
+fn the_degradation_does_not_depend_on_which_refusal_it_gets() {
+    let root = Path::new("/project");
+    let desired = desired_directories(root, &[PathBuf::from("a"), PathBuf::from("b")], &[]);
+
+    let mut states = Vec::new();
+    for detail in [
+        "the platform limit was reached",
+        "some other failure entirely",
+    ] {
+        let mut scope = WatchScope::new();
+        let mut backend = FakeBackend::with_budget(1);
+        backend.refusal_detail = detail;
+        scope.reconcile(&desired, &mut backend);
+        states.push((scope.state().clone(), scope.watched_count()));
+    }
+    assert_eq!(states[0], states[1]);
+    assert_eq!(states[0], (WatchState::Stopped, 0));
+}
+
+/// Stopped means stopped: a reconcile does not retry the platform on its own, and
+/// only a reopen (`resume`) places watches again.
+#[test]
+fn a_stopped_scope_does_not_retry_until_it_is_resumed() {
+    let root = Path::new("/project");
+    let desired = desired_directories(root, &[PathBuf::from("a")], &[]);
+    let mut scope = WatchScope::new();
+    let mut backend = FakeBackend::with_budget(0);
+    scope.reconcile(&desired, &mut backend);
+    assert_eq!(scope.state(), &WatchState::Stopped);
+
+    backend.budget = 100;
+    let change = scope.reconcile(&desired, &mut backend);
+    assert_eq!(change.added, 0, "no retry while stopped");
+    assert_eq!(scope.state(), &WatchState::Stopped);
+
+    scope.resume();
+    let change = scope.reconcile(&desired, &mut backend);
+    assert_eq!(change.added, 2, "a reopen places the watches again");
+    assert_eq!(scope.state(), &WatchState::Live);
+}
+
+/// H1: a panic inside a watch call is caught and reported as a refusal. The panic is
+/// real, not simulated by returning an error.
+#[test]
+fn a_panic_inside_a_watch_call_is_a_refusal_not_a_crash() {
+    let refused: Result<(), WatchRefusal> =
+        guard_watch_call::<()>(|| panic!("notify's event thread is gone"));
+    assert!(refused.is_err());
+    assert_eq!(
+        refused.unwrap_err().detail(),
+        "the watcher's thread panicked"
+    );
+}
+
+/// The production backend places and removes a real, non-recursive watch on a real
+/// directory on this machine. The kernel answers; nothing is simulated.
+#[test]
+fn the_real_backend_places_and_removes_a_watch_on_a_real_directory() {
+    let directory = Path::new("/dev/shm/tekwatch-real");
+    let _ = std::fs::remove_dir_all(directory);
+    std::fs::create_dir_all(directory).unwrap();
+
+    let (sender, _receiver) = std::sync::mpsc::channel();
+    let mut backend = super::NotifyBackend::new(sender).expect("notify starts on Linux");
+    backend
+        .watch_directory(directory)
+        .expect("the kernel places a watch on a directory this process owns");
+    backend.unwatch_directory(directory);
+    let _ = std::fs::remove_dir_all(directory);
 }
 
 /// RFC-026 review 450: `GIT_SUBPROCESSES_PER_SCAN` checked against a real scan, not

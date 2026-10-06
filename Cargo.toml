@@ -24,6 +24,11 @@ tekstide-core               = { version = "0.28.0", path = "crates/tekstide-core
 
 libc                        = "0.2"
 
+# RFC-026 D4, adopted at review 452: non-recursive per-directory watches only, so
+# the default `macos_fsevent` feature (macOS-only) is off. Re-check row: the 9.0 line
+# (release candidates since 2026-01-25; see rfcs/handoffs/dependency-advisories.md).
+notify                      = { version = "8.2.0", default-features = false }
+
 serde                       = { version = "1", features = ["derive"] }
 serde_json                  = "1"
 toml                        = "1"

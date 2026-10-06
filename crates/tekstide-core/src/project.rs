@@ -47,7 +47,10 @@ pub use session::{
     RunRecordPersistSummary, RunRecordWrite, RunRecordsSetAside, TranscriptLoadSummary,
     TranscriptRetentionCleanup, agent_run_status_is_active, terminal_status_is_active,
 };
-pub use watch::{GIT_SUBPROCESSES_PER_SCAN, SCAN_WINDOW, ScanBatcher, ScanRequest};
+pub use watch::{
+    GIT_SUBPROCESSES_PER_SCAN, NotifyBackend, SCAN_WINDOW, ScanBatcher, ScanRequest, ScopeChange,
+    WatchBackend, WatchRefusal, WatchScope, WatchState, desired_directories,
+};
 
 #[cfg(test)]
 mod tests;
