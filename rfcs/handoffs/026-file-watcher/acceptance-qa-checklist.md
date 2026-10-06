@@ -51,9 +51,26 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-026-B — the watcher and its dependency
 
-- [ ] **D4's evaluation recorded before adoption**, including `notify`'s MSRV, its **CC0-1.0** licence
+- [x] **D4's evaluation recorded before adoption** — brought at review 452 with `Cargo.toml`
+      untouched, and **adopted at review 452** with three conditions (C1–C3 below). The release-date
+      fact the implementer refused to stand behind was settled by the architect: `8.2.0` is the latest
+      stable (2025-08-03) **but five 9.0 release candidates exist, the newest 2026-08-30** — the crate
+      is maintained, and D12's "over a year old" framing was the architect's and was misleading. The
+      **9.0 line** is the re-check row, not a date. Original wording:, including `notify`'s MSRV, its **CC0-1.0** licence
       (unlike every other direct dependency) and its last stable date — and the answer to **what it
       does when the kernel refuses another watch**, read from what it does.
+- [ ] **C1 (review 452): the wrapper does not depend on which error it gets.** Any non-success from
+      `watch()` — any variant, and a caught panic per H1 — means *watching stopped*; the variant only
+      refines the message. This is what makes H2's "evidenced by reading, not by a test" acceptable:
+      the degradation is total, so the source reading is decoration rather than load-bearing.
+- [ ] **C2 (review 452): no path in the sidebar line.** The path is attacker-influenced, the sidebar
+      is ~33 monospace columns (measured at RFC-055), and a clipped path is a defect we already ship
+      as a known limitation.
+- [ ] **C3 (review 452): do not echo notify's error string as product text.** "OS file watch limit
+      reached" names a cause to a reader who did not ask one. RFC-055's vocabulary states the
+      **consequence first** — the explorer has stopped keeping up, and what to do — and the cause
+      second if at all.
+
 - [ ] `dependency-advisories.md` carries the new crate the way it carries the existing three.
 - [ ] Watch scope is `expanded` + the root + open documents' folders. **Counted before and after**
       expanding, collapsing and closing a project — a scope that only grows is a defect.
