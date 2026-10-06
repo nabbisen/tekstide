@@ -115,6 +115,16 @@ measurement with no number in the evidence is not ticked.
       constructible only through `admit` — and `the_access_policy_decides_what_the_scope_may_ever_hold`
       refuses a real escaping symlink and admits an in-root one. Non-recursion is by construction (single
       directories only). The end-to-end fixture, with a live tree and a live watch, is step 4: still open.)*
+- [ ] **Ownership is per project** (ruled at review 456): each open project owns its backend, scope
+      and receiver. Measured against (b), one process-wide watcher: the watch budget is **per user**
+      (524,288), so (b) shares nothing that is scarce; instances are 1,024, so (a) costs one per
+      project. What (b) would share is the **failure** — a refusal in one project stopping them all,
+      which contradicts *"Reopen the project to resume."* R6 holds by ownership, not by a cleanup step.
+- [ ] **Reconcile is trigger-driven and invents no trigger**: a toggle, a scan finishing, a document
+      opening or closing — **and project open**, which the plan left out and which is when the root
+      first becomes desired. It must **not** become an unconditional call in `update`: it costs a
+      `directory_exists` syscall per desired directory, so a hundred expanded folders is a hundred
+      stat calls per invocation. Say so where it lives.
 - [ ] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
       already has.
 
