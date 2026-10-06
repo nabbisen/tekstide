@@ -33,6 +33,10 @@ impl WatchRefusal {
 pub trait WatchBackend {
     fn watch_directory(&mut self, directory: &Path) -> Result<(), WatchRefusal>;
     fn unwatch_directory(&mut self, directory: &Path);
+    /// Whether `directory` exists now. The policy asks this itself before every watch
+    /// (RFC-026 review 453): a directory that has gone is not desired, so it is never
+    /// handed to the platform, and its absence cannot stop watching.
+    fn directory_exists(&self, directory: &Path) -> bool;
 }
 
 /// The production backend: `notify`'s recommended watcher, non-recursive only.
@@ -60,6 +64,10 @@ impl WatchBackend for NotifyBackend {
 
     fn unwatch_directory(&mut self, directory: &Path) {
         let _ = guard_watch_call(|| self.watcher.unwatch(directory));
+    }
+
+    fn directory_exists(&self, directory: &Path) -> bool {
+        directory.is_dir()
     }
 }
 

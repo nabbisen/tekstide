@@ -65,9 +65,14 @@ impl WatchScope {
         self.last_refusal.as_ref()
     }
 
-    /// Makes the watched set equal `desired`. Removals run first, so a shrinking scope
-    /// frees platform budget before a growing one needs it. The first refusal stops
-    /// watching and ends the call.
+    /// Makes the watched set equal the desired set **that still exists**. A directory
+    /// that has gone is dropped here, before the platform is asked about it (review 453):
+    /// that branches on a fact this policy checks itself, never on a library's error.
+    ///
+    /// The one race left is named, not engineered away: a directory that exists when
+    /// checked and is gone when watched is still a refusal, and that stops watching.
+    /// Removals run first, so a shrinking scope frees platform budget before a growing
+    /// one needs it. The first refusal stops watching and ends the call.
     pub fn reconcile(
         &mut self,
         desired: &BTreeSet<PathBuf>,
@@ -77,6 +82,12 @@ impl WatchScope {
         if self.state == WatchState::Stopped {
             return change;
         }
+        let desired: BTreeSet<PathBuf> = desired
+            .iter()
+            .filter(|directory| backend.directory_exists(directory))
+            .cloned()
+            .collect();
+        let desired = &desired;
 
         let stale: Vec<PathBuf> = self.watched.difference(desired).cloned().collect();
         for directory in stale {

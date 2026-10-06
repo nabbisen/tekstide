@@ -151,6 +151,8 @@ struct FakeBackend {
     placed: BTreeSet<PathBuf>,
     budget: usize,
     refusal_detail: &'static str,
+    /// Directories that do not exist. Every other directory exists.
+    missing: BTreeSet<PathBuf>,
 }
 
 impl FakeBackend {
@@ -159,6 +161,7 @@ impl FakeBackend {
             placed: BTreeSet::new(),
             budget,
             refusal_detail: "the fake backend's budget is exhausted",
+            missing: BTreeSet::new(),
         }
     }
 }
@@ -174,6 +177,10 @@ impl WatchBackend for FakeBackend {
 
     fn unwatch_directory(&mut self, directory: &Path) {
         self.placed.remove(directory);
+    }
+
+    fn directory_exists(&self, directory: &Path) -> bool {
+        !self.missing.contains(directory)
     }
 }
 
@@ -323,6 +330,54 @@ fn the_real_backend_places_and_removes_a_watch_on_a_real_directory() {
         .expect("the kernel places a watch on a directory this process owns");
     backend.unwatch_directory(directory);
     let _ = std::fs::remove_dir_all(directory);
+}
+
+/// Review 453: a directory that has gone is not a refusal and does not stop watching.
+/// The policy checks existence itself, so the platform is never asked about it.
+#[test]
+fn a_directory_that_has_gone_is_not_watched_and_does_not_stop_watching() {
+    let root = Path::new("/project");
+    let desired = desired_directories(root, &[PathBuf::from("src"), PathBuf::from("build")], &[]);
+    let mut scope = WatchScope::new();
+    let mut backend = FakeBackend::with_budget(10);
+    backend.missing.insert(root.join("build"));
+
+    let change = scope.reconcile(&desired, &mut backend);
+
+    assert_eq!(
+        scope.state(),
+        &WatchState::Live,
+        "a gone directory is not a refusal"
+    );
+    assert!(scope.last_refusal().is_none());
+    assert_eq!(change.added, 2, "the root and src are watched");
+    assert!(!scope.is_watched(&root.join("build")));
+    assert!(
+        !backend.placed.contains(&root.join("build")),
+        "the platform was never asked"
+    );
+}
+
+/// Review 453: a watched directory that is deleted later is dropped as an ordinary
+/// removal. Nothing stops, and no further watch is placed for it.
+#[test]
+fn a_watched_directory_that_is_deleted_later_is_dropped_without_stopping() {
+    let root = Path::new("/project");
+    let desired = desired_directories(root, &[PathBuf::from("build")], &[]);
+    let mut scope = WatchScope::new();
+    let mut backend = FakeBackend::with_budget(10);
+    scope.reconcile(&desired, &mut backend);
+    assert_eq!(scope.watched_count(), 2);
+
+    backend.missing.insert(root.join("build"));
+    let change = scope.reconcile(&desired, &mut backend);
+
+    assert_eq!(
+        change.removed, 1,
+        "the deleted directory's watch is dropped"
+    );
+    assert_eq!(scope.watched_count(), 1);
+    assert_eq!(scope.state(), &WatchState::Live);
 }
 
 /// RFC-026 review 450: `GIT_SUBPROCESSES_PER_SCAN` checked against a real scan, not
