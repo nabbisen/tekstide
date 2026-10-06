@@ -98,6 +98,17 @@ measurement with no number in the evidence is not ticked.
 - [ ] The core pin bumps with the version.
 - [ ] Commits are pushed once the gate is green.
 
+### Carried into `0.29.0` at review 451 — not RFC-026's subject
+
+- [ ] **`change_review_content_view_build_cost_by_line_count_measurement` stops measuring the
+      machine.** Assert a **ratio against a reference workload timed in the same process** — ten
+      times the work must cost under some multiple of the time — rather than an absolute 500 ms.
+      Scheduled after a **fourth** episode: `0.26.0`, the `0.28.0` candidate, the architect's `0.28.0`
+      verification, and PR-026-A's own gate. The implementer flagged that the count was high enough
+      to schedule rather than record again, and was right. Worked examples for both halves:
+      `editor_typing_latency_baseline_100_000_lines` (publish the number, assert nothing) and snora
+      0.52.0's CI ratio.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.

@@ -310,9 +310,9 @@ starting — **the suite's own parallelism generates most of the load the test t
 own advice to "rerun on an idle machine" has no idle machine to offer once the suite is running.
 
 A test that measures the machine on a shared machine teaches its readers to read a red gate as
-weather. It should assert a **ratio against a reference workload timed in the same process**, so
-contention cancels, rather than an absolute millisecond count. Unscheduled; recorded so the next
-blocked gate is not re-diagnosed from scratch.
+weather. It should assert a **ratio against a reference workload timed in the same process**, so contention cancels, rather than an absolute millisecond count.
+
+**Scheduled 2026-10-06, into `0.29.0` (RFC-026), after a fourth episode.** It has now cost a gate attempt at `0.26.0`, at the `0.28.0` candidate, at the architect's own `0.28.0` verification, and at RFC-026 PR-026-A's review 451 — where the implementer flagged that the count was high enough to schedule rather than record again. **They were right, and recording it a fourth time instead of scheduling it would be using a finding as a substitute for a decision.** It rides `0.29.0` the way the `0.26.0` pin fix rode RFC-056: a defect repair in a release that is not about it. The two halves both have worked examples — `editor_typing_latency_baseline_100_000_lines` for *publish the number, assert nothing*, and snora 0.52.0's CI for *ten times the work must cost under thirty times the time*.
 
 **A worked example now exists (2026-09-26, RFC-057 PR-057-A):** `editor_typing_latency_baseline_100_000_lines` is `#[ignore]`d, prints p50/p95/p99 per stage, and **asserts nothing about speed**, so the gate cannot depend on the machine. That is the shape the change-review budget test should take. **And the ratio half has an outside precedent (2026-09-29): snora 0.52.0 asserts bounded work as *ten times the toasts must cost under thirty times the layout time*, in release, in CI — measured 11.6–12.0, with a deliberate quadratic edit caught at 92.** Two projects arrived at the same technique independently; ours is still unscheduled.
 
