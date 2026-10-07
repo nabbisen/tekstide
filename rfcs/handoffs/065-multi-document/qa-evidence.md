@@ -108,3 +108,118 @@ PR-065-B/C/D's own work, per the task-breakdown's own ordering.
 - No core-pin or version bump: this slice is not its own release (`0.30.0` is the whole RFC's
   target, per its own `README.md`), so `Cargo.toml` is untouched here.
 - Commits pushed once this gate was green (see the response's own final commit list).
+
+## PR-065-B — the set
+
+### Required at review 468 (landed in B, per the ruling)
+
+- **Dedup by path.** `open_text_document` now switches to an already-open path's existing
+  entry in place (no disk read) instead of adding a second -- checked after dedup, before any
+  disk read, the same structural-then-policy order `add_terminal_session`'s own
+  `terminal_session_limit` uses.
+  `reopening_an_already_open_path_switches_to_the_existing_entry_rather_than_adding_a_second`
+  (`project/tests/content.rs`) proves it, including that the entry's own text, dirty state and
+  cursor survive untouched. The old behaviour's own test is renamed, not deleted, with a doc
+  comment recording that it was once true and deliberate (slice A's own boundary).
+  **Fallout caught by the full workspace run, not by inspection**: the Reload button relied on
+  the old "open an already-open path always re-reads from disk" behaviour to discard local
+  edits past a conflict -- exactly what the dedup switch stops doing. Split into its own entry
+  point, `reload_active_document` (`content.rs`/`session.rs`/`app.rs`/`shell.rs`'s
+  `ApplicationShell`), which always replaces the active entry's own slot from disk regardless
+  of the open set. Four shell tests caught this before it shipped.
+- **The explorer's `[open]` tag marks set membership.** `RowContext::open_paths: &[PathBuf]`
+  (was `open_path: Option<&Path>`), built from `open_documents()` rather than
+  `active_document()` alone. `open_marks_every_member_of_the_open_set_not_only_the_active_one`
+  (`surface/explorer/tests.rs`) opens two files, leaves one active, and asserts both rows (and
+  no others) carry the tag.
+
+### The two counts, the close dialog, the watcher's scope
+
+- `open_buffer_count`/`dirty_file_count` already counted the whole set as of slice A
+  (`opening_a_second_file_leaves_the_first_s_text_and_dirty_state_intact`); re-confirmed here
+  since B is this acceptance criterion's own slice.
+- **D10, the close dialog needs no separate change.**
+  `the_close_dialog_counts_the_whole_open_set_through_the_existing_wiring`
+  (`project/tests/content.rs`): two documents open, one dirty, `close_resource_summary().
+  dirty_files == 1` -- passes with no code change, since `session.rs`'s `set_file_state`
+  already feeds it from `dirty_file_count`. The acceptance criterion's own test, not a second
+  code path nobody needed.
+- **The watcher's scope follows the set.** `watch_inputs()` changed from
+  `active_document().into_iter()` to `open_documents()`.
+  `the_watched_scope_grows_as_documents_in_new_directories_open` (`project/tests/content.rs`)
+  opens documents across two directories and a third in an already-watched one, asserting the
+  document-derived watched count grows by exactly one per new directory and not at all for a
+  repeat.
+- **Found while working this: a notice naming a background document's file was previously
+  dropped.** `drain_project_watches` only ever refreshed the *active* document
+  (`ProjectWatch.document_touched: bool`, keyed to one path) -- a real correctness gap this
+  criterion is about closing, not just a measurement precondition: a background document's own
+  external changes and conflicts would never be detected until it happened to become active.
+  `ProjectContentWorkspace::refresh_document_by_canonical_path` generalizes
+  `refresh_active_document` to any open document; `self.status` updates only when the refreshed
+  document is the active one, so an unrelated background file changing cannot leak into what
+  the chrome renders for the document on screen.
+  `a_background_document_is_refreshed_by_its_own_path_without_touching_the_active_status`
+  (core-level) and `an_external_change_to_a_background_open_document_reaches_it_too`
+  (shell-level, real notice + real drain) both prove the fix and the isolation.
+
+### D4, the bound is stated when reached
+
+`ProjectResourceLimits.open_document_limit` (default `Some(20)`, reasoned the same way as the
+struct's other bounds -- see its own doc comment). Enforced in `open_text_document`, after the
+dedup switch (a path already open always belongs) and before any disk read.
+`ProjectContentError::OpenSetAtLimit { open, limit }` names the refusal.
+`opening_past_the_bound_is_refused_and_the_refusal_is_stated` (`project/tests/content.rs`)
+proves the dedup switch bypasses the bound entirely, then that a genuinely new path is refused
+with the exact count and limit, stated. **Stated even with a document active** (unlike every
+other `OpenError`, which only ever occurred with nothing open): `open_error_line_while_active`
+(`surface/editor.rs`), factored out and tested directly
+(`open_error_line_while_active_is_none_ordinarily_then_states_the_bound`,
+`surface/editor/tests.rs`). This also retroactively covers a pre-existing gap: any open
+failure (too-large, not-UTF8, etc.) while a document was already active was previously set as
+status but never rendered anywhere.
+
+### D3, `REQ-EDIT-004`'s coverage row
+
+`rfcs/delivery-plan.md`'s Text document row: "**`REQ-EDIT-004` was half met**... **and is met
+by RFC-065 PR-065-B (2026-10-07)**: the open set is real, `open_buffer_count`/
+`dirty_file_count` count every open document, and the close dialog counts the same way through
+the same field (D10)" -- the same treatment RFC-057 gave `REQ-EDIT-002`'s own half-met row.
+
+### D7/D13, the per-document refresh measurement -- **not captured, disclosed**
+
+RFC-026's paired-control harness (`shell/tests/editor_baseline.rs`,
+`editor_typing_latency_under_a_watched_burst`) is extended, not rebuilt, per D13: the single
+`touch_document: Option<(PathBuf, String)>` generalizes to `touch_documents: Vec<...>`, and a
+fifth condition, `WatchCondition::BurstWithNDocuments` (10 real documents, well below the real
+`open_document_limit` default of 20, opened and rewritten through the same path the explorer
+uses), joins the existing four in a 5-by-5 Latin square. The summary reports both the D8
+paired difference (one document) and this condition's own, plus their ratio against `N`.
+
+**The real release-mode numbers could not be captured this response.** `cargo test --release
+-p tekstide --tests` fails to compile with 57 `E0277`/`E0599` errors in
+`surface/frame/tests.rs` (an `iced` `Renderer` trait-bound mismatch) -- confirmed via `git
+stash` to pre-date every change in this response, on the exact same commit before any of
+today's work. A pre-existing, unrelated release-test-build blocker that affects any
+release-mode measurement in this crate today, not only this one.
+
+Verified instead, in debug mode (timings not meaningful there, the mechanism is): the full
+5-round, 5-condition run was run by hand and produced coherent keystroke timings for every
+condition including the new one, through several full rounds, with no panic, before being
+stopped rather than run to completion at debug-mode speed. The non-ignored smoke test
+(`the_watched_burst_harness_delivers_the_burst_end_to_end`) passes in the regular gate.
+
+**This checklist box stays unticked, with this as the stated reason.** Fixing the release-test
+build is its own, unrelated piece of work, out of this slice's scope.
+
+## Gate, PR-065-B (run this response, against commit `805a90d`)
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean,
+  throughout (checked after every change in this response, not only at the end).
+- `git diff --cached --check` after staging: clean, every time.
+- `cargo test --doc --workspace`: 2 passed, 0 failed.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**:
+  `734 + 16 + 1083` (+ `0+1+1` doctests), every run, 0 failures, 0 fixture entries left in each
+  run's own `TMPDIR`.
+- No core-pin or version bump: `0.30.0` is the whole RFC's own target, not this slice's.
+- Commits pushed once this gate was green.
