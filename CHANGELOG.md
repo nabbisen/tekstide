@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.30.0 - The Multi-Document Model
+
+Status: **in progress.** RFC-065, PR-065-A (the repair) and PR-065-B (the set) are done; the switcher
+(PR-065-C) and save-all (PR-065-D) are not. This entry is written incrementally as slices close, not held
+back for the release; see `rfcs/handoffs/065-multi-document/` for the full handoff pack.
+
+**`0.29.0`'s own open question, answered**: that release's "what this release does not do" section said
+of the open-document refresh, "with one document this is a few milliseconds; the multi-document RFC
+inherits the question of what a burst touching several open documents at once should cost." Measured
+(RFC-065 D7/D13, reusing RFC-026's own paired-control harness): the per-document refresh cost is close to
+linear in the number of open documents. One document costs about **4.2 ms** of delivery work (between
+keystrokes) per touched burst window; ten documents cost about **38.9 ms** — a ratio of **9.2×** against
+the 10× a linear cost would predict. At the open set's own bound of twenty documents (PR-065-B, D4), that
+extrapolates to roughly **78 ms** of delivery work per burst window, between keystrokes, invisible to
+typing latency itself but real CPU cost on the machine. The bound is now a number with a measurement
+behind it, not only a reasoned convention.
+
 ## 0.29.0 - The Explorer Keeps Up On Its Own
 
 Status: **released on 2026-10-07.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.29.0` at `e346dfe`. Post-publish: `0.29.0` passes all three checks, and **`0.28.0` still installs** now that a newer core exists. Scoped 2026-10-07: `REQ-FILE-003`, `REQ-FILE-004` and `NFR-PERF-007` met and measured. RFC-026

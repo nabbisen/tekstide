@@ -246,3 +246,15 @@ not evidence a future gate re-derives automatically.
   Final accepted three runs: `734 + 16 + 1083`, every run, 0 fixture entries left each time.
 - No core-pin or version bump: `0.30.0` is the whole RFC's own target, not this slice's.
 - Commits pushed once this gate was green.
+
+## Review 470: independent reproduction, and the changelog
+
+The architect reproduced the delivery-work measurement independently (load 14.65): D8 cost
+`+4.219 ms`, 10-document cost `+38.901 ms`, ratio **9.22×** (submitted: `8.79×`) — measurement
+9 confirmed a second time, from a second run. The p95 keystroke-latency ratio also reproduced
+close to the submitted figure (`1.08×` against `1.11×` at review 469).
+
+`CHANGELOG.md` gained a `## 0.30.0` entry, `Status: in progress`, directly answering `0.29.0`'s
+own "what this release does not do" question about multi-document refresh cost -- written now,
+incrementally, rather than held back for the eventual release candidate's own pass (the
+convention `0.29.0`'s own entry was written under). Updated as C and D close.
