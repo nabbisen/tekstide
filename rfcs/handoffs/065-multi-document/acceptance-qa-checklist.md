@@ -211,9 +211,7 @@ wrong here is a deterministic logic case that a plain test catches with no timin
 - [ ] The core pin bumps with the version. Not yet: `0.30.0` has not been cut as a release candidate
       (workspace version is still `0.29.0`), so there is no new version for the pin to bump to. A
       release-step item, left for the candidate itself.
-- [ ] Commits are pushed once the gate is green. The Whole-RFC doc edits (this checklist,
-      `CHANGELOG.md`, `rfcs/delivery-plan.md`) are about to be committed and pushed with this
-      response; left unticked until that push lands.
+- [x] Commits are pushed once the gate is green. Pushed at `710f6dd`.
 
 ### Required at the candidate (review 471)
 
