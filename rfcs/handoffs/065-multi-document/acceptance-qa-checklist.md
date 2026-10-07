@@ -14,12 +14,12 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-065-A — the repair
 
-- [ ] **The test was written first and shown failing against today's code**, with the failure in the
+- [x] **The test was written first and shown failing against today's code**, with the failure in the
       evidence. A repair whose test never saw the defect is a claim.
-- [ ] Editing a file and opening another leaves the first's text **and** dirty state intact.
-- [ ] Captured live: edits made, a second file opened, the first still there.
-- [ ] The undo history of the first document survives, or the product says it did not.
-- [ ] Nothing else in this slice.
+- [x] Editing a file and opening another leaves the first's text **and** dirty state intact.
+- [x] Captured live: edits made, a second file opened, the first still there.
+- [x] The undo history of the first document survives, or the product says it did not.
+- [x] Nothing else in this slice.
 
 ## PR-065-B — the set
 

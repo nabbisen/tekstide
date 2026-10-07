@@ -1268,3 +1268,15 @@ run, unchanged in spirit from before, but it no longer decides pass or fail.
 
 **This closes the row.** No further entries are expected for this test; a future failure here
 would mean the ratio itself moved, which is what the fix exists to catch.
+
+## Recurrence, 2026-10-07 — RFC-065 PR-065-A's gate, load unmeasured
+
+**One failure in run 3 of a three-run full-workspace gate**, `TMPDIR=/dev/shm/tk065g3` (fixed, short,
+per the 2026-09-29 entry's own guidance): `approval::tests::channel::bind_recovers_from_a_stale_socket_file`
+failed; runs 1 and 2 both clean (`731 + 16 + 1079`, both runs). **Row 1, recurring in its own
+already-documented shape** -- nothing in this response touches the approval channel, the socket
+directory, or anything near it: the whole diff is `ProjectContentWorkspace`'s open set
+(`crates/tekstide-core/src/project/content.rs`), its own tests, and one new shell-level test in
+`crates/tekstide/src/shell/tests.rs`. Re-run once, isolated, and passed. **The gate was redone, not
+counted**, per the same convention the 2026-09-29 entry used: the final accepted three runs are
+`731 + 16 + 1079`, `731 + 16 + 1079`, `731 + 16 + 1079`.
