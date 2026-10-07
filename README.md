@@ -39,8 +39,8 @@ It is early. Read these before relying on it:
   proof uses a controlled test executable.
 - **Command approval is built but unreachable.** No shipping AI CLI speaks its protocol, and it is
   cooperative, not enforced.
-- **No before/after diff, and no multi-document editing** — one file open at a time. Terminal
-  input latency is not verified against its target.
+- **No before/after diff** — the change model exists; nothing renders it yet. Terminal input
+  latency is not verified against its target.
 
 The full list, with the reasons, is [What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html). Deferred
 work is tracked in [Deferred work](https://nabbisen.github.io/tekstide/contributors/future-work.html).

@@ -1,15 +1,15 @@
 ---
 title: "RFC-065: The Multi-Document Model — implementation handoff"
 rfc: "RFC-065"
-rfc_file: "../../accepted/065-the-multi-document-model.md"
-source_rfc_status: "Accepted 2026-10-07 — M13"
+rfc_file: "../../done/065-the-multi-document-model.md"
+source_rfc_status: "Implemented and closed 2026-10-08 — 0.30.0 candidate, not yet published"
 target_milestone: "M13"
 created: "2026-10-07"
 ---
 
 # Opening a second file throws the first one's edits away
 
-Source RFC: [RFC-065](../../accepted/065-the-multi-document-model.md)
+Source RFC: [RFC-065](../../done/065-the-multi-document-model.md)
 
 ## What this is
 
@@ -26,7 +26,7 @@ second document. D is save-all.
 
 ## Read these first, in this order
 
-1. [The RFC](../../accepted/065-the-multi-document-model.md) — ten measurements, D1–D9, and *Decided
+1. [The RFC](../../done/065-the-multi-document-model.md) — ten measurements, D1–D9, and *Decided
    on acceptance* (D10–D13). **D10 and D13 remove work; read them before planning any.**
 2. [What losing a buffer looks like](./what-the-open-set-must-not-do.md) — the risk document.
 3. [The PR plan](./task-breakdown-pr-plan.md).

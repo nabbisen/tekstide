@@ -1,7 +1,9 @@
 # RFC-065: The Multi-Document Model
 
-Status: **Accepted by the human owner 2026-10-07.** D1–D9 as written, plus D10–D13 — see *Decided on acceptance*. Proposed 2026-10-07. `0.30.0`, M13. Split from RFC-026 on 2026-10-07 when the watcher
-shipped alone. **Its first slice repairs a data-loss defect that is live in `0.29.0`.**
+Status: **Implemented and closed 2026-10-08; `0.30.0` candidate, not yet published.** See the
+*Closed* section. **Accepted by the human owner 2026-10-07.** D1–D9 as written, plus D10–D13 — see
+*Decided on acceptance*. Proposed 2026-10-07. `0.30.0`, M13. Split from RFC-026 on 2026-10-07 when
+the watcher shipped alone. **Its first slice repairs a data-loss defect that is live in `0.29.0`.**
 
 ## Summary
 
@@ -138,3 +140,52 @@ it carries its own control in the same run, and it took three attempts to get ri
 464). Add a condition — N documents against one — and do not rebuild it.
 
 **Ships as `0.30.0`**, with slice A first and alone.
+
+## Closed (2026-10-08)
+
+**`0.30.0` candidate; not yet published.** `REQ-EDIT-004` met for its own plural — `dirty_file_count`
+can finally return more than 0 or 1, and the open set it counts is real. No `REQ-` names
+multi-document itself; disclosed, not minted, at D8 (`rfcs/delivery-plan.md`'s own "Requirements
+gap" entry).
+
+**The repair, slice A, demonstrated against the defect.**
+`opening_a_second_file_leaves_the_first_s_text_and_dirty_state_intact` was written first and shown
+failing against the pre-repair code (`open_buffer_count() == 1` where `2` was expected), the same
+discipline D12 required and RFC-026 PR-026-C set. One line then flipped push-not-replace. The first
+document's own text, dirty state and undo history all survive a second file opening — "nothing is
+discarded" turned out to include the undo stack, which review 479 had to point out was never
+actually said anywhere in the release notes.
+
+**The open set, slice B.** Dedup by path (an already-open file switches to its own entry, no
+second one added, no disk re-read), the two counts and the close dialog counting the whole set
+through the same wiring they always used, the bound stated at 20 documents when reached, and the
+watcher's scope following the set — including a real correctness gap found while building it, not
+before: `drain_project_watches` only ever refreshed the active document, so a background
+document's own external change was invisible until it happened to become active. Fixed in the
+same slice. The per-document refresh cost measured close to linear: about 4.2 ms per document,
+a 9.2× ratio at ten documents against a 10× linear prediction, extrapolating to about 78 ms at
+the bound — D7's own question, answered rather than assumed.
+
+**The switcher, slice C.** `Ctrl+Alt+F`, keyboard-only by design (not a tab bar — the RFC's own
+non-goal). Cursor and viewport restored exactly on every return, for free, since both already
+lived on the document itself and the switch never touches them.
+
+**Save-all, slice D, and the defect review found, not the implementer.** `Ctrl+Shift+S` saves
+every open document, attempted regardless of an earlier one's own failure. The implementer's own
+claim that "N saves cost N watcher notices" shipped false in both the changelog and a checklist
+box: `save()` returns `Ok(Saved)` for a clean document from an early return before the real write,
+so a save-all over a mostly-clean set costs the watcher one notice, not N. Found by review 477
+measuring directly rather than taking the structural argument on faith — the standing lesson this
+RFC leaves behind, stated plainly: "structural fact, no measurement needed" is a claim that still
+has to be checked once against the code. `was_written`/`written_count`/`all_written` were renamed
+to `succeeded`/`succeeded_count`/`all_succeeded`, and a deterministic test now puts a clean
+document in the open set and checks its file's own mtime.
+
+**Closed before publish, deliberately — the opposite of RFC-026's own mistake.** RFC-026 moved to
+`done/` only after `0.29.0` was already published, tagged and marked released, caught hours late
+by `an_rfc_a_release_names_lives_in_done` rather than by habit. This RFC closes at the candidate
+instead, specifically so that check never has anything to catch here.
+
+**Left open.** Crash recovery of the open set is RFC-027's own (`0.31.0`), which this unblocks
+rather than attempts. The per-document refresh cost is still O(file size) per document, inherited
+unchanged from RFC-026. Full evidence: `rfcs/handoffs/065-multi-document/qa-evidence.md`.

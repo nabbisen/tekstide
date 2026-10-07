@@ -1,8 +1,8 @@
 ---
 title: "RFC-065 — acceptance and QA checklist"
 rfc: "RFC-065"
-rfc_file: "../../accepted/065-the-multi-document-model.md"
-source_rfc_status: "Accepted 2026-10-07 — M13"
+rfc_file: "../../done/065-the-multi-document-model.md"
+source_rfc_status: "Implemented and closed 2026-10-08 — 0.30.0 candidate, not yet published"
 target_milestone: "M13"
 created: "2026-10-07"
 ---
@@ -208,9 +208,9 @@ wrong here is a deterministic logic case that a plain test catches with no timin
 - [x] Every new intermittent failure has a dated row in `test-process-leak.md`. None from these three
       runs (all clean); the two review 478 found in its own run are already registered there ("New
       rows, 2026-10-08 — review 478", `a79d808`), not mine to add a second time.
-- [ ] The core pin bumps with the version. Not yet: `0.30.0` has not been cut as a release candidate
-      (workspace version is still `0.29.0`), so there is no new version for the pin to bump to. A
-      release-step item, left for the candidate itself.
+- [x] The core pin bumps with the version. Done at the candidate: workspace version and the
+      `tekstide-core` pin both bumped to `0.30.0` (`the_workspace_pins_tekstide_core_to_its_own_version`
+      passes).
 - [x] Commits are pushed once the gate is green. Pushed at `710f6dd`.
 
 ### Required at the candidate (review 471)

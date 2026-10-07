@@ -92,7 +92,8 @@ you left it. The sidebar's `[open]` tag marks every open document, not only the 
 Opening a path that is already open switches to it in place rather than opening a second copy of
 it. **`Ctrl+Shift+S`** (or the editor's own "Save All" button) saves every open document in one
 action, attempting every one regardless of an earlier document's own failure, and reports
-afterward how many were written and names each one that was not, with why.
+afterward how many succeeded and names each one that failed, with why. A document already clean
+is saved without being rewritten — the count is honest about that too.
 
 File **names** in the explorer and the editor header are escaped, because they are untrusted,
 attacker-influenced text. File **contents** are deliberately not: the editor shows a file as it

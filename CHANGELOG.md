@@ -2,10 +2,10 @@
 
 ## 0.30.0 - The Multi-Document Model
 
-Status: **in progress.** RFC-065's four slices (the repair, the set, the switcher, save-all) and the
-requirements-gap write-up are all done; the release candidate itself is not. This entry is written
-incrementally as slices close, not held back for the release; see `rfcs/handoffs/065-multi-document/`
-for the full handoff pack.
+Status: **scoped 2026-10-08.** `REQ-EDIT-004` met for its own plural. No `REQ-` names
+multi-document itself — disclosed, not minted, in `rfcs/delivery-plan.md`'s own "Requirements gap"
+entry. RFC-065 is implemented and closed (`rfcs/done/065-the-multi-document-model.md`); see
+`rfcs/handoffs/065-multi-document/` for the full handoff pack and its own evidence.
 
 **The repair, and this release's headline**: opening a second file used to silently discard the
 first's unsaved edits — no prompt, no refusal, no record, a live defect shipping in `0.29.0`. The

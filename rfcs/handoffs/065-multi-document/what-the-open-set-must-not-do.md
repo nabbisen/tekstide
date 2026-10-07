@@ -1,8 +1,8 @@
 ---
 title: "RFC-065 — what losing a buffer looks like"
 rfc: "RFC-065"
-rfc_file: "../../accepted/065-the-multi-document-model.md"
-source_rfc_status: "Accepted 2026-10-07 — M13"
+rfc_file: "../../done/065-the-multi-document-model.md"
+source_rfc_status: "Implemented and closed 2026-10-08 — 0.30.0 candidate, not yet published"
 target_milestone: "M13"
 created: "2026-10-07"
 ---

@@ -17,7 +17,7 @@ ships with**: any of them except `Ctrl+Shift+P` can be moved in your configurati
 | `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
 | `Ctrl+Shift+V` | Paste into the focused terminal |
 | `Ctrl+S` | Save the active document |
-| `Ctrl+Shift+S` | Save every open document, reporting which were written and which were not |
+| `Ctrl+Shift+S` | Save every open document, reporting which succeeded and which failed |
 | `Ctrl+Z` | Undo the last edit to the active document, up to 500 deep |
 | `Ctrl+Shift+Z` | Redo an edit undone by `Ctrl+Z` |
 | `Ctrl+Alt+A` | Launch an AI CLI run in the active project — refused unless the project is trusted |

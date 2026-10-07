@@ -738,8 +738,11 @@ documented limitations.
   RFC-026 (`0.29.0`).** A blocked save opens a dialog; `0.29.0` added a direct Reload button that
   reaches the same dialog without first attempting a save, and the open file's own header now names a
   change, a deletion, or a conflict as soon as the watcher sees it.
-- Multi-document tabs or another explicit multi-document model — **split out as its own RFC, RFC-065**
-  (`0.30.0`), once RFC-026's watcher half was measured complete and shipped alone in `0.29.0`.
+- **Multi-document tabs or another explicit multi-document model — implemented by RFC-065
+  (`0.30.0`).** Split out from RFC-026 once the watcher half was measured complete and shipped
+  alone in `0.29.0`. The editor holds an open set rather than one document, deduplicated by path
+  and bounded at 20; `Ctrl+Alt+F` switches, `Ctrl+Shift+S` saves every open document at once, and
+  every open document is watched, not only the active one.
 - Richer editor internals if `String`-backed buffers become limiting.
 - **Clickable explorer rows.** The explorer tree (RFC-052, `0.24.0`) is keyboard-only, as the one-level
   explorer was: `Enter` opens or closes a folder, `Up`/`Down` move. A click that selects a row, opens a
