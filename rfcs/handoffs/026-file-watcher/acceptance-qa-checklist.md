@@ -246,7 +246,14 @@ measurement with no number in the evidence is not ticked.
       refresh finds the text matches disk. **But every save costs a scan and a whole-file re-read of
       the file just written.** Named at 464 so nobody measures saving and is surprised.
 
-## PR-026-D — the open set
+## PR-026-D — the open set — **moved to RFC-065 on 2026-10-07**
+
+> **This slice is no longer RFC-026's.** The split point was decided at the architect's turn after
+> review 465: the watcher ships as `0.29.0` and the multi-document model as `0.30.0`, under its own
+> number, because an RFC spanning two releases trips the released-RFC invariant. The boxes below and
+> the two findings carried into them at review 464 travel to RFC-065's own pack. They are kept here,
+> unticked, so the record shows where they went rather than appearing to have been dropped.
+### What moved (for RFC-065)
 
 - [ ] `open_buffer_count()` and `dirty_file_count()` count the whole open set. **A test fails if
       either counts one when two are open.**
