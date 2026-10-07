@@ -500,7 +500,10 @@ fn keystrokes_under_a_watched_burst(
     min_keystrokes: usize,
     width: f32,
     watched: bool,
-    touch_document: Option<(std::path::PathBuf, String)>,
+    // RFC-065 D13: generalized from `Option<(PathBuf, String)>` to a `Vec`, the minimal
+    // change the harness's own doc requires ("add a condition... do not rebuild it") to let
+    // N open documents be rewritten during the burst instead of only one.
+    touch_documents: Vec<(std::path::PathBuf, String)>,
 ) -> BurstRun {
     use std::sync::mpsc::channel;
     use std::time::{Duration, Instant};
@@ -547,21 +550,26 @@ fn keystrokes_under_a_watched_burst(
         let root = root.clone();
         std::thread::spawn(move || {
             let mut written = 0;
-            // RFC-026 D8: the open document is rewritten every hundred files, alternating
-            // between two versions, so each rewrite is a real change the refresh must read.
-            let mut versions = touch_document.map(|(path, text)| {
-                let other = format!("external edit\n{text}");
-                (path, [text, other], 0usize)
-            });
+            // RFC-026 D8, generalized by RFC-065 D13: every touched document (one, before
+            // this slice; N, with it) is rewritten every hundred files, each alternating
+            // between two versions, so each rewrite is a real change each one's own refresh
+            // must read.
+            let mut versions: Vec<(std::path::PathBuf, [String; 2], usize)> = touch_documents
+                .into_iter()
+                .map(|(path, text)| {
+                    let other = format!("external edit\n{text}");
+                    (path, [text, other], 0usize)
+                })
+                .collect();
             for index in 0..files {
                 if std::fs::write(root.join(format!("burst-{index:05}.txt")), b"x").is_ok() {
                     written += 1;
                 }
-                if let Some((path, versions, turn)) = versions.as_mut()
-                    && index % 100 == 99
-                {
-                    let _ = std::fs::write(&*path, versions[*turn % 2].as_bytes());
-                    *turn += 1;
+                if index % 100 == 99 {
+                    for (path, versions, turn) in versions.iter_mut() {
+                        let _ = std::fs::write(&*path, versions[*turn % 2].as_bytes());
+                        *turn += 1;
+                    }
                 }
                 std::thread::sleep(pace);
             }
@@ -711,7 +719,7 @@ fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
         5,
         880.0,
         true,
-        None,
+        Vec::new(),
     );
 
     assert_eq!(run.files_written, 100, "the burst wrote every file");
@@ -726,6 +734,11 @@ fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
     );
 }
 
+/// `N`, RFC-065 D7/D13's own open-document count for [`WatchCondition::BurstWithNDocuments`]
+/// -- comfortably below the real `open_document_limit` default of 20 (D4), high enough to
+/// show real multiplicative scaling without the round itself taking unreasonably long.
+const BURST_N_DOCUMENTS: usize = 10;
+
 /// The conditions of the watched-burst measurement, in one process under one load.
 #[derive(Clone, Copy, Debug)]
 enum WatchCondition {
@@ -739,6 +752,14 @@ enum WatchCondition {
     /// The same burst, and the open document is rewritten every hundred files. This is the
     /// pipeline with D8: each drain tick asks the document about its file.
     BurstWithD8,
+    /// RFC-065 D7/D13: the same burst, with [`BURST_N_DOCUMENTS`] documents open (not one)
+    /// and every one of them rewritten every hundred files -- the open set's own
+    /// multiplication of the per-document refresh (measurement 9), on the harness D13 says
+    /// to reuse rather than rebuild. The paired difference against `BurstBeforeD8`, divided
+    /// by the `BurstWithD8` vs `BurstBeforeD8` difference, is the real scaling factor: close
+    /// to `N` if the cost is what measurement 9 assumed (one whole-file read per open
+    /// document per touched drain window), not some other shape.
+    BurstWithNDocuments,
 }
 
 impl WatchCondition {
@@ -748,6 +769,7 @@ impl WatchCondition {
             Self::WatchedIdle => "watched, nothing happening",
             Self::BurstBeforeD8 => "burst into the root (before D8)",
             Self::BurstWithD8 => "burst, open document rewritten (with D8)",
+            Self::BurstWithNDocuments => "burst, N open documents rewritten (RFC-065 D7/D13)",
         }
     }
 }
@@ -763,12 +785,16 @@ fn sorted_totals_ms(stages: &[Stage]) -> Vec<f64> {
 }
 
 /// **REQ-FILE-004, the pre-D8 control and the D8 before-and-after, in one frame** (review 462, and
-/// the D8 plan). The RFC-057 100,000-line fixture, the character-at-the-start keystroke, and four
-/// conditions in one process. The **D8 cost is the paired difference between the last two**: the same
-/// burst into the root, with and without the open document being rewritten, in the same round, so
-/// everything else is held constant. The control measures the watcher against no watcher at all.
+/// the D8 plan), **plus RFC-065 D7/D13's own N-open-documents condition**, reusing this harness
+/// unchanged rather than rebuilding it. The RFC-057 100,000-line fixture, the character-at-the-start
+/// keystroke, and five conditions in one process. The **D8 cost is the paired difference between
+/// `BurstBeforeD8` and `BurstWithD8`**: the same burst into the root, with and without the open
+/// document being rewritten, in the same round, so everything else is held constant. **D13's own
+/// figure is that same D8 cost against `BurstWithNDocuments`'s**: if N documents cost about N times
+/// one document's own refresh, the ratio of the two paired differences should land near N. The
+/// control measures the watcher against no watcher at all.
 ///
-/// The conditions run in a 4 by 4 Latin square over four rounds, so each condition takes each
+/// The conditions run in a 5 by 5 Latin square over five rounds, so each condition takes each
 /// position in the run once. Every run is a fresh project. The figure that matters is the paired
 /// difference within a round, not any absolute number.
 ///
@@ -778,8 +804,17 @@ fn sorted_totals_ms(stages: &[Stage]) -> Vec<f64> {
 fn editor_typing_latency_under_a_watched_burst() {
     let text = fixture_text();
     let width = 880.0;
-    use WatchCondition::{BurstBeforeD8 as R, BurstWithD8 as D, Unwatched as U, WatchedIdle as I};
-    let orders = [[U, R, D, I], [R, D, I, U], [D, I, U, R], [I, U, R, D]];
+    use WatchCondition::{
+        BurstBeforeD8 as R, BurstWithD8 as D, BurstWithNDocuments as N, Unwatched as U,
+        WatchedIdle as I,
+    };
+    let orders = [
+        [U, R, D, N, I],
+        [R, D, N, I, U],
+        [D, N, I, U, R],
+        [N, I, U, R, D],
+        [I, U, R, D, N],
+    ];
     println!(
         "fixture: {} lines, {} bytes; body font {} px; layout width {} px; keystroke: character at the start; budget NFR-PERF-003: p95 <= 16 ms, p99 <= 33 ms",
         FIXTURE_LINES,
@@ -793,8 +828,9 @@ fn editor_typing_latency_under_a_watched_burst() {
         WatchCondition::WatchedIdle => 1,
         WatchCondition::BurstBeforeD8 => 2,
         WatchCondition::BurstWithD8 => 3,
+        WatchCondition::BurstWithNDocuments => 4,
     };
-    let mut p95 = [[0.0f64; 4]; 4];
+    let mut p95 = [[0.0f64; 5]; 5];
     let mut burst_notes = Vec::new();
     for (round, order) in orders.iter().enumerate() {
         for &condition in order {
@@ -811,7 +847,7 @@ fn editor_typing_latency_under_a_watched_burst() {
                     200,
                     width,
                     false,
-                    None,
+                    Vec::new(),
                 ),
                 WatchCondition::WatchedIdle => keystrokes_under_a_watched_burst(
                     &mut state,
@@ -820,7 +856,7 @@ fn editor_typing_latency_under_a_watched_burst() {
                     200,
                     width,
                     true,
-                    None,
+                    Vec::new(),
                 ),
                 WatchCondition::BurstBeforeD8 => keystrokes_under_a_watched_burst(
                     &mut state,
@@ -829,7 +865,7 @@ fn editor_typing_latency_under_a_watched_burst() {
                     30,
                     width,
                     true,
-                    None,
+                    Vec::new(),
                 ),
                 WatchCondition::BurstWithD8 => {
                     let document = std::fs::canonicalize(dir.join("file.txt"))
@@ -841,7 +877,56 @@ fn editor_typing_latency_under_a_watched_burst() {
                         30,
                         width,
                         true,
-                        Some((document, text.clone())),
+                        vec![(document, text.clone())],
+                    )
+                }
+                WatchCondition::BurstWithNDocuments => {
+                    // RFC-065 D7/D13: `BURST_N_DOCUMENTS` total, including the primary one
+                    // `state_with_an_open_document` already opened -- each with real, distinct
+                    // content, each opened for real through the same path the explorer uses, so
+                    // the watcher's own scope (`watch_inputs`) genuinely grows to match.
+                    let mut touch_documents = vec![(
+                        std::fs::canonicalize(dir.join("file.txt"))
+                            .expect("the fixture document exists"),
+                        text.clone(),
+                    )];
+                    for extra in 1..BURST_N_DOCUMENTS {
+                        let name = format!("extra-{extra:02}.txt");
+                        let extra_text = format!("{text}\nextra document {extra}");
+                        std::fs::write(dir.join(&name), &extra_text)
+                            .expect("an extra fixture document should be writable");
+                        state
+                            .app_shell
+                            .open_active_project_text_document(&name)
+                            .expect("an extra fixture document should open");
+                        touch_documents.push((
+                            std::fs::canonicalize(dir.join(&name))
+                                .expect("the extra fixture document exists"),
+                            extra_text,
+                        ));
+                    }
+                    // The keystroke measurement is still against the primary document, the
+                    // same one every other condition measures, so the paired comparison holds
+                    // only the open-document count different.
+                    state
+                        .app_shell
+                        .open_active_project_text_document("file.txt")
+                        .expect("switching back to the primary document must succeed");
+                    let project_id = state
+                        .app_shell
+                        .state()
+                        .active_project_id()
+                        .cloned()
+                        .expect("the fixture has an active project");
+                    crate::shell::reconcile_project_watch(&mut state, &project_id);
+                    keystrokes_under_a_watched_burst(
+                        &mut state,
+                        1_000,
+                        std::time::Duration::from_millis(1),
+                        30,
+                        width,
+                        true,
+                        touch_documents,
                     )
                 }
             };
@@ -875,27 +960,56 @@ fn editor_typing_latency_under_a_watched_burst() {
     }
     println!("\npaired differences from the control, per round (p95 of the keystroke total):");
     let mut d8_cost = Vec::new();
+    let mut n_cost = Vec::new();
     for (round, row) in p95.iter().enumerate() {
         println!(
-            "round {}: control {:.3} ms; watched-idle {:+.3}; burst before D8 {:+.3}; burst with D8 {:+.3}; D8 cost (with minus before) {:+.3} ms",
+            "round {}: control {:.3} ms; watched-idle {:+.3}; burst before D8 {:+.3}; burst with D8 {:+.3}; burst with N docs {:+.3}; D8 cost (with minus before) {:+.3} ms; N-doc cost (N minus before) {:+.3} ms",
             round + 1,
             row[0],
             row[1] - row[0],
             row[2] - row[0],
             row[3] - row[0],
+            row[4] - row[0],
             row[3] - row[2],
+            row[4] - row[2],
         );
         d8_cost.push(row[3] - row[2]);
+        n_cost.push(row[4] - row[2]);
     }
     let median = |values: &[f64]| {
         let mut sorted = values.to_vec();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+        let mid = sorted.len() / 2;
+        if sorted.len().is_multiple_of(2) {
+            (sorted[mid - 1] + sorted[mid]) / 2.0
+        } else {
+            sorted[mid]
+        }
     };
+    let median_d8_cost = median(&d8_cost);
+    let median_n_cost = median(&n_cost);
     println!(
-        "median D8 cost over the four rounds (p95, with minus before): {:+.3} ms",
-        median(&d8_cost)
+        "median D8 cost over the five rounds (p95, with minus before): {median_d8_cost:+.3} ms"
     );
+    println!(
+        "median {BURST_N_DOCUMENTS}-document cost over the five rounds (p95, N minus before): {median_n_cost:+.3} ms"
+    );
+    // RFC-065 D7/D13's own figure: if one document's own refresh costs the D8 paired
+    // difference, N documents multiplying that cost by about N is what measurement 9
+    // assumed -- this is the ratio that tells whether it actually does. Reported, not used
+    // to tick anything on its own: the D8 entry itself is already at the edge of the
+    // harness's resolution (its own qa-evidence.md), so a two-stage paired difference is
+    // noisier still.
+    if median_d8_cost.abs() > 0.05 {
+        println!(
+            "ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {:.2}x (near {BURST_N_DOCUMENTS}x would match measurement 9's assumption of one whole-file read per open document)",
+            median_n_cost / median_d8_cost
+        );
+    } else {
+        println!(
+            "ratio not reported: the one-document (D8) cost is too close to zero to divide by meaningfully"
+        );
+    }
     for note in burst_notes {
         println!("watch, {note}");
     }
@@ -920,7 +1034,7 @@ fn d8_burst_diagnostic() {
         30,
         width,
         true,
-        Some((document, text.clone())),
+        vec![(document, text.clone())],
     );
     println!(
         "loop {:.1} ms; after the burst finished {:.1} ms; keystrokes {}; notices {} ({} after the burst); scans run {}, applied {}; delivery {:.1} ms",
