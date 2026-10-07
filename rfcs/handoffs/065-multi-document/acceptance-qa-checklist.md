@@ -64,9 +64,13 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-065-C — reaching the second document
 
-- [ ] A switcher, **keyboard-first, reachable, captured live**, no environment variable.
-- [ ] Switching restores each document's own cursor and viewport — asserted, not assumed.
-- [ ] Any new sidebar text fits 32 columns, like every other sentence there.
+- [x] A switcher, **keyboard-first, reachable, captured live**, no environment variable.
+      `Ctrl+Alt+F`, cycling the open set, wrapping — `evidence/pr-065-c/`.
+- [x] Switching restores each document's own cursor and viewport — asserted, not assumed.
+      Core-level and shell-level (real routing) tests, plus the live capture.
+- [x] **Not applicable: no new sidebar text.** The switcher is keyboard-only by design (the
+      RFC's own non-goal), so there is no new visible surface to measure against the 32-column
+      bound.
 
 ## PR-065-D — save-all
 

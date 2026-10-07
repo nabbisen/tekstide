@@ -258,3 +258,64 @@ close to the submitted figure (`1.08×` against `1.11×` at review 469).
 own "what this release does not do" question about multi-document refresh cost -- written now,
 incrementally, rather than held back for the eventual release candidate's own pass (the
 convention `0.29.0`'s own entry was written under). Updated as C and D close.
+
+## PR-065-C — reaching the second document
+
+### A switcher, keyboard-first, reachable, captured live, no environment variable
+
+`NavigationAction::SwitchActiveDocument`, bound to `Ctrl+Alt+F` -- the direct analogue of
+`SwitchActiveProject`'s own `Ctrl+Alt+N`, for the open document set rather than the project
+list. Cycles `ProjectContentWorkspace::cycle_to_next_open_document` through `self.documents`'s
+own order, wrapping, a no-op with fewer than two open. Deliberately no visible control (D5's own
+non-goal: "a tab bar for documents, if a simpler switcher reaches the same place") --
+`control_coverage`'s own `KeyboardOnly` entry cites this directly, `Permanent`, not a tracked
+gap awaiting one.
+
+Live capture: `rfcs/handoffs/065-multi-document/evidence/pr-065-c/` (committed) -- three real
+documents opened, each given a distinct cursor position with no edit, then three real
+`Ctrl+Alt+F` presses showing the full cycle (third → first → second → third), each document's
+own cursor read back exactly on return. See its own `README.md` for the full sequence and one
+disclosed observation (the explorer's own keyboard highlight does not follow the switch --
+consistent with the pre-existing separation between "the keyboard highlight" and "the open
+file", not a defect).
+
+### Switching restores each document's own cursor and viewport -- asserted, not assumed
+
+`cycling_the_active_document_wraps_and_restores_cursor_and_viewport`
+(`crates/tekstide-core/src/project/tests/content.rs`): three documents, cursor and viewport set
+on two before a third is opened; cycling wraps through all three and each document's own cursor
+and viewport read back exactly, never touched by the cycle itself (both live on `TextDocument`,
+restored for free by construction). Also asserts the no-op case directly: cycling with zero or
+one document open changes nothing and does not panic.
+
+`ctrl_alt_f_cycles_to_the_next_open_document_wrapping` and `ctrl_alt_f_is_a_no_op_with_fewer_
+than_two_documents_open` (`crates/tekstide/src/shell/tests.rs`): the same two properties proven
+through real key routing (`NavigationAction::SwitchActiveDocument` dispatched exactly as a real
+`Ctrl+Alt+F` press would be), not just at the core level.
+
+### Any new sidebar text fits 32 columns -- not applicable
+
+No new sidebar text was added. The switcher is keyboard-only by design (the non-goal above), so
+there is no new visible surface to measure against the 32-column bound RFC-055 set; the
+existing `[open]` tag (PR-065-B) and row text are unchanged by this slice.
+
+### Chord-count bookkeeping
+
+Every place that counts the keybinding policy's own chords updated: `navigation/tests.rs`'s
+`every_advertised_chord_round_trips` (eighteen chords held → nineteen) and
+`advertised_bindings_are_exactly_the_live_ones` (the ordered list, `Ctrl+Alt+F` appended);
+`keyboard_help/tests.rs`'s `every_live_binding_is_described_to_the_user` and `shell/tests.rs`'s
+`opening_help_through_a_real_key_event_shows_every_live_binding` (seventeen → eighteen);
+`rfc_docs_invariants.rs`'s `the_configuration_page_lists_every_rebindable_action_with_its_
+default_chord` (seventeen → eighteen); `docs/src/users/configuration.md` and
+`docs/src/users/keyboard-reference.md` both gain a row and their own wording update
+("seventeen... eighteen" → "eighteen... nineteen"). A new collision-check test,
+`switch_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`
+(`navigation/tests.rs`), proves `Ctrl+Alt+F` collides with nothing, mechanically, not by
+inspection -- the same discipline every other chord in this table already has.
+
+## Gate, PR-065-C
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
+- Commits pushed once this gate was green.
