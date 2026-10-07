@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::content::TextDocumentState;
+use crate::content::{EditOperation, TextCursor, TextDocumentState};
 use crate::project::{ProjectContentStatus, ProjectId, ProjectSession};
 
 fn test_root(name: &str) -> PathBuf {
@@ -301,6 +301,51 @@ fn opening_a_second_file_leaves_the_first_s_text_and_dirty_state_intact() {
         "the first document's own edit must not have been silently discarded"
     );
     assert_eq!(first.state(), TextDocumentState::Dirty);
+
+    cleanup_root(root);
+}
+
+/// Checklist item the first test above does not cover: "the undo history of the first
+/// document survives, or the product says it did not". `replace_active_text` alone (used
+/// above) never records an undo entry -- an ordinary keystroke also calls
+/// `record_active_edit_operation`, so this test uses the real two-step path to plant a real
+/// undo entry before opening the second file, and checks it is still there afterward.
+#[test]
+fn opening_a_second_file_leaves_the_first_s_undo_history_intact() {
+    let root = test_root("content-open-second-keeps-first-undo");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project
+        .open_text_document("first.txt")
+        .expect("the first document should open");
+    project
+        .replace_active_text("Xfirst original\n")
+        .expect("a local edit on the first document");
+    project
+        .record_active_edit_operation(EditOperation::Insert {
+            at: TextCursor::default(),
+            inserted: "X".to_owned(),
+        })
+        .expect("the edit should be recorded for undo");
+
+    project
+        .open_text_document("second.txt")
+        .expect("the second document should open");
+
+    let first = project
+        .content_workspace()
+        .open_documents()
+        .find(|document| {
+            document.target().selected_relative_path == std::path::Path::new("first.txt")
+        })
+        .expect("the first document must still be in the open set");
+    assert!(
+        first.can_undo(),
+        "the first document's undo entry must not have been lost when the second was opened"
+    );
+    assert!(!first.can_redo());
 
     cleanup_root(root);
 }
