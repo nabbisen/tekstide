@@ -369,6 +369,11 @@ fn deciding_an_unknown_proposal_returns_not_found() {
 /// `is_still_answerable` to the state they need against a bounded deadline, generous because
 /// what is being waited for is a kernel notification, not a fixed amount of work -- rather than
 /// asserting on the first call and failing when the kernel has not caught up yet.
+///
+/// **Precondition, flagged at review 476**: this is a proxy for "the close has been observed",
+/// not a direct read of it -- `is_still_answerable` also returns `false` for a request that has
+/// already been decided, so the proxy only holds while the request is still `Pending`. Call this
+/// only for a request that was dropped without ever being decided (both current callers are).
 fn poll_until_no_longer_answerable(
     coordinator: &ApprovalCoordinator,
     agent_run_id: &AgentRunId,
