@@ -554,3 +554,42 @@ measurement uses this protocol, and any change it reports is read against that f
 `1811 passed, 0 failed, 6 ignored`, 0 entries left after each. Two defects of my own were caught on the way and
 fixed before the gate counted: a `.label()` call in the harness tripped the crate's source scan (renamed to
 `description()`), and a loop indexing the rounds failed clippy's `needless_range_loop`.
+
+## Review 463 — D8: the open document hears a change on disk, through the states that exist
+
+**What D8 does.** A notice that names the active document's file (or that events may have been lost, `Failed`)
+marks the watch; the next drain tick asks the core's `refresh_active_text_document` once. The core's existing
+refresh decides: a clean document becomes `ExternalChanged` (its text is kept, nothing reloads), a dirty one
+`Conflict`, and a file that is gone is `ExternalDeleted` (new). The header names each: `(changed on disk, not
+reloaded)`, `(deleted on disk, not reloaded)`, `(conflict)`. No line is drawn, so the editor's window does not move.
+
+**Three defects found on the way, each with a test that fails without the fix:**
+
+1. **The watcher reported opens, so the refresh looped.** notify subscribes to `OPEN`
+   (`notify-8.2.0/src/inotify.rs:427`). The refresh reads its own file, so each refresh was answered by a notice
+   that asked for another refresh. Found by the burst measurement: 239 root scans and 465 ms of delivery work
+   between keystrokes, after the burst had finished. Fixed in `WatchEvents::wait_for_notice` (access events are
+   not changes). Test: `reading_a_watched_file_is_not_reported_but_writing_it_is` (ablated).
+2. **An edit after an external change left the document `ExternalChanged`**, which reads as "nothing local to
+   lose". Fixed in `TextDocument`: an edit that differs from the opened text in `ExternalChanged` is a `Conflict`.
+   `Conflict` is still not cleared by undoing the text (RFC-057's rule). Test:
+   `an_edit_made_after_an_external_change_is_a_conflict_not_a_clean_change` (ablated).
+3. **A deleted file read as changed**: both are `ExternalChanged` in the document. Fixed with
+   `ProjectContentStatus::ExternalDeleted`. Tests: `a_clean_document_whose_file_is_deleted_reports_external_deleted_and_keeps_its_text`
+   and `the_header_names_a_deleted_file_apart_from_a_changed_one_and_says_nothing_was_reloaded`.
+
+**D8's properties, tested.** No silent reload: `an_external_change_to_the_open_document_reaches_it_without_a_silent_reload`
+(ablated: the drain's refresh removed, it fails). Unsaved edits survive: `a_dirty_document_keeps_its_edit_when_the_file_changes_on_disk`.
+Deleted is a state the product can say: above.
+
+**The measurement** (`evidence/pr-026-c/req-file-004-d8-measurement.md`): the four-condition Latin square with
+the control, the burst before D8 and the burst with D8, in one frame. Median D8 cost on p95 +0.72 ms over four
+rounds, and round 3 is a load spike that moved every condition, so it is kept and not used. Work between
+keystrokes rose about 4 ms a burst. Every p95 is inside 16 ms, with and without D8. The D8 median sits at the
+edge of the harness's resolution, and is reported as that, not as zero.
+
+**Not done.** A reload with undo history (there is no user-driven reload yet, and none is performed silently); the
+book; the split point.
+
+**Gate.** fmt and clippy clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`:
+each `1818 passed, 0 failed, 7 ignored`, 0 entries left, on commit `364164c`.

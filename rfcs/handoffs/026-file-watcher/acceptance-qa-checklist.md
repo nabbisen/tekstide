@@ -199,7 +199,7 @@ measurement with no number in the evidence is not ticked.
       and **nobody can tell**, because the only unwatched figure is from another release on another
       day. Three conditions in one run — unwatched, watched-idle, watched-burst — make the difference
       a difference in the code. Before D8, not after.
-- [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
+- [x] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
       baseline harness.
       *(Harness and pre-D8 baseline, with its unwatched control (review 462): `editor_typing_latency_under_a_watched_burst`,
       three runs of six rounds, one per order of unwatched, watched-idle and watched-burst, in one process. The
@@ -215,10 +215,20 @@ measurement with no number in the evidence is not ticked.
 - [ ] *Recorded at 461:* captures use a **fresh `XDG_STATE_HOME`**, not only a fresh project fixture.
       `02-created-externally.png` reads "19 projects" — nothing leaked, since only a count is shown,
       but the same capture of the Project Board would have shown nineteen real paths.
+      *(Measured after D8 with the control in the same frame (review 462's order): one release run, four conditions
+      in a 4 by 4 Latin square, the RFC-057 fixture and keystroke. Median D8 cost on p95 +0.72 ms over four
+      rounds, with a round spread of −7.8 to +2.3 ms; round 3 is a load spike that moved every condition, and is
+      kept but not used. Work between keystrokes rose about 4 ms a burst with D8. Every p95 is inside 16 ms, with
+      and without D8. Ticked on that measurement with its numbers and limits. `evidence/pr-026-c/req-file-004-d8-measurement.md`.)*
 - [ ] **The book names the batching window** (moved here from A at review 450): by this slice a user
       can observe it, so it describes real behaviour rather than an internal constant.
-- [ ] Unsaved edits survive an external change; **no silent reload**; a deleted open file is a state
+- [x] Unsaved edits survive an external change; **no silent reload**; a deleted open file is a state
       the product can say.
+      *(D8, review 463's plan: a notice on the open file reaches the document on the drain through the core's
+      refresh. Edits survive (`a_dirty_document_keeps_its_edit...`); nothing reloads silently (`an_external_change...`,
+      ablated); a deleted file is `ExternalDeleted`, named in the header (`the_header_names_a_deleted_file...`).
+      Found on the way and fixed with tests: an edit after an external change was not a conflict; the watcher
+      reported opens, which made the refresh loop; a deleted file read as changed. `evidence/pr-026-c/`.)*
 - [ ] A reload takes the undo history with the document, and the product does not pretend otherwise.
 - [ ] **The split point considered and answered here**, not at the candidate.
 
