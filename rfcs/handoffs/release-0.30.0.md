@@ -59,6 +59,11 @@ known provenance-drift case in the checklist did not arise this time. `post-publ
 passes for **`0.30.0` and `0.29.0`**; `LICENSE` and `NOTICE` are in both published archives, and
 `NOTICE`'s hardcoded `rusqlite 0.40.2 and libsqlite3-sys 0.38.2` match the published lockfile.
 
+`cargo install tekstide --version 0.30.0` from the registry builds. `cargo audit`: **zero
+vulnerabilities**, and the three `unmaintained`/`unsound` warnings — `RUSTSEC-2024-0436`,
+`RUSTSEC-2026-0192`, `RUSTSEC-2026-0253` — match `dependency-advisories.md`'s own table exactly,
+with nothing to add and no retired row to delete.
+
 ## Left open, deliberately
 
 - **Two terminal PTY tests are registered intermittents**, diagnosed but not yet fixed
