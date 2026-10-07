@@ -232,6 +232,19 @@ measurement with no number in the evidence is not ticked.
 - [ ] A reload takes the undo history with the document, and the product does not pretend otherwise.
 - [ ] **The split point considered and answered here**, not at the candidate.
 
+### Carried into slice D at review 464
+
+- [ ] **D8's refresh is O(file size), per document.** `refresh_external_state` reads the whole file
+      through `file_snapshot_for_current_disk` — about **4 ms** at the 3.3 MB fixture, measured as
+      work between keystrokes. With the open set plural, a burst touching N open documents is **N
+      whole-file reads in one drain window**, each up to the 4 MiB cap. The 4 ms is per document, not
+      per burst. Decide what that means before the code assumes one.
+- [ ] **A save is a self-caused write into a watched directory.** `write_text_via_temp_rename` creates
+      its temp file in the document's own parent, which is watched while that document is open. Those
+      are write events, so review 464's access filter does not drop them, and they do not loop — the
+      refresh finds the text matches disk. **But every save costs a scan and a whole-file re-read of
+      the file just written.** Named at 464 so nobody measures saving and is surprised.
+
 ## PR-026-D — the open set
 
 - [ ] `open_buffer_count()` and `dirty_file_count()` count the whole open set. **A test fails if
