@@ -7133,9 +7133,12 @@ fn git_summary_subscription(
 struct ProjectWatch {
     generation: u64,
     watcher: tekstide_core::project::ProjectWatcher,
-    /// RFC-026 D8: the active document's file was named by a notice (or events may have been
-    /// lost), so the next drain tick asks the document whether it changed on disk.
-    document_touched: bool,
+    /// RFC-026 D8, widened by RFC-065 PR-065-B: every open document (not only the active
+    /// one -- a single `bool` could name only one) whose own file a notice named, or every
+    /// open document if events may have been lost. The next drain tick asks each one
+    /// whether it changed on disk, through
+    /// `ProjectSession::refresh_text_document_by_canonical_path`.
+    touched_documents: Vec<std::path::PathBuf>,
 }
 
 /// Brings one open project's watches to its desired set (RFC-026 D1, D7). Called only
@@ -7158,7 +7161,7 @@ fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::projec
             ProjectWatch {
                 generation,
                 watcher: tekstide_core::project::ProjectWatcher::open(),
-                document_touched: false,
+                touched_documents: Vec::new(),
             },
         );
     }
@@ -7177,12 +7180,20 @@ fn record_project_watch_notice(
     generation: u64,
     notice: tekstide_core::project::WatchNotice,
 ) {
-    let document_path = state
+    // RFC-065 PR-065-B: every open document's own canonical path, not only the active
+    // one's -- a notice naming a background document's file must reach that document too.
+    let open_document_paths: Vec<std::path::PathBuf> = state
         .app_shell
         .state()
         .project(project_id)
-        .and_then(|project| project.content_workspace().active_document())
-        .map(|document| document.target().canonical_path.clone());
+        .map(|project| {
+            project
+                .content_workspace()
+                .open_documents()
+                .map(|document| document.target().canonical_path.clone())
+                .collect()
+        })
+        .unwrap_or_default();
     let Some(watch) = state.project_watches.get_mut(project_id) else {
         return;
     };
@@ -7192,14 +7203,21 @@ fn record_project_watch_notice(
     let now = std::time::Instant::now();
     match notice {
         tekstide_core::project::WatchNotice::Changed(paths) => {
-            if document_path.is_some_and(|path| paths.contains(&path)) {
-                watch.document_touched = true;
+            for path in &open_document_paths {
+                if paths.contains(path) && !watch.touched_documents.contains(path) {
+                    watch.touched_documents.push(path.clone());
+                }
             }
             watch.watcher.record_changed_paths(&paths, now);
         }
         tekstide_core::project::WatchNotice::Failed => {
-            // Events may have been lost, so the document is asked about its file too.
-            watch.document_touched = true;
+            // Events may have been lost, so every open document is asked about its own
+            // file too.
+            for path in open_document_paths {
+                if !watch.touched_documents.contains(&path) {
+                    watch.touched_documents.push(path);
+                }
+            }
             watch.watcher.record_all_watched(now);
         }
     }
@@ -7222,19 +7240,23 @@ fn drain_project_watches(state: &mut State) {
             project.request_explorer_rescan(&directory);
         }
     }
-    // RFC-026 D8: the active document is asked once per tick, and only when a notice named its
-    // file. The core's refresh keeps the document's text: a changed file marks the document, a
-    // deleted one reports itself, and nothing is reloaded.
-    let touched: Vec<tekstide_core::project::ProjectId> = state
+    // RFC-026 D8, widened by RFC-065 PR-065-B: every open document named by a notice is
+    // asked once per tick, not only the active one. The core's refresh keeps each
+    // document's own text: a changed file marks it, a deleted one reports itself, and
+    // nothing is reloaded.
+    let touched: Vec<(tekstide_core::project::ProjectId, Vec<std::path::PathBuf>)> = state
         .project_watches
         .iter_mut()
         .filter_map(|(project_id, watch)| {
-            std::mem::take(&mut watch.document_touched).then(|| project_id.clone())
+            let paths = std::mem::take(&mut watch.touched_documents);
+            (!paths.is_empty()).then(|| (project_id.clone(), paths))
         })
         .collect();
-    for project_id in touched {
+    for (project_id, paths) in touched {
         if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
-            let _ = project.refresh_active_text_document();
+            for path in paths {
+                let _ = project.refresh_text_document_by_canonical_path(&path);
+            }
         }
     }
 }

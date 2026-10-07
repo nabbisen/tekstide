@@ -1684,6 +1684,24 @@ impl ProjectSession {
         result
     }
 
+    /// RFC-065 PR-065-B: see [`ProjectContentWorkspace::refresh_document_by_canonical_path`]'s
+    /// own doc -- the watcher's scope follows the whole open set, so a notice naming a
+    /// background document's file reaches that document, not only the active one.
+    pub fn refresh_text_document_by_canonical_path(
+        &mut self,
+        canonical_path: &std::path::Path,
+    ) -> Result<ExternalChangeDecision, ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        let result = self.content_workspace.refresh_document_by_canonical_path(
+            canonical_path,
+            &root,
+            TextDocumentOpenPolicy::linux_mvp(),
+        );
+        self.sync_file_state_from_content_workspace();
+        self.record_activity();
+        result
+    }
+
     pub fn assess_agent_launch_active_file_safety(
         &mut self,
     ) -> Result<ProjectActiveFileLaunchAssessment, ProjectContentError> {

@@ -561,3 +561,69 @@ fn opening_past_the_bound_is_refused_and_the_refusal_is_stated() {
 
     cleanup_root(root);
 }
+
+/// RFC-065 PR-065-B: a background (non-active) open document is reachable for refresh by its
+/// own canonical path, not only the active document -- found while working D7's own
+/// per-document-refresh measurement, a watch notice naming a background document's file was
+/// previously dropped on the floor (`shell.rs`'s own `document_touched: bool` could only ever
+/// name the active document). Also proves the active document's own displayed status is
+/// untouched by a background document's external change: `self.status` is what the chrome
+/// renders for the document on screen, and an unrelated background file changing must not
+/// leak into it -- the same cross-document isolation PR-065-A's own repair is about.
+#[test]
+fn a_background_document_is_refreshed_by_its_own_path_without_touching_the_active_status() {
+    let root = test_root("content-refresh-background-by-path");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project
+        .open_text_document("first.txt")
+        .expect("the first document should open");
+    project
+        .open_text_document("second.txt")
+        .expect("the second document should open, becoming active");
+    assert_eq!(
+        project.content_workspace().status(),
+        &ProjectContentStatus::Opened,
+        "test precondition: opening the second document leaves an ordinary Opened status"
+    );
+
+    let first_canonical_path = project
+        .content_workspace()
+        .open_documents()
+        .find(|document| {
+            document.target().selected_relative_path == std::path::Path::new("first.txt")
+        })
+        .expect("the first document must still be open")
+        .target()
+        .canonical_path
+        .clone();
+    std::fs::write(root.join("first.txt"), "first external\n")
+        .expect("external write to the background document's file should succeed");
+
+    project
+        .refresh_text_document_by_canonical_path(&first_canonical_path)
+        .expect("a refresh is a decision");
+
+    let first = project
+        .content_workspace()
+        .open_documents()
+        .find(|document| {
+            document.target().selected_relative_path == std::path::Path::new("first.txt")
+        })
+        .expect("the first document must still be open");
+    assert_eq!(
+        first.state(),
+        TextDocumentState::ExternalChanged,
+        "the background document's own state must reflect the external change"
+    );
+    assert_eq!(
+        project.content_workspace().status(),
+        &ProjectContentStatus::Opened,
+        "the active (second) document's own displayed status must be untouched by a \
+         background document's external change"
+    );
+
+    cleanup_root(root);
+}

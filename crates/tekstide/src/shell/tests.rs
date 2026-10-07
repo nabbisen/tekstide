@@ -20270,7 +20270,7 @@ fn a_stopped_watch_says_so_in_the_sidebar_and_gives_up_two_rows() {
             watcher: tekstide_core::project::ProjectWatcher::unavailable(
                 tekstide_core::project::WatchRefusal::new("the platform refused"),
             ),
-            document_touched: false,
+            touched_documents: Vec::new(),
         },
     );
     super::reconcile_project_watch(&mut state, &project_id);
@@ -20481,6 +20481,60 @@ fn an_external_change_to_the_open_document_reaches_it_without_a_silent_reload() 
         active_document_text(&state),
         "hello\n",
         "the document's text is not replaced: no silent reload"
+    );
+}
+
+/// RFC-065 PR-065-B: the watcher's scope now follows the whole open set, and so must the
+/// refresh a notice triggers -- found while working D7's per-document-refresh measurement,
+/// a notice naming a *background* (non-active) document's file was previously dropped on the
+/// floor (`document_touched: bool` could only ever name the active document). Opens two
+/// files, leaves the second active, changes the *first* (background) one on disk, and
+/// asserts the notice reaches it -- while the active document's own displayed status is
+/// untouched, the same cross-document isolation PR-065-A's own repair is about.
+#[test]
+fn an_external_change_to_a_background_open_document_reaches_it_too() {
+    let (mut state, dir) = state_with_an_open_document("d8-background-external-change", "hello\n");
+    std::fs::write(dir.join("second.txt"), "second\n").unwrap();
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+    state
+        .app_shell
+        .open_active_project_text_document("second.txt")
+        .expect("the second document should open, becoming active");
+    super::reconcile_project_watch(&mut state, &project_id);
+    let generation = state.project_watches[&project_id].generation;
+    let first_document = std::fs::canonicalize(dir.join("file.txt")).unwrap();
+
+    std::fs::write(&first_document, "changed on disk\n").unwrap();
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        generation,
+        tekstide_core::project::WatchNotice::Changed(vec![first_document]),
+    );
+    std::thread::sleep(tekstide_core::project::SCAN_WINDOW + std::time::Duration::from_millis(50));
+    super::drain_project_watches(&mut state);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    let first = project
+        .content_workspace()
+        .open_documents()
+        .find(|document| document.target().selected_relative_path == Path::new("file.txt"))
+        .expect("the first (background) document must still be open");
+    assert_eq!(
+        first.state(),
+        tekstide_core::content::TextDocumentState::ExternalChanged,
+        "the notice must reach the background document, not only the active one"
+    );
+    assert_eq!(
+        project.content_workspace().status(),
+        &tekstide_core::project::ProjectContentStatus::Opened,
+        "the active (second) document's own displayed status must be untouched by a \
+         background document's external change"
     );
 }
 

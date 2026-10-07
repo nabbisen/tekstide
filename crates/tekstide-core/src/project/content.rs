@@ -449,45 +449,85 @@ impl ProjectContentWorkspace {
         root: &ProjectRootHandle,
         policy: TextDocumentOpenPolicy,
     ) -> Result<ExternalChangeDecision, ProjectContentError> {
-        let Some(document) = self.active_document_mut() else {
+        let Some(document) = self.active_document() else {
             self.status = ProjectContentStatus::RefreshError {
                 message: "no active text document".to_owned(),
             };
             return Err(ProjectContentError::NoActiveDocument);
         };
+        let canonical_path = document.target().canonical_path.clone();
+        self.refresh_document_by_canonical_path(&canonical_path, root, policy)
+    }
+
+    /// RFC-065 PR-065-B: refreshes any open document by its own canonical path, not only the
+    /// active one. The watcher's own scope already follows the whole open set
+    /// (`watch_inputs()`); a notice naming a *background* document's file must reach that
+    /// document too, not be silently dropped the way a single `document_touched: bool` keyed
+    /// to "the active document" (`shell.rs`'s own `ProjectWatch`, pre-PR-065-B) could only
+    /// ever do. [`Self::refresh_active_document`] is this method applied to the active
+    /// document's own path.
+    ///
+    /// Updates `self.status` only when the refreshed document is the active one:
+    /// `self.status` is the convenience field the chrome renders for *the document on
+    /// screen*, and a background document's own `TextDocumentState` (read through
+    /// [`Self::open_documents`]) is already where its own state lives. Overwriting the
+    /// active document's displayed status because an unrelated background file changed
+    /// would be exactly the kind of cross-document leak PR-065-A's own repair was about not
+    /// having.
+    pub fn refresh_document_by_canonical_path(
+        &mut self,
+        canonical_path: &Path,
+        root: &ProjectRootHandle,
+        policy: TextDocumentOpenPolicy,
+    ) -> Result<ExternalChangeDecision, ProjectContentError> {
+        let Some(index) = self
+            .documents
+            .iter()
+            .position(|document| document.target().canonical_path == canonical_path)
+        else {
+            return Err(ProjectContentError::NoActiveDocument);
+        };
+        let is_active = self.active_index == Some(index);
+        let document = &mut self.documents[index];
 
         match document.refresh_external_state(root, policy) {
             Ok(decision) => {
-                self.status = match decision {
-                    ExternalChangeDecision::Unchanged
-                        if document.state() == TextDocumentState::SaveError =>
-                    {
-                        ProjectContentStatus::SaveError {
-                            message: "active document has save error".to_owned(),
+                if is_active {
+                    self.status = match decision {
+                        ExternalChangeDecision::Unchanged
+                            if document.state() == TextDocumentState::SaveError =>
+                        {
+                            ProjectContentStatus::SaveError {
+                                message: "active document has save error".to_owned(),
+                            }
                         }
-                    }
-                    ExternalChangeDecision::Unchanged if document.is_dirty() => {
-                        ProjectContentStatus::Edited
-                    }
-                    ExternalChangeDecision::Unchanged => ProjectContentStatus::Opened,
-                    // RFC-026 D8: a file that is gone is a state the product can say, distinct
-                    // from one that changed. The document's text is kept either way.
-                    ExternalChangeDecision::ExternalChanged | ExternalChangeDecision::Conflict
-                        if !document.target().canonical_path.exists() =>
-                    {
-                        ProjectContentStatus::ExternalDeleted
-                    }
-                    ExternalChangeDecision::ExternalChanged => {
-                        ProjectContentStatus::ExternalChanged
-                    }
-                    ExternalChangeDecision::Conflict => ProjectContentStatus::Conflict,
-                };
+                        ExternalChangeDecision::Unchanged if document.is_dirty() => {
+                            ProjectContentStatus::Edited
+                        }
+                        ExternalChangeDecision::Unchanged => ProjectContentStatus::Opened,
+                        // RFC-026 D8: a file that is gone is a state the product can say,
+                        // distinct from one that changed. The document's text is kept
+                        // either way.
+                        ExternalChangeDecision::ExternalChanged
+                        | ExternalChangeDecision::Conflict
+                            if !document.target().canonical_path.exists() =>
+                        {
+                            ProjectContentStatus::ExternalDeleted
+                        }
+                        ExternalChangeDecision::ExternalChanged => {
+                            ProjectContentStatus::ExternalChanged
+                        }
+                        ExternalChangeDecision::Conflict => ProjectContentStatus::Conflict,
+                    };
+                }
                 Ok(decision)
             }
             Err(error) => {
-                self.status = ProjectContentStatus::RefreshError {
-                    message: error.to_string(),
-                };
+                if is_active {
+                    self.status = ProjectContentStatus::RefreshError {
+                        message: error.to_string(),
+                    };
+                }
                 Err(ProjectContentError::Refresh(error))
             }
         }
