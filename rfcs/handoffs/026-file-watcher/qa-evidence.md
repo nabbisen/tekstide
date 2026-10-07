@@ -336,3 +336,51 @@ directory. The review allowed it on triggers; no per-trigger timing is recorded 
 **Gate.** `cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, and `git diff --cached
 --check` clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`
 (`/dev/shm/tkN`): each run `1795 passed, 0 failed, 4 ignored`, 0 entries left after each, at load ~9.
+
+## Review 457 — the receiver taken once, the refusals kept, and the reconcile cost measured
+
+**One waiter, by the type.** `WatchEvents` is no longer `Clone`, and `wait_for_event` takes `&mut self`.
+The only way out is `WatchEventsSlot::take`, which hands the receiver to exactly one caller. A second
+take, from the same slot or a clone of it, gets `None` and does not block. `try_lock` is not used.
+
+**Test.** `the_event_receiver_is_handed_out_once_so_only_one_waiter_can_exist`.
+
+**Ablation, and its limit.** Replacing `take` with `None` makes the test fail on its first assertion,
+"the first taker gets the receiver". That shows the test detects a missing receiver. It does not show a
+second waiter is impossible: no one-line change can give a second waiter a receiver, because there is
+only one `Receiver` and it is not `Clone`. The property is the type, and the test checks what it
+observably does. Restored by `ablate.sh`; the tree was clean afterwards.
+
+**Refusals kept.** `ProjectWatcher::reconcile` takes the admission refusals and keeps them on the owner;
+`admission_refusals()` returns them with their reasons. Nothing reads them yet, and none is shown (C3).
+Test: `the_owner_keeps_the_admission_refusals_it_was_given`.
+
+**Reconcile cost on the render thread, per expanded directory.** Measured by
+`measured_reconcile_cost_per_expanded_directory` (`#[ignore]`, run by hand:
+`cargo test -p tekstide-core measured_reconcile_cost -- --ignored --nocapture`). The trigger is the same pair
+the app runs: `watched_directories()` then `reconcile`, with a real `NotifyBackend`. Each count is one
+project on `/dev/shm` (tmpfs, not disk), 40 steady triggers after the first, p95 taken from the sorted
+steady samples. Budget: **NFR-PERF-002 p95 ≤ 32 ms**, the nearest stated budget, since no trigger is an
+editor keystroke. The per-expanded figure is p95 divided by the expanded count, so the root is in the
+total and not in the divisor.
+
+| expanded | desired | first trigger (places watches) | steady p95 | steady p95 per expanded directory | within 32 ms |
+|---:|---:|---:|---:|---:|:---:|
+| 1 | 2 | 0.216 ms | 0.016 ms | 15.72 µs | yes |
+| 10 | 11 | 0.153 ms | 0.042 ms | 4.19 µs | yes |
+| 100 | 101 | 1.410 ms | 0.428 ms | 4.28 µs | yes |
+| 500 | 501 | 5.242 ms | 2.113 ms | 4.23 µs | yes |
+
+The one-expanded row is noisy: its total is 16 µs, so the per-directory figure there is dominated by
+timer resolution, not work. The steady cost is about 4.2 µs per expanded directory across the measured range, 10 to 500.
+Scaling that to a larger tree (2,000 folders would be about 8.5 ms) is an **extrapolation, not a
+measurement**, and is not used to tick anything. The first trigger, which places the watches, costs
+5.2 ms at 500 and is the larger of the two; it was measured only up to 500.
+
+**Not measured.** A real disk filesystem rather than tmpfs, and a tree beyond 500 expanded folders.
+Both are stated here, not extrapolated into the box.
+
+**Gate.** `cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`:
+clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR` (`/dev/shm/tkgN`):
+each run `1797 passed, 0 failed, 5 ignored`, 0 entries left after each, at load ~5 at the end of the
+runs.

@@ -137,20 +137,27 @@ measurement with no number in the evidence is not ticked.
       *(Step 2: six call sites, `grep -n reconcile_project_watch crates/tekstide/src/shell.rs`: project open
       (three arms), folder toggle, document open, scan finished. The cost is in `reconcile_project_watch`'s
       doc comment. Not per frame.)*
-- [ ] **At most one waiter on the event stream, enforced by the type** (required at review 457):
+- [x] **At most one waiter on the event stream, enforced by the type** (required at review 457):
       `wait_for_event` holds the receiver's mutex across a blocking `recv()`, `WatchEvents` is
       clonable, and the method is `pub` — so a second caller blocks until the next filesystem event,
       which on a quiet project is indefinite. **Avoid `try_lock`**: on a subscription rebuild the new
       thread would fail the lock and return, leaving the project silently receiving nothing.
-- [ ] **Reconcile's cost on the render thread is measured before this box is ticked** (ruled at 457):
+      *(Done at review 457: `WatchEvents` is not `Clone` and `wait_for_event` takes `&mut self`; the receiver
+      is handed out once by `WatchEventsSlot::take`, and a second take gets `None` without blocking.
+      `the_event_receiver_is_handed_out_once_so_only_one_waiter_can_exist`. The ablation is weak by nature:
+      it shows the test sees a missing receiver, and the property rests on the type. `qa-evidence.md` § Review 457.)*
+- [x] **Reconcile's cost on the render thread is measured before this box is ticked** (ruled at 457):
       cost **per expanded directory**, not one figure at a hundred, reported against
       `NFR-PERF-002`'s p95 ≤ 32 ms — the nearest stated budget, since no trigger is an editor
       keystroke.
-- [ ] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
+      *(Measured: `measured_reconcile_cost_per_expanded_directory`, 1 to 500 expanded folders. Steady p95
+      about 4.2 µs per expanded directory from 10 to 500, and 2.1 ms at 500 — within 32 ms at every count.
+      Measured on tmpfs with 500 as the largest tree, not on disk or beyond. `qa-evidence.md` § Review 457.)*
+- [x] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
       already has.
       *(Step 2: the event thread is off the render thread, and the subscription has the explorer's shape.
-      Left open because reconcile runs in `update` on its triggers, doing filesystem calls there. The review
-      allowed that on triggers, but no per-trigger cost is measured yet.)*
+      Reconcile runs in `update` on its triggers, which is new render-thread work; its cost is measured and
+      within budget (box above). Ticked on that measurement, not on the claim that the work is zero.)*
 
 ## PR-026-C — the change arrives
 
