@@ -1364,3 +1364,42 @@ intermittents and does not write the code. Concretely, what is wanted:
 - Retire both rows from the register in that change, and say in the commit that the register's
   recurrence sections stay as history.
 - No product code. If the fix appears to need any, that finding outranks the fix: say so instead.
+
+## Verification, 2026-10-07 — review 476: the fix is accepted on reasoning, not on measurement
+
+**I could not reproduce rows 2 and 5 at all, with or without the fix.** Recorded in full, because an
+ablation that found nothing is itself a finding, and because the next person to chase this cause
+should not repeat the three attempts below.
+
+| What was run | Result |
+| --- | --- |
+| Both tests, 60 iterations, **fixed** code, 16 `yes` spinners on 32 cores (load avg ~16) | 60 passed |
+| Both tests, 60 iterations, **ablated** to the pre-fix single assertion, same contention | 60 passed |
+| Full workspace, 8 runs, **ablated** | row 5 failed 0 times; no test failed at all |
+
+The second line is the one that matters. **The ablated run passing is what makes the first line
+worthless**: a harness that cannot fail with the bug present proves nothing when it passes with the
+bug removed. Had I stopped at 60/60 on the fixed code I would have reported the fix as verified.
+
+**So the fix is accepted on inspection, not evidence.** It is correct in form — bounded 5s poll,
+10 ms sleep, original assertion message preserved — and it is strictly *weaker* in what it demands
+than the code it replaces (it waits for a condition instead of requiring it already hold), so it
+cannot fail where the old code passed. What is missing is any demonstration that it fails *less*.
+The evidence will be the absence of recurrence across the coming gates. **If either row reappears,
+this disposition reopens**; the rows are retired from active tracking, not declared solved.
+
+**Method notes, for whoever chases this cause next.**
+
+- **CPU contention alone does not reproduce it.** 68 attempts under deliberate load produced
+  nothing, while the dev team's two occurrences on 2026-10-07 came out of ordinary gate runs on
+  this same machine. Whatever the trigger is, it is not simply a loaded scheduler.
+- **A detector that greps the test's name matches a passing run too.** My first full-workspace
+  attempt reported "reproduced in 8 of 8" because `cargo test` prints the test's name whether it
+  passes or fails. Match `^test .* FAILED`, never the name.
+- **`error: test failed` is not a compile error.** My second attempt classified two runs as
+  "DID NOT COMPILE" on that string and `continue`d past the row-5 check, so "0 of 8" was really
+  "0 of the 6 runs I looked at". Match `^error\[E…\]` or `could not compile` for compilation.
+- **Loose end, unidentified.** Those same two runs had a genuine test failure under
+  `-p tekstide --bin tekstide`, and my filter discarded the names before I read them. The third
+  attempt's 8 runs were completely clean, so it did not recur. Recorded so that a failure seen on
+  2026-10-07 is not simply lost; it is not a new register row, because nothing names it yet.
