@@ -413,3 +413,97 @@ fn reopening_an_already_open_path_switches_to_the_existing_entry_rather_than_add
 
     cleanup_root(root);
 }
+
+/// RFC-065 D10: the close dialog needs no separate change -- `session.rs`'s own
+/// `set_file_state` already feeds `close_resources.dirty_files` from `dirty_file_count`, the
+/// same count this RFC's slice A made count the whole set. This is the acceptance criterion's
+/// own test, not a new code path: two documents open, one dirty, and the close dialog's count
+/// must say `1`, the same as `dirty_file_count` itself.
+#[test]
+fn the_close_dialog_counts_the_whole_open_set_through_the_existing_wiring() {
+    let root = test_root("content-close-dialog-counts-set");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project
+        .open_text_document("first.txt")
+        .expect("the first document should open");
+    project
+        .replace_active_text("first original, edited\n")
+        .expect("a local edit on the first document");
+    project
+        .open_text_document("second.txt")
+        .expect("the second document should open");
+
+    assert_eq!(
+        project.content_workspace().dirty_file_count(),
+        1,
+        "test precondition: one of the two open documents is dirty"
+    );
+    assert_eq!(
+        project.close_resource_summary().dirty_files,
+        1,
+        "the close dialog's own count must agree with dirty_file_count -- D10's own point is \
+         that this is the same field, not a second computation that could drift from it"
+    );
+
+    cleanup_root(root);
+}
+
+/// RFC-065 acceptance criterion: "the watcher's scope follows the open set: opening and
+/// closing documents changes the watched count, counted before and after." `watch_inputs()`
+/// changed from `active_document()` to `open_documents()` for this slice; this is the test
+/// that proves the consequence rather than the plumbing. The project root is always watched
+/// (`desired_directories` admits it unconditionally), so this counts the *document-derived*
+/// directories specifically rather than the raw total.
+#[test]
+fn the_watched_scope_grows_as_documents_in_new_directories_open() {
+    let root = test_root("content-watch-scope-grows-with-set");
+    std::fs::create_dir_all(root.join("a")).unwrap();
+    std::fs::create_dir_all(root.join("b")).unwrap();
+    std::fs::write(root.join("a/one.txt"), "a\n").unwrap();
+    std::fs::write(root.join("a/two.txt"), "a2\n").unwrap();
+    std::fs::write(root.join("b/three.txt"), "b\n").unwrap();
+    let mut project = project_at(&root);
+
+    let (before, _refused) = project.watched_directories();
+    assert_eq!(
+        before.len(),
+        1,
+        "before anything is open, only the project root is watched: {before:?}"
+    );
+
+    project
+        .open_text_document("a/one.txt")
+        .expect("the first document should open");
+    let (after_first, _refused) = project.watched_directories();
+    assert_eq!(
+        after_first.len(),
+        2,
+        "opening a document in a/ must add exactly one watched directory: {after_first:?}"
+    );
+
+    project
+        .open_text_document("b/three.txt")
+        .expect("the second document, in a different directory, should open");
+    let (after_second, _refused) = project.watched_directories();
+    assert_eq!(
+        after_second.len(),
+        3,
+        "a second document in a new directory (b/) must add another: {after_second:?}"
+    );
+
+    project
+        .open_text_document("a/two.txt")
+        .expect("a third document, in an already-watched directory, should open");
+    let (after_third, _refused) = project.watched_directories();
+    assert_eq!(
+        after_third.len(),
+        3,
+        "a third document in an already-watched directory (a/) must not add a fourth: \
+         {after_third:?}"
+    );
+
+    cleanup_root(root);
+}

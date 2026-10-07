@@ -105,9 +105,12 @@ impl ProjectContentWorkspace {
         self.documents.iter()
     }
 
-    /// RFC-026 D1's inputs to the watch scope: the expanded folders and the folder of
-    /// the open document, both relative to the project root. The open set is plural
-    /// only from RFC-026 slice D; until then the active document's folder is the one.
+    /// RFC-026 D1's inputs to the watch scope: the expanded folders and the folders of
+    /// every open document, both relative to the project root. RFC-065 PR-065-B: the open
+    /// set is plural now, and the watcher's own scope follows it -- `open_documents()`
+    /// rather than `active_document()` alone, the measurement RFC-065 itself named
+    /// ("`watch_inputs()` already returns `open_document_directories` -- plural, fed by
+    /// one. The watcher needs no change in shape, only in count.").
     pub fn watch_inputs(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
         let expanded = self
             .explorer_tree
@@ -115,8 +118,7 @@ impl ProjectContentWorkspace {
             .map(Path::to_path_buf)
             .collect();
         let open_document_directories = self
-            .active_document()
-            .into_iter()
+            .open_documents()
             .filter_map(|document| {
                 document
                     .target()
