@@ -74,6 +74,12 @@ measurement with no number in the evidence is not ticked.
 - [ ] Each save is the existing temp-and-rename path; N saves cost N watcher notices, and the
       changelog says so.
 
+- [ ] **The changelog carries the per-document refresh figure** (review 470): the delivery-work ratio
+      is **9.22×** reproduced (8.79× as submitted), so the refresh is close to linear in open-document
+      count — about **+4.2 ms** for one document and **+38.9 ms** for ten, per burst window, between
+      keystrokes. At D4's bound of twenty that extrapolates to roughly **78 ms**. `0.29.0` carried the
+      one-document cost; this release carries the shape.
+
 ## Whole-RFC
 
 - [ ] The requirements gap — **no `REQ-` names multi-document** — is written up for the owner, and no
