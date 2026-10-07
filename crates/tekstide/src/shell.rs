@@ -9313,25 +9313,31 @@ fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message
         Some(ProjectMode::Content) => {
             let active_project = state.app_shell.state().active_project();
             match active_project {
-                Some(project) => crate::surface::explorer::view(
-                    project.content_workspace().explorer_tree(),
-                    project.content_workspace().explorer_status(),
-                    crate::surface::explorer::ExplorerCursor {
-                        highlight: state.explorer_highlight,
-                        top: state.explorer_top,
-                        capacity: explorer_window_capacity(state),
-                        watch_stopped: active_watch_stopped(state),
-                    },
-                    &state.catalog,
-                    &state.theme,
-                    crate::surface::explorer::RowContext {
-                        git_summary: Some(project.git_summary()),
-                        open_path: project
-                            .content_workspace()
-                            .active_document()
-                            .map(|document| document.target().selected_relative_path.as_path()),
-                    },
-                ),
+                Some(project) => {
+                    // RFC-065 PR-065-B: every open document's own path, not just the
+                    // active one's -- see `RowContext::open_paths`'s own doc.
+                    let open_paths: Vec<std::path::PathBuf> = project
+                        .content_workspace()
+                        .open_documents()
+                        .map(|document| document.target().selected_relative_path.clone())
+                        .collect();
+                    crate::surface::explorer::view(
+                        project.content_workspace().explorer_tree(),
+                        project.content_workspace().explorer_status(),
+                        crate::surface::explorer::ExplorerCursor {
+                            highlight: state.explorer_highlight,
+                            top: state.explorer_top,
+                            capacity: explorer_window_capacity(state),
+                            watch_stopped: active_watch_stopped(state),
+                        },
+                        &state.catalog,
+                        &state.theme,
+                        crate::surface::explorer::RowContext {
+                            git_summary: Some(project.git_summary()),
+                            open_paths: &open_paths,
+                        },
+                    )
+                }
                 None => text(sidebar_label(state)).into(),
             }
         }

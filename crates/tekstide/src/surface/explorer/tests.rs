@@ -1134,9 +1134,10 @@ fn the_highlight_and_the_open_file_are_distinguishable_without_colour() {
         plain_node("c.rs", ExplorerNodeKind::File),
     ]));
     // `b.rs` is open in the editor; the keyboard is on `a.rs`.
+    let open_paths = [PathBuf::from("b.rs")];
     let context = super::RowContext {
         git_summary: None,
-        open_path: Some(Path::new("b.rs")),
+        open_paths: &open_paths,
     };
     let lines: Vec<String> = tree_lines(
         &catalog,
@@ -1178,6 +1179,51 @@ fn the_highlight_and_the_open_file_are_distinguishable_without_colour() {
     assert!(
         both.starts_with("> ") && both.contains("[open]"),
         "{both:?}"
+    );
+}
+
+/// RFC-065 PR-065-B, review 468's disclosure 1: `[open]` must mark every member of the open
+/// set, not just the active document -- `open_path: Option<&Path>` could only ever mark one
+/// row no matter how many documents were really open, which was correct under slice A's own
+/// "only the counts" boundary (D2) and a truth problem once two documents can be open at once.
+#[test]
+fn open_marks_every_member_of_the_open_set_not_only_the_active_one() {
+    let catalog = real_catalog();
+    let tree = tree_with(scan_at_root(vec![
+        plain_node("a.rs", ExplorerNodeKind::File),
+        plain_node("b.rs", ExplorerNodeKind::File),
+        plain_node("c.rs", ExplorerNodeKind::File),
+    ]));
+    // `a.rs` and `b.rs` are both open; only `b.rs` is active. `c.rs` is open nowhere.
+    let open_paths = [PathBuf::from("a.rs"), PathBuf::from("b.rs")];
+    let context = super::RowContext {
+        git_summary: None,
+        open_paths: &open_paths,
+    };
+    let lines: Vec<String> = tree_lines(
+        &catalog,
+        &tree,
+        &ProjectExplorerStatus::Ready,
+        0,
+        0,
+        100,
+        context,
+    )
+    .iter()
+    .map(|line| plain_words(line))
+    .collect();
+
+    assert!(
+        lines[0].contains("[open]"),
+        "a.rs is open (not active) and must still be tagged: {lines:?}"
+    );
+    assert!(
+        lines[1].contains("[open]"),
+        "b.rs is open and active: {lines:?}"
+    );
+    assert!(
+        !lines[2].contains("[open]"),
+        "c.rs is open nowhere: {lines:?}"
     );
 }
 

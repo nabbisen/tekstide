@@ -178,11 +178,16 @@ pub(crate) fn node_line_with(
 }
 
 /// What a row needs from outside the tree: the active project's Git summary
-/// (per-file status words) and the path of the file open in the editor.
+/// (per-file status words) and the paths of every file open in the editor.
+///
+/// RFC-065 PR-065-B: `open_paths`, plural, was `open_path: Option<&Path>` (the single
+/// active document) until the open set made that a truth problem -- disclosed at PR-065-A's
+/// own review (468) and ruled in scope for this slice: the tag means "open," and once a set
+/// exists, "open" can no longer mean only "active."
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RowContext<'a> {
     pub(crate) git_summary: Option<&'a ProjectGitSummary>,
-    pub(crate) open_path: Option<&'a std::path::Path>,
+    pub(crate) open_paths: &'a [std::path::PathBuf],
 }
 
 impl<'a> RowContext<'a> {
@@ -190,7 +195,7 @@ impl<'a> RowContext<'a> {
     pub(crate) fn git(git_summary: Option<&'a ProjectGitSummary>) -> Self {
         Self {
             git_summary,
-            open_path: None,
+            open_paths: &[],
         }
     }
 }
@@ -242,7 +247,10 @@ pub(crate) fn row_text(
                 catalog,
                 node,
                 expanded,
-                context.open_path == Some(node.relative_path.as_path()),
+                context
+                    .open_paths
+                    .iter()
+                    .any(|open_path| open_path.as_path() == node.relative_path.as_path()),
                 context.git_summary
             )
         ),
