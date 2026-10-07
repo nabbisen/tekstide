@@ -1,6 +1,6 @@
 # RFC-065: The Multi-Document Model
 
-Status: **Implemented and closed 2026-10-08; `0.30.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-08; released as `0.30.0` 2026-10-08.** See the
 *Closed* section. **Accepted by the human owner 2026-10-07.** D1–D9 as written, plus D10–D13 — see
 *Decided on acceptance*. Proposed 2026-10-07. `0.30.0`, M13. Split from RFC-026 on 2026-10-07 when
 the watcher shipped alone. **Its first slice repairs a data-loss defect that is live in `0.29.0`.**
