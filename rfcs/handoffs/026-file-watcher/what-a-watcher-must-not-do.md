@@ -1,8 +1,8 @@
 ---
 title: "RFC-026 — what a watcher must not do"
 rfc: "RFC-026"
-rfc_file: "../../accepted/026-file-watcher.md"
-source_rfc_status: "Accepted 2026-09-30 — M13"
+rfc_file: "../../done/026-file-watcher.md"
+source_rfc_status: "Implemented and closed 2026-10-07 — released as 0.29.0"
 target_milestone: "M13"
 created: "2026-09-30"
 ---

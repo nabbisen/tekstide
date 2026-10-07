@@ -1,6 +1,6 @@
 # RFC-026: File Watcher
 
-Status: **Accepted by the human owner 2026-09-30.** D1–D8 as written, plus D9–D12 — see *Decided on acceptance*. Proposed 2026-09-30. `0.29.0` in the authorised schedule, and **M13 proper**. Closes
+Status: **Implemented and closed 2026-10-07; released as `0.29.0` (`e346dfe`).** Closed late, within hours rather than releases — see the Closed section. **Accepted by the human owner 2026-09-30.** D1–D8 as written, plus D9–D12 — see *Decided on acceptance*. Proposed 2026-09-30. `0.29.0` in the authorised schedule, and **M13 proper**. Closes
 `REQ-FILE-003` (the explorer updates when files change externally), `REQ-FILE-004` (watching is
 debounced and does not block editor input), `NFR-PERF-007` (batched under churn), and the
 single-document limit that "multi-document editing" in the 1.0 list depends on.
@@ -189,3 +189,44 @@ decides it: **what it does when the kernel refuses another watch.**
 
 **Ships as `0.29.0`**, with the split point in *If this is larger than it looks* left open as an
 architect's decision at review.
+
+## Closed (2026-10-07)
+
+**Shipped as `0.29.0`.** `REQ-FILE-003`, `REQ-FILE-004` and `NFR-PERF-007` met and measured.
+
+**The measurements that decided the design, each taken before the thing it judged.** The batching was
+falsified against a simulated stream before any watcher existed (D11), so `notify` was judged against
+a number that already existed: a thousand events into one directory cost **one scan per window**, and
+removing the batching made it a thousand. The reconcile cost was measured **per expanded directory** —
+about 4.2 µs, flat from 10 to 500 — rather than as one figure at one size, which is why it could be
+scaled rather than trusted. And `REQ-FILE-004` was measured with an **unwatched control in the same
+process under the same load**, in every ordering, after the first attempt compared across releases and
+could not tell a watcher's cost from a busy machine.
+
+**The defect that measuring found.** `notify` subscribes to `OPEN`; the document refresh reads its own
+file; each refresh answered itself. 239 root scans and 465 ms of work between keystrokes, still
+running two minutes after the burst ended — a figure wrong by two orders of magnitude, visible only
+because the loop ran long enough to see. A product that watches a directory it also writes to is a
+feedback loop waiting for a trigger.
+
+**Conditions that became types rather than rules.** `WatchRefusal` has no variants, so the degradation
+policy cannot branch on a cause. `WatchedDirectory` can be built only through `admit`, so D7's access
+policy is enforced by construction. `WatchEvents` is not `Clone` and waits on `&mut self`, so a second
+waiter cannot block on a quiet project.
+
+**Three corrections to the reviewer's own conditions**, each caused by the condition and found by the
+implementer asking rather than complying: C1 said *any* non-success stops watching, which would have
+made a deleted directory — the normal event a watcher observes — stop everything; the budget box said
+the sentence must say "why", after C3 had ruled no cause text reaches the screen; and the sidebar
+sentence the reviewer was offered (A) would have failed the 32-column test the reviewer himself
+required.
+
+**Closed late, and the invariant caught it.** `0.29.0` was published, tagged and marked released
+before this RFC moved to `done/` — the failure RFC-053 cost three releases, repeated by the reviewer
+who wrote the memory about it, and caught within hours by
+`an_rfc_a_release_names_lives_in_done` rather than three releases later. The check works; the habit it
+was built to replace did not.
+
+**Left open:** the real `ENOSPC` path is evidenced by reading, not by a test; a save costs a scan and
+a whole-file re-read of the file just written; and the per-document refresh is O(file size), which
+**RFC-065** inherits.

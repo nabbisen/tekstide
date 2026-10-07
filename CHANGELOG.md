@@ -3,7 +3,7 @@
 ## 0.29.0 - The Explorer Keeps Up On Its Own
 
 Status: **released on 2026-10-07.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.29.0` at `e346dfe`. Post-publish: `0.29.0` passes all three checks, and **`0.28.0` still installs** now that a newer core exists. Scoped 2026-10-07: `REQ-FILE-003`, `REQ-FILE-004` and `NFR-PERF-007` met and measured. RFC-026
-is now the watcher alone — the multi-document model it originally covered is **RFC-065**, with its own
+is now the watcher alone — the multi-document model it originally covered has its own RFC, with its own
 number and its own release, `0.30.0`.
 
 The explorer used to read a folder once and never again: a file created, deleted or renamed after you
@@ -91,7 +91,7 @@ each release's own Added section for exactly this shape of staleness.
 ### What this release does not do
 
 - **The multi-document model is not in this release.** One file open at a time, even across several
-  projects — `active_document` keeps its meaning. It is **RFC-065**, scheduled for `0.30.0`.
+  projects — `active_document` keeps its meaning. It has its own RFC, scheduled for `0.30.0`.
 - **Watching is per project and binary: live or stopped, nothing in between.** A refusal stops every
   watch in that project at once; it does not degrade one folder at a time, and nothing retries on its own.
 - **The real kernel refusal path (`ENOSPC`, the inotify instance or watch limit) is evidenced by reading
@@ -101,7 +101,7 @@ each release's own Added section for exactly this shape of staleness.
 - **A save costs one extra scan and a whole-file re-read of the file it just wrote**, since the save is
   itself a change inside a folder the project watches. Measured at about 4 ms for a 3.3 MB file.
 - **The open-document refresh reads the whole file, every time**, bounded by the same 4 MiB editable cap
-  everything else is. With one document this is a few milliseconds; `RFC-065` inherits the question of
+  everything else is. With one document this is a few milliseconds; the multi-document RFC inherits the question of
   what a burst touching several open documents at once should cost, rather than this release deciding it
   for a case it does not yet have.
 - **Everything `0.28.0` listed still holds**, including there being **no screen-reader support**.

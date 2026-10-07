@@ -1,15 +1,15 @@
 ---
 title: "RFC-026: File Watcher — implementation handoff"
 rfc: "RFC-026"
-rfc_file: "../../accepted/026-file-watcher.md"
-source_rfc_status: "Accepted 2026-09-30 — M13"
+rfc_file: "../../done/026-file-watcher.md"
+source_rfc_status: "Implemented and closed 2026-10-07 — released as 0.29.0"
 target_milestone: "M13"
 created: "2026-09-30"
 ---
 
 # The explorer reads a folder once and never again
 
-Source RFC: [RFC-026](../../accepted/026-file-watcher.md)
+Source RFC: [RFC-026](../../done/026-file-watcher.md)
 
 ## What this is
 
@@ -27,7 +27,7 @@ anything. D makes the open set plural.
 
 ## Read these first, in this order
 
-1. [The RFC](../../accepted/026-file-watcher.md) — nine measurements, D1–D8,
+1. [The RFC](../../done/026-file-watcher.md) — nine measurements, D1–D8,
    and *Decided on acceptance* (D9–D12). **D11 puts the batching before the dependency.**
 2. [What a watcher must not do](./what-a-watcher-must-not-do.md) — the risk document.
 3. [The PR plan](./task-breakdown-pr-plan.md).
