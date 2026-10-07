@@ -194,7 +194,14 @@ measurement with no number in the evidence is not ticked.
       expanded folder appears and disappears with no reopen and no keystroke. `evidence/pr-026-c/`, with a
       README that says what the captures prove and what they do not: latency and bursts are not in them.)*
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
-      baseline harness.
+      baseline harness. **Ruled at review 461: two numbers, and the box is ticked by the second.** A
+      pre-D8 baseline, then D8's wiring (which reads a file on the update thread), then a re-measure —
+      without the first, D8's cost is unattributable and "still within budget" cannot be told from
+      "always was". The requirement is a claim about the **shipped** system, so only the post-D8
+      number discharges it.
+- [ ] *Recorded at 461:* captures use a **fresh `XDG_STATE_HOME`**, not only a fresh project fixture.
+      `02-created-externally.png` reads "19 projects" — nothing leaked, since only a count is shown,
+      but the same capture of the Project Board would have shown nineteen real paths.
 - [ ] **The book names the batching window** (moved here from A at review 450): by this slice a user
       can observe it, so it describes real behaviour rather than an internal constant.
 - [ ] Unsaved edits survive an external change; **no silent reload**; a deleted open file is a state
