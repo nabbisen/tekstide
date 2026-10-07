@@ -107,7 +107,9 @@ measurement with no number in the evidence is not ticked.
       *(The policy is proven: `expanding_collapsing_and_closing_move_the_watched_count_exactly`. Now
       wired to the live explorer tree; the open-document set is counted at the document-open trigger.)*
 - [ ] **Budget exhaustion forced in a test**: no crash, today's fallback behaviour, and a sentence on
-      screen saying watching stopped and why.
+      screen saying watching stopped and **what it means for the user**. *(Corrected at review 459:
+      this box said "and why", written before C3 ruled that no cause text reaches the screen. C3 is
+      the later and more specific ruling; a kernel watch limit is not something a user can act on.)*
       *(Forced and tested against a fake backend — `a_refused_watch_stops_watching_and_drops_every_watch_without_crashing`.
       **Left open on one point, for the reviewer:** the sentence is written and drawn by the explorer
       view whenever the project's watching is stopped (step 5), and the app test forces that stop and
@@ -179,6 +181,11 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-026-C — the change arrives
 
+- [ ] **The row floor survives the stop sentence** (review 459): `rows_that_fit` ends `.max(1)`, then
+      `shell.rs:4205` does `rows.saturating_sub(WATCH_STOPPED_LINES)` — **0 rows when the floor
+      returned 1 or 2**, a tree showing nothing while files exist, in exactly the short-sidebar case
+      the floor was written for. Move the subtraction inside `rows_that_fit` so there is one floor and
+      it happens last; a guarantee a caller can undo is not one.
 - [ ] **`REQ-FILE-003` captured live**: a file created in an expanded folder appears without the user
       reopening it.
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
