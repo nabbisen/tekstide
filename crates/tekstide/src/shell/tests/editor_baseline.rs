@@ -470,3 +470,276 @@ fn write_the_baseline_fixture() {
         std::env::var("TEKSTIDE_BASELINE_FIXTURE_OUT").expect("set TEKSTIDE_BASELINE_FIXTURE_OUT");
     std::fs::write(path, fixture_text()).unwrap();
 }
+
+/// What the runtime delivered between keystrokes, and what it cost.
+struct BurstRun {
+    stages: Vec<Stage>,
+    delivery: std::time::Duration,
+    notices: usize,
+    scans_run: usize,
+    scans_applied: usize,
+    files_written: usize,
+}
+
+/// RFC-026 slice C, `REQ-FILE-004`: keystrokes measured in the same process as a watched burst,
+/// with the same stages as the RFC-057 baseline. The burst writes `files` files into the project
+/// root (always watched) at one file per `pace`, from a thread of its own. Between keystrokes this
+/// delivers what the runtime's subscriptions would, in the order they would arrive: each watch
+/// notice, a drain tick when a window is due, and each explorer scan result, all through `update`,
+/// and it runs each pending explorer scan on a worker thread. Delivery is timed apart from the
+/// keystroke, so the keystroke figures are the editor's own. Runs until the burst has finished and
+/// settled, and at least `min_keystrokes` have been measured.
+fn keystrokes_under_a_watched_burst(
+    state: &mut State,
+    files: usize,
+    pace: std::time::Duration,
+    min_keystrokes: usize,
+    width: f32,
+) -> BurstRun {
+    use std::sync::mpsc::channel;
+    use std::time::{Duration, Instant};
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .expect("the fixture has an active project");
+    let root = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .expect("the project is open")
+        .canonical_root_path()
+        .clone();
+    let generation = state.project_watches[&project_id].generation;
+    let events = state.project_watches[&project_id]
+        .watcher
+        .events()
+        .expect("notify starts on Linux")
+        .take()
+        .expect("the harness is the one waiter");
+
+    let (notice_tx, notice_rx) = channel();
+    std::thread::spawn(move || {
+        let mut events = events;
+        while let Some(notice) = events.wait_for_notice() {
+            if notice_tx.send(notice).is_err() {
+                break;
+            }
+        }
+    });
+
+    let burst = (files > 0).then(|| {
+        let root = root.clone();
+        std::thread::spawn(move || {
+            let mut written = 0;
+            for index in 0..files {
+                if std::fs::write(root.join(format!("burst-{index:05}.txt")), b"x").is_ok() {
+                    written += 1;
+                }
+                std::thread::sleep(pace);
+            }
+            written
+        })
+    });
+
+    let (scan_tx, scan_rx) = channel::<Message>();
+    let mut launched: std::collections::HashSet<(std::path::PathBuf, u64)> = Default::default();
+    let mut run = BurstRun {
+        stages: Vec::new(),
+        delivery: Duration::ZERO,
+        notices: 0,
+        scans_run: 0,
+        scans_applied: 0,
+        files_written: 0,
+    };
+    let mut last_tick = Instant::now();
+    let mut burst_done = burst.is_none();
+    let mut quiet_since: Option<Instant> = None;
+    let mut keystrokes = 0usize;
+
+    // One pass of what the runtime delivers between two keystrokes.
+    let deliver = |state: &mut State,
+                   run: &mut BurstRun,
+                   last_tick: &mut Instant,
+                   launched: &mut std::collections::HashSet<(std::path::PathBuf, u64)>|
+     -> bool {
+        let started = Instant::now();
+        let mut progressed = false;
+        while let Ok(notice) = notice_rx.try_recv() {
+            run.notices += 1;
+            progressed = true;
+            let _ = super::super::update(
+                state,
+                Message::ProjectWatchNotice {
+                    project_id: project_id.clone(),
+                    generation,
+                    notice,
+                },
+            );
+        }
+        if state.project_watches[&project_id]
+            .watcher
+            .has_pending_scans()
+            && last_tick.elapsed() >= tekstide_core::project::SCAN_WINDOW
+        {
+            *last_tick = Instant::now();
+            progressed = true;
+            let _ = super::super::update(state, Message::WatchDrainTick);
+        }
+        for request in state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .map(|project| project.explorer_scan_requests())
+            .unwrap_or_default()
+        {
+            if launched.insert((request.path().to_path_buf(), request.generation())) {
+                run.scans_run += 1;
+                progressed = true;
+                let scan_tx = scan_tx.clone();
+                let project_id = project_id.clone();
+                std::thread::spawn(move || {
+                    let completed = request.run();
+                    let _ = scan_tx.send(Message::ExplorerScanFinished {
+                        project_id,
+                        completed,
+                    });
+                });
+            }
+        }
+        while let Ok(message) = scan_rx.try_recv() {
+            run.scans_applied += 1;
+            progressed = true;
+            let _ = super::super::update(state, message);
+        }
+        run.delivery += started.elapsed();
+        progressed
+    };
+
+    let started_at = Instant::now();
+    loop {
+        let progressed = deliver(state, &mut run, &mut last_tick, &mut launched);
+        if !burst_done {
+            burst_done = burst.as_ref().is_some_and(|handle| handle.is_finished());
+        }
+        if started_at.elapsed() > Duration::from_secs(120) {
+            break;
+        }
+        if keystrokes >= min_keystrokes && burst_done {
+            // The burst has finished and enough keystrokes are measured: stop typing, and
+            // deliver until nothing is left, then stop.
+            let idle = !progressed
+                && !state.project_watches[&project_id]
+                    .watcher
+                    .has_pending_scans();
+            if idle {
+                let since = *quiet_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_millis(300) {
+                    break;
+                }
+            } else {
+                quiet_since = None;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+            continue;
+        }
+        run.stages.push(one_keystroke(state, character("x"), width));
+        keystrokes += 1;
+    }
+
+    if let Some(handle) = burst {
+        run.files_written = handle.join().unwrap_or(0);
+    }
+    run
+}
+
+/// The harness runs end to end on a small document: a real burst reaches the watch, becomes
+/// notices, drains into explorer scans, and the scan results are applied, while keystrokes
+/// still edit the document. Runs in the ordinary suite; asserts nothing about speed.
+#[test]
+fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
+    let (mut state, _dir) = state_with_an_open_document("editor-watched-smoke", "one\ntwo");
+    state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
+
+    let run = keystrokes_under_a_watched_burst(
+        &mut state,
+        100,
+        std::time::Duration::from_micros(500),
+        5,
+        880.0,
+    );
+
+    assert_eq!(run.files_written, 100, "the burst wrote every file");
+    assert!(run.notices > 0, "the watch reported the burst");
+    assert!(
+        run.scans_applied >= 1,
+        "a drained window reached the explorer and its result was applied"
+    );
+    assert!(
+        active_document_text(&state).starts_with("x"),
+        "keystrokes still edited the document during the burst"
+    );
+}
+
+/// **REQ-FILE-004's baseline (RFC-026 slice C), before D8.** Keystroke latency on the RFC-057
+/// 100,000-line fixture, the character-at-the-start scenario, measured twice: with the project
+/// watched and nothing happening (the idle watch), and while a 1,000-file burst is written into
+/// the project root at one file a millisecond (the burst). The burst is paced so it stays in flight
+/// across the keystrokes. This is the number D8 is measured against; it does not discharge
+/// `REQ-FILE-004`, which the post-D8 measurement does.
+///
+/// `cargo test --release -p tekstide editor_typing_latency_under_a_watched_burst -- --ignored --nocapture`
+#[test]
+#[ignore = "a measurement, not a check: release build, see the module doc"]
+fn editor_typing_latency_under_a_watched_burst() {
+    let text = fixture_text();
+    let width = 880.0;
+    let mut out = String::new();
+    out.push_str(&format!(
+        "fixture: {} lines, {} bytes; body font {} px; layout width {} px; keystroke: character at the start\n",
+        FIXTURE_LINES,
+        text.len(),
+        crate::theme::Theme::default().font_size_body(),
+        width
+    ));
+    let idle = {
+        let (mut state, _dir) = state_with_an_open_document("editor-watched-idle", &text);
+        state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
+        for _ in 0..3 {
+            let _ = one_keystroke(&mut state, character("w"), width);
+        }
+        keystrokes_under_a_watched_burst(&mut state, 0, std::time::Duration::ZERO, 60, width)
+    };
+    out.push_str(&report(
+        "the project watched, nothing happening",
+        &idle.stages,
+    ));
+    let burst = {
+        let (mut state, _dir) = state_with_an_open_document("editor-watched-burst", &text);
+        state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
+        for _ in 0..3 {
+            let _ = one_keystroke(&mut state, character("w"), width);
+        }
+        keystrokes_under_a_watched_burst(
+            &mut state,
+            1_000,
+            std::time::Duration::from_millis(1),
+            30,
+            width,
+        )
+    };
+    out.push_str(&report(
+        "during a 1,000-file burst into the project root, one file a millisecond",
+        &burst.stages,
+    ));
+    out.push_str(&format!(
+        "watch, during the burst: {} files written, {} notices delivered, {} explorer scans run, {} results applied; delivery (the work between keystrokes, not counted in the keystroke figures) {:.1} ms in total\n",
+        burst.files_written,
+        burst.notices,
+        burst.scans_run,
+        burst.scans_applied,
+        millis(burst.delivery),
+    ));
+    println!("{out}");
+}

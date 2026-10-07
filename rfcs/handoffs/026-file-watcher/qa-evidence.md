@@ -487,3 +487,40 @@ for changes in the root folder, which the capture did not exercise.
 
 **Gate.** fmt and clippy clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`:
 each `1810 passed, 0 failed, 5 ignored`, 0 entries left, load 12 to 16.
+
+## Review 461 — `REQ-FILE-004`: the harness and the pre-D8 baseline
+
+**The harness.** `keystrokes_under_a_watched_burst` (`shell/tests/editor_baseline.rs`), built on the RFC-057
+harness's own helpers: the 100,000-line fixture, the character-at-the-start keystroke, and the same three
+stages (update, view, layout), timed apart. The burst writes files into the project root, which is always
+watched. The harness takes the project's event receiver itself, since the iced subscription does not run
+in-process, and delivers what the runtime's subscriptions would between keystrokes, in order: each watch
+notice, a drain tick when a window is due, and each explorer scan result, all through `update`. Each pending
+explorer scan runs on a worker thread. Delivery is timed apart from the keystroke and reported as the work
+between keystrokes.
+
+**Proof the pipeline runs end to end.** `the_watched_burst_harness_delivers_the_burst_end_to_end` (ordinary
+suite): 100 files written, notices delivered, a window drained into an applied scan, and keystrokes still
+edited the document during the burst.
+
+**The baseline** (`evidence/pr-026-c/req-file-004-baseline.md`): four release runs, each with a fresh
+`XDG_STATE_HOME`, `TMPDIR=/dev/shm/tkrel`, and `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`, RFC-057's
+build (the suite's `()` renderer exists only with debug assertions on). Totals, p95 across runs:
+
+| condition | keystrokes per run | p95 total, range across four runs | budget (NFR-PERF-003) |
+| --- | ---: | --- | --- |
+| project watched, nothing happening | 60 | 8.05 to 8.41 ms | p95 at most 16 ms |
+| during a 1,000-file burst, one a millisecond | 129 to 133 | 8.12 to 8.39 ms | p95 at most 16 ms |
+
+During each burst: 4,003 notices delivered, 3 explorer scans run and applied, 1.2 to 1.7 ms of delivery
+work between keystrokes.
+
+**Limits, stated where the figures are quoted.** The machine was not quiet: load 6.2 to 10.7, against
+RFC-057's 1.0 to 1.6. Painting and presenting are not measured. The runtime's event loop is emulated, and
+keys go through `update` rather than the window.
+
+**What this is not.** A baseline. `REQ-FILE-004` says watching must not block editor input in the shipped
+system, so the box is ticked by the post-D8 measurement, with both numbers reported.
+
+**Gate.** fmt and clippy clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed
+`TMPDIR`: each `1811 passed, 0 failed, 6 ignored`, 0 entries left.

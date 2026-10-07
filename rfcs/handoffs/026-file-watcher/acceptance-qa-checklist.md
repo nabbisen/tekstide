@@ -194,7 +194,11 @@ measurement with no number in the evidence is not ticked.
       expanded folder appears and disappears with no reopen and no keystroke. `evidence/pr-026-c/`, with a
       README that says what the captures prove and what they do not: latency and bursts are not in them.)*
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
-      baseline harness. **Ruled at review 461: two numbers, and the box is ticked by the second.** A
+      baseline harness.
+      *(Harness and pre-D8 baseline, review 461's order: `editor_typing_latency_under_a_watched_burst`, four
+      runs, p95 8.05–8.41 ms idle and 8.12–8.39 ms during a 1,000-file burst, against NFR-PERF-003's 16 ms.
+      **Unticked on purpose:** a baseline is not the requirement. The box is ticked by the measurement after
+      D8, with both numbers reported. `evidence/pr-026-c/req-file-004-baseline.md`, taken at load 6 to 11.)* **Ruled at review 461: two numbers, and the box is ticked by the second.** A
       pre-D8 baseline, then D8's wiring (which reads a file on the update thread), then a re-measure —
       without the first, D8's cost is unattributable and "still within budget" cannot be told from
       "always was". The requirement is a claim about the **shipped** system, so only the post-D8
