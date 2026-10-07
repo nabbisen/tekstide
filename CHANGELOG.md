@@ -2,9 +2,10 @@
 
 ## 0.30.0 - The Multi-Document Model
 
-Status: **in progress.** RFC-065, PR-065-A (the repair), PR-065-B (the set) and PR-065-C (the switcher)
-are done; save-all (PR-065-D) is not. This entry is written incrementally as slices close, not held back
-for the release; see `rfcs/handoffs/065-multi-document/` for the full handoff pack.
+Status: **in progress.** RFC-065's four slices (the repair, the set, the switcher, save-all) are all
+done; the requirements-gap write-up and the release candidate itself are not. This entry is written
+incrementally as slices close, not held back for the release; see `rfcs/handoffs/065-multi-document/`
+for the full handoff pack.
 
 **`0.29.0`'s own open question, answered**: that release's "what this release does not do" section said
 of the open-document refresh, "with one document this is a few milliseconds; the multi-document RFC
@@ -26,6 +27,17 @@ open in the editor, it now marks every member of the open set — a project with
 shows `[open]` on all three rows, not one. A user who learned the old, singular meaning should read the
 tag as "open", not "the one on screen"; the editor's own header, above the cursor line, is what names
 *which* open document is active.
+
+**Save all**: `Ctrl+Shift+S` (or the editor's own "Save All" button) saves every open document in one
+action — new work, not a loop around `Ctrl+S`'s own save, because saving several files is a sequence of
+writes that can fail partway. One document's own save being blocked (an external change, an unsafe
+symlink, a write failure) does not cost any other document its own save: every open document is
+attempted regardless of an earlier one's own result, and the chrome says, afterward, how many of the
+open set were written and names each one that was not, with why — success included, so "nothing has
+happened yet" and "all of it worked" never look the same. Each of the N saves is the same
+temp-and-rename write a single `Ctrl+S` already was, so an N-document save-all costs the watcher the
+same N scans and N re-reads of the files just written that N separate single saves always would have —
+no new cost per document, only N of a cost `0.29.0` already measured for one.
 
 ## 0.29.0 - The Explorer Keeps Up On Its Own
 

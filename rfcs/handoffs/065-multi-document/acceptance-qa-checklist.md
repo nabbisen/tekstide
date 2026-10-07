@@ -135,9 +135,16 @@ of `rfcs/handoffs/test-process-leak.md`. Scheduled before the `0.30.0` candidate
 
 ## PR-065-D — save-all
 
-- [ ] **A partial save-all says which files were written and which were not.**
-- [ ] Each save is the existing temp-and-rename path; N saves cost N watcher notices, and the
-      changelog says so.
+- [x] **A partial save-all says which files were written and which were not.** Proved on real
+      files on disk, one document blocked by a real external deletion, at both the core and
+      shell levels (real key routing) -- `qa-evidence.md`.
+- [x] Each save is the existing temp-and-rename path; N saves cost N watcher notices, and the
+      changelog says so. `save_all_documents` calls the identical `document.save(root, policy)`
+      method `save_active_document` already does, per document -- a structural fact, not a new
+      measurement, stated in `CHANGELOG.md`'s own `## 0.30.0` entry. A dedicated real-kernel
+      notice-count test was considered and not written, to avoid the exact class of timing
+      flakiness this session's own flake-register work (rows 2/5) just fixed elsewhere;
+      reasoning disclosed in `qa-evidence.md`.
 
 - [x] **The changelog carries the per-document refresh figure** (review 470): `CHANGELOG.md` now has
       a `## 0.30.0` entry, `Status: in progress`, answering `0.29.0`'s own open question directly —

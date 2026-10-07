@@ -404,3 +404,69 @@ disposition now, recorded by the architect at `test-process-leak.md`'s own "Disp
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
 - Commits pushed once this gate was green.
+
+## PR-065-D — save-all
+
+### A partial save-all says which files were written and which were not
+
+`ProjectContentWorkspace::save_all_documents` attempts every open document regardless of an
+earlier one's own failure, each through the identical `document.save(root, policy)`
+temp-and-rename path `save_active_document` already uses (`status_for_save_result` is the
+shared mapping factored out so both compute the same `ProjectContentStatus` for whichever
+entry is active). `SaveAllOutcome`/`DocumentSaveOutcome` name which documents were written and
+which were not, per-path.
+
+`saving_all_documents_writes_every_one_through_the_real_path` and `a_partial_save_all_reports_
+which_documents_were_written_and_which_were_not`
+(`crates/tekstide-core/src/project/tests/content.rs`): three real documents, the middle one
+blocked by a real external deletion, `save_all_documents` called once -- the outcome correctly
+splits written/not-written, and the two unblocked documents' own edits are verified **on
+disk**, not only in the in-memory result, proving the blocked one costs nothing to the other
+two (attempted in order, one after the blocked one).
+
+`save_all_notice_lines_summarizes_and_names_every_document_not_written`
+(`crates/tekstide/src/surface/editor/tests.rs`): the chrome's own message against a *real*
+blocked save (a file deleted out from under an open document, not a hand-built error) --
+proves the summary line, the one row for the document not written, and that its path is
+escaped the same way `chrome_line`'s own path already is (a bidi-override character in the
+fixture's own filename, checked both ways: the escaped marker present, the raw character
+absent).
+
+`ctrl_shift_s_saves_every_open_document_through_real_routing`
+(`crates/tekstide/src/shell/tests.rs`, real key routing): two documents edited, only one
+active, a real `Ctrl+Shift+S` press writes both to disk and stores a notice with the real
+counts -- the end-to-end path, not only the core-level pieces.
+
+**Not captured live.** Unlike PR-065-C's own checklist item, PR-065-D's acceptance criteria
+do not say "captured live" (re-checked against the RFC's own wording); the four tests above
+already demonstrate the real behavior end to end (real files on disk, a real blocked save, real
+key routing), so a live GUI capture was judged not to add further evidence proportionate to its
+own cost. Flagged as a scope decision, not an oversight, in case the reviewer wants one anyway.
+
+### Each save is the existing temp-and-rename path; N saves cost N watcher notices, and the changelog says so
+
+**Structural claim, not a new measurement.** `save_all_documents`'s own per-document call is
+`document.save(root, policy)` -- the identical method `save_active_document` already calls for
+a single save, unchanged. RFC-026 already measured what one call through this path costs the
+watcher (one scan, one re-read of the file just written, `0.29.0`'s own changelog entry); N
+calls to the same method in one `save_all_documents` run is N of that already-measured cost,
+not a new combinatorial effect needing its own fresh measurement the way D7's per-document
+*refresh* cost did (that one was genuinely new: N documents' refresh in one drain window, a
+real interaction the single-document model never had). `CHANGELOG.md`'s own `## 0.30.0` entry
+states this directly.
+
+A dedicated real-kernel-watcher test proving N saves produce N *observed* notices (as opposed
+to N calls to the known-costly method) was considered and not written: the project's own
+existing tests for "a real external change reaches an open document" use synthetic notice
+injection (`record_project_watch_notice` called directly) rather than a real inotify wait,
+precisely to avoid the kernel-timing flakiness this session's own flake-register work (rows 2
+and 5, fixed and disposed 2026-10-07) just finished diagnosing and fixing elsewhere in this same
+codebase. Building a new real-timing test for this claim risked reintroducing exactly that
+class of flake for a claim that is already structurally true by construction (same method, same
+call), not speculative.
+
+## Gate, PR-065-D
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace --no-fail-fast`: `738 + 16 + 1088` (+ `0+1+1` doctests), 0 failed.
+- Commits pushed once this gate was green.

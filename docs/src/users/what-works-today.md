@@ -90,7 +90,9 @@ nothing, and each document keeps its own text, undo history, cursor and viewport
 you left it. The sidebar's `[open]` tag marks every open document, not only the one on screen —
 **the editor's own header, above the cursor line, is what names which open document is active.**
 Opening a path that is already open switches to it in place rather than opening a second copy of
-it.
+it. **`Ctrl+Shift+S`** (or the editor's own "Save All" button) saves every open document in one
+action, attempting every one regardless of an earlier document's own failure, and reports
+afterward how many were written and names each one that was not, with why.
 
 File **names** in the explorer and the editor header are escaped, because they are untrusted,
 attacker-influenced text. File **contents** are deliberately not: the editor shows a file as it
@@ -273,8 +275,7 @@ configuration. See [Configuration](./configuration.md).
 
 ## Not built
 
-There is no command palette (`Ctrl+Shift+P` is reserved and currently does nothing), and no
-save-all — each open document is still saved on its own (`Ctrl+S`), one at a time. For a
+There is no command palette (`Ctrl+Shift+P` is reserved and currently does nothing). For a
 consolidated list of what else is missing or deferred, see
 [Deferred work](../contributors/future-work.md), which is a live index rather than a wish list —
 items leave it only when they are done or explicitly rejected.
