@@ -1300,3 +1300,13 @@ own documented shape** -- the whole diff this response adds is CHANGELOG.md, two
 doc comment (the `[open]` meaning-widened fixes required at review 472), nothing near approval or its
 connection state. Passed in isolation. **The gate was redone, not counted**: the final accepted three
 runs are `736 + 16 + 1085`, `736 + 16 + 1085`, `736 + 16 + 1085`.
+
+## Recurrence, 2026-10-07 — RFC-065 review 473's documentation-fix gate, load unmeasured
+
+**One failure in run 2 of a three-run full-workspace gate**, `TMPDIR=/dev/shm/tk065r2` (fixed, short):
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` failed again --
+the second recurrence of this same row today, in the previous response's own gate as well. Runs 1 and
+3 both clean (`736 + 16 + 1085`, both runs). The whole diff this response adds is `en.ftl`, two doc
+comments and one evidence `README.md` (the four fixes required at review 473), nothing near approval.
+Passed in isolation. **The gate was redone, not counted**: the final accepted three runs are
+`736 + 16 + 1085`, `736 + 16 + 1085`, `736 + 16 + 1085`.

@@ -351,3 +351,30 @@ PR-065-B's own aftermath that PR-065-C inherited:
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
 - Commits pushed once this gate was green.
+
+## Review 473: the fix ran one direction only, and created a new contradiction
+
+Review 472's fix corrected the *book* (`docs/`) but left the *program's own words* (`en.ftl`,
+which `keyboard_help.rs` turns into the Help modal and `tekstide --help`) saying "the open
+file" -- a contradiction that did not exist before `5c20605`: book and program previously
+agreed, stale together. `0.28.0`'s own defect shape, inverted.
+
+Fixed, all four items: `en.ftl`'s `keyboard-help-save-active-document`/`-undo-active-document`/
+`-redo-active-document` ("the open file" / "needs an open file" → "the active document" /
+"needs an active document"); the `en.ftl` comment above the `[open]` string (singular →
+set membership, matching `surface/explorer.rs`'s own fix); `surface/explorer/tests.rs`'s own
+doc comment (the exact sentence my own evidence `README.md` had cited as authority -- that
+citation is corrected too, now disclosing its own source's staleness rather than silently
+standing as if still accurate); and `keyboard-reference.md`'s "edits the open document" nit.
+
+**Then ran the review's own named method** (a repo-wide grep for the phrase) before declaring
+this done, rather than waiting for a fifth round to find the next spot -- found one more:
+`ProjectContentStatus::ExternalDeleted`'s own doc comment in `content.rs`, "the open file was
+deleted," tightened to "the active document's file" (this status is deliberately
+active-document-scoped, PR-065-B's own design, so "open" was ambiguous there too).
+
+## Gate, review 473's fixes
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
+- Commits pushed once this gate was green.

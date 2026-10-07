@@ -31,8 +31,11 @@ sidebar navigation) rather than following the newly active document. This is con
 the architecture, not a defect: `Ctrl+Alt+F` is a global action that changes which document is
 *active*; `explorer_highlight` is a separate, sidebar-local keyboard cursor over the tree's own
 rows, untouched by it -- the same separation that already existed between "the keyboard
-highlight" and "the open file" before this slice (`surface::explorer`'s own doc: "the highlight
-is `> ` on the row; the open file is the word `[open]`. They are independent."). A user who
-wants the sidebar's own highlight to follow would press `Tab` to the sidebar and navigate, the
-same as before. Not fixed here; noted so a reviewer does not have to rediscover it from a
-screenshot.
+highlight" and "what is open" before this slice. (Review 472/473's own correction: the sentence
+originally cited here as authority for that separation -- `surface::explorer`'s own doc,
+"the open file is the word `[open]`. They are independent." -- was itself stale by the time
+this was written, still describing `[open]` as singular after PR-065-B made it set membership.
+The conclusion above holds regardless; that specific sentence did not, and has since been
+corrected at its source rather than re-cited here.) A user who wants the sidebar's own
+highlight to follow would press `Tab` to the sidebar and navigate, the same as before. Not
+fixed here; noted so a reviewer does not have to rediscover it from a screenshot.

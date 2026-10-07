@@ -677,7 +677,8 @@ pub enum ProjectContentStatus {
         decision: SaveDecision,
     },
     ExternalChanged,
-    /// RFC-026 D8: the open file was deleted on disk. Its text is kept, and nothing is reloaded.
+    /// RFC-026 D8: the active document's file was deleted on disk. Its text is kept, and
+    /// nothing is reloaded.
     ExternalDeleted,
     Conflict,
     OpenError {

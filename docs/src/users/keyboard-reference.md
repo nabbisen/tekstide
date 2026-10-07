@@ -44,7 +44,7 @@ classification, `n` edits your notes and `e` exports the report. Each has a butt
 In a text field `Enter` saves, `Shift+Enter` starts a new line in the notes, `Escape` cancels and `Ctrl+V`
 pastes; while a field is open the number and letter keys are text, not shortcuts.
 
-With focus on the main area, typing edits the open document at the real cursor position;
+With focus on the main area, typing edits the active document at the real cursor position;
 `Up`/`Down`/`Left`/`Right` move the cursor without editing; `Enter` inserts a newline; and
 `Backspace` deletes the character before the cursor. `Ctrl+Z` undoes and `Ctrl+Shift+Z` redoes, up
 to 500 edits deep; past that the oldest edit can no longer be undone, and the editor says so.

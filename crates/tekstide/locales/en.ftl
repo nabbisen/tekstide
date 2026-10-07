@@ -578,8 +578,10 @@ terminal-paste-refused = { $reason ->
 # they need a font that many machines lack. Real per-file-type icons need an
 # icon font, which is an asset and a dependency decision (RFC-054's). `[OTHER]` keeps its word: a link
 # or special entry has no other channel that says what it is. `[open]` marks
-# the file open in the editor, so the keyboard highlight (`>`) and the open
-# file are two separately readable things without colour.
+# every document in the open set (RFC-065 PR-065-B), not only the active one,
+# so the keyboard highlight (`>`) and what is open are two separately
+# readable things without colour. Which member is active is a third,
+# narrower fact this tag does not carry -- the editor's own header names it.
 explorer-node-entry = { $kind ->
     [directory] ▣
     [directory-open] ▢
@@ -1316,9 +1318,9 @@ keyboard-help-open-project-entry-field = Add a project by path
 keyboard-help-toggle-project-mode = Switch between Content and Terminal (needs an open project)
 keyboard-help-launch-terminal = New terminal (needs an open project)
 keyboard-help-paste-into-terminal = Paste into the focused terminal
-keyboard-help-save-active-document = Save the open file
-keyboard-help-undo-active-document = Undo the last edit (needs an open file)
-keyboard-help-redo-active-document = Redo the last undone edit (needs an open file)
+keyboard-help-save-active-document = Save the active document
+keyboard-help-undo-active-document = Undo the last edit (needs an active document)
+keyboard-help-redo-active-document = Redo the last undone edit (needs an active document)
 keyboard-help-launch-agent-run = Launch an AI CLI run (needs a trusted project)
 keyboard-help-open-current-agent-run-detail = AgentRun Report for the latest run
 keyboard-help-open-approval-history = Approval History (needs an open project)

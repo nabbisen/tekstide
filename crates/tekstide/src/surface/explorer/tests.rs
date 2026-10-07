@@ -1121,10 +1121,11 @@ fn every_status_a_row_can_carry_is_a_word_and_none_is_an_icon() {
     assert!(other.starts_with("[OTHER]"), "{other:?}");
 }
 
-/// **The keyboard highlight and the open file are two separately readable
-/// things, without colour.** The highlight is `> ` on the row; the open file
-/// is the word `[open]`. They are independent: one row can have either, both,
-/// or neither.
+/// **The keyboard highlight and what is open are two separately readable
+/// things, without colour.** The highlight is `> ` on the row; membership in
+/// the open set (RFC-065 PR-065-B: every open document, not only the active
+/// one) is the word `[open]`. They are independent: one row can have either,
+/// both, or neither.
 #[test]
 fn the_highlight_and_the_open_file_are_distinguishable_without_colour() {
     let catalog = real_catalog();

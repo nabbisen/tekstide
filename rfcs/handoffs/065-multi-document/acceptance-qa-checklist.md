@@ -98,22 +98,21 @@ The three fixes are correct and the third place you found on your own (the watch
 was not in my list. But the fix went one direction only — the book — and the program's own words
 were left behind. A repo-wide grep for the phrase finds them; neither of us ran one at 472.
 
-- [ ] **The Help modal and `tekstide --help` still say "the open file".** `keyboard-reference.md:19`
-  now reads "Save **the active document**", but `crates/tekstide/locales/en.ftl:1319` still reads
-  `keyboard-help-save-active-document = Save the open file` — and that string, via
-  `keyboard_help.rs:56`, is what `Ctrl+Alt+K` and `--help` actually print. Same for `:1320`
-  ("Undo the last edit (needs an open file)") and `:1321` ("Redo the last undone edit (needs an
-  open file)"). All three sit three lines above the string PR-065-C added, `:1330`, "Switch to the
-  next open document" — a label whose whole premise is that several are open. **This contradiction
-  is new, created by `5c20605`**: before it, book and program both said "the open file" — stale but
-  agreeing. Now the book is right and the program is wrong. That is `0.28.0`'s defect inverted.
-- [ ] **`crates/tekstide/locales/en.ftl:581`**, the comment directly above the `[open]` string
-  itself, still carries the singular sentence corrected in `surface/explorer.rs` — one of the two
-  copies was fixed.
-- [ ] **`crates/tekstide/src/surface/explorer/tests.rs:1124-1125`** carries it a third time, and it
-  is the exact text quoted as authority in `evidence/pr-065-c/README.md`.
-- [ ] *(nit, not blocking)* `docs/src/users/keyboard-reference.md:47` still says typing "edits the
-  open document" — ambiguous on the page whose rows were just disambiguated.
+- [x] **The Help modal and `tekstide --help` still say "the open file".** Fixed: `en.ftl`'s
+  `keyboard-help-save-active-document`/`-undo-active-document`/`-redo-active-document` now say
+  "the active document"/"an active document", matching `keyboard-reference.md`'s own wording.
+- [x] **`crates/tekstide/locales/en.ftl:581`**, the comment above the `[open]` string, corrected
+  to set membership, matching `surface/explorer.rs`'s own fix.
+- [x] **`crates/tekstide/src/surface/explorer/tests.rs:1124-1125`** corrected. The evidence
+  `README.md`'s own citation of this sentence as authority was also corrected (not re-cited as
+  if still accurate; the conclusion it supported is noted as holding independently of it, and
+  the citation's own staleness is now disclosed in place rather than silently left standing).
+- [x] *(nit)* `docs/src/users/keyboard-reference.md:47` now says "the active document".
+- [x] **A repo-wide grep for the phrase** (the review's own named method, run this time) found
+  one more: `crates/tekstide-core/src/project/content.rs`'s own `ExternalDeleted` doc comment
+  said "the open file was deleted" — tightened to "the active document's file", since
+  `ProjectContentStatus` is deliberately active-document-scoped (PR-065-B's own design) and
+  "open" was ambiguous there too.
 
 ## PR-065-D — save-all
 
