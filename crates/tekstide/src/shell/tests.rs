@@ -11900,7 +11900,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     );
     assert_eq!(
         lines.len(),
-        18,
+        19,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }
@@ -13378,6 +13378,85 @@ fn ctrl_alt_f_is_a_no_op_with_fewer_than_two_documents_open() {
         active_document_relative_path(&state),
         std::path::Path::new("file.txt")
     );
+}
+
+// RFC-065 PR-065-D, D6: `SaveAllDocuments` (`Ctrl+Shift+S`) -- the near-universal "save all"
+// convention, the same class of pre-existing muscle memory `Ctrl+S`/`Ctrl+Z`/`Ctrl+Shift+Z`
+// already are.
+
+fn press_ctrl_shift_s(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::SaveAllDocuments,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+/// A real `Ctrl+Shift+S` press, through real routing, writes every open document's own edit
+/// to disk -- not just the active one -- and stores a notice naming the real counts.
+#[test]
+fn ctrl_shift_s_saves_every_open_document_through_real_routing() {
+    let (mut state, dir) = state_with_an_open_document("save-all-cs-s", "first\n");
+    dir_write(&dir, "second.txt", "second\n");
+    state
+        .app_shell
+        .open_active_project_text_document("second.txt")
+        .expect("the second document should open");
+    state.focus = FocusZone::MainArea;
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Surface(
+            crate::input::surface_input_for_test(
+                FocusZone::MainArea,
+                crate::input::KeyPress {
+                    key: iced::keyboard::Key::Character("!".into()),
+                    modifiers: iced::keyboard::Modifiers::empty(),
+                },
+            ),
+        )),
+    );
+    state
+        .app_shell
+        .open_active_project_text_document("file.txt")
+        .expect("switching back to the first document must succeed");
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Surface(
+            crate::input::surface_input_for_test(
+                FocusZone::MainArea,
+                crate::input::KeyPress {
+                    key: iced::keyboard::Key::Character("?".into()),
+                    modifiers: iced::keyboard::Modifiers::empty(),
+                },
+            ),
+        )),
+    );
+
+    press_ctrl_shift_s(&mut state);
+
+    assert_eq!(
+        std::fs::read_to_string(dir.join("file.txt")).unwrap(),
+        "?first\n",
+        "the first document's own edit must be on disk, saved even though it was not active \
+         when Ctrl+Shift+S was pressed"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("second.txt")).unwrap(),
+        "!second\n",
+        "the second (active) document's own edit must be on disk too"
+    );
+    let notice = state
+        .save_all_notice
+        .as_ref()
+        .expect("a save-all notice must be stored after Ctrl+Shift+S");
+    assert!(notice.all_written(), "{notice:?}");
+    assert_eq!(notice.written_count(), 2);
+}
+
+fn dir_write(dir: &std::path::Path, name: &str, contents: &str) {
+    std::fs::write(dir.join(name), contents).unwrap();
 }
 
 /// **PR-039-A's own evidence requirement, still true after PR-039-B's

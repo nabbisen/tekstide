@@ -756,6 +756,29 @@ editor-cursor = Line {$line}, Column {$column}
 # no-op-shaped call on a clean document, not an error).
 editor-save-button = Save
 
+# RFC-065 PR-065-D, D6: saves every open document, not only the active one -- new work, not a
+# loop around Save: a partial save-all can fail partway, and `editor-save-all-summary`/
+# `editor-save-all-outcome-row` below say which landed. Shown whenever a document is open, the
+# same always-available rule `editor-save-button` already uses.
+editor-save-all-button = Save All
+
+# The save-all summary line: how many of the open set were actually written. Always shown
+# after a save-all runs, success included -- a save-all that only speaks up on failure would
+# leave a user unable to tell "nothing happened yet" from "all of it worked."
+editor-save-all-summary = Save all: { $written } of { $total } saved
+
+# One row per document save-all did **not** write, naming it and why -- `$path` is untrusted
+# and escaped the same way `editor-chrome`'s own path is. `$reason` is a compile-time symbol
+# (`SaveDecision`'s own non-`Saved` variants), never `TextDocumentSaveError`'s raw `Display`,
+# which would embed the path a second time, unescaped.
+editor-save-all-outcome-row = { $path } -- not saved: { $reason ->
+    [external-change] changed on disk
+    [root-escape] escapes the project root
+    [unsafe-symlink] unsafe symlink
+    [write-failed] write failed
+   *[saved] { "" }
+}
+
 # RFC-026, release 0.29.0: a user-driven reload, the same action
 # `external-change-dialog-reload` offers from the save-blocked dialog, reachable
 # directly from the editor's own chrome. Shown only when `editor::view`'s own
@@ -1330,6 +1353,7 @@ keyboard-help-open-help = This list
 keyboard-help-open-folder-browser = Browse for a project folder
 keyboard-help-switch-active-project = Switch to the next open project
 keyboard-help-switch-active-document = Switch to the next open document
+keyboard-help-save-all-documents = Save every open document
 
 # RFC-044 D2/PR-044-C: the surface-grouped section, generated from
 # `SURFACE_ACTION_ORDER`/`surface_action_entry` in `keyboard_help.rs`, not

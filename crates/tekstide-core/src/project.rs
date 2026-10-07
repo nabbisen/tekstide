@@ -17,9 +17,9 @@ pub use change_detection::{
     ReviewBaseline, ReviewBaselineEntry,
 };
 pub use content::{
-    ProjectActiveFileLaunchAssessment, ProjectActiveFileLaunchBlockReason,
+    DocumentSaveOutcome, ProjectActiveFileLaunchAssessment, ProjectActiveFileLaunchBlockReason,
     ProjectActiveFileLaunchDecision, ProjectContentError, ProjectContentStatus,
-    ProjectContentWorkspace, ProjectExplorerStatus, explorer_node_kind_label,
+    ProjectContentWorkspace, ProjectExplorerStatus, SaveAllOutcome, explorer_node_kind_label,
     explorer_node_state_label, explorer_symlink_status_label, text_document_state_label,
 };
 pub use diff::{

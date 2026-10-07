@@ -17,6 +17,7 @@ ships with**: any of them except `Ctrl+Shift+P` can be moved in your configurati
 | `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
 | `Ctrl+Shift+V` | Paste into the focused terminal |
 | `Ctrl+S` | Save the active document |
+| `Ctrl+Shift+S` | Save every open document, reporting which were written and which were not |
 | `Ctrl+Z` | Undo the last edit to the active document, up to 500 deep |
 | `Ctrl+Shift+Z` | Redo an edit undone by `Ctrl+Z` |
 | `Ctrl+Alt+A` | Launch an AI CLI run in the active project — refused unless the project is trusted |
@@ -29,8 +30,8 @@ ships with**: any of them except `Ctrl+Shift+P` can be moved in your configurati
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is bound in the
-keybinding policy and currently does nothing. That is why `tekstide --help` prints eighteen chords
-while the policy holds nineteen.
+keybinding policy and currently does nothing. That is why `tekstide --help` prints nineteen chords
+while the policy holds twenty.
 
 ## Within a surface
 

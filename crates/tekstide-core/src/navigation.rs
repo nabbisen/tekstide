@@ -111,13 +111,21 @@ pub enum NavigationAction {
     /// restores them for free, by construction, rather than through any explicit save/restore
     /// step.
     SwitchActiveDocument,
+    /// RFC-065 PR-065-D, D6: saves every open document, not only the active one -- new work,
+    /// not a loop around `SaveActiveDocument`. `Ctrl+Shift+S`, the near-universal "save all"
+    /// convention, in the same class of pre-existing muscle memory `SaveActiveDocument`/
+    /// `UndoActiveDocument`/`RedoActiveDocument`/`PasteIntoTerminal` already are -- not a
+    /// `Ctrl+Alt+<letter>` this crate mints, the same reasoning `SwitchActiveDocument` above
+    /// does not use either because unlike that one, "save all" already has a universal
+    /// keyboard convention to match.
+    SaveAllDocuments,
 }
 
 impl NavigationAction {
     /// Every action, in declaration order. `config_name` is an exhaustive match,
     /// so adding an action without a name does not compile; a test holds this
     /// list to the policy so adding one without a rule does not pass.
-    pub const ALL: [NavigationAction; 21] = [
+    pub const ALL: [NavigationAction; 22] = [
         Self::OpenProjectBoard,
         Self::OpenProjectEntryField,
         Self::SwitchActiveProject,
@@ -139,6 +147,7 @@ impl NavigationAction {
         Self::OpenFolderBrowser,
         Self::ReloadConfiguration,
         Self::SwitchActiveDocument,
+        Self::SaveAllDocuments,
     ];
 
     /// The key a `[keybindings]` entry uses for this action: the identifier in
@@ -167,6 +176,7 @@ impl NavigationAction {
             Self::OpenFolderBrowser => "open_folder_browser",
             Self::ReloadConfiguration => "reload_configuration",
             Self::SwitchActiveDocument => "switch_active_document",
+            Self::SaveAllDocuments => "save_all_documents",
         }
     }
 
@@ -528,6 +538,17 @@ impl KeybindingPolicy {
                 // room, and adding one is a known operation, not a design
                 // question.
                 KeybindingRule::bound(NavigationAction::SwitchActiveDocument, "Ctrl+Alt+F"),
+                // RFC-065 PR-065-D, D6: `Ctrl+Shift+S`, the near-universal
+                // "save all" convention -- the same class of pre-existing
+                // muscle memory `Ctrl+S`/`Ctrl+Z`/`Ctrl+Shift+Z`/
+                // `Ctrl+Shift+V` already are here, not a `Ctrl+Alt+<letter>`
+                // this crate mints for every new action. Unclaimed by any
+                // other rule here and not `Ctrl+Shift+P`'s `Reserved`
+                // command-palette binding, so it collides with nothing
+                // (checked mechanically by
+                // `save_all_documents_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone).
+                KeybindingRule::bound(NavigationAction::SaveAllDocuments, "Ctrl+Shift+S"),
             ],
         }
     }

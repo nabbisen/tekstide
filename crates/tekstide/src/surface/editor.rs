@@ -22,9 +22,9 @@ use iced::widget::{column, container};
 use iced::{Element, Length, Size};
 
 use tekstide_core::content::{
-    EditOperation, TextCursor, TextDocument, TextDocumentState, TextViewport,
+    EditOperation, SaveDecision, TextCursor, TextDocument, TextDocumentState, TextViewport,
 };
-use tekstide_core::project::ProjectContentStatus;
+use tekstide_core::project::{ProjectContentStatus, SaveAllOutcome};
 use tekstide_core::text_safety;
 
 use crate::i18n::{Catalog, CatalogArgs};
@@ -38,6 +38,46 @@ fn document_state_symbol(state: TextDocumentState) -> &'static str {
         TextDocumentState::Conflict => "conflict",
         TextDocumentState::SaveError => "save-error",
     }
+}
+
+fn save_decision_symbol(decision: SaveDecision) -> &'static str {
+    match decision {
+        SaveDecision::Saved => "saved",
+        SaveDecision::BlockedExternalChange => "external-change",
+        SaveDecision::BlockedRootEscape => "root-escape",
+        SaveDecision::BlockedUnsafeSymlink => "unsafe-symlink",
+        SaveDecision::WriteFailed => "write-failed",
+    }
+}
+
+/// RFC-065 PR-065-D, D6: the save-all result, stated -- "a partial save-all says which files
+/// were written and which were not" is this function's whole reason to exist. One line summing
+/// the counts, then one line per document that was **not** written, naming it (untrusted,
+/// escaped, the same as [`chrome_line`]'s own path) and why -- never silent about a file that
+/// looked saved but was not. Factored out of [`view`] for the same testability reason as every
+/// other line function here.
+pub(crate) fn save_all_notice_lines(catalog: &Catalog, outcome: &SaveAllOutcome) -> Vec<String> {
+    let mut lines = vec![
+        catalog.get_with_args(
+            "editor-save-all-summary",
+            &CatalogArgs::new()
+                .number("written", outcome.written_count())
+                .number("total", outcome.outcomes.len() as u32),
+        ),
+    ];
+    for item in &outcome.outcomes {
+        let Err(error) = &item.result else { continue };
+        let path = text_safety::quote_untrusted(&item.relative_path.display().to_string());
+        lines.push(
+            catalog.get_with_args(
+                "editor-save-all-outcome-row",
+                &CatalogArgs::new()
+                    .untrusted("path", &path)
+                    .trusted_symbol("reason", save_decision_symbol(error.decision())),
+            ),
+        );
+    }
+    lines
 }
 
 /// The chrome header for an open document: its path (untrusted, escaped)
@@ -752,25 +792,44 @@ pub(crate) struct EditorWindow {
     pub columns: usize,
 }
 
-/// The two document-level messages the chrome's own buttons dispatch, the same
+/// The document-level messages the chrome's own buttons dispatch, the same
 /// one-struct-for-related-arguments shape [`EditorWindow`] already uses, and for the
 /// identical clippy-line reason: adding `on_reload` (RFC-026, release 0.29.0) as a bare
-/// positional argument beside `on_save` is what crossed it.
+/// positional argument beside `on_save` is what crossed it. `on_save_all` (RFC-065 PR-065-D)
+/// joins it the same way.
 pub(crate) struct EditorActions<Message> {
     pub on_save: Message,
     pub on_reload: Message,
+    pub on_save_all: Message,
+}
+
+/// The two pieces of read-only workspace state the chrome needs beyond the document itself,
+/// the same one-struct-for-related-arguments shape [`EditorWindow`]/[`EditorActions`] already
+/// use -- adding `save_all_notice` (RFC-065 PR-065-D) as a bare positional argument beside
+/// `status` is what crossed clippy's own line this time.
+pub(crate) struct EditorWorkspaceState<'a> {
+    pub status: &'a ProjectContentStatus,
+    pub save_all_notice: Option<&'a SaveAllOutcome>,
 }
 
 pub fn view<'a, Message: 'a + Clone>(
     document: Option<&TextDocument>,
-    status: &ProjectContentStatus,
+    workspace_state: EditorWorkspaceState<'a>,
     catalog: &'a Catalog,
     theme: &'a Theme,
     actions: EditorActions<Message>,
     window: EditorWindow,
     on_body_measured: impl Fn(Size) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let EditorActions { on_save, on_reload } = actions;
+    let EditorWorkspaceState {
+        status,
+        save_all_notice,
+    } = workspace_state;
+    let EditorActions {
+        on_save,
+        on_reload,
+        on_save_all,
+    } = actions;
     let EditorWindow {
         rows: row_capacity,
         columns: column_capacity,
@@ -873,12 +932,25 @@ pub fn view<'a, Message: 'a + Clone>(
             if let Some(line) = open_error_line_while_active(catalog, status) {
                 chrome.push(text(line).size(theme.font_size_status()).into());
             }
+            if let Some(outcome) = save_all_notice {
+                for line in save_all_notice_lines(catalog, outcome) {
+                    chrome.push(text(line).size(theme.font_size_status()).into());
+                }
+            }
             chrome.push(
                 crate::theme::button(
                     *theme,
                     text(catalog.get("editor-save-button")).size(theme.font_size_body()),
                 )
                 .on_press(on_save)
+                .into(),
+            );
+            chrome.push(
+                crate::theme::button(
+                    *theme,
+                    text(catalog.get("editor-save-all-button")).size(theme.font_size_body()),
+                )
+                .on_press(on_save_all)
                 .into(),
             );
             if reload_button_is_shown(status) {

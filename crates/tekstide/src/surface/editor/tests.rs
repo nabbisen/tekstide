@@ -8,15 +8,17 @@ use tekstide_core::content::{
 use tekstide_core::project::root::{
     ProjectRootHandle, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
-use tekstide_core::project::{ProjectContentStatus, ProjectId, ProjectSession};
+use tekstide_core::project::{
+    DocumentSaveOutcome, ProjectContentStatus, ProjectId, ProjectSession, SaveAllOutcome,
+};
 
 use tekstide_core::content::TextCursor;
 
 use super::{
     RowPlan, apply_edit_key, caret_row_position, caret_split, chrome_line, columns_that_fit,
     cursor_line, document_state_symbol, empty_lines, gutter_digits, gutter_lines, navigate_cursor,
-    open_error_line, open_error_line_while_active, row_plan, rows_that_fit, viewport_following,
-    window_rows, windowed_line,
+    open_error_line, open_error_line_while_active, row_plan, rows_that_fit, save_all_notice_lines,
+    viewport_following, window_rows, windowed_line,
 };
 use crate::i18n::{Catalog, LocalePreference};
 
@@ -989,6 +991,70 @@ fn open_error_line_while_active_is_none_ordinarily_then_states_the_bound() {
     assert!(
         line.contains("20"),
         "the disclosure must name the real limit, not a vague amount: {line}"
+    );
+}
+
+/// RFC-065 PR-065-D, D6: "a partial save-all says which files were written and which were
+/// not" -- `save_all_notice_lines` is that statement. A real blocked save (the file deleted
+/// out from under the document, the same mechanism `content::tests::save` uses), not a
+/// hand-built error, so the message really is `TextDocumentSaveError`'s own shape, and the
+/// path is proven escaped, not merely claimed to be.
+#[test]
+fn save_all_notice_lines_summarizes_and_names_every_document_not_written() {
+    let catalog = real_catalog();
+    let sandbox = Sandbox::new("save-all-notice");
+    sandbox.write_file("ok.txt", "fine");
+    sandbox.write_file("proj\u{202E}gpj.exe", "doomed");
+    let root = sandbox.root_handle();
+    let policy = TextDocumentOpenPolicy::default();
+
+    let mut ok_document = open(&sandbox, "ok.txt");
+    let ok_result = ok_document.save(&root, policy);
+    assert!(ok_result.is_ok(), "the fixture's own precondition");
+
+    let mut doomed_document = open(&sandbox, "proj\u{202E}gpj.exe");
+    fs::remove_file(sandbox.root.join("proj\u{202E}gpj.exe")).unwrap();
+    let doomed_result = doomed_document.save(&root, policy);
+    assert!(
+        doomed_result.is_err(),
+        "the fixture's own precondition: the file is gone"
+    );
+
+    let outcome = SaveAllOutcome {
+        outcomes: vec![
+            DocumentSaveOutcome {
+                relative_path: PathBuf::from("ok.txt"),
+                result: ok_result,
+            },
+            DocumentSaveOutcome {
+                relative_path: PathBuf::from("proj\u{202E}gpj.exe"),
+                result: doomed_result,
+            },
+        ],
+    };
+
+    let lines = save_all_notice_lines(&catalog, &outcome);
+    assert_eq!(
+        lines.len(),
+        2,
+        "one summary line, plus one row per document not written: {lines:?}"
+    );
+    assert!(
+        lines[0].contains('1') && lines[0].contains('2'),
+        "the summary must name both the written count and the total: {lines:?}"
+    );
+    assert!(
+        lines[1].contains("<U+202E>"),
+        "the escaped override marker must reach the row, the same escaping chrome_line's own \
+         path already gets: {lines:?}"
+    );
+    assert!(
+        !lines[1].contains('\u{202E}'),
+        "the raw override character must never reach the line: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("ok.txt")),
+        "a document that was written must not get its own row: {lines:?}"
     );
 }
 

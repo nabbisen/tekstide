@@ -404,6 +404,31 @@ fn switch_active_document_shortcut_is_a_candidate_that_collides_with_no_other_ru
     );
 }
 
+/// RFC-065 PR-065-D, D6: the mechanical check named in `linux_mvp()`'s own doc comment on
+/// `SaveAllDocuments` -- not by inspection alone.
+#[test]
+fn save_all_documents_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::SaveAllDocuments)
+        .expect("Save All Documents should have a keyboard policy");
+
+    assert_eq!(rule.default_binding(), Some("Ctrl+Shift+S"));
+    assert_eq!(rule.status(), KeybindingStatus::Bound);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::SaveAllDocuments)
+        .filter(|other| other.default_binding() == rule.default_binding())
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Shift+S must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 /// pr-020-b-report-surface.md: `AgentRunDetail` is this slice's own
 /// real render arm, with no other route to open it -- a
 /// `Configurable`/`None` binding here would leave it unreachable by any
@@ -500,6 +525,7 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+B",
             "Ctrl+Alt+C",
             "Ctrl+Alt+F",
+            "Ctrl+Shift+S",
         ],
     );
 
@@ -692,8 +718,8 @@ fn every_advertised_chord_round_trips() {
         checked += 1;
     }
     assert_eq!(
-        checked, 19,
-        "nineteen chords are held (eighteen bound, one reserved)"
+        checked, 20,
+        "twenty chords are held (nineteen bound, one reserved)"
     );
 }
 

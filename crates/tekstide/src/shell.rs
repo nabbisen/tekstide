@@ -779,6 +779,14 @@ pub struct State {
     /// `Allow` -- see its own doc comment), and is cleared at the start
     /// of every new paste attempt.
     terminal_paste_notice: Option<TerminalPasteRefusal>,
+    /// RFC-065 PR-065-D: the most recent save-all result, if any -- shell-local, transient,
+    /// the same shape `terminal_paste_notice` above already is. Shown in the editor's own
+    /// chrome (`content_mode_editor_view`) whenever `Some`, success included: a save-all that
+    /// only speaks up on failure would leave a user unable to tell "nothing happened yet" from
+    /// "all of it worked." Cleared when a new save-all runs (replaced with the fresh result,
+    /// the same "most recent attempt" shape every other notice field here uses), not on a
+    /// timer or a navigation away.
+    save_all_notice: Option<tekstide_core::project::SaveAllOutcome>,
     /// RFC-019 PR-019-B: which row of the *currently rendered* explorer
     /// listing the keyboard cursor is on. Shell-local UI state, not a
     /// duplicate of core's -- core has no concept of "which row a
@@ -1347,6 +1355,7 @@ impl State {
             terminal_launch_notice: None,
             agent_run_launch_notice: None,
             terminal_paste_notice: None,
+            save_all_notice: None,
             explorer_highlight: 0,
             explorer_top: 0,
             explorer_viewport: None,
@@ -1543,6 +1552,15 @@ pub enum Message {
     /// this button is not always present, so a global chord would be bound
     /// to an action that does nothing most of the time.
     ReloadActiveDocumentButtonPressed,
+    /// RFC-065 PR-065-D, D6: the editor's own real "Save All" button
+    /// (`content_mode_editor_view`'s chrome, shown whenever a document is
+    /// open, the same always-available rule `SaveActiveDocumentButtonPressed`
+    /// uses). `Ctrl+Shift+S` is the accelerator -- the near-universal "save
+    /// all" convention, the same class of pre-existing muscle memory `Ctrl+S`/
+    /// `Ctrl+Z`/`Ctrl+Shift+Z`/`Ctrl+Shift+V` already are, not a
+    /// `Ctrl+Alt+<letter>` this crate mints. Both converge on
+    /// [`save_all_active_project_documents`].
+    SaveAllDocumentsButtonPressed,
     /// RFC-040 PR-040-C: `TrustSettings`'s own real "Launch AI CLI Run"
     /// button -- D2's "agent run where a trusted project's actions
     /// live." `Ctrl+Alt+A` is the accelerator; both converge on
@@ -1897,6 +1915,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::LaunchTerminalButtonPressed
         | Message::SaveActiveDocumentButtonPressed
         | Message::ReloadActiveDocumentButtonPressed
+        | Message::SaveAllDocumentsButtonPressed
         | Message::LaunchAgentRunButtonPressed
         | Message::OpenCurrentAgentRunDetailButtonPressed
         | Message::OpenApprovalHistoryButtonPressed
@@ -2221,6 +2240,13 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             // already is.
             if action == NavigationAction::SaveActiveDocument {
                 attempt_save_active_document(state);
+            }
+            // RFC-065 PR-065-D: `SaveAllDocuments` needs the same real I/O `SaveActiveDocument`
+            // needs above, not an `AppCommand` -- `save_all_documents_button_pressed` is the
+            // identical modal guard plus the one-shot call, the same shape as every other
+            // button/chord pair in this match.
+            if action == NavigationAction::SaveAllDocuments {
+                save_all_documents_button_pressed(state);
             }
             // RFC-057 D3: `Ctrl+Z`/`Ctrl+Shift+Z` need the same real,
             // document-level write `SaveActiveDocument` needs above, not
@@ -2629,6 +2655,7 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::ReloadActiveDocumentButtonPressed => {
             open_external_change_dialog_for_active_document(state)
         }
+        Message::SaveAllDocumentsButtonPressed => save_all_documents_button_pressed(state),
         Message::LaunchAgentRunButtonPressed => launch_agent_run_in_active_project(state),
         Message::OpenCurrentAgentRunDetailButtonPressed => open_current_agent_run_detail(state),
         Message::OpenApprovalHistoryButtonPressed => open_approval_history(state),
@@ -5752,6 +5779,20 @@ fn save_active_document_button_pressed(state: &mut State) {
     attempt_save_active_document(state);
 }
 
+/// RFC-065 PR-065-D, D6: new work, not a loop around
+/// [`attempt_save_active_document`] -- unlike that function, this never auto-opens the
+/// external-change dialog for the active document specifically: with several documents in
+/// play, the save-all notice this stores (shown in the editor's own chrome, naming every
+/// document that was not written and why) is the "never silent" mechanism here, not a modal
+/// that can speak for only one of them.
+fn save_all_documents_button_pressed(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    let outcome = state.app_shell.save_all_active_project_text_documents();
+    state.save_all_notice = Some(outcome);
+}
+
 /// RFC-057 D3: `Ctrl+Z`. Pops the active document's most recent undo
 /// entry and applies its inverse through the same two-step
 /// `replace_active_project_text`/`set_active_project_cursor` shape
@@ -7553,6 +7594,10 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // arm special-cases it directly (`cycle_to_next_open_document`),
         // the same shape.
         NavigationAction::SwitchActiveDocument => None,
+        // RFC-065 PR-065-D: the same reason `SaveActiveDocument` above is `None` -- a real
+        // write to disk, so `update`'s `Shell` arm special-cases it directly
+        // (`save_all_documents_button_pressed`) rather than through a route/mode `AppCommand`.
+        NavigationAction::SaveAllDocuments => None,
     }
 }
 
@@ -9577,12 +9622,16 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
     match workspace {
         Some(workspace) => crate::surface::editor::view(
             workspace.active_document(),
-            workspace.status(),
+            crate::surface::editor::EditorWorkspaceState {
+                status: workspace.status(),
+                save_all_notice: state.save_all_notice.as_ref(),
+            },
             &state.catalog,
             &state.theme,
             crate::surface::editor::EditorActions {
                 on_save: Message::SaveActiveDocumentButtonPressed,
                 on_reload: Message::ReloadActiveDocumentButtonPressed,
+                on_save_all: Message::SaveAllDocumentsButtonPressed,
             },
             crate::surface::editor::EditorWindow {
                 rows: editor_window_capacity(state),

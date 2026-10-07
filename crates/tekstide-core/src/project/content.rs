@@ -360,45 +360,40 @@ impl ProjectContentWorkspace {
             return Err(ProjectContentError::NoActiveDocument);
         };
 
-        match document.save(root, policy) {
-            Ok(decision) => {
-                self.status = ProjectContentStatus::Saved { decision };
-                Ok(decision)
+        let result = document.save(root, policy);
+        self.status = status_for_save_result(document, &result);
+        result.map_err(ProjectContentError::Save)
+    }
+
+    /// RFC-065 PR-065-D, D6: new work, not a loop around [`Self::save_active_document`] --
+    /// saving several documents is a sequence of writes that can fail partway, and the one risk
+    /// the acceptance criteria name is a user told "saved" when some landed and some did not,
+    /// without knowing which. Attempts **every** open document regardless of an earlier one's
+    /// own failure (so one write failure does not silently cost the rest still to try), in
+    /// `self.documents`'s own order, each through the identical temp-and-rename path
+    /// `save_active_document` uses -- this is a sequencing difference, not a different write.
+    /// `self.status` updates only for the active document's own entry, if it is among them, the
+    /// same "status is the convenience field for the document on screen" rule
+    /// `refresh_document_by_canonical_path` already established for refresh.
+    pub fn save_all_documents(
+        &mut self,
+        root: &ProjectRootHandle,
+        policy: TextDocumentOpenPolicy,
+    ) -> SaveAllOutcome {
+        let active_index = self.active_index;
+        let mut outcomes = Vec::with_capacity(self.documents.len());
+        for (index, document) in self.documents.iter_mut().enumerate() {
+            let relative_path = document.target().selected_relative_path.clone();
+            let result = document.save(root, policy);
+            if Some(index) == active_index {
+                self.status = status_for_save_result(document, &result);
             }
-            Err(error) => {
-                self.status = match error.decision() {
-                    // `TextDocument::save` already distinguished these two
-                    // cases on `self.state` before collapsing both into
-                    // `BlockedExternalChange` for this `SaveDecision`
-                    // (`content::document`'s `block_external_change`: state
-                    // becomes `Conflict` only if the buffer was dirty,
-                    // `ExternalChanged` otherwise). Reading `document.state()`
-                    // back here recovers that distinction rather than
-                    // re-deriving or guessing it -- the same pattern
-                    // `refresh_active_document` below already uses, and the
-                    // one the shell's own RFC-019 PR-019-E fix reads
-                    // independently for its conflict-modal wording.
-                    //
-                    // RFC-026 D8: a blocked save against a file that is gone is reported as
-                    // deleted, not as changed, the same correction `refresh_active_document`
-                    // below carries -- a save can be blocked by a disk that went away just as
-                    // easily as by one that changed, and the two must not look the same.
-                    SaveDecision::BlockedExternalChange
-                        if !document.target().canonical_path.exists() =>
-                    {
-                        ProjectContentStatus::ExternalDeleted
-                    }
-                    SaveDecision::BlockedExternalChange => match document.state() {
-                        TextDocumentState::Conflict => ProjectContentStatus::Conflict,
-                        _ => ProjectContentStatus::ExternalChanged,
-                    },
-                    _ => ProjectContentStatus::SaveError {
-                        message: error.to_string(),
-                    },
-                };
-                Err(ProjectContentError::Save(error))
-            }
+            outcomes.push(DocumentSaveOutcome {
+                relative_path,
+                result,
+            });
         }
+        SaveAllOutcome { outcomes }
     }
 
     /// RFC-006 Amendment 1: the one write path `active_document()`'s
@@ -588,6 +583,88 @@ impl Default for ProjectContentWorkspace {
             active_index: None,
             status: ProjectContentStatus::Empty,
         }
+    }
+}
+
+/// The shared mapping from a single document's own save attempt to `ProjectContentStatus`,
+/// factored out of `save_active_document` when `save_all_documents` (RFC-065 PR-065-D) needed
+/// the identical decision for whichever entry happens to be active, without duplicating the
+/// match.
+fn status_for_save_result(
+    document: &TextDocument,
+    result: &Result<SaveDecision, TextDocumentSaveError>,
+) -> ProjectContentStatus {
+    match result {
+        Ok(decision) => ProjectContentStatus::Saved {
+            decision: *decision,
+        },
+        Err(error) => match error.decision() {
+            // `TextDocument::save` already distinguished these two
+            // cases on `self.state` before collapsing both into
+            // `BlockedExternalChange` for this `SaveDecision`
+            // (`content::document`'s `block_external_change`: state
+            // becomes `Conflict` only if the buffer was dirty,
+            // `ExternalChanged` otherwise). Reading `document.state()`
+            // back here recovers that distinction rather than
+            // re-deriving or guessing it -- the same pattern
+            // `refresh_active_document` below already uses, and the
+            // one the shell's own RFC-019 PR-019-E fix reads
+            // independently for its conflict-modal wording.
+            //
+            // RFC-026 D8: a blocked save against a file that is gone is reported as
+            // deleted, not as changed, the same correction `refresh_active_document`
+            // below carries -- a save can be blocked by a disk that went away just as
+            // easily as by one that changed, and the two must not look the same.
+            SaveDecision::BlockedExternalChange if !document.target().canonical_path.exists() => {
+                ProjectContentStatus::ExternalDeleted
+            }
+            SaveDecision::BlockedExternalChange => match document.state() {
+                TextDocumentState::Conflict => ProjectContentStatus::Conflict,
+                _ => ProjectContentStatus::ExternalChanged,
+            },
+            _ => ProjectContentStatus::SaveError {
+                message: error.to_string(),
+            },
+        },
+    }
+}
+
+/// RFC-065 PR-065-D, D6: one document's own save-all result, named by its path since the
+/// caller asked about all of them at once and needs to tell them apart -- "a partial save-all
+/// says which files were written and which were not" is this type's whole reason to exist.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DocumentSaveOutcome {
+    pub relative_path: PathBuf,
+    pub result: Result<SaveDecision, TextDocumentSaveError>,
+}
+
+impl DocumentSaveOutcome {
+    pub fn was_written(&self) -> bool {
+        matches!(self.result, Ok(SaveDecision::Saved))
+    }
+}
+
+/// RFC-065 PR-065-D: the whole open set's own save-all result, one [`DocumentSaveOutcome`] per
+/// document that was attempted, in `self.documents`'s own order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SaveAllOutcome {
+    pub outcomes: Vec<DocumentSaveOutcome>,
+}
+
+impl SaveAllOutcome {
+    pub fn all_written(&self) -> bool {
+        self.outcomes.iter().all(DocumentSaveOutcome::was_written)
+    }
+
+    pub fn written_count(&self) -> u32 {
+        self.outcomes
+            .iter()
+            .filter(|outcome| outcome.was_written())
+            .count() as u32
+    }
+
+    pub fn failed_count(&self) -> u32 {
+        self.outcomes.len() as u32 - self.written_count()
     }
 }
 

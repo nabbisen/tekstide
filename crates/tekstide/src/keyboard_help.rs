@@ -67,6 +67,7 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::ReloadConfiguration => Some("keyboard-help-reload-configuration"),
         NavigationAction::SwitchActiveProject => Some("keyboard-help-switch-active-project"),
         NavigationAction::SwitchActiveDocument => Some("keyboard-help-switch-active-document"),
+        NavigationAction::SaveAllDocuments => Some("keyboard-help-save-all-documents"),
         NavigationAction::OpenDiffReview => Some("keyboard-help-open-diff-review"),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog
@@ -195,6 +196,10 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
         NavigationAction::SaveActiveDocument => Some(ControlCoverage::VisibleControl {
             description: "the editor's own \"Save\" button (surface::editor::view, RFC-040 PR-040-C)",
             on_press_snippet: "Message::SaveActiveDocumentButtonPressed,",
+        }),
+        NavigationAction::SaveAllDocuments => Some(ControlCoverage::VisibleControl {
+            description: "the editor's own \"Save All\" button (surface::editor::view, RFC-065 PR-065-D)",
+            on_press_snippet: "Message::SaveAllDocumentsButtonPressed,",
         }),
         // RFC-057 D3: `Ctrl+Z`/`Ctrl+Shift+Z` are the universal
         // text-editing convention, and the task breakdown's own PR-057-D

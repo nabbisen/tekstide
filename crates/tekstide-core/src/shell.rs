@@ -8,8 +8,8 @@ use crate::navigation::{TerminalLayoutClass, TerminalPanePolicy};
 use crate::project::recent::RecentProjectState;
 use crate::project::root::ProjectRootValidationError;
 use crate::project::{
-    ProjectContentError, ProjectId, explorer_node_kind_label, explorer_node_state_label,
-    explorer_symlink_status_label, text_document_state_label,
+    ProjectContentError, ProjectId, SaveAllOutcome, explorer_node_kind_label,
+    explorer_node_state_label, explorer_symlink_status_label, text_document_state_label,
 };
 use crate::project_board::ProjectBoardViewModel;
 use crate::route::AppRoute;
@@ -250,6 +250,16 @@ impl ApplicationShell {
             self.route = AppRoute::ActiveProjectWorkspace;
         }
         result
+    }
+
+    /// RFC-065 PR-065-D: see [`crate::project::ProjectSession::save_all_text_documents`]'s own
+    /// doc. Same route handling as [`Self::save_active_project_text_document`] above.
+    pub fn save_all_active_project_text_documents(&mut self) -> SaveAllOutcome {
+        let outcome = self.state.save_all_active_project_text_documents();
+        if self.state.active_project().is_some() {
+            self.route = AppRoute::ActiveProjectWorkspace;
+        }
+        outcome
     }
 
     pub fn refresh_active_project_text_document(

@@ -16,7 +16,7 @@ use crate::project::root::{
 use crate::project::{
     DetectedChanges, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
     ProjectChangeSetError, ProjectContentError, ProjectId, ProjectMode, ProjectOpenSurface,
-    ProjectSession, ProjectTerminalError, ReviewBaseline,
+    ProjectSession, ProjectTerminalError, ReviewBaseline, SaveAllOutcome,
 };
 use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
@@ -591,6 +591,19 @@ impl AppState {
         };
 
         project.save_active_text_document()
+    }
+
+    /// RFC-065 PR-065-D: see [`ProjectSession::save_all_text_documents`]'s own doc. An empty
+    /// outcome (not an error) with no active project -- the same "nothing to do" shape as an
+    /// empty open set.
+    pub fn save_all_active_project_text_documents(&mut self) -> SaveAllOutcome {
+        let Some(project) = self.active_project_mut() else {
+            return SaveAllOutcome {
+                outcomes: Vec::new(),
+            };
+        };
+
+        project.save_all_text_documents()
     }
 
     pub fn refresh_active_project_text_document(

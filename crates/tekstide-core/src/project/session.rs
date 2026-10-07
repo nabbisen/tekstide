@@ -36,7 +36,7 @@ use super::{
     ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
     ProjectFileState, ProjectGitSummary, ProjectId, ProjectMode, ProjectOpenSurface,
     ProjectProviderState, ProjectResourceLimits, ProjectRuntimeSummary, ProjectWarningState,
-    WorkspaceTrust,
+    SaveAllOutcome, WorkspaceTrust,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1678,6 +1678,17 @@ impl ProjectSession {
         self.sync_file_state_from_content_workspace();
         self.record_activity();
         result
+    }
+
+    /// RFC-065 PR-065-D: see [`ProjectContentWorkspace::save_all_documents`]'s own doc.
+    pub fn save_all_text_documents(&mut self) -> SaveAllOutcome {
+        let root = ProjectRootHandle::from_project_session(self);
+        let outcome = self
+            .content_workspace
+            .save_all_documents(&root, TextDocumentOpenPolicy::linux_mvp());
+        self.sync_file_state_from_content_workspace();
+        self.record_activity();
+        outcome
     }
 
     pub fn refresh_active_text_document(

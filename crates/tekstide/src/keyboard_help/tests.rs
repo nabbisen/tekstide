@@ -60,8 +60,8 @@ fn every_live_binding_is_described_to_the_user() {
 
     assert_eq!(
         lines.len(),
-        18,
-        "expected the eighteen Candidate rules with a default binding to be described; \
+        19,
+        "expected the nineteen Candidate rules with a default binding to be described; \
          got {}: {:?}",
         lines.len(),
         lines

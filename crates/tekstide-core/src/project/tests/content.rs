@@ -726,3 +726,109 @@ fn cycling_the_active_document_wraps_and_restores_cursor_and_viewport() {
 
     cleanup_root(root);
 }
+
+/// RFC-065 PR-065-D, D6: a save-all where every document can be written -- the real
+/// temp-and-rename path, checked on disk, not assumed from the in-memory result alone.
+#[test]
+fn saving_all_documents_writes_every_one_through_the_real_path() {
+    let root = test_root("content-save-all-writes-every-document");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project
+        .open_text_document("first.txt")
+        .expect("the first document should open");
+    project
+        .replace_active_text("first edited\n")
+        .expect("a local edit on the first document");
+    project
+        .open_text_document("second.txt")
+        .expect("the second document should open");
+    project
+        .replace_active_text("second edited\n")
+        .expect("a local edit on the second document");
+
+    let outcome = project.save_all_text_documents();
+
+    assert!(
+        outcome.all_written(),
+        "both documents must be written: {outcome:?}"
+    );
+    assert_eq!(outcome.written_count(), 2);
+    assert_eq!(outcome.failed_count(), 0);
+    assert_eq!(
+        std::fs::read_to_string(root.join("first.txt")).unwrap(),
+        "first edited\n",
+        "the first document's own edit must really be on disk, not only in memory"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("second.txt")).unwrap(),
+        "second edited\n",
+        "the second document's own edit must really be on disk, not only in memory"
+    );
+
+    cleanup_root(root);
+}
+
+/// RFC-065 PR-065-D, D6: the acceptance criterion's own words -- "a partial save-all says
+/// which files were written and which were not." Three documents, the middle one blocked by
+/// an external deletion: the outcome must name all three, correctly split between written and
+/// not, and the two that could be written must really be written -- one blocked document must
+/// not cost the other two their own save.
+#[test]
+fn a_partial_save_all_reports_which_documents_were_written_and_which_were_not() {
+    let root = test_root("content-save-all-partial");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second original\n").unwrap();
+    std::fs::write(root.join("third.txt"), "third original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project.open_text_document("first.txt").unwrap();
+    project.replace_active_text("first edited\n").unwrap();
+    project.open_text_document("second.txt").unwrap();
+    project.replace_active_text("second edited\n").unwrap();
+    project.open_text_document("third.txt").unwrap();
+    project.replace_active_text("third edited\n").unwrap();
+
+    // Block the second document's own save: its file is gone from under it.
+    std::fs::remove_file(root.join("second.txt")).expect("external delete should succeed");
+
+    let outcome = project.save_all_text_documents();
+
+    assert!(
+        !outcome.all_written(),
+        "one blocked document must make this a partial save-all: {outcome:?}"
+    );
+    assert_eq!(outcome.written_count(), 2);
+    assert_eq!(outcome.failed_count(), 1);
+
+    let by_path = |name: &str| {
+        outcome
+            .outcomes
+            .iter()
+            .find(|item| item.relative_path == std::path::Path::new(name))
+            .unwrap_or_else(|| panic!("{name} must have its own outcome entry"))
+    };
+    assert!(by_path("first.txt").was_written());
+    assert!(!by_path("second.txt").was_written());
+    assert!(by_path("third.txt").was_written());
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("first.txt")).unwrap(),
+        "first edited\n",
+        "the first document's own edit must be on disk -- the second's block must not cost it"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("third.txt")).unwrap(),
+        "third edited\n",
+        "the third document's own edit must be on disk -- the second's block must not cost it \
+         either, even though it was attempted after"
+    );
+    assert!(
+        !root.join("second.txt").exists(),
+        "the second document's own file must still be gone: nothing papered over the deletion"
+    );
+
+    cleanup_root(root);
+}
