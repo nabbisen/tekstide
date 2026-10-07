@@ -1445,3 +1445,27 @@ disposition had to learn that lesson at review 475.
 **Possibly, but not provably, the pair referred to in "Verification, 2026-10-07" above**, where two
 of eight ablated runs failed under a target I did not name because my filter discarded the names.
 Those logs are gone, so this is a resemblance, not an identification.
+
+## Addendum, 2026-10-08 — review 480: review 478's two rows also leak their fixture directory
+
+Found while verifying the `0.30.0` candidate's own "0 fixture entries left" criterion. A reused
+`TMPDIR` held exactly three entries, and two of them were these:
+
+```
+tekstide-terminate-real-backgrounded-job-677412-1791413026620745216
+tekstide-terminate-setsid-survives-677412-1791413026620725036
+```
+
+Same process id, and it is the id of the failing run recorded at **New rows, 2026-10-08 — review
+478**. A fresh short `TMPDIR` over a passing run leaves 0, so the criterion itself is sound.
+
+**Why they leak:** the fixture is removed by `cleanup_root(root)`
+(`runtime/terminal/tests.rs:821`), an ordinary call at the end of the test body rather than a drop
+guard. Any panic before it — including the PTY-parse panic those two rows *are* — skips the removal.
+This is the shape this whole register was opened for, so it is worth saying plainly: **these two
+tests fail the gate twice, once on the assertion and once on the leak.**
+
+**Fix it with the wait, in one change.** Whoever polls `parse_bgpid` to `Some` should also make the
+fixture clean itself on unwinding, the way `test_support`'s own
+`kill_on_drop_child_does_not_leak_across_a_panic` already establishes for a `Child`. Owner: the dev
+team, with the rows above.
