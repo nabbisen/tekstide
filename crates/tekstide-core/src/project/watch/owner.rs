@@ -4,37 +4,45 @@
 //! step someone could forget). A refusal stays inside the project that caused it.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
 use super::backend::{NotifyBackend, WatchBackend, WatchRefusal};
-use super::directory::WatchedDirectory;
+use super::directory::{WatchAdmissionError, WatchedDirectory};
 use super::scope::{ScopeChange, WatchScope, WatchState};
 
-/// The platform's event stream for one project. Cloning shares the one receiver, so the
-/// app can hand a clone to the thread that waits on it while the owner keeps its own.
-#[derive(Clone)]
+/// The platform's event receiver for one project. Not `Clone`, and it is only ever handed
+/// out once, by [`WatchEventsSlot::take`], so exactly one thread can be waiting on it. A
+/// second waiter could never be woken to no effect, so the type forbids one (review 457).
 pub struct WatchEvents {
-    receiver: Arc<Mutex<Receiver<notify::Result<notify::Event>>>>,
+    receiver: Receiver<notify::Result<notify::Event>>,
 }
 
 impl WatchEvents {
-    fn new(receiver: Receiver<notify::Result<notify::Event>>) -> Self {
-        Self {
-            receiver: Arc::new(Mutex::new(receiver)),
-        }
-    }
-
     /// Blocks until the platform reports one event, then returns `true`. A failed event
     /// counts as one too: the watcher is alive, and deciding what a failure means is the
     /// caller's job. Returns `false` once the owning [`ProjectWatcher`] has been dropped,
     /// which is when the project closed, so the caller stops waiting for good.
-    pub fn wait_for_event(&self) -> bool {
-        let Ok(receiver) = self.receiver.lock() else {
-            return false;
-        };
-        receiver.recv().is_ok()
+    pub fn wait_for_event(&mut self) -> bool {
+        self.receiver.recv().is_ok()
+    }
+}
+
+/// Shared access to a project's one [`WatchEvents`]. Cloning shares the slot, not the
+/// receiver: whichever clone calls [`Self::take`] first gets it, and every later call gets
+/// `None` without blocking. A subscription rebuilt with the same identity therefore cannot
+/// start a second waiter.
+#[derive(Clone)]
+pub struct WatchEventsSlot {
+    slot: Arc<Mutex<Option<WatchEvents>>>,
+}
+
+impl WatchEventsSlot {
+    /// The receiver, if nobody has taken it yet. Never blocks on a waiter: the lock is held
+    /// only for the swap.
+    pub fn take(&self) -> Option<WatchEvents> {
+        self.slot.lock().ok()?.take()
     }
 }
 
@@ -42,7 +50,8 @@ impl WatchEvents {
 pub struct ProjectWatcher {
     scope: WatchScope,
     platform: Result<NotifyBackend, WatchRefusal>,
-    events: Option<WatchEvents>,
+    events: Option<WatchEventsSlot>,
+    admission_refusals: Vec<(PathBuf, WatchAdmissionError)>,
 }
 
 impl ProjectWatcher {
@@ -55,21 +64,32 @@ impl ProjectWatcher {
             Ok(backend) => Self {
                 scope: WatchScope::new(),
                 platform: Ok(backend),
-                events: Some(WatchEvents::new(receiver)),
+                events: Some(WatchEventsSlot {
+                    slot: Arc::new(Mutex::new(Some(WatchEvents { receiver }))),
+                }),
+                admission_refusals: Vec::new(),
             },
             Err(refusal) => Self {
                 scope: WatchScope::new(),
                 platform: Err(refusal),
                 events: None,
+                admission_refusals: Vec::new(),
             },
         }
     }
 
-    /// Makes the watches equal `desired`. Call this on a trigger (a toggle, a scan
-    /// finishing, a document opening or closing, a project opening), never on every
-    /// frame: it asks the filesystem whether each desired directory still exists, so a
-    /// hundred expanded folders is a hundred stat calls per call.
-    pub fn reconcile(&mut self, desired: &BTreeSet<WatchedDirectory>) -> ScopeChange {
+    /// Makes the watches equal `desired`, and keeps `refused` (the paths the access policy
+    /// refused, with their reasons) on the owner: nothing reads them yet, but a log would
+    /// read them here, so they are not thrown away at the call site. Call this on a trigger
+    /// (a toggle, a scan finishing, a document opening or closing, a project opening), never
+    /// on every frame: it asks the filesystem whether each desired directory still exists,
+    /// so a hundred expanded folders is a hundred stat calls per call.
+    pub fn reconcile(
+        &mut self,
+        desired: &BTreeSet<WatchedDirectory>,
+        refused: Vec<(PathBuf, WatchAdmissionError)>,
+    ) -> ScopeChange {
+        self.admission_refusals = refused;
         match &mut self.platform {
             Ok(backend) => self.scope.reconcile(desired, backend),
             Err(refusal) => self
@@ -86,6 +106,7 @@ impl ProjectWatcher {
             scope: WatchScope::new(),
             platform: Err(refusal),
             events: None,
+            admission_refusals: Vec::new(),
         }
     }
 
@@ -97,8 +118,14 @@ impl ProjectWatcher {
         &self.scope
     }
 
-    /// The event stream to subscribe to, or `None` if the platform never started.
-    pub fn events(&self) -> Option<WatchEvents> {
+    /// The paths the access policy refused at the last reconcile, with their reasons.
+    pub fn admission_refusals(&self) -> &[(PathBuf, WatchAdmissionError)] {
+        &self.admission_refusals
+    }
+
+    /// The slot holding this project's event receiver, or `None` if the platform never
+    /// started.
+    pub fn events(&self) -> Option<WatchEventsSlot> {
         self.events.clone()
     }
 }

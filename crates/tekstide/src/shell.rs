@@ -7069,12 +7069,13 @@ struct ProjectWatch {
 /// directory still exists, so a hundred expanded folders is a hundred stat calls. The
 /// triggers are a folder toggle, a scan finishing, a document opening, and a project
 /// opening. The owner is created here on first use, so a project is watched from the
-/// moment it is opened. The admission refusals are not applied and not shown (C3).
+/// moment it is opened. The admission refusals go to the owner, which keeps them for a
+/// log; nothing reads them yet, and none is shown (C3).
 fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::project::ProjectId) {
     let Some(project) = state.app_shell.state().project(project_id) else {
         return;
     };
-    let (desired, _refusals) = project.watched_directories();
+    let (desired, refused) = project.watched_directories();
     if !state.project_watches.contains_key(project_id) {
         state.watch_generation += 1;
         let generation = state.watch_generation;
@@ -7087,7 +7088,7 @@ fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::projec
         );
     }
     if let Some(watch) = state.project_watches.get_mut(project_id) {
-        watch.watcher.reconcile(&desired);
+        watch.watcher.reconcile(&desired, refused);
     }
 }
 
@@ -7098,7 +7099,7 @@ fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::projec
 fn project_watch_subscription(
     project_id: tekstide_core::project::ProjectId,
     generation: u64,
-    events: tekstide_core::project::WatchEvents,
+    events: tekstide_core::project::WatchEventsSlot,
 ) -> Subscription<Message> {
     Subscription::run_with(
         ProjectWatchSource {
@@ -7112,11 +7113,13 @@ fn project_watch_subscription(
 
 /// Identity is (project, generation): a reopened project is a new generation and so a
 /// new subscription, and a rebuild of `subscription()` does not start a second thread.
-/// The receiver is not hashable, so it is left out of the identity.
+/// The receiver is not hashable, so it is left out of the identity. `events` is a slot,
+/// not the receiver: the stream takes the receiver once, so a stream built a second time
+/// for the same identity has nothing to wait on and does nothing.
 struct ProjectWatchSource {
     project_id: tekstide_core::project::ProjectId,
     generation: u64,
-    events: tekstide_core::project::WatchEvents,
+    events: tekstide_core::project::WatchEventsSlot,
 }
 
 impl std::hash::Hash for ProjectWatchSource {
@@ -7131,8 +7134,12 @@ fn project_watch_stream(
 ) -> impl iced::futures::Stream<Item = Message> + use<> {
     let project_id = source.project_id.clone();
     let generation = source.generation;
-    let events = source.events.clone();
+    let slot = source.events.clone();
     iced::stream::channel(1, async move |mut output| {
+        let Some(mut events) = slot.take() else {
+            std::future::pending::<()>().await;
+            return;
+        };
         std::thread::spawn(move || {
             // `wait_for_event` returns false once the project's owner is dropped, which
             // is the project closing; the thread then ends rather than waiting forever.

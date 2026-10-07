@@ -631,11 +631,15 @@ fn a_change_in_a_watched_directory_reaches_the_owner_event_stream() {
 
     let mut watcher = super::ProjectWatcher::open();
     let desired = BTreeSet::from([WatchedDirectory::for_test(directory)]);
-    watcher.reconcile(&desired);
+    watcher.reconcile(&desired, Vec::new());
     assert_eq!(watcher.state(), &WatchState::Live);
     assert_eq!(watcher.scope().watched_count(), 1);
 
-    let events = watcher.events().expect("notify starts on Linux");
+    let mut events = watcher
+        .events()
+        .expect("notify starts on Linux")
+        .take()
+        .expect("the receiver is handed out once, to the waiter");
     let (sender, reported) = channel();
     std::thread::spawn(move || sender.send(events.wait_for_event()).unwrap());
     std::fs::write(directory.join("created.txt"), b"x").unwrap();
@@ -657,7 +661,11 @@ fn dropping_the_owner_ends_its_event_stream() {
     use std::time::Duration;
 
     let watcher = super::ProjectWatcher::open();
-    let events = watcher.events().expect("notify starts on Linux");
+    let mut events = watcher
+        .events()
+        .expect("notify starts on Linux")
+        .take()
+        .expect("the receiver is handed out once, to the waiter");
     let (sender, reported) = channel();
     std::thread::spawn(move || sender.send(events.wait_for_event()).unwrap());
 
@@ -680,11 +688,102 @@ fn a_platform_that_never_started_stops_watching_on_the_first_reconcile() {
     let mut watcher = super::ProjectWatcher::refused_for_test(WatchRefusal::new("no inotify"));
     assert!(watcher.events().is_none());
 
-    watcher.reconcile(&desired);
+    watcher.reconcile(&desired, Vec::new());
 
     assert_eq!(watcher.state(), &WatchState::Stopped);
     assert_eq!(
         watcher.scope().last_refusal().map(WatchRefusal::detail),
         Some("no inotify")
     );
+}
+
+/// Review 457: at most one waiter, by the type. The receiver is handed out once; a second
+/// take, from a clone of the slot or from the same one, gets nothing and does not block.
+#[test]
+fn the_event_receiver_is_handed_out_once_so_only_one_waiter_can_exist() {
+    let watcher = super::ProjectWatcher::open();
+    let slot = watcher.events().expect("notify starts on Linux");
+    let clone = slot.clone();
+
+    assert!(slot.take().is_some(), "the first taker gets the receiver");
+    assert!(
+        clone.take().is_none(),
+        "a clone of the slot gets nothing once taken"
+    );
+    assert!(slot.take().is_none(), "and nothing on any later take");
+}
+
+/// Review 457, choice 3: the admission refusals are kept on the owner, with their reasons,
+/// so a log can read them and nothing is discarded at the call site.
+#[test]
+fn the_owner_keeps_the_admission_refusals_it_was_given() {
+    let mut watcher = super::ProjectWatcher::open();
+    let refused = vec![(
+        PathBuf::from("link-out"),
+        super::WatchAdmissionError::NotADirectory,
+    )];
+
+    watcher.reconcile(&BTreeSet::new(), refused.clone());
+
+    assert_eq!(watcher.admission_refusals(), refused.as_slice());
+}
+
+/// Review 457: the render-thread cost of one reconcile trigger, reported per expanded
+/// directory, against NFR-PERF-002's p95 of 32 ms (the nearest stated budget, since no
+/// trigger is an editor keystroke). The trigger is the same pair the app runs:
+/// `watched_directories()` then `reconcile`. Run by hand:
+/// `cargo test -p tekstide-core measured_reconcile_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check: see qa-evidence.md § Review 457"]
+fn measured_reconcile_cost_per_expanded_directory() {
+    use crate::project::root::{ProjectRootValidator, SymlinkPolicy};
+    use crate::project::{ProjectId, ProjectSession};
+    use std::time::{Duration, Instant};
+
+    const TRIGGERS: usize = 40;
+    for count in [1usize, 10, 100, 500] {
+        let base = PathBuf::from(format!("/dev/shm/tekmeasure-{count}"));
+        let _ = std::fs::remove_dir_all(&base);
+        let project = base.join("project");
+        for index in 0..count {
+            let folder = project.join(format!("d{index:04}"));
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join("file.txt"), "f").unwrap();
+        }
+        let valid = ProjectRootValidator
+            .validate(&project, SymlinkPolicy::FailClosed)
+            .expect("the measurement project root validates");
+        let mut session = ProjectSession::new(
+            ProjectId::for_test(1),
+            valid.display_name,
+            valid.selected_path,
+            valid.canonical_path,
+        );
+        for index in 0..count {
+            let _ = session.toggle_explorer_directory(Path::new(&format!("d{index:04}")));
+        }
+        let mut watcher = super::ProjectWatcher::open();
+
+        let trigger = |watcher: &mut super::ProjectWatcher| -> Duration {
+            let started = Instant::now();
+            let (desired, refused) = session.watched_directories();
+            watcher.reconcile(&desired, refused);
+            started.elapsed()
+        };
+        let first = trigger(&mut watcher);
+        let mut steady: Vec<Duration> = (0..TRIGGERS).map(|_| trigger(&mut watcher)).collect();
+        steady.sort();
+        let p95 = steady[(TRIGGERS * 95).div_ceil(100) - 1];
+        let per_expanded_us = p95.as_secs_f64() * 1e6 / count as f64;
+        println!(
+            "expanded={count} desired={} first_trigger_ms={:.3} steady_p95_ms={:.3} \
+             steady_p95_us_per_expanded_directory={per_expanded_us:.2} within_32ms={}",
+            count + 1,
+            first.as_secs_f64() * 1e3,
+            p95.as_secs_f64() * 1e3,
+            p95 <= Duration::from_millis(32),
+        );
+        drop(watcher);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
