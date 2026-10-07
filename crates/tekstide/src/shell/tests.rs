@@ -10549,6 +10549,48 @@ fn a_typed_key_edits_the_real_active_document_through_real_routing() {
     assert_eq!(active_document_text(&state), "!hello");
 }
 
+/// RFC-065 D1, found while capturing live evidence for this slice: a live run through the
+/// real GUI showed the Project Board's "unsaved files" count read back `0` after a real edit
+/// to one document followed by opening a second one, even though the core-level test proves
+/// `ProjectContentWorkspace::dirty_file_count` itself stays `1` for the same sequence. This
+/// test reproduces the exact shell-level path (a real routed key, the same
+/// `open_active_project_text_document` call `Action::Open`'s own handler in `shell.rs` makes)
+/// to find whether the gap is in the glue rather than the core.
+#[test]
+fn opening_a_second_file_through_real_routing_leaves_the_boards_dirty_count_intact() {
+    let (mut state, dir) = state_with_an_open_document("shell-dirty-count-second-open", "hello");
+    std::fs::write(dir.join("second.txt"), "second original\n").unwrap();
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("!".into()),
+        modifiers: iced::keyboard::Modifiers::empty(),
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed =
+        crate::input::route_non_modal_input(proof, &policy, state.focus, None, press.clone());
+    let _ = super::update(&mut state, Message::Input(routed));
+    assert_eq!(active_document_text(&state), "!hello");
+
+    state
+        .app_shell
+        .open_active_project_text_document("second.txt")
+        .expect("the second fixture file must open");
+
+    let rows = state.app_shell.project_board().rows;
+    let row = rows
+        .iter()
+        .find(|row| row.row_kind == tekstide_core::project_board::BoardRowKind::ActiveSession)
+        .expect("the open project must have a board row");
+    assert_eq!(
+        row.dirty_file_count,
+        tekstide_core::project_board::CountDisplay::KnownCount(1),
+        "the board must still count the first document's edit after a second file is opened \
+         through the same real path the GUI's explorer uses"
+    );
+}
+
 fn active_document_cursor(state: &State) -> tekstide_core::content::TextCursor {
     state
         .app_shell

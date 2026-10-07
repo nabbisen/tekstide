@@ -88,7 +88,8 @@ impl ProjectContentWorkspace {
     }
 
     pub fn active_document(&self) -> Option<&TextDocument> {
-        self.active_index.and_then(|index| self.documents.get(index))
+        self.active_index
+            .and_then(|index| self.documents.get(index))
     }
 
     fn active_document_mut(&mut self) -> Option<&mut TextDocument> {
