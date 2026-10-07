@@ -1350,3 +1350,17 @@ name*; the same pattern fixes it, and both rows should be retired in one change.
 
 **Scheduled: before the `0.30.0` candidate**, because what it taxes is the candidate's own
 three-run gate. It is test-only, so it does not open a second RFC in the release.
+
+**Owner: the dev team — added at review 475, because the entry above did not say so and was read,
+reasonably, as "not mine to action".** A scheduled fix with no name against it is the same failure
+this disposition was written to end: recorded, agreed, and never done. The reviewer rules on
+intermittents and does not write the code. Concretely, what is wanted:
+
+- Replace the single post-`drop` assertion with a bounded poll — `is_still_answerable` must *become*
+  `false` within a deadline generous enough to survive a loaded machine (seconds, not milliseconds),
+  failing with the same message if it never does.
+- Apply the same shape to `an expired entry must not continue occupying the live budget`, the second
+  name for this cause.
+- Retire both rows from the register in that change, and say in the commit that the register's
+  recurrence sections stay as history.
+- No product code. If the fix appears to need any, that finding outranks the fix: say so instead.
