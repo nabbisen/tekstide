@@ -96,8 +96,7 @@ measurement with no number in the evidence is not ticked.
       `cargo audit`: zero vulnerabilities, the same three warnings.)*
 - [x] Watch scope is `expanded` + the root + open documents' folders. **Counted before and after**
       *(Step 1 (review 455): the session computes the admitted set from its own tree and document —
-      `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated. The app does not reconcile
-      it yet: that needs the watcher's owner decided, see review 456.)*
+      `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated.)*
       *(Step 2: reconciled on the triggers, and the owner exists per project.)*
       *(Steps 3–5, review 458's live count: `the_live_watch_scope_follows_expand_collapse_and_close`
       drives the real sidebar Enter key. Expanding `src` takes the watch count from 1 to 2, collapsing
@@ -106,16 +105,15 @@ measurement with no number in the evidence is not ticked.
       expanding, collapsing and closing a project — a scope that only grows is a defect.
       *(The policy is proven: `expanding_collapsing_and_closing_move_the_watched_count_exactly`. Now
       wired to the live explorer tree; the open-document set is counted at the document-open trigger.)*
-- [ ] **Budget exhaustion forced in a test**: no crash, today's fallback behaviour, and a sentence on
+- [x] **Budget exhaustion forced in a test**: no crash, today's fallback behaviour, and a sentence on
       screen saying watching stopped and **what it means for the user**. *(Corrected at review 459:
       this box said "and why", written before C3 ruled that no cause text reaches the screen. C3 is
       the later and more specific ruling; a kernel watch limit is not something a user can act on.)*
       *(Forced and tested against a fake backend — `a_refused_watch_stops_watching_and_drops_every_watch_without_crashing`.
-      **Left open on one point, for the reviewer:** the sentence is written and drawn by the explorer
-      view whenever the project's watching is stopped (step 5), and the app test forces that stop and
-      proves the two lines are given up from the rows. But the box says "and why", and the sentence names
-      the consequence and the action, not the cause: review 452's C3 ruled that no cause text reaches the
-      screen. Which wording the box should carry is the reviewer's call, so I have not ticked it.)*
+      Forced in the app by `ProjectWatcher::unavailable` through the real reconcile trigger:
+      `a_stopped_watch_says_so_in_the_sidebar_and_gives_up_two_rows`. The explorer view draws the two trusted
+      lines whenever watching is stopped. Ticked on the reviewer's ruling at 459: the sentence says what it
+      means for the user, and names no cause.)*
 - [x] **The policy guarantee lands with the wiring, not with its test** (ruled at review 455):
       `desired_directories` is `root.join(relative)` with **no policy consulted**, is `pub`, and takes
       arbitrary paths. D7 is a guarantee, so step 1 takes paths the explorer's access policy has
@@ -181,11 +179,15 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-026-C — the change arrives
 
-- [ ] **The row floor survives the stop sentence** (review 459): `rows_that_fit` ends `.max(1)`, then
+- [x] **The row floor survives the stop sentence** (review 459): `rows_that_fit` ends `.max(1)`, then
       `shell.rs:4205` does `rows.saturating_sub(WATCH_STOPPED_LINES)` — **0 rows when the floor
       returned 1 or 2**, a tree showing nothing while files exist, in exactly the short-sidebar case
       the floor was written for. Move the subtraction inside `rows_that_fit` so there is one floor and
       it happens last; a guarantee a caller can undo is not one.
+      *(Done at review 459's fix: `rows_that_fit(height, font, extra_lines)` does the subtraction and
+      the `.max(1)` in one expression, the floor last. The shell passes the extra lines and no longer subtracts. `the_stopped_sentence_never_takes_a_short_sidebar_to_no_rows` sweeps
+      heights 0–2000 and pins 160 px, where the window is one row: it keeps one. Ablation: the floor
+      removed from `rows_that_fit` fails it.)*
 - [ ] **`REQ-FILE-003` captured live**: a file created in an expanded folder appears without the user
       reopening it.
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
