@@ -10,15 +10,20 @@ for the full handoff pack.
 **The repair, and this release's headline**: opening a second file used to silently discard the
 first's unsaved edits — no prompt, no refusal, no record, a live defect shipping in `0.29.0`. The
 editor now holds an **open set** of documents rather than one, so opening a second file adds it to
-the set instead of replacing what was there, and there is nothing left to discard. Deduplicated by
-path: opening a file that is already in the set switches to its existing entry (text, dirty state
-and cursor untouched) rather than adding a second. `REQ-EDIT-004` has said "dirty *buffers*",
-plural, since it was written, and the product has only ever had one; the open set makes that plural
-real for the first time, and the requirements coverage row is corrected from implying it already
-was. The two counts a user reads from, and the close dialog, count the whole set through the same
-wiring they always used — only what they were counting changed. The set is bounded at **20 open
-documents**, refused with the open count and the limit stated once reached, even with a document
-already active.
+the set instead of replacing what was there, and there is nothing left to discard. Nothing means
+nothing: the first document's own undo history survives too, since it always lived on the document
+itself, not on "whichever one is active" — the open set does not touch it, so the switcher can never
+undo into the wrong file. Deduplicated by path: opening a file that is already in the set switches to
+its existing entry (text, dirty state and cursor untouched) rather than adding a second. `REQ-EDIT-004`
+has said "dirty *buffers*", plural, since it was written, and the product has only ever had one; the
+open set makes that plural real for the first time, and the requirements coverage row is corrected
+from implying it already was. The two counts a user reads from, and the close dialog, count the whole
+set through the same wiring they always used — only what they were counting changed. The set is
+bounded at **20 open documents**, refused with the open count and the limit stated once reached, even
+with a document already active. **Every open document is watched, not only the active one**: a
+background document's own external change or conflict is detected the same way the active one's
+always was, and is already waiting, named, the moment you switch to it — not discovered only once a
+document happens to become active.
 
 **`0.29.0`'s own open question, answered**: that release's "what this release does not do" section said
 of the open-document refresh, "with one document this is a few milliseconds; the multi-document RFC

@@ -585,3 +585,36 @@ one.
   short fixed literal, `/dev/shm/g479{1,2,3}`, not `mktemp`): `738 + 16 + 1089` (+ `0+1+1`
   doctests), 0 failed, 0 fixture entries left in each run's own `TMPDIR` afterward.
 - Commits pushed once this gate was green.
+
+## Review 479: a self-contradicting row, and two things the re-read itself should have caught
+
+Three required items, all documentation, none touching the write path.
+
+**1. `rfcs/delivery-plan.md`'s Text-document coverage row contradicted itself.** `7d01570`
+appended `REQ-EDIT-004`'s correction to the row without updating the row's own opening summary,
+which still said "Model complete, single active document" -- the same shape review 472 caught
+with the `[open]` tag: a correction appended, the summary it falsifies left standing. Fixed: the
+lead now reads "Model complete, an open set of documents with one active," pointing at the `004`
+correction already in the same cell rather than duplicating it.
+
+**2 and 3: the changelog's repair paragraph never mentioned undo, and never said the watcher
+covers every open document, not only the active one.** Both are real, user-visible consequences
+of the open set that previously had tests and a live capture (undo:
+`opening_a_second_file_leaves_the_first_s_undo_history_intact`, PR-065-A; the watcher:
+`a_background_document_is_refreshed_by_its_own_path_without_touching_the_active_status` and
+`an_external_change_to_a_background_open_document_reaches_it_too`, required at review 474) but no
+line in the release that ships them. `CHANGELOG.md`'s repair paragraph now says both: that the
+undo history survives because it lives on the document itself, not on "whichever one is active,"
+so the switcher can never undo into the wrong file; and that every open document is watched, with
+a background change already waiting, named, the moment you switch to it.
+
+The review's own diagnosis for 2 and 3 is worth keeping: an incrementally-written changelog
+records what each slice *did* and tends to miss what the slices *together* now mean, which is why
+the re-read has to run once more against the finished set, not only against the last slice's own
+diff.
+
+## Gate, review 479's fixes
+
+- `cargo fmt --check`: clean (doc-only changes; no code touched).
+- `cargo test --test rfc_docs_invariants`: 16 passed, 0 failed.
+- Commits pushed once this gate was green.

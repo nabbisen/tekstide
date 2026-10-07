@@ -234,23 +234,29 @@ The requirements-gap write-up, the scan reasoning and the gate are all accepted,
 genuinely found what it was meant to find — the entry had never named slice A. Three items remain,
 two of them things the re-read should have caught on the same pass.
 
-- [ ] **`rfcs/delivery-plan.md:30` now contradicts itself.** `7d01570` appended `REQ-EDIT-004`'s
+- [x] **`rfcs/delivery-plan.md:30` now contradicts itself.** `7d01570` appended `REQ-EDIT-004`'s
   correction to the Text-document coverage row — correctly — but the row still *opens* with
   "Model complete, **single active document**." The same cell now says both that there is one
   active document and that the open set is real and counts every one of them. This is the shape
   caught at review 472 with `[open]`: the correction gets appended and the summary the correction
   falsifies is left standing. The lead phrase must change. A repo-wide sweep for the claim finds
   only this and `release-0.29.0.md:49`, which is a frozen record and correct for its own release.
-- [ ] **The entry never mentions undo — zero occurrences.** The release's headline is that opening
+  Fixed: the lead now reads "Model complete, **an open set of documents with one active**", with a
+  pointer to the `004` correction in the same cell rather than restating it.
+- [x] **The entry never mentions undo — zero occurrences.** The release's headline is that opening
   a second file no longer discards the first's unsaved edits, and slice A's own test is
   `opening_a_second_file_leaves_the_first_s_undo_history_intact`. Undo and redo histories are
   per-document (`undo_stack`/`redo_stack` are fields of the document) and survive both the open and
   the switch. "Nothing is discarded" includes the undo history, and a user who lived with `0.29.0`
-  has every reason to ask. One clause in the repair paragraph.
-- [ ] **The entry never says every open document is watched.** Its only watcher mentions are
+  has every reason to ask. One clause in the repair paragraph. Fixed: `CHANGELOG.md`'s repair
+  paragraph now says the undo history survives too, since it lives on the document itself, and that
+  the switcher can never undo into the wrong file.
+- [x] **The entry never says every open document is watched.** Its only watcher mentions are
   save-all's cost. `what-works-today.md` says it — required at review 474 — that a background
   document's own disk change is detected the same way and is waiting when you switch to it. That is
   new, user-visible behaviour of the multi-document model with no line in the release that ships it.
+  Fixed: one sentence added to the repair paragraph, naming that every open document is watched, not
+  only the active one, and that a background change is already waiting, named, when you switch to it.
 
 **The core pin and the version bump: your reading is right, leave them.** Cutting the candidate is a
 separate step and the box's own wording ("bumps *with the version*") makes it a release-cut item.
