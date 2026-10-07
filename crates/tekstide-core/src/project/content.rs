@@ -202,6 +202,24 @@ impl ProjectContentWorkspace {
     ) -> Result<(), ProjectContentError> {
         let selected_relative_path = selected_relative_path.as_ref().to_path_buf();
 
+        // RFC-065 review 468's ruling: a path already in the open set switches to that
+        // entry rather than adding a second. Slice A deliberately left this undone (two
+        // entries for one path, neither lost); the review found the hazard it was storing
+        // up for slice C -- `save_active_document` saves only the active entry, so once a
+        // switcher makes the older entry reachable, saving both in either order silently
+        // overwrites one with the other. Switching here, with no disk read, is also what
+        // every editor a user has met already does for this case.
+        if let Some(index) = self
+            .documents
+            .iter()
+            .position(|document| document.target().selected_relative_path == selected_relative_path)
+        {
+            self.selected_explorer_path = selected_relative_path;
+            self.active_index = Some(index);
+            self.status = ProjectContentStatus::Opened;
+            return Ok(());
+        }
+
         match TextDocument::open(root, &selected_relative_path, policy) {
             Ok(document) => {
                 self.selected_explorer_path = selected_relative_path;
@@ -211,6 +229,45 @@ impl ProjectContentWorkspace {
                 // switcher) is PR-065-B/C; this is only the line that stops the loss.
                 self.documents.push(document);
                 self.active_index = Some(self.documents.len() - 1);
+                self.status = ProjectContentStatus::Opened;
+                Ok(())
+            }
+            Err(error) => {
+                self.status = ProjectContentStatus::OpenError {
+                    message: error.to_string(),
+                };
+                Err(ProjectContentError::Open(error))
+            }
+        }
+    }
+
+    /// RFC-065 PR-065-B: the Reload button's own entry point, split out of
+    /// [`Self::open_text_document`] once that method gained the dedup-by-path switch (review
+    /// 468). Reload must always take disk's current content for the active document and
+    /// discard any local edit -- the one escape `TextDocument::save()` gives past a conflict
+    /// -- so it cannot share a path with "open," which now deliberately does the opposite
+    /// (switches in place, no disk read) for a path that is already open. Replaces the active
+    /// entry's own slot in the set rather than pushing a new one, so its position (and every
+    /// other open document's) is undisturbed.
+    pub fn reload_active_document(
+        &mut self,
+        root: &ProjectRootHandle,
+        policy: TextDocumentOpenPolicy,
+    ) -> Result<(), ProjectContentError> {
+        let Some(index) = self.active_index else {
+            self.status = ProjectContentStatus::OpenError {
+                message: "no active text document".to_owned(),
+            };
+            return Err(ProjectContentError::NoActiveDocument);
+        };
+        let relative_path = self.documents[index]
+            .target()
+            .selected_relative_path
+            .clone();
+
+        match TextDocument::open(root, &relative_path, policy) {
+            Ok(document) => {
+                self.documents[index] = document;
                 self.status = ProjectContentStatus::Opened;
                 Ok(())
             }

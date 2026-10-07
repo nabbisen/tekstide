@@ -474,6 +474,15 @@ impl AppState {
         project.open_text_document(selected_relative_path)
     }
 
+    /// RFC-065 PR-065-B: see [`ProjectSession::reload_active_document`]'s own doc.
+    pub fn reload_active_project_document(&mut self) -> Result<(), ProjectContentError> {
+        let Some(project) = self.active_project_mut() else {
+            return Err(ProjectContentError::NoActiveProject);
+        };
+
+        project.reload_active_document()
+    }
+
     pub fn scan_active_project_explorer_directory(
         &mut self,
         selected_relative_path: impl Into<std::path::PathBuf>,

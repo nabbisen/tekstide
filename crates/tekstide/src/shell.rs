@@ -1987,20 +1987,26 @@ fn activate_current_modal(state: &mut State) {
         Some(ModalContent::PasteConfirmation(modal)) if modal.focus == PasteConfirmButton::Accept => {
             write_terminal_input(state, &modal.target, modal.content.as_bytes());
         }
-        // RFC-019 PR-019-D: Reload re-opens the document fresh --
-        // `open_active_project_text_document` takes disk's current
-        // content and drops local edits, the only way past a
-        // conflict `TextDocument::save()` itself provides. Any other
-        // focus (Dismiss), or `ModalDismiss` (Escape), closes
-        // the modal without touching the file at all -- the same
-        // "every dismissal path defaults to not overwriting" shape
-        // the paste dialog's own Reject/Escape arms already hold.
+        // RFC-019 PR-019-D: Reload re-opens the document fresh -- takes
+        // disk's current content and drops local edits, the only way
+        // past a conflict `TextDocument::save()` itself provides. Any
+        // other focus (Dismiss), or `ModalDismiss` (Escape), closes the
+        // modal without touching the file at all -- the same "every
+        // dismissal path defaults to not overwriting" shape the paste
+        // dialog's own Reject/Escape arms already hold.
+        //
+        // RFC-065 PR-065-B: `reload_active_project_document`, not
+        // `open_active_project_text_document` on `modal.relative_path` --
+        // once "open" started switching to an already-open path rather
+        // than re-reading it (review 468), it stopped being able to do
+        // what Reload needs here. The modal always names the *active*
+        // document's own path (`open_external_change_dialog_for_
+        // active_document`'s own doc), so reloading the active document
+        // is exactly the right target regardless.
         Some(ModalContent::ExternalChange(modal))
             if modal.focus == ExternalChangeButton::Reload =>
         {
-            let _ = state
-                .app_shell
-                .open_active_project_text_document(&modal.relative_path);
+            let _ = state.app_shell.reload_active_project_document();
         }
         // RFC-022 PR-022-E: unlike Paste/ExternalChange above, *both*
         // of this dialog's own focus positions are real decisions --

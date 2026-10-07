@@ -133,6 +133,13 @@ impl ApplicationShell {
         result
     }
 
+    /// RFC-065 PR-065-B: see [`crate::project::ProjectSession::reload_active_document`]'s own
+    /// doc. No route change: unlike opening a document, reloading the active one never leaves
+    /// the workspace route it was already in.
+    pub fn reload_active_project_document(&mut self) -> Result<(), ProjectContentError> {
+        self.state.reload_active_project_document()
+    }
+
     pub fn scan_active_project_explorer_directory(
         &mut self,
         selected_relative_path: impl Into<std::path::PathBuf>,

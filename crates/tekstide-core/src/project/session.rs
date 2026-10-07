@@ -1480,6 +1480,18 @@ impl ProjectSession {
         result
     }
 
+    /// RFC-065 PR-065-B: the Reload button's own entry point -- see
+    /// [`ProjectContentWorkspace::reload_active_document`]'s own doc for why this is not
+    /// `open_text_document` on the same path.
+    pub fn reload_active_document(&mut self) -> Result<(), ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        let result = self
+            .content_workspace
+            .reload_active_document(&root, TextDocumentOpenPolicy::linux_mvp());
+        self.sync_file_state_from_content_workspace();
+        result
+    }
+
     pub fn scan_content_explorer_directory(
         &mut self,
         selected_relative_path: impl Into<PathBuf>,

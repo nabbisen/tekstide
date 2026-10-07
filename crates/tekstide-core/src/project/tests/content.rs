@@ -350,16 +350,22 @@ fn opening_a_second_file_leaves_the_first_s_undo_history_intact() {
     cleanup_root(root);
 }
 
-/// RFC-065 D1's own boundary, found live while capturing evidence for this slice: reopening a
-/// path that is already open does not reuse the existing entry -- it opens a second, fresh
-/// one, and the first (however dirty) is untouched in the set. Deliberate, not a bug: reusing
-/// an already-open entry by path is identity/switching work (PR-065-B's counts, PR-065-C's
-/// switcher), and this slice's only job is that nothing already open is ever discarded. This
-/// test locks the actual, observed boundary in rather than leaving it as something a reviewer
-/// has to rediscover from a screenshot.
+/// RFC-065 history: when slice A shipped, reopening an already-open path added a **second**,
+/// fresh entry rather than reusing the first -- deliberate, tested
+/// (`reopening_an_already_open_path_adds_a_second_entry_rather_than_losing_the_first`, slice A's
+/// own name for this test), and disclosed as identity/switching work left for later. Review 468
+/// found the hazard that boundary was storing up: two entries for one path are two documents
+/// that both believe they own the file, `save_active_document` saves only the active one, and
+/// once PR-065-C's switcher makes the older entry reachable, saving both in either order
+/// silently overwrites one with the other -- a lost update the product would create against
+/// itself. The ruling moved the fix into B, before C makes the hazard reachable, with the
+/// instruction to rename this test to say what it now holds rather than delete the record that
+/// the old behaviour was once true and once deliberate. **This is that rename**: reopening now
+/// switches to the existing entry, in place, with no disk read -- the same thing every editor a
+/// user has met already does.
 #[test]
-fn reopening_an_already_open_path_adds_a_second_entry_rather_than_losing_the_first() {
-    let root = test_root("content-reopen-same-path-keeps-first");
+fn reopening_an_already_open_path_switches_to_the_existing_entry_rather_than_adding_a_second() {
+    let root = test_root("content-reopen-same-path-switches");
     std::fs::write(root.join("first.txt"), "first original\n").unwrap();
     let mut project = project_at(&root);
 
@@ -369,6 +375,9 @@ fn reopening_an_already_open_path_adds_a_second_entry_rather_than_losing_the_fir
     project
         .replace_active_text("first original, with a real local edit\n")
         .expect("a local edit on the document");
+    project
+        .set_active_cursor(TextCursor { line: 0, column: 5 })
+        .expect("a cursor move on the document");
 
     project
         .open_text_document("first.txt")
@@ -376,22 +385,30 @@ fn reopening_an_already_open_path_adds_a_second_entry_rather_than_losing_the_fir
 
     assert_eq!(
         project.content_workspace().open_buffer_count(),
-        2,
-        "the reopen is a second entry, not a no-op and not a discard of the first"
+        1,
+        "reopening an already-open path must not create a second entry"
     );
     assert_eq!(
         project.content_workspace().dirty_file_count(),
         1,
-        "the original, edited entry is still counted dirty"
+        "the entry's own unsaved edit is untouched by the reopen"
     );
+    let active = project
+        .content_workspace()
+        .active_document()
+        .expect("the entry must be active after the reopen");
     assert_eq!(
-        project
-            .content_workspace()
-            .active_document()
-            .unwrap()
-            .state(),
-        TextDocumentState::Clean,
-        "the newly (re)opened entry reads the file fresh from disk and is clean"
+        active.text(),
+        "first original, with a real local edit\n",
+        "switching to the existing entry must not re-read the file from disk and discard the \
+         edit"
+    );
+    assert_eq!(active.state(), TextDocumentState::Dirty);
+    assert_eq!(
+        active.cursor(),
+        TextCursor { line: 0, column: 5 },
+        "the existing entry's own cursor must survive the reopen, the same as any other \
+         untouched field of a document that was not re-read"
     );
 
     cleanup_root(root);
