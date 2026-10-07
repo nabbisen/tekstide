@@ -378,3 +378,29 @@ active-document-scoped, PR-065-B's own design, so "open" was ambiguous there too
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
 - Commits pushed once this gate was green.
+
+## Review 474: one more documentation item, reachable only once C shipped
+
+`what-works-today.md`'s own "the open file's own header names a change or a deletion" was still
+singular. With the open set, each document carries its own external-change state
+(`a_background_document_is_refreshed_by_its_own_path_without_touching_the_active_status`,
+PR-065-B) and the header shows only the *active* one's -- so a background document's own disk
+change is real and detected, but invisible until the user switches to it. Not reachable before
+PR-065-C: before a switcher existed, there was no way to *reach* a second document at all, so
+the question did not arise before this slice.
+
+Fixed: the paragraph now says the header names the active document's state, that a background
+document's own change is detected the same way, and that it surfaces on switching, not before. A
+repo-wide sweep (now the standing habit after reviews 472-474) found nothing else user-facing;
+the one remaining hit for the same phrase, `explorer/tests.rs:1169`, describes that test's own
+single-file fixture correctly and is not stale.
+
+The flake (`is_still_answerable_reflects_the_real_connection_state`, row 5) has its own
+disposition now, recorded by the architect at `test-process-leak.md`'s own "Disposition,
+2026-10-07" entry: ruled, scheduled before the candidate, not mine to action this response.
+
+## Gate, review 474's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
+- Commits pushed once this gate was green.

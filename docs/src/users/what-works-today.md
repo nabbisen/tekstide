@@ -17,9 +17,12 @@ and a permanent **Projects** tab returns to the board. Each project gets a bound
 scan, root-bound file access so nothing outside the project folder is reachable, UTF-8 text
 buffers, and a save that will not silently overwrite a file that changed on disk: a dialog offers
 to reload, every dismissal leaves the disk file untouched, and it only claims local changes will
-be lost when there are some. The open file's own header names a change or a deletion on disk as
-soon as the watcher sees it — *(changed on disk, not reloaded)*, *(deleted on disk, not
-reloaded)*, *(conflict)* — and a **Reload** button beside **Save** reaches the same dialog
+be lost when there are some. **The editor's header names the active document's own state** — a
+change or a deletion on disk, as soon as the watcher sees it — *(changed on disk, not
+reloaded)*, *(deleted on disk, not reloaded)*, *(conflict)*. A background document's own disk
+change is detected the same way (every open document is watched, not only the active one), but
+is not shown until you switch to it — the header, not a sidebar marker, is where it surfaces.
+A **Reload** button beside **Save** reaches the same dialog
 directly, without first attempting to save.
 
 The explorer is **read-only** — no rename, delete, or create.

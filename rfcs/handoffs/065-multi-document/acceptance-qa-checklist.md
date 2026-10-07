@@ -120,15 +120,12 @@ The four fixes are correct, the contradiction `5c20605` created is closed, and r
 yourself before calling it done — finding `ExternalDeleted`'s doc comment — is the habit the last
 two reviews were asking for. My own sweep now returns nothing user-facing but one item.
 
-- [ ] **`docs/src/users/what-works-today.md:20` still describes the status in the singular**: "The
-  open file's own header names a change or a deletion on disk as soon as the watcher sees it." With
-  the set, each open document carries its own state
-  (`a_background_document_is_refreshed_by_its_own_path_without_touching_the_active_status`), and
-  the header shows the **active** one. So a background document can be changed or deleted on disk
-  and the user learns of it only on switching to it. **This became reachable only when PR-065-C
-  shipped** — before the switcher there was no way to reach a second document at all, so the
-  question did not arise. Say it: the header names the active document's status, and a background
-  document's change is waiting when you switch to it.
+- [x] **`docs/src/users/what-works-today.md:20` still describes the status in the singular**: fixed.
+  The paragraph now says the header names the *active* document's own state, that a background
+  document's disk change is detected the same way (every open document is watched) but surfaces
+  only on switching to it, and that the header — not a sidebar marker — is where it shows. A
+  repo-wide sweep for the same phrase found nothing else user-facing (one remaining hit,
+  `explorer/tests.rs:1169`, is accurate for its own single-file test fixture, not stale).
 
 **Not an item for this slice, ruled separately:** `is_still_answerable_reflects_the_real_connection_state`
 is no longer to be recorded and redone. It has flaked since 2026-08-25, twice on 2026-10-07 alone,
