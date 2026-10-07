@@ -1403,3 +1403,45 @@ this disposition reopens**; the rows are retired from active tracking, not decla
   `-p tekstide --bin tekstide`, and my filter discarded the names before I read them. The third
   attempt's 8 runs were completely clean, so it did not recur. Recorded so that a failure seen on
   2026-10-07 is not simply lost; it is not a new register row, because nothing names it yet.
+
+## New rows, 2026-10-08 — review 478: two terminal PTY tests, diagnosed, not yet fixed
+
+**Found in the reviewer's own gate run on review 478's tree, not by the dev team's** — their three
+runs were clean, mine failed once in two. Load-dependent, as the cause below explains.
+
+| Test | First seen |
+| --- | --- |
+| `runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close` (`tests.rs:553`) | review 478 (2026-10-08) |
+| `runtime::terminal::tests::a_job_that_leaves_the_session_via_setsid_survives_a_real_close` (`tests.rs:627`) | review 478 (2026-10-08) |
+
+Both failed together, in the same run, with the same shape of message:
+
+```
+real backgrounded job's own pid should be parseable from PTY output
+```
+
+**Cause, confirmed in the test code — the same class as rows 2 and 5, waiting on a weaker
+condition than the one actually needed.** The test writes `sleep 300 & echo BGPID=$!` to the PTY
+and then calls `read_until_contains(&mut runtime, &handle, b"BGPID=")`, which returns as soon as
+the byte sequence `BGPID=` appears. But `parse_bgpid` needs the marker **followed by digits**, and
+`parse_bgpid`'s own comment already records why those are different things: the shell echoes the
+still-unexpanded command text, `echo BGPID=$!`, which contains the literal marker with no digits
+after it. So the wait can be satisfied by the echo alone. Normally the echo and the command's real
+output land inside the same 50 ms read and nothing is noticed; under load the read returns holding
+only the echo, `parse_bgpid` finds no digits, and the test panics.
+
+The author knew about the echo — it is why the parser takes the *last* occurrence — but the wait
+condition was never given the same knowledge.
+
+**Fix shape, and it is the row 2/5 pattern again.** Wait for the condition the test actually needs
+rather than a proxy for it: poll until `parse_bgpid(&output).is_some()` against the existing
+5-second deadline, and the same for the setsid test's own marker. No product code; both causes are
+in the tests' own waiting.
+
+**Owner: the dev team.** Not a blocker for the `0.30.0` candidate unless it fails a gate run, in
+which case the run is redone and recorded as usual. Naming the owner here because the row 2/5
+disposition had to learn that lesson at review 475.
+
+**Possibly, but not provably, the pair referred to in "Verification, 2026-10-07" above**, where two
+of eight ablated runs failed under a target I did not name because my filter discarded the names.
+Those logs are gone, so this is a resemblance, not an identification.
