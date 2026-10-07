@@ -130,6 +130,23 @@ invariant that cross-checks the book's *"not built"* and *"no X"* claims against
 provides. Written down because the asymmetry — three invariants on one page, none on the other — is
 the whole explanation for which page drifted.
 
+### A live data-loss defect, found authoring RFC-065 (2026-10-07)
+
+**Opening a second file discards the first's unsaved edits, silently, in `0.29.0` as shipped.**
+`Action::Open(path)` → `open_active_project_text_document` → `app.rs:466` → `session.rs:1472` →
+`content.rs:190`, which is `self.active_document = Some(document)`. **No `dirty`, `unsaved` or
+`confirm` appears anywhere on that chain** — checked function by function, zero hits in all four.
+There is no prompt, no refusal, and no record; the document carrying the edits is simply replaced,
+and its undo history goes with it.
+
+**`NFR-REL-005` enumerates three causes of accidental loss — external file changes, close events,
+process termination — and this is a fourth.** The requirement lists rather than generalises, which is
+why neither the requirement, the audit, nor six releases of review caught it.
+
+**Not patched separately.** RFC-065 is already next, and the open set removes the defect by
+construction rather than guarding it; **its slice A is the repair, shipping first and alone**. If
+RFC-065 slips, a refusal or a prompt is the interim.
+
 ### The split point, decided 2026-10-07: the watcher ships as `0.29.0`, the document model as `0.30.0`
 
 **RFC-026 named this as a planned option rather than leaving it to be discovered, and the evidence now

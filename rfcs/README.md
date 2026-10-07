@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 065 | [The Multi-Document Model](./proposed/065-the-multi-document-model.md) | **Proposed 2026-10-07**, awaiting the owner. `0.30.0`, M13. **Its first slice repairs a data-loss defect live in `0.29.0`**: opening a second file discards the first's unsaved edits silently — no `dirty`, `unsaved` or `confirm` anywhere on the chain from `Action::Open` to `active_document = Some(document)`. `NFR-REL-005` names three causes and this is a fourth. **`REQ-EDIT-004` says "dirty *buffers*"** and `dirty_file_count` can only return 0 or 1 |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -59,7 +60,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 062 | Honouring `core.excludesFile` | explorer ignore tail |
 | 063 | Querying The Live UI (`iced_selector`) | GUI verification |
 | 064 | Does `iced`'s `text_editor` Replace Our Own? | editor, pre-1.0 |
-| 065 | The Multi-Document Model | M13, `0.30.0` |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
 audit's findings, not guesses; each row's scope is in the release schedule in
