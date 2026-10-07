@@ -249,6 +249,12 @@ Two shapes, both found by the implementer rather than by the gate:
   could not have caught this**: they start from the release's own **Added** section, and the slice
   that changed the meaning wrote nothing there. A capability that is renamed, widened or narrowed
   leaves no trace in *Added* — only in the diff.
+- **A one-directional fix making it worse.** Found at review 473, fixing the row above. The book's
+  chord rows were corrected to "the active document" while `locales/en.ftl` kept "Save the open
+  file" — the string the Help modal and `--help` actually print. Before the fix both were stale and
+  *agreed*; after it they contradict each other. **Correcting a description without correcting the
+  program's own words does not half-fix the drift, it creates a new one.** Fix both sides in one
+  commit or neither.
 
 - [ ] For every capability this release's **Added** section names, search
       `docs/src/users/what-works-today.md` for a claim that it does not exist — *"no X"*, *"There is

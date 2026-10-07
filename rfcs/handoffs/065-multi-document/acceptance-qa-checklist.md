@@ -92,6 +92,29 @@ measurement with no number in the evidence is not ticked.
   live capture demonstrates. The "Not built" section's stale "no multi-document editing" claim
   was also corrected (to the real remaining gap, save-all) while in the area.
 
+### Required at review 473
+
+The three fixes are correct and the third place you found on your own (the watcher-scope sentence)
+was not in my list. But the fix went one direction only — the book — and the program's own words
+were left behind. A repo-wide grep for the phrase finds them; neither of us ran one at 472.
+
+- [ ] **The Help modal and `tekstide --help` still say "the open file".** `keyboard-reference.md:19`
+  now reads "Save **the active document**", but `crates/tekstide/locales/en.ftl:1319` still reads
+  `keyboard-help-save-active-document = Save the open file` — and that string, via
+  `keyboard_help.rs:56`, is what `Ctrl+Alt+K` and `--help` actually print. Same for `:1320`
+  ("Undo the last edit (needs an open file)") and `:1321` ("Redo the last undone edit (needs an
+  open file)"). All three sit three lines above the string PR-065-C added, `:1330`, "Switch to the
+  next open document" — a label whose whole premise is that several are open. **This contradiction
+  is new, created by `5c20605`**: before it, book and program both said "the open file" — stale but
+  agreeing. Now the book is right and the program is wrong. That is `0.28.0`'s defect inverted.
+- [ ] **`crates/tekstide/locales/en.ftl:581`**, the comment directly above the `[open]` string
+  itself, still carries the singular sentence corrected in `surface/explorer.rs` — one of the two
+  copies was fixed.
+- [ ] **`crates/tekstide/src/surface/explorer/tests.rs:1124-1125`** carries it a third time, and it
+  is the exact text quoted as authority in `evidence/pr-065-c/README.md`.
+- [ ] *(nit, not blocking)* `docs/src/users/keyboard-reference.md:47` still says typing "edits the
+  open document" — ambiguous on the page whose rows were just disambiguated.
+
 ## PR-065-D — save-all
 
 - [ ] **A partial save-all says which files were written and which were not.**
