@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::content::{EditOperation, TextCursor, TextDocumentState};
-use crate::project::{ProjectContentStatus, ProjectId, ProjectSession};
+use crate::project::{
+    ProjectContentError, ProjectContentStatus, ProjectId, ProjectResourceLimits, ProjectSession,
+};
 
 fn test_root(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -503,6 +505,58 @@ fn the_watched_scope_grows_as_documents_in_new_directories_open() {
         3,
         "a third document in an already-watched directory (a/) must not add a fourth: \
          {after_third:?}"
+    );
+
+    cleanup_root(root);
+}
+
+/// RFC-065 D4: the open set is bounded, and the bound is stated when reached. A low limit
+/// (`2`, not the real default of `20`) keeps this test from needing twenty real fixture
+/// files. The already-open path is reopened first to prove the dedup switch (review 468)
+/// still bypasses the bound entirely -- a path that already has a slot always belongs,
+/// no matter how full the set is -- before a genuinely new path is refused.
+#[test]
+fn opening_past_the_bound_is_refused_and_the_refusal_is_stated() {
+    let root = test_root("content-open-set-bound");
+    std::fs::write(root.join("first.txt"), "first\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second\n").unwrap();
+    std::fs::write(root.join("third.txt"), "third\n").unwrap();
+    let mut project = project_at(&root);
+    project.set_resource_limits(ProjectResourceLimits {
+        open_document_limit: Some(2),
+        ..ProjectResourceLimits::default()
+    });
+
+    project
+        .open_text_document("first.txt")
+        .expect("the first document should open");
+    project
+        .open_text_document("second.txt")
+        .expect("the second document should open, reaching the limit");
+    assert_eq!(project.content_workspace().open_buffer_count(), 2);
+
+    // Reopening an already-open path must still switch, not be refused by the bound.
+    project
+        .open_text_document("first.txt")
+        .expect("a path already in the set is never refused by the bound");
+    assert_eq!(project.content_workspace().open_buffer_count(), 2);
+
+    let error = project
+        .open_text_document("third.txt")
+        .expect_err("a genuinely new path past the bound must be refused");
+    assert_eq!(
+        error,
+        ProjectContentError::OpenSetAtLimit { open: 2, limit: 2 }
+    );
+    assert_eq!(
+        project.content_workspace().open_buffer_count(),
+        2,
+        "a refused open must not have joined the set"
+    );
+    assert_eq!(
+        project.content_workspace().status().message(),
+        Some("too many documents are open to open another: 2 are open, limit is 2"),
+        "the refusal must be stated, not silent"
     );
 
     cleanup_root(root);

@@ -15,7 +15,8 @@ use tekstide_core::content::TextCursor;
 use super::{
     RowPlan, apply_edit_key, caret_row_position, caret_split, chrome_line, columns_that_fit,
     cursor_line, document_state_symbol, empty_lines, gutter_digits, gutter_lines, navigate_cursor,
-    open_error_line, row_plan, rows_that_fit, viewport_following, window_rows, windowed_line,
+    open_error_line, open_error_line_while_active, row_plan, rows_that_fit, viewport_following,
+    window_rows, windowed_line,
 };
 use crate::i18n::{Catalog, LocalePreference};
 
@@ -962,6 +963,31 @@ fn history_bound_line_is_none_until_the_bound_is_reached_then_names_the_limit() 
         .expect("one edit past the bound must produce a disclosure line");
     assert!(
         line.contains(&tekstide_core::content::UNDO_MAX_DEPTH.to_string()),
+        "the disclosure must name the real limit, not a vague amount: {line}"
+    );
+}
+
+/// RFC-065 D4: the open set's own bound is stated even with a document active -- the one
+/// `OpenError` case that is reachable that way, since the set is full of *existing*
+/// documents (one of them necessarily active) when a new path is refused. `None` for every
+/// status that is not an `OpenError`, including an ordinary `Opened`/`Edited` document with
+/// nothing wrong.
+#[test]
+fn open_error_line_while_active_is_none_ordinarily_then_states_the_bound() {
+    let catalog = real_catalog();
+    assert_eq!(
+        open_error_line_while_active(&catalog, &ProjectContentStatus::Opened),
+        None,
+        "an ordinary open must produce no disclosure line"
+    );
+
+    let status = ProjectContentStatus::OpenError {
+        message: "too many documents are open to open another: 20 are open, limit is 20".to_owned(),
+    };
+    let line = open_error_line_while_active(&catalog, &status)
+        .expect("a refusal while a document is active must still produce a disclosure line");
+    assert!(
+        line.contains("20"),
         "the disclosure must name the real limit, not a vague amount: {line}"
     );
 }

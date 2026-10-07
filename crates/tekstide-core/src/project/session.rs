@@ -1473,6 +1473,7 @@ impl ProjectSession {
             &root,
             selected_relative_path,
             TextDocumentOpenPolicy::linux_mvp(),
+            self.resource_limits.open_document_limit,
         );
         self.sync_file_state_from_content_workspace();
         self.set_open_surface(ProjectOpenSurface::TextEditor);

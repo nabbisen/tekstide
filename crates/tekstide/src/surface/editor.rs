@@ -128,6 +128,23 @@ pub(crate) fn empty_lines(catalog: &Catalog, status: &ProjectContentStatus) -> V
     }
 }
 
+/// RFC-065 D4: the open set's own bound, stated when reached -- the same "stated when
+/// reached" shape [`history_bound_line`] already uses for a different bound, but reachable
+/// with a document **active**, unlike every other `OpenError` (which [`empty_lines`] above
+/// covers): the set is full of *existing* documents when a new path is refused, so this
+/// cannot wait for the "no document" branch. `None` for every other status, the same
+/// "no line to show" shape [`history_bound_line`] uses. Factored out of [`view`] for the
+/// same testability reason as every other line function here.
+pub(crate) fn open_error_line_while_active(
+    catalog: &Catalog,
+    status: &ProjectContentStatus,
+) -> Option<String> {
+    let ProjectContentStatus::OpenError { message } = status else {
+        return None;
+    };
+    open_error_line(catalog, message)
+}
+
 /// RFC-026, release 0.29.0: whether the chrome's Reload button is shown -- a user-driven
 /// reload, reachable without first trying to save and having it refused. Factored out of
 /// [`view`] for the same testability reason as [`empty_lines`]. `true` only when there is
@@ -851,6 +868,9 @@ pub fn view<'a, Message: 'a + Clone>(
                     .into(),
             ];
             if let Some(line) = history_bound_line(catalog, document) {
+                chrome.push(text(line).size(theme.font_size_status()).into());
+            }
+            if let Some(line) = open_error_line_while_active(catalog, status) {
                 chrome.push(text(line).size(theme.font_size_status()).into());
             }
             chrome.push(

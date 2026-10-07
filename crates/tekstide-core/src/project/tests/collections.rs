@@ -355,6 +355,8 @@ fn approval_request_retention_limit_evicts_the_oldest_terminal_entry() {
         approval_request_limit: None,
         agent_run_approval_limit: None,
         approval_history_limit: Some(2),
+
+        open_document_limit: None,
     });
 
     let first = ApprovalRequest::pending(
@@ -442,6 +444,8 @@ fn approval_request_retention_limit_refuses_when_nothing_is_evictable() {
         approval_request_limit: None,
         agent_run_approval_limit: None,
         approval_history_limit: Some(1),
+
+        open_document_limit: None,
     });
 
     let first = ApprovalRequest::pending(
@@ -617,6 +621,8 @@ fn terminal_session_limit_is_enforced_with_a_typed_refusal() {
         approval_request_limit: None,
         agent_run_approval_limit: None,
         approval_history_limit: None,
+
+        open_document_limit: None,
     });
 
     for index in 0..2 {

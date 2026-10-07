@@ -49,6 +49,9 @@ fn new_project_initializes_rfc002_session_metadata_with_inert_provider_defaults(
             approval_request_limit: Some(50),
             agent_run_approval_limit: Some(20),
             approval_history_limit: Some(100),
+            // RFC-065 D4: reasoned the same way -- see
+            // `ProjectResourceLimits::default`'s own doc comment.
+            open_document_limit: Some(20),
         }
     );
     assert_eq!(project.file_state(), &ProjectFileState::default());
@@ -114,6 +117,8 @@ fn project_session_surface_mode_and_deferred_summaries_are_owned_per_project() {
         approval_request_limit: Some(20),
         agent_run_approval_limit: Some(5),
         approval_history_limit: Some(40),
+
+        open_document_limit: None,
     });
     project.set_file_state(ProjectFileState {
         provider_state: ProjectProviderState::Complete,

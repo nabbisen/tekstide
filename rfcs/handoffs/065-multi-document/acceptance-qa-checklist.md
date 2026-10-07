@@ -29,12 +29,12 @@ measurement with no number in the evidence is not ticked.
       criterion's own slice.)
 - [x] The close dialog counts the set — **by test, not by a second code path** (D10: `session.rs:1706`
       already feeds it from `dirty_file_count`).
-- [ ] The bound is stated when reached.
+- [x] The bound is stated when reached.
 - [x] The watcher's scope follows the set: opening and closing documents changes the watched count,
       counted before and after.
 - [ ] **The per-document refresh measured on RFC-026's harness unchanged**, N documents against one,
       with the control in the same run.
-- [ ] `REQ-EDIT-004` met **for its own plural**, and the coverage row corrected from implying it
+- [x] `REQ-EDIT-004` met **for its own plural**, and the coverage row corrected from implying it
       already was.
 
 ### Required at review 468

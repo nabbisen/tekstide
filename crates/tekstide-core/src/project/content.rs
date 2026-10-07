@@ -201,6 +201,7 @@ impl ProjectContentWorkspace {
         root: &ProjectRootHandle,
         selected_relative_path: impl AsRef<Path>,
         policy: TextDocumentOpenPolicy,
+        open_document_limit: Option<u32>,
     ) -> Result<(), ProjectContentError> {
         let selected_relative_path = selected_relative_path.as_ref().to_path_buf();
 
@@ -220,6 +221,20 @@ impl ProjectContentWorkspace {
             self.active_index = Some(index);
             self.status = ProjectContentStatus::Opened;
             return Ok(());
+        }
+
+        // RFC-065 D4: the bound, checked after the dedup/ownership question above (a path
+        // already open always belongs, no matter how full the set is) and before any disk
+        // read -- the same "structural checks before the policy check" order
+        // `add_terminal_session`'s own `terminal_session_limit` enforcement uses.
+        if let Some(limit) = open_document_limit
+            && self.documents.len() as u32 >= limit
+        {
+            let open = self.documents.len() as u32;
+            self.status = ProjectContentStatus::OpenError {
+                message: ProjectContentError::OpenSetAtLimit { open, limit }.to_string(),
+            };
+            return Err(ProjectContentError::OpenSetAtLimit { open, limit });
         }
 
         match TextDocument::open(root, &selected_relative_path, policy) {
@@ -664,6 +679,13 @@ pub enum ProjectContentError {
     Edit(TextDocumentEditError),
     Save(TextDocumentSaveError),
     Refresh(TextDocumentRefreshError),
+    /// RFC-065 D4: the open set's own bound, reached. A path already open still switches
+    /// (the dedup check runs first), so this is only reachable by opening a path that is
+    /// genuinely new while the set is already full.
+    OpenSetAtLimit {
+        open: u32,
+        limit: u32,
+    },
 }
 
 impl fmt::Display for ProjectContentError {
@@ -676,6 +698,10 @@ impl fmt::Display for ProjectContentError {
             Self::Edit(error) => write!(formatter, "{error}"),
             Self::Save(error) => write!(formatter, "{error}"),
             Self::Refresh(error) => write!(formatter, "{error}"),
+            Self::OpenSetAtLimit { open, limit } => write!(
+                formatter,
+                "too many documents are open to open another: {open} are open, limit is {limit}"
+            ),
         }
     }
 }

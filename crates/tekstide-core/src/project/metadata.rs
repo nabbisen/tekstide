@@ -150,6 +150,13 @@ pub struct ProjectResourceLimits {
     /// `approval_requests()` must say it is showing the most recent N,
     /// not imply the list is complete.
     pub approval_history_limit: Option<u32>,
+    /// RFC-065 D4: the open set's own bound. Measurement 9: each document is up to 4 MiB
+    /// plus two 500-deep undo stacks, and RFC-026 review 464 measured its refresh at about
+    /// 4 ms per document, read whole-file, in one drain window. N open documents multiply
+    /// both. `open_text_document` refuses a push past this limit -- reasoned, not
+    /// benchmarked, the same as `approval_request_limit` above: there is no throughput to
+    /// measure here either, only a ceiling to stay well clear of.
+    pub open_document_limit: Option<u32>,
 }
 
 impl Default for ProjectResourceLimits {
@@ -248,6 +255,14 @@ impl Default for ProjectResourceLimits {
             // against a different constraint (usefulness to a reader,
             // not a process resource).
             approval_history_limit: Some(100),
+            // `20`: at 4 MiB plus two 500-deep undo stacks each (measurement 9), the worst
+            // case is 80 MiB of document text and a one-time refresh burst of roughly
+            // 20 * 4 ms = 80 ms if every open document's directory changes in the same
+            // drain window -- comfortably inside the budgets `terminal_session_limit` and
+            // `approval_request_limit` above already treat as acceptable, for a quantity a
+            // user drives directly (opening files one at a time) rather than one a runaway
+            // process could spike unbounded.
+            open_document_limit: Some(20),
         }
     }
 }
