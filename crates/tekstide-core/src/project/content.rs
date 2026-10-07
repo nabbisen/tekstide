@@ -259,6 +259,16 @@ impl ProjectContentWorkspace {
                     // `refresh_active_document` below already uses, and the
                     // one the shell's own RFC-019 PR-019-E fix reads
                     // independently for its conflict-modal wording.
+                    //
+                    // RFC-026 D8: a blocked save against a file that is gone is reported as
+                    // deleted, not as changed, the same correction `refresh_active_document`
+                    // below carries -- a save can be blocked by a disk that went away just as
+                    // easily as by one that changed, and the two must not look the same.
+                    SaveDecision::BlockedExternalChange
+                        if !document.target().canonical_path.exists() =>
+                    {
+                        ProjectContentStatus::ExternalDeleted
+                    }
                     SaveDecision::BlockedExternalChange => match document.state() {
                         TextDocumentState::Conflict => ProjectContentStatus::Conflict,
                         _ => ProjectContentStatus::ExternalChanged,

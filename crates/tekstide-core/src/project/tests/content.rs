@@ -215,3 +215,31 @@ fn an_edit_made_after_an_external_change_is_a_conflict_not_a_clean_change() {
     );
     cleanup_root(root);
 }
+
+/// RFC-026 D8, the save path's own copy of the same fix: a blocked save against a file that is
+/// gone is reported as deleted, not as changed. `refresh_active_document` already made this
+/// distinction (review 463); `save_active_document` had the identical `BlockedExternalChange`
+/// collapse and had not been fixed. A clean document is enough -- the file does not need local
+/// edits sitting on top of it to be gone.
+#[test]
+fn a_save_blocked_by_a_deleted_file_reports_external_deleted_not_external_changed() {
+    let root = test_root("content-save-blocked-by-deletion");
+    std::fs::write(root.join("note.txt"), "original\n").expect("fixture file should be written");
+    let mut project = project_at(&root);
+    project
+        .open_text_document("note.txt")
+        .expect("a clean document should open");
+
+    std::fs::remove_file(root.join("note.txt")).expect("external delete should succeed");
+
+    project
+        .save_active_text_document()
+        .expect_err("a save against a deleted file must be refused");
+
+    assert_eq!(
+        project.content_workspace().status(),
+        &ProjectContentStatus::ExternalDeleted,
+        "the file is gone, not merely changed, and the save path must say so like the refresh path does"
+    );
+    cleanup_root(root);
+}
