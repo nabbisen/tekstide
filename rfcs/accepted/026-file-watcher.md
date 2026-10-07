@@ -1,4 +1,4 @@
-# RFC-026: File Watcher and Multi-Document Model
+# RFC-026: File Watcher
 
 Status: **Accepted by the human owner 2026-09-30.** D1–D8 as written, plus D9–D12 — see *Decided on acceptance*. Proposed 2026-09-30. `0.29.0` in the authorised schedule, and **M13 proper**. Closes
 `REQ-FILE-003` (the explorer updates when files change externally), `REQ-FILE-004` (watching is
@@ -137,6 +137,25 @@ discovered: the watcher (`REQ-FILE-003`, `004`, `NFR-PERF-007`) can ship as `0.2
 multi-document model as `0.30.0` and RFC-027's crash recovery moving one release later. Taking that
 option is a scheduling decision for the architect at review, on evidence — not a scramble at the
 candidate.
+
+## Re-scoped 2026-10-07: the multi-document model is RFC-065
+
+**This RFC is now the watcher alone.** `REQ-FILE-003`, `REQ-FILE-004` and `NFR-PERF-007` — met and
+measured. The single-document limit, D5's cap, D6's open set and D9's two counts move to **RFC-065**,
+shipping as `0.30.0`, with two findings this RFC produced:
+
+- **D8's refresh is O(file size), per document** (review 464). `refresh_external_state` reads the whole
+  file, about 4 ms at the 3.3 MB fixture. With the open set plural, a burst touching N documents is N
+  whole-file reads in one drain window, each up to the 4 MiB cap.
+- **A save is a self-caused write into a watched directory** (review 464). It does not loop — the
+  refresh finds the text matches disk — but every save costs a scan and a whole-file re-read of the
+  file just written.
+
+**Why the RFC split and not only the release.** A released changelog section may not name an RFC still
+in `accepted/`, the invariant carried from RFC-053's late closure. An RFC spanning two releases would
+trip it, or force `0.29.0`'s changelog to describe its own subject without naming it. Two halves with
+different requirements, different risks and now different releases should have been two RFCs.
+D1–D12 stand as written; D5, D6 and D9 travel to RFC-065 with the text that justified them.
 
 ## Decided on acceptance (2026-09-30)
 
