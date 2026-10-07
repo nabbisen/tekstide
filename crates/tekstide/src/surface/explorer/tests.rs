@@ -639,14 +639,14 @@ fn the_window_shows_the_highlight_and_moves_as_little_as_it_can() {
 /// drawing uses; unknown until the first layout, then it follows the size.
 #[test]
 fn how_many_rows_fit_follows_the_measured_height() {
-    assert_eq!(rows_that_fit(None, 14.0), DEFAULT_WINDOW_ROWS);
-    let small = rows_that_fit(Some(300.0), 14.0);
-    let large = rows_that_fit(Some(900.0), 14.0);
+    assert_eq!(rows_that_fit(None, 14.0, 0), DEFAULT_WINDOW_ROWS);
+    let small = rows_that_fit(Some(300.0), 14.0, 0);
+    let large = rows_that_fit(Some(900.0), 14.0, 0);
     assert!(small >= 1 && large > small, "{small} then {large}");
     // A larger font fits fewer rows in the same height.
-    assert!(rows_that_fit(Some(900.0), 20.0) < large);
+    assert!(rows_that_fit(Some(900.0), 20.0, 0) < large);
     // Degenerate heights still leave one row rather than none.
-    assert_eq!(rows_that_fit(Some(0.0), 14.0), 1);
+    assert_eq!(rows_that_fit(Some(0.0), 14.0, 0), 1);
 }
 
 /// **Nothing is hidden silently.** A tree longer than its window draws only
@@ -843,7 +843,7 @@ fn the_detail_shows_the_highlighted_row_in_full_and_escaped() {
 /// under it.
 #[test]
 fn the_window_leaves_room_for_the_detail_area() {
-    let with_detail = rows_that_fit(Some(600.0), 14.0);
+    let with_detail = rows_that_fit(Some(600.0), 14.0, 0);
     let pitch = 14.0 * 1.3 + 2.0;
     let without = (((600.0f32 - 32.0) / pitch).floor() as usize) - 2;
     assert!(
@@ -912,7 +912,7 @@ fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
             .collect(),
     ));
     let status = ProjectExplorerStatus::Ready;
-    let capacity = rows_that_fit(Some(700.0), theme.font_size_body());
+    let capacity = rows_that_fit(Some(700.0), theme.font_size_body(), 0);
 
     // Warm the font system once: the first layout in a process loads fonts.
     let _ = build_and_layout(&renderer, || {
@@ -1465,6 +1465,35 @@ fn the_watch_stopped_sentence_fits_the_sidebar() {
             line.chars().count() <= SIDEBAR_COLUMNS,
             "{} columns is clipped in the sidebar: {line:?}",
             line.chars().count()
+        );
+    }
+}
+
+/// Review 459: the stopped sentence can take two lines off a short sidebar, but never the last
+/// row. At a height where the window is one row, the sentence leaves it one row, not zero; over
+/// a sweep of heights the window is never empty and never gains rows from the sentence.
+#[test]
+fn the_stopped_sentence_never_takes_a_short_sidebar_to_no_rows() {
+    use super::{WATCH_STOPPED_LINES, rows_that_fit};
+
+    assert_eq!(
+        rows_that_fit(Some(160.0), 14.0, WATCH_STOPPED_LINES),
+        rows_that_fit(Some(160.0), 14.0, 0),
+        "a sidebar that fits one row keeps it when the sentence is shown"
+    );
+    assert!(rows_that_fit(Some(160.0), 14.0, WATCH_STOPPED_LINES) >= 1);
+
+    for height in (0..=2_000).step_by(7) {
+        let height = height as f32;
+        let with_sentence = rows_that_fit(Some(height), 14.0, WATCH_STOPPED_LINES);
+        let without = rows_that_fit(Some(height), 14.0, 0);
+        assert!(
+            with_sentence >= 1,
+            "height {height}: the window kept no row"
+        );
+        assert!(
+            with_sentence <= without,
+            "height {height}: the sentence can only take rows, not add them"
         );
     }
 }

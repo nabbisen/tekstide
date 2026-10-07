@@ -1231,3 +1231,15 @@ were green with the same tree: 1808 passed, 0 failed, 5 ignored each.
 (`the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses` and
 `a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request`). They passed under this load, but a
 future flake in them should be recorded here with its load, not absorbed into a longer timeout.
+
+## Recurrence, 2026-10-07 — RFC-026 review 459's floor fix, load ~16 to ~19
+
+**One failure in four full-workspace runs**, on the tree that moves the row floor into one function:
+
+| Test | Runs | Register row |
+| --- | --- | --- |
+| `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | once, 892 ms against 500 ms, load 19.04 | the `0.29.0` ratio item, already scheduled |
+
+The test's own message names load as the likely cause. The same tree then passed three full runs in a
+row at load 22 to 28. This is the known absolute-budget test the `0.29.0` ratio fix is for; no new
+row is needed, and this entry is the dated record of its recurrence.

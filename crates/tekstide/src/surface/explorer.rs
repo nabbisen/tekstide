@@ -486,16 +486,24 @@ const SIDEBAR_VERTICAL_PADDING: f32 = 32.0;
 /// What the window holds before the layout has been measured.
 pub(crate) const DEFAULT_WINDOW_ROWS: usize = 20;
 
-/// How many rows fit a sidebar of `height` pixels at `font_size`.
-pub(crate) fn rows_that_fit(height: Option<f32>, font_size: f32) -> usize {
-    let Some(height) = height else {
-        return DEFAULT_WINDOW_ROWS;
+/// How many rows fit a sidebar of `height` pixels at `font_size`, when `extra_lines` more lines
+/// than [`RESERVED_LINES`] are drawn above them (the stopped sentence, RFC-026 D2). The
+/// subtraction and the floor are one step, and the floor is the last thing that happens, so no
+/// caller can take the window to nothing: at least one row, always (review 459).
+pub(crate) fn rows_that_fit(height: Option<f32>, font_size: f32, extra_lines: usize) -> usize {
+    let fitted = match height {
+        None => DEFAULT_WINDOW_ROWS,
+        Some(height) => {
+            let pitch = font_size * LINE_HEIGHT_FACTOR + LINE_SPACING;
+            let usable = (height - SIDEBAR_VERTICAL_PADDING - detail_height(font_size)).max(0.0);
+            (usable / pitch).floor() as usize
+        }
     };
-    let pitch = font_size * LINE_HEIGHT_FACTOR + LINE_SPACING;
-    let usable = (height - SIDEBAR_VERTICAL_PADDING - detail_height(font_size)).max(0.0);
-    ((usable / pitch).floor() as usize)
-        .saturating_sub(RESERVED_LINES)
-        .max(1)
+    let reserved = match height {
+        None => extra_lines,
+        Some(_) => RESERVED_LINES + extra_lines,
+    };
+    fitted.saturating_sub(reserved).max(1)
 }
 
 /// The detail area's height: its lines at the text line height, plus the gap

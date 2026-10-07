@@ -4194,19 +4194,19 @@ fn ensure_explorer_scanned(state: &mut State) {
 /// How many tree rows the sidebar can draw, from the size the layout
 /// engine last gave it.
 fn explorer_window_capacity(state: &State) -> usize {
-    let rows = crate::surface::explorer::rows_that_fit(
+    // RFC-026 D2, B2 step 5: the stopped sentence takes two lines the window does not have.
+    // They come out of the rows only while it is shown, inside the one floor that
+    // `rows_that_fit` applies last (review 459).
+    let extra_lines = if active_watch_stopped(state) {
+        crate::surface::explorer::WATCH_STOPPED_LINES
+    } else {
+        0
+    };
+    crate::surface::explorer::rows_that_fit(
         state.explorer_viewport.map(|size| size.height),
         state.theme.font_size_body(),
-    );
-    // RFC-026 D2, B2 step 5: the stopped sentence takes two lines the window does not
-    // have. They come out of the rows only while it is shown, so nothing is clipped off
-    // the bottom of the sidebar. A stop is rare, so the window moving then is acceptable.
-    if active_watch_stopped(state) {
-        rows.saturating_sub(crate::surface::explorer::WATCH_STOPPED_LINES)
-            .max(1)
-    } else {
-        rows
-    }
+        extra_lines,
+    )
 }
 
 /// Whether the active project's watching has stopped (RFC-026 D2): the one state the
