@@ -23,13 +23,14 @@ measurement with no number in the evidence is not ticked.
 
 ## PR-065-B — the set
 
-- [ ] `active` keeps its meaning: one active document, a plural open set.
-- [ ] **`open_buffer_count` and `dirty_file_count` count the whole set.** A test fails when either
-      returns one while two are open.
-- [ ] The close dialog counts the set — **by test, not by a second code path** (D10: `session.rs:1706`
+- [x] `active` keeps its meaning: one active document, a plural open set.
+- [x] **`open_buffer_count` and `dirty_file_count` count the whole set.** A test fails when either
+      returns one while two are open. (Landed in slice A; re-confirmed here since B is this
+      criterion's own slice.)
+- [x] The close dialog counts the set — **by test, not by a second code path** (D10: `session.rs:1706`
       already feeds it from `dirty_file_count`).
 - [ ] The bound is stated when reached.
-- [ ] The watcher's scope follows the set: opening and closing documents changes the watched count,
+- [x] The watcher's scope follows the set: opening and closing documents changes the watched count,
       counted before and after.
 - [ ] **The per-document refresh measured on RFC-026's harness unchanged**, N documents against one,
       with the control in the same run.
