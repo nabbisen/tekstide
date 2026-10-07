@@ -109,12 +109,36 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.26.0` | **055** Ignore Rules In The Explorer | `REQ-FILE-005`, `REQ-FILE-006`, the `ignored` badge of `REQ-FILE-002` | Directly after the tree: expansion makes RFC-052 D7's fixed collapse list load-bearing, and this is what replaces it |
 | `0.27.0` | **056** AgentRun Report And Classification | `REQ-AGENT-011` (final report / handoff note), `REQ-AGENT-015` (classify a run) | Both were recorded as implemented and never existed. They are also the product's own pitch: what did this run do, and what do I hand on |
 | `0.28.0` | **057** Editor Essentials | `REQ-EDIT-002`'s line-number gutter, a visible caret, and **undo** — which no requirement names, and which `NFR-REL-005` assumes | "Multi-document editing" is a 1.0 expectation; an editor with no undo cannot carry it |
-| `0.29.0` | **026** File Watcher and Multi-Document Model | `REQ-FILE-003`, `004`; the single-document limit | M13 proper. Needs the editor to be worth having first |
-| `0.30.0` | **027** Crash Recovery and Unsaved Buffer Persistence | `REQ-RECOVER-002`, `005` | Follows the watcher; both are the file layer maturing |
-| `0.31.0` | **058** A Project Held By One Process | `REQ-PROJ-009` | Two Tekstide processes can hold one project root today and neither knows. Scheduled once multi-document writing raises the stakes |
-| `0.32.0` | **059** Seeing The Audit, And Redacting It | `REQ-SEC-023`, and the gap that **nothing renders the audit store** | Twelve producers record; no user can read any of it. The privacy claim leans on a view that does not exist |
-| `0.33.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker**: "command approval for adapter-supported workflows" is in the 1.0 minimum list, and `to_ai_cli_profile` sets `Supervised` unconditionally, so no user can reach one |
-| `0.34.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
+| `0.29.0` | **026** File Watcher | `REQ-FILE-003`, `004`, `NFR-PERF-007` | **Split from the document model 2026-10-07** — the watcher is complete and measured, the document model has not started, and an RFC spanning two releases trips the released-RFC invariant |
+| `0.30.0` | **065** The Multi-Document Model | the single-document limit; `REQ-EDIT-004`'s counts across an open set | RFC-026's other half, with its own number so each closes with its own release |
+| `0.31.0` | **027** Crash Recovery and Unsaved Buffer Persistence | `REQ-RECOVER-002`, `005` | Unchanged in order: you recover *buffers*, plural, so it always followed the document model |
+| `0.32.0` | **058** A Project Held By One Process | `REQ-PROJ-009` | Two Tekstide processes can hold one project root today and neither knows |
+| `0.33.0` | **059** Seeing The Audit, And Redacting It | `REQ-SEC-023`, and the gap that **nothing renders the audit store** | Twelve producers record; no user can read any of it |
+| `0.34.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker** |
+| `0.35.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
+
+### The split point, decided 2026-10-07: the watcher ships as `0.29.0`, the document model as `0.30.0`
+
+**RFC-026 named this as a planned option rather than leaving it to be discovered, and the evidence now
+decides it.**
+
+**The watcher is finished and the document model has not started.** `REQ-FILE-003` is captured live,
+`REQ-FILE-004` is measured four conditions in one frame with its control, and `NFR-PERF-007`'s batching
+turned 4,003 notices into 3 scans. Slice D has not begun, and review 464 handed it a design question
+before its first line: `refresh_external_state` reads the **whole file**, so with an open set a burst
+touching N documents is N whole-file reads in one drain window. That deserves thinking, not a rush to
+meet a release boundary.
+
+**Nothing is reordered by this.** RFC-027 recovers *buffers*, plural, so it always followed the
+document model; the split adds a boundary between two things that were already sequential, and moves
+`027`, `058`, `059` and `060` down one.
+
+**The RFC splits too, and that is not bookkeeping.** A released changelog section may not name an RFC
+still in `accepted/` — the invariant carried from RFC-053's late closure. An RFC spanning two releases
+would either trip it or force `0.29.0`'s changelog to describe its own subject without naming it. The
+honest resolution is that two halves with different requirements, different risks and now different
+releases should have been two RFCs: **RFC-026 is the watcher and closes with `0.29.0`; RFC-065 is the
+multi-document model and closes with `0.30.0`.**
 
 ### Reserved RFC-064: does `iced::widget::text_editor` replace what RFC-057 built by hand? (2026-09-29)
 
@@ -471,7 +495,7 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 060 | Command Approval A User Can Reach | pre-1.0 | 021, 022 | no | **Reserved 2026-09-24.** `0.33.0`, and a **1.0 blocker**: the 1.0 minimum list promises command approval for adapter-supported workflows, and `to_ai_cli_profile` sets `Supervised` unconditionally, so the dialog no user can reach stays unreachable |
 | 061 | A Bound On Combining Marks Per Cell | terminal boundary | 009, 018 | partly | **Reserved 2026-09-24 at review 429.** `alacritty_terminal` gives every cell with a combining mark its own heap allocation, so output that puts one on every cell costs about **four times** as much a row: a 12,000-line pane at 200 columns reaches roughly 200 MB against a 64 MiB budget. Bounded, not unbounded, and disclosed in the book — but the bound belongs at the terminal boundary, where escape sequences are already filtered. **The per-cell limit must be chosen against real Devanagari, Arabic, Hebrew and Vietnamese**, not against Zalgo, and the honest long-term bound is **bytes, not lines** — the allocator probe RFC-054 built is what makes that possible |
 | 062 | Honouring `core.excludesFile` | explorer ignore tail | 055 | partly | **Reserved 2026-09-25 at review 433.** `check-ignore` runs with `GIT_CONFIG_GLOBAL=/dev/null` — the right guarantee, against the repository's configuration — so a user's own `core.excludesFile` is not applied and Tekstide and their `git status` can disagree in both directions. The shape to accept: ask git for the value with a read-only `config --get` (no index, so no `core.fsmonitor`) and pass it on `check-ignore`'s argv, **not** a Tekstide-side key, which would be a second place to say the same thing. It changes a stated guarantee and wants a threat model of its own |
-| 026 | File Watcher and Multi-Document Model | M13 | 019 | partly | **Accepted 2026-09-30; D1–D8 as written, plus D9–D12** — D9 pins “the ones that count” to `open_buffer_count()`/`dirty_file_count()`, each `u32::from(<one Option>)` with one reader; D11 proves the batching against a simulated stream **before** the dependency, so the dependency is judged against an existing number; D12 records what the evaluation must carry (`notify 8.2.0`, MSRV 1.77, **CC0-1.0**, last stable 2025-08-03). [Handoff pack](./handoffs/026-file-watcher/README.md). Four slices: **A** the batching, **B** the watcher and its dependency, **C** the change arriving, **D** the open set. It was `Blocked` on RFC-019, which shipped. `0.29.0`, M13 proper. [The RFC](./accepted/026-file-watcher-and-multi-document-model.md). Re-measured at authoring, and two facts postdate the scheduling: **RFC-055 made every directory scan ask git** (the gate's configuration half ~1.3 ms plus one `check-ignore` ~1 ms), so an event storm is a subprocess storm and D3's batching is a requirement, not a nicety; and **RFC-055's ignore answer makes the watch scope affordable** — 18,974 directories in this repository, **1,485** without the ignored ones, and `ExplorerTree::expanded` already tracks what the user opened (D1). **No watcher crate is in the graph at all**, so D4 is the first added dependency in many releases, judged by RFC-052 D3's rule. `active_document` has **74 production call sites**; D6 keeps its meaning and makes only the *open set* plural. The split point — watcher as `0.29.0`, multi-document as `0.30.0` — is stated in the RFC rather than discovered. |
+| 026 | File Watcher and Multi-Document Model | M13 | 019 | partly | **Accepted 2026-09-30; D1–D8 as written, plus D9–D12** — D9 pins “the ones that count” to `open_buffer_count()`/`dirty_file_count()`, each `u32::from(<one Option>)` with one reader; D11 proves the batching against a simulated stream **before** the dependency, so the dependency is judged against an existing number; D12 records what the evaluation must carry (`notify 8.2.0`, MSRV 1.77, **CC0-1.0**, last stable 2025-08-03). [Handoff pack](./handoffs/026-file-watcher/README.md). Four slices: **A** the batching, **B** the watcher and its dependency, **C** the change arriving, **D** the open set. It was `Blocked` on RFC-019, which shipped. `0.29.0`, M13 proper. [The RFC](./accepted/026-file-watcher.md). Re-measured at authoring, and two facts postdate the scheduling: **RFC-055 made every directory scan ask git** (the gate's configuration half ~1.3 ms plus one `check-ignore` ~1 ms), so an event storm is a subprocess storm and D3's batching is a requirement, not a nicety; and **RFC-055's ignore answer makes the watch scope affordable** — 18,974 directories in this repository, **1,485** without the ignored ones, and `ExplorerTree::expanded` already tracks what the user opened (D1). **No watcher crate is in the graph at all**, so D4 is the first added dependency in many releases, judged by RFC-052 D3's rule. `active_document` has **74 production call sites**; D6 keeps its meaning and makes only the *open set* plural. The split point — watcher as `0.29.0`, multi-document as `0.30.0` — is stated in the RFC rather than discovered. |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 | — | **yes** | Queued (parallel-ready) |
 | 028 | Cross-Platform Support | M14 | most | partly | Queued |
 | 029 | Documentation, CI, and Release Automation | M14 | — | **yes** | Queued (parallel-ready) |

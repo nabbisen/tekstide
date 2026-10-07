@@ -1,7 +1,7 @@
 ---
 title: "RFC-026 — task breakdown and PR plan"
 rfc: "RFC-026"
-rfc_file: "../../accepted/026-file-watcher-and-multi-document-model.md"
+rfc_file: "../../accepted/026-file-watcher.md"
 source_rfc_status: "Accepted 2026-09-30 — M13"
 target_milestone: "M13"
 created: "2026-09-30"
