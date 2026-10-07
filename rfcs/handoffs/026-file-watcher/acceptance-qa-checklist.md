@@ -137,6 +137,15 @@ measurement with no number in the evidence is not ticked.
       *(Step 2: six call sites, `grep -n reconcile_project_watch crates/tekstide/src/shell.rs`: project open
       (three arms), folder toggle, document open, scan finished. The cost is in `reconcile_project_watch`'s
       doc comment. Not per frame.)*
+- [ ] **At most one waiter on the event stream, enforced by the type** (required at review 457):
+      `wait_for_event` holds the receiver's mutex across a blocking `recv()`, `WatchEvents` is
+      clonable, and the method is `pub` — so a second caller blocks until the next filesystem event,
+      which on a quiet project is indefinite. **Avoid `try_lock`**: on a subscription rebuild the new
+      thread would fail the lock and return, leaving the project silently receiving nothing.
+- [ ] **Reconcile's cost on the render thread is measured before this box is ticked** (ruled at 457):
+      cost **per expanded directory**, not one figure at a hundred, reported against
+      `NFR-PERF-002`'s p95 ≤ 32 ms — the nearest stated budget, since no trigger is an editor
+      keystroke.
 - [ ] Nothing new on the render thread; the subscription is the shape `explorer_scan_subscription`
       already has.
       *(Step 2: the event thread is off the render thread, and the subscription has the explorer's shape.
