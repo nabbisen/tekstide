@@ -87,6 +87,12 @@ Ninety seconds. Run it.
 - [ ] `git status --short` shows no unintended changes.
 - [ ] `git diff --check`
 - [ ] `cargo fmt --check`
+- [ ] `cargo test --doc --workspace` — **added 2026-10-07.** `--all-targets` **excludes doctests by
+      design**, so the `compile_fail` guard on `WatchEvents` (review 458, the one that catches a future
+      `#[derive(Clone)]` on a type whose whole safety rests on not being clonable) had **never been run
+      by this gate**. It ran for the first time in the reviewer's `0.29.0` verification, which uses
+      `--workspace` — that is the entire 1,824-vs-1,822 difference between the two counts. Both
+      commands are needed: `--all-targets` for examples and benches, `--doc` for doctests.
 - [ ] `cargo test --all-targets`
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] `cargo build --release --locked`
