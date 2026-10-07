@@ -1392,6 +1392,10 @@ impl State {
         // call it is a line someone can delete and no test would notice, which
         // is exactly what happened; here there is no such line.
         run_transcript_retention_for_open_projects(&mut state);
+        // RFC-026 D10, the same gap as the retention trigger above (review 459 and the live
+        // walkthrough): a command-line project is open before `State` exists and never reaches
+        // the add-project arms, so its watch is placed here rather than at a call site.
+        reconcile_project_watches_for_open_projects(&mut state);
         state
     }
 
@@ -11028,6 +11032,22 @@ fn apply_agent_terminal_outcome_and_record(
         .app_shell
         .state_mut()
         .apply_agent_terminal_outcome_for_project(project_id, agent_run_id, terminal_id, outcome);
+}
+
+/// RFC-026 D1, the project-open trigger for every project already open when `State` is built.
+/// Mirrors [`run_transcript_retention_for_open_projects`]: a command-line project reaches this
+/// type with its project open, so its root is watched from the start.
+fn reconcile_project_watches_for_open_projects(state: &mut State) {
+    let open_projects = state
+        .app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect::<Vec<_>>();
+    for project_id in open_projects {
+        reconcile_project_watch(state, &project_id);
+    }
 }
 
 /// RFC-049 D2: the open trigger for every project that is **already open when

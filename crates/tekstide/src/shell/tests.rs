@@ -20364,3 +20364,32 @@ fn the_live_watch_scope_follows_expand_collapse_and_close() {
         "closing the project drops its watches with its owner"
     );
 }
+
+/// RFC-026 D1 (B2 defect found in slice C): a project already open when `State` is built, as a
+/// command-line open is, is watched from the start, with no other trigger needed.
+#[test]
+fn a_project_open_before_the_state_is_built_is_watched_from_the_start() {
+    let mut app_shell = ApplicationShell::new();
+    let project_root = fresh_project_dir("watch-from-boot");
+    app_shell
+        .add_project_from_path(&project_root)
+        .expect("a fresh directory is a valid project root");
+
+    let state = state_with(app_shell);
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+
+    let watch = state
+        .project_watches
+        .get(&project_id)
+        .expect("the boot-time open trigger creates the watch owner");
+    assert_eq!(
+        watch.watcher.scope().watched_count(),
+        1,
+        "the root is watched"
+    );
+}
