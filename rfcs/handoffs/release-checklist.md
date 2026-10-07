@@ -243,12 +243,24 @@ Two shapes, both found by the implementer rather than by the gate:
 - **A negative claim going stale.** *"The editor has no undo"*, and *"Not built"* still listing a file
   watcher.
 - **A number drifting.** The keyboard reference printed fifteen chords while the policy held eighteen.
+- **A word quietly widening.** Found at review 472, in `0.30.0` itself. `[open]` shipped at `bd88978`
+  meaning *the* open file — one row. RFC-065 PR-065-B made it set membership, so several rows carry
+  it at once, and both sentences describing it still read in the singular. **The two boxes above
+  could not have caught this**: they start from the release's own **Added** section, and the slice
+  that changed the meaning wrote nothing there. A capability that is renamed, widened or narrowed
+  leaves no trace in *Added* — only in the diff.
 
 - [ ] For every capability this release's **Added** section names, search
       `docs/src/users/what-works-today.md` for a claim that it does not exist — *"no X"*, *"There is
       no X"*, *"Not built"*.
 - [ ] For every count the book states, check it against the thing that holds the count, not against
       the last edit of the sentence.
+- [ ] Run it in the other direction too, from the diff rather than the changelog: for every
+      user-visible word this release's commits touched — a marker, a status word, a label — read
+      every sentence that describes it. `git log -p <previous tag>..HEAD -- crates/tekstide/locales`
+      and the surface modules name the words; the book and the module's own doc comment hold the
+      sentences. A meaning that widened and a sentence that stayed singular is the same defect as a
+      stale negative claim, and arrives with no changelog line to start from.
 
 The mechanical version is scheduled: `what-works-today.md` carries **no** invariants while the
 configuration page carries three, and that asymmetry is why one drifted and the other did not.

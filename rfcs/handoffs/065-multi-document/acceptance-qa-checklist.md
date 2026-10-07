@@ -72,6 +72,26 @@ measurement with no number in the evidence is not ticked.
       RFC's own non-goal), so there is no new visible surface to measure against the 32-column
       bound.
 
+### Required at review 472
+
+- [ ] **The changelog's `## 0.30.0` status line still says the switcher is not done.** Neither
+  PR-065-C commit touched `CHANGELOG.md`, so at `699da0c` the entry reads that "the switcher
+  (PR-065-C) and save-all (PR-065-D) are not" done while both C commits are in the tree. Review
+  471 ruled the incremental changelog the better habit *because* it is written as each slice
+  closes; a slice that closes without it leaves the entry asserting the opposite of the tree.
+  Add C's paragraph and correct the status line.
+- [ ] **`[open]` changed meaning in PR-065-B and nothing that describes it was updated.** The
+  marker was introduced at `bd88978` as the open file — singular, exactly one row. PR-065-B made
+  it set membership: live capture `04` shows all three rows carrying it. Two descriptions are now
+  false and must be corrected — `docs/src/users/what-works-today.md:35-36` ("The file open in the
+  editor is marked `[open]`") and `crates/tekstide/src/surface/explorer.rs:141-142` ("whether this
+  is the row of the file that is open in the editor... that is the *selection*"). The changelog
+  must say the meaning widened: a user who learned the old meaning now misreads the sidebar.
+- [ ] **The book must say how a user tells which open document is active.** The answer is the
+  editor's own header — captures `04` and `05` name `third.txt` and `first.txt` above the cursor
+  line — not the sidebar. That is sufficient, and no sidebar marker is required by this slice,
+  but it is now the only answer and the book never gives it.
+
 ## PR-065-D — save-all
 
 - [ ] **A partial save-all says which files were written and which were not.**
