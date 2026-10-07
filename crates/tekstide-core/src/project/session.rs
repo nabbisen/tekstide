@@ -1493,6 +1493,14 @@ impl ProjectSession {
         result
     }
 
+    /// RFC-065 PR-065-C: see
+    /// [`ProjectContentWorkspace::cycle_to_next_open_document`]'s own doc.
+    pub fn cycle_to_next_open_document(&mut self) {
+        self.content_workspace.cycle_to_next_open_document();
+        self.sync_file_state_from_content_workspace();
+        self.record_activity();
+    }
+
     pub fn scan_content_explorer_directory(
         &mut self,
         selected_relative_path: impl Into<PathBuf>,

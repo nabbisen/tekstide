@@ -483,6 +483,15 @@ impl AppState {
         project.reload_active_document()
     }
 
+    /// RFC-065 PR-065-C: see [`ProjectSession::cycle_to_next_open_document`]'s own doc.
+    /// A no-op (not an error) with no active project -- the same "nothing to cycle" shape
+    /// as fewer than two open documents.
+    pub fn cycle_to_next_open_document_in_active_project(&mut self) {
+        if let Some(project) = self.active_project_mut() {
+            project.cycle_to_next_open_document();
+        }
+    }
+
     pub fn scan_active_project_explorer_directory(
         &mut self,
         selected_relative_path: impl Into<std::path::PathBuf>,

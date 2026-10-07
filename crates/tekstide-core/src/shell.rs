@@ -140,6 +140,14 @@ impl ApplicationShell {
         self.state.reload_active_project_document()
     }
 
+    /// RFC-065 PR-065-C: see
+    /// [`crate::project::ProjectSession::cycle_to_next_open_document`]'s own doc. No route
+    /// change: unlike opening a document, cycling within an already-open project never leaves
+    /// the workspace route it was already in.
+    pub fn cycle_to_next_open_document_in_active_project(&mut self) {
+        self.state.cycle_to_next_open_document_in_active_project();
+    }
+
     pub fn scan_active_project_explorer_directory(
         &mut self,
         selected_relative_path: impl Into<std::path::PathBuf>,

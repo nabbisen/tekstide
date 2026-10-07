@@ -105,6 +105,28 @@ impl ProjectContentWorkspace {
         self.documents.iter()
     }
 
+    /// RFC-065 PR-065-C, D5: cycles the active document to the next one in the open set, in
+    /// `self.documents`'s own order, wrapping -- a no-op with fewer than two open. The direct
+    /// analogue of `AppState::switch_active_project`'s own cycling, for documents instead of
+    /// projects. A document's own cursor and viewport live on `TextDocument` itself and are
+    /// untouched by this -- switching restores them for free, by construction, rather than
+    /// through any explicit save/restore step.
+    pub fn cycle_to_next_open_document(&mut self) {
+        if self.documents.len() < 2 {
+            return;
+        }
+        let next_index = match self.active_index {
+            Some(index) => (index + 1) % self.documents.len(),
+            None => 0,
+        };
+        self.active_index = Some(next_index);
+        self.selected_explorer_path = self.documents[next_index]
+            .target()
+            .selected_relative_path
+            .clone();
+        self.status = ProjectContentStatus::Opened;
+    }
+
     /// RFC-026 D1's inputs to the watch scope: the expanded folders and the folders of
     /// every open document, both relative to the project root. RFC-065 PR-065-B: the open
     /// set is plural now, and the watcher's own scope follows it -- `open_documents()`

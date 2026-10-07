@@ -11900,7 +11900,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     );
     assert_eq!(
         lines.len(),
-        17,
+        18,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }
@@ -13291,6 +13291,92 @@ fn ctrl_alt_n_is_a_no_op_with_fewer_than_two_projects_open() {
     assert_eq!(
         state.app_shell.state().active_project_id(),
         Some(&project_id)
+    );
+}
+
+// RFC-065 PR-065-C, D5: `SwitchActiveDocument` (`Ctrl+Alt+F`) -- the direct analogue of
+// `SwitchActiveProject` above, for the open document set rather than the project list.
+
+fn press_ctrl_alt_f(state: &mut State) {
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::SwitchActiveDocument,
+    );
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+fn active_document_relative_path(state: &State) -> std::path::PathBuf {
+    state
+        .app_shell
+        .state()
+        .active_project()
+        .and_then(|project| project.content_workspace().active_document())
+        .expect("an active document must exist")
+        .target()
+        .selected_relative_path
+        .clone()
+}
+
+/// Cycles to the next open document in `ProjectContentWorkspace::open_documents()`'s own
+/// order, wrapping back to the first once past the last -- proven with three real open
+/// documents and three real `Ctrl+Alt+F` presses, not assumed from two.
+#[test]
+fn ctrl_alt_f_cycles_to_the_next_open_document_wrapping() {
+    let (mut state, dir) = state_with_an_open_document("switch-document-cycle", "first\n");
+    std::fs::write(dir.join("second.txt"), "second\n").unwrap();
+    std::fs::write(dir.join("third.txt"), "third\n").unwrap();
+    state
+        .app_shell
+        .open_active_project_text_document("second.txt")
+        .expect("the second document should open");
+    state
+        .app_shell
+        .open_active_project_text_document("third.txt")
+        .expect("the third document should open, becoming active");
+    assert_eq!(
+        active_document_relative_path(&state),
+        std::path::Path::new("third.txt")
+    );
+
+    press_ctrl_alt_f(&mut state);
+    assert_eq!(
+        active_document_relative_path(&state),
+        std::path::Path::new("file.txt"),
+        "cycling past the last document must wrap back to the first"
+    );
+
+    press_ctrl_alt_f(&mut state);
+    assert_eq!(
+        active_document_relative_path(&state),
+        std::path::Path::new("second.txt")
+    );
+
+    press_ctrl_alt_f(&mut state);
+    assert_eq!(
+        active_document_relative_path(&state),
+        std::path::Path::new("third.txt")
+    );
+}
+
+/// With fewer than two documents open, there is nothing to cycle to -- a real `Ctrl+Alt+F`
+/// press must be a harmless no-op, not a panic on an empty or single-element index
+/// computation, and must not panic with no active project either.
+#[test]
+fn ctrl_alt_f_is_a_no_op_with_fewer_than_two_documents_open() {
+    let mut state = state_with(ApplicationShell::new());
+    press_ctrl_alt_f(&mut state);
+    assert!(
+        state.app_shell.state().active_project().is_none(),
+        "no project, let alone no document, must still not panic"
+    );
+
+    let (mut state, _dir) = state_with_an_open_document("switch-document-cycle-single", "only\n");
+    press_ctrl_alt_f(&mut state);
+    assert_eq!(
+        active_document_relative_path(&state),
+        std::path::Path::new("file.txt")
     );
 }
 

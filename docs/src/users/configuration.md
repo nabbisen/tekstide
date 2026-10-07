@@ -84,6 +84,7 @@ terminal, and a dialog still swallows every key but its own.
 | `open_help` | `Ctrl+Alt+K` |
 | `open_folder_browser` | `Ctrl+Alt+B` |
 | `reload_configuration` | `Ctrl+Alt+C` |
+| `switch_active_document` | `Ctrl+Alt+F` |
 
 **Two actions have no chord and cannot be rebound**, and neither is an oversight:
 `cycle_visible_terminal_session` (there is no handler — a new terminal becomes the one that receives

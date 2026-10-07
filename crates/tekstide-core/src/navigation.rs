@@ -102,13 +102,22 @@ pub enum NavigationAction {
     /// appear there *by construction rather than by remembering* -- is
     /// met either way.
     ReloadConfiguration,
+    /// RFC-065 PR-065-C, D5: cycles to the next open document in the active project, wrapping,
+    /// a no-op with fewer than two open -- the direct analogue of `SwitchActiveProject` for
+    /// documents instead of projects. **Keyboard-only, deliberately** (`control_coverage`'s own
+    /// `KeyboardOnly` entry): D11/the RFC's own non-goal name "a tab bar for documents, if a
+    /// simpler switcher reaches the same place" as the alternative this is, not a gap awaiting
+    /// one. A document's own cursor and viewport live on `TextDocument` itself, so switching
+    /// restores them for free, by construction, rather than through any explicit save/restore
+    /// step.
+    SwitchActiveDocument,
 }
 
 impl NavigationAction {
     /// Every action, in declaration order. `config_name` is an exhaustive match,
     /// so adding an action without a name does not compile; a test holds this
     /// list to the policy so adding one without a rule does not pass.
-    pub const ALL: [NavigationAction; 20] = [
+    pub const ALL: [NavigationAction; 21] = [
         Self::OpenProjectBoard,
         Self::OpenProjectEntryField,
         Self::SwitchActiveProject,
@@ -129,6 +138,7 @@ impl NavigationAction {
         Self::OpenHelp,
         Self::OpenFolderBrowser,
         Self::ReloadConfiguration,
+        Self::SwitchActiveDocument,
     ];
 
     /// The key a `[keybindings]` entry uses for this action: the identifier in
@@ -156,6 +166,7 @@ impl NavigationAction {
             Self::OpenHelp => "open_help",
             Self::OpenFolderBrowser => "open_folder_browser",
             Self::ReloadConfiguration => "reload_configuration",
+            Self::SwitchActiveDocument => "switch_active_document",
         }
     }
 
@@ -503,6 +514,20 @@ impl KeybindingPolicy {
                 // `reload_configuration_shortcut_is_a_candidate_that_collides_with_no_other_rule`
                 // rather than by reading the list.
                 KeybindingRule::bound(NavigationAction::ReloadConfiguration, "Ctrl+Alt+C"),
+                // RFC-065 PR-065-C, D5/D11: `Ctrl+Alt+F` (File) -- the
+                // same `Ctrl+Alt+<letter>` shape every other action here
+                // uses, following `SwitchActiveProject`'s own `N` (Next)
+                // precedent in spirit but naming what this one cycles
+                // rather than the direction, since `N` is already taken.
+                // Unclaimed by any other rule here and not `Ctrl+Shift+P`'s
+                // `Reserved` command-palette binding, so it collides with
+                // nothing (checked mechanically by
+                // `switch_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone). D11's own point: eighteen
+                // chords were held before this one, the chord space had
+                // room, and adding one is a known operation, not a design
+                // question.
+                KeybindingRule::bound(NavigationAction::SwitchActiveDocument, "Ctrl+Alt+F"),
             ],
         }
     }

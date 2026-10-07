@@ -379,6 +379,31 @@ fn switch_active_project_shortcut_is_a_candidate_that_collides_with_no_other_rul
     );
 }
 
+/// RFC-065 PR-065-C, D11: the mechanical check named in `linux_mvp()`'s own doc comment on
+/// `SwitchActiveDocument` -- not by inspection alone.
+#[test]
+fn switch_active_document_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::SwitchActiveDocument)
+        .expect("Switch Active Document should have a keyboard policy");
+
+    assert_eq!(rule.default_binding(), Some("Ctrl+Alt+F"));
+    assert_eq!(rule.status(), KeybindingStatus::Bound);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::SwitchActiveDocument)
+        .filter(|other| other.default_binding() == rule.default_binding())
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+F must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 /// pr-020-b-report-surface.md: `AgentRunDetail` is this slice's own
 /// real render arm, with no other route to open it -- a
 /// `Configurable`/`None` binding here would leave it unreachable by any
@@ -474,6 +499,7 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+K",
             "Ctrl+Alt+B",
             "Ctrl+Alt+C",
+            "Ctrl+Alt+F",
         ],
     );
 
@@ -666,8 +692,8 @@ fn every_advertised_chord_round_trips() {
         checked += 1;
     }
     assert_eq!(
-        checked, 18,
-        "eighteen chords are held (seventeen bound, one reserved)"
+        checked, 19,
+        "nineteen chords are held (eighteen bound, one reserved)"
     );
 }
 

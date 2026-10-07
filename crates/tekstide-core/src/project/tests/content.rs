@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::content::{EditOperation, TextCursor, TextDocumentState};
+use crate::content::{EditOperation, TextCursor, TextDocumentState, TextViewport};
 use crate::project::{
     ProjectContentError, ProjectContentStatus, ProjectId, ProjectResourceLimits, ProjectSession,
 };
@@ -623,6 +623,105 @@ fn a_background_document_is_refreshed_by_its_own_path_without_touching_the_activ
         &ProjectContentStatus::Opened,
         "the active (second) document's own displayed status must be untouched by a \
          background document's external change"
+    );
+
+    cleanup_root(root);
+}
+
+/// RFC-065 PR-065-C, D5: cycling the active document wraps through the open set, is a no-op
+/// with fewer than two open, and restores each document's own cursor and viewport -- **asserted,
+/// not assumed** (the acceptance criterion's own wording), since both are owned by
+/// `TextDocument` itself and never touched by the cycle.
+#[test]
+fn cycling_the_active_document_wraps_and_restores_cursor_and_viewport() {
+    let root = test_root("content-cycle-active-document");
+    std::fs::write(root.join("first.txt"), "first\nfirst\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second\nsecond\n").unwrap();
+    std::fs::write(root.join("third.txt"), "third\nthird\n").unwrap();
+    let mut project = project_at(&root);
+
+    project.cycle_to_next_open_document();
+    assert_eq!(
+        project.content_workspace().open_buffer_count(),
+        0,
+        "test precondition: cycling with nothing open must be a no-op, not a panic"
+    );
+
+    project.open_text_document("first.txt").unwrap();
+    project
+        .set_active_cursor(TextCursor { line: 1, column: 3 })
+        .unwrap();
+    project
+        .set_active_viewport(TextViewport {
+            first_visible_line: 1,
+            first_visible_column: 2,
+        })
+        .unwrap();
+
+    project.cycle_to_next_open_document();
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .target()
+            .selected_relative_path,
+        std::path::Path::new("first.txt"),
+        "cycling with only one document open must be a no-op, not a panic"
+    );
+
+    project.open_text_document("second.txt").unwrap();
+    project
+        .set_active_cursor(TextCursor { line: 0, column: 4 })
+        .unwrap();
+    project.open_text_document("third.txt").unwrap();
+    project
+        .set_active_cursor(TextCursor { line: 1, column: 1 })
+        .unwrap();
+    // Open set, in order: first.txt (active index 0 at open time), second.txt (1), third.txt
+    // (2, active now).
+
+    project.cycle_to_next_open_document();
+    let active = project.content_workspace().active_document().unwrap();
+    assert_eq!(
+        active.target().selected_relative_path,
+        std::path::Path::new("first.txt"),
+        "cycling from the last entry wraps to the first"
+    );
+    assert_eq!(
+        active.cursor(),
+        TextCursor { line: 1, column: 3 },
+        "the first document's own cursor, set before either other document was opened, must \
+         survive untouched -- restored, not reset"
+    );
+    assert_eq!(
+        active.viewport(),
+        TextViewport {
+            first_visible_line: 1,
+            first_visible_column: 2,
+        },
+        "the first document's own viewport must survive untouched"
+    );
+
+    project.cycle_to_next_open_document();
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .target()
+            .selected_relative_path,
+        std::path::Path::new("second.txt"),
+        "cycling continues to the second entry"
+    );
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .cursor(),
+        TextCursor { line: 0, column: 4 },
+        "the second document's own cursor must survive untouched"
     );
 
     cleanup_root(root);

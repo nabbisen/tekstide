@@ -10,6 +10,7 @@ ships with**: any of them except `Ctrl+Shift+P` can be moved in your configurati
 | --- | --- |
 | `Ctrl+Alt+P` | Open the Project Board |
 | `Ctrl+Alt+N` | Switch to the next open project, cycling with wraparound |
+| `Ctrl+Alt+F` | Switch to the next open document, cycling with wraparound |
 | `Ctrl+Alt+O` | Open a field to type or paste a project path |
 | `Ctrl+Alt+B` | Open a folder browser to choose a project without typing a path |
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
@@ -28,8 +29,8 @@ ships with**: any of them except `Ctrl+Shift+P` can be moved in your configurati
 | `Tab` / `Shift+Tab` | Cycle keyboard focus between shell zones |
 
 `Ctrl+Shift+P` is reserved for a command palette that does not exist yet — it is bound in the
-keybinding policy and currently does nothing. That is why `tekstide --help` prints seventeen chords
-while the policy holds eighteen.
+keybinding policy and currently does nothing. That is why `tekstide --help` prints eighteen chords
+while the policy holds nineteen.
 
 ## Within a surface
 

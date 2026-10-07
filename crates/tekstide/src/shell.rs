@@ -2279,6 +2279,15 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             if action == NavigationAction::SwitchActiveProject {
                 cycle_to_next_active_project(state);
             }
+            // RFC-065 PR-065-C: the direct analogue of the arm above, for the open
+            // document set rather than the project list -- `app_command_for`'s own
+            // doc on `SwitchActiveDocument` explains why it is not in that
+            // function's `Some` group either.
+            if action == NavigationAction::SwitchActiveDocument {
+                state
+                    .app_shell
+                    .cycle_to_next_open_document_in_active_project();
+            }
         }
         Message::Input(RoutedInput::Surface(surface_input)) => {
             // RFC-019 PR-019-B: the explorer tree is the first real
@@ -7536,6 +7545,14 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         | NavigationAction::OpenCommandPalette
         | NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog => None,
+        // RFC-065 PR-065-C: the same reason `SwitchActiveProject` above
+        // is `None` -- "cycle to the next open document" has no route
+        // or mode to carry; the open set's own current order and active
+        // index are shell-layer-reachable through `ApplicationShell`,
+        // not through a core route/mode `AppCommand`. `update`'s `Shell`
+        // arm special-cases it directly (`cycle_to_next_open_document`),
+        // the same shape.
+        NavigationAction::SwitchActiveDocument => None,
     }
 }
 

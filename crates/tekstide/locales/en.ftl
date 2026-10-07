@@ -1327,6 +1327,7 @@ keyboard-help-open-diff-review = Change Review: what the most recent agent run c
 keyboard-help-open-help = This list
 keyboard-help-open-folder-browser = Browse for a project folder
 keyboard-help-switch-active-project = Switch to the next open project
+keyboard-help-switch-active-document = Switch to the next open document
 
 # RFC-044 D2/PR-044-C: the surface-grouped section, generated from
 # `SURFACE_ACTION_ORDER`/`surface_action_entry` in `keyboard_help.rs`, not

@@ -66,6 +66,7 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::OpenFolderBrowser => Some("keyboard-help-open-folder-browser"),
         NavigationAction::ReloadConfiguration => Some("keyboard-help-reload-configuration"),
         NavigationAction::SwitchActiveProject => Some("keyboard-help-switch-active-project"),
+        NavigationAction::SwitchActiveDocument => Some("keyboard-help-switch-active-document"),
         NavigationAction::OpenDiffReview => Some("keyboard-help-open-diff-review"),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog
@@ -237,6 +238,13 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
                           review surface)",
             on_press_snippet: ".on_press(Message::OpenDiffReviewButtonPressed)",
         }),
+        NavigationAction::SwitchActiveDocument => Some(ControlCoverage::KeyboardOnly(
+            "RFC-065 D5/D11, and the RFC's own non-goal: \"a tab bar for documents, if a \
+             simpler switcher reaches the same place.\" This chord is that simpler switcher, \
+             not a stopgap awaiting a tab bar -- the explorer's own row navigation (which can \
+             also reach an open document, since PR-065-B's dedup switches to it) is itself \
+             keyboard-only with no mouse row click either. Permanent for this design.",
+        )),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,
