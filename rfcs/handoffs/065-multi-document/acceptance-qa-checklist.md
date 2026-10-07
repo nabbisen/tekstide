@@ -152,6 +152,43 @@ of `rfcs/handoffs/test-process-leak.md`. Scheduled before the `0.30.0` candidate
       a **9.2×** ratio against the 10× a linear cost predicts, extrapolating to roughly **78 ms** at
       D4's bound of twenty. Written incrementally as slices close, not held back for the release.
 
+### Required at review 477
+
+Save-all's write path, its partial-failure reporting, the chord and the bookkeeping are all correct,
+and the gate reproduces on my own run (`738 + 16 + 1088`). But the one claim the slice chose *not*
+to test is false, and it is stated in three places.
+
+- [ ] **"N saves cost N watcher notices" is wrong, and the changelog says it.** A clean document is
+  never written: `content/document.rs`'s `save` returns `Ok(SaveDecision::Saved)` from an early
+  `if !self.is_dirty()` return, *before* `write_text_via_temp_rename`. I measured it — two open
+  documents, one edited, one untouched: `written_count()` reported **2**, and the untouched file's
+  **mtime did not change**. So a save-all over N open documents costs the watcher one notice per
+  **dirty** document, not N. At D4's bound of twenty open with one edited, that is 1, not 20. The
+  *relative* half of the changelog sentence is right (it is the same as N separate `Ctrl+S`
+  presses); the absolute "N scans and N re-reads of the files just written" is not. Fix the
+  sentence in `CHANGELOG.md`, and untick the PR-065-D box that asserts it.
+- [ ] **`was_written`, `written_count` and `all_written` do not mean written.** All three rest on
+  `matches!(self.result, Ok(SaveDecision::Saved))`, which is true for a document that was never
+  touched. The user-facing string is defensible — a clean document *is* saved — but the identifiers
+  and the changelog both say *written*, and that is the word that made the claim above look true.
+  **Recommended: rename the three accessors; do not widen `SaveDecision`** for this. The enum is
+  shared with the single-save path and the user does not need "1 written, 4 already saved"; what
+  the user needs is that the summary is not read as a count of files touched.
+- [ ] **No test puts a clean document in the open set.** Both core tests edit every document before
+  saving, which is why this survived. Add one that leaves a document clean and asserts the file is
+  not rewritten — mtime, as above, is enough — and that the reporting about it is truthful.
+- [ ] **A live capture is required after all.** Your reading of the wording is accurate: PR-065-D's
+  boxes do not say "captured live" the way PR-065-C's did, so this is me adding a requirement, not
+  you missing one. Two reasons it is not ceremony here. This slice ships **the first visible control
+  in RFC-065** — a "Save All" button and a multi-line notice — and no capture has ever shown either.
+  And a capture of a save-all with one clean document in the set would have put *"2 of 2 saved"* on
+  the screen beside a file that was never written, which is how the item above should have been
+  found. Capture that case specifically.
+
+**Scope decision 2, accepted in part.** Declining a real-kernel *timing* test was right, and citing
+the flake work is a fair reason. The error was concluding that therefore no test was needed: what is
+wrong here is a deterministic logic case that a plain test catches with no timing at all.
+
 ## Whole-RFC
 
 - [ ] The requirements gap — **no `REQ-` names multi-document** — is written up for the owner, and no
