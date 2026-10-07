@@ -26,7 +26,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) |
 | `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **candidate, not confirmed** |
-| `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below** |
+| `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below. Fixed, `0.29.0`: rewritten as a paired ratio against a reference workload timed in the same run, so load no longer decides it; see the dated entry.** |
 | `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **PTY read timing, not process leak or audit store.** Once in three runs. The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. A read that outran the shell's own output, not a failure of the termination behaviour the test covers. Distinct from every row above: no socket, no audit store, no PTY exhaustion — `/dev/pts` was well below its limit throughout. |
 | `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry.** |
 | `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed.** |
@@ -1243,3 +1243,28 @@ future flake in them should be recorded here with its load, not absorbed into a 
 The test's own message names load as the likely cause. The same tree then passed three full runs in a
 row at load 22 to 28. This is the known absolute-budget test the `0.29.0` ratio fix is for; no new
 row is needed, and this entry is the dated record of its recurrence.
+
+## 2026-10-07 — `change_review_content_view_build_cost_by_line_count_measurement`, fixed for `0.29.0`
+
+**The absolute budget is gone.** Four episodes of the same failure shape — `0.26.0`, the `0.28.0`
+candidate, the architect's own `0.28.0` verification, and RFC-026 PR-026-A's review 451 — each
+fixed by reporting the load average beside the 500 ms budget it crossed, which explains a red run
+after the fact and prevents none. Scheduled into `0.29.0` at review 451 rather than recorded a
+fifth time (the implementer's own call, and the right one).
+
+**The fix: a paired ratio, not a bigger or looser absolute number.** The test now times a
+10,000-line reference workload and a 100,000-line one (ten times the work) back to back, in the
+same process, in the same run, and asserts the larger costs under thirty times the smaller's own
+time — RFC-026's own paired control (review 462), applied to a view-build cost instead of a
+watched burst. An ambient load spike lands on both sides of the ratio at very nearly the same
+moment, so it moves the absolute numbers without moving the ratio much; a real regression (an
+accidental allocation per line, a quadratic pass) would move the ratio itself and nothing else can.
+
+**Verified under artificial load.** Run quiet: reference ≈16 ms, scaled ≈162 ms, ratio ≈10.1x.
+Run under 32 concurrent `yes` processes (load average 25, on a 32-core machine): reference ≈44 ms,
+scaled ≈394 ms, ratio ≈9.0x — both comfortably inside the 30x budget, and the ratio barely moved
+while the absolute numbers nearly tripled. The full per-line-count curve is still printed every
+run, unchanged in spirit from before, but it no longer decides pass or fail.
+
+**This closes the row.** No further entries are expected for this test; a future failure here
+would mean the ratio itself moved, which is what the fix exists to catch.

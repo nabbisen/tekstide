@@ -277,7 +277,7 @@ measurement with no number in the evidence is not ticked.
 
 ### Carried into `0.29.0` at review 451 — not RFC-026's subject
 
-- [ ] **`change_review_content_view_build_cost_by_line_count_measurement` stops measuring the
+- [x] **`change_review_content_view_build_cost_by_line_count_measurement` stops measuring the
       machine.** Assert a **ratio against a reference workload timed in the same process** — ten
       times the work must cost under some multiple of the time — rather than an absolute 500 ms.
       Scheduled after a **fourth** episode: `0.26.0`, the `0.28.0` candidate, the architect's `0.28.0`
@@ -285,6 +285,11 @@ measurement with no number in the evidence is not ticked.
       to schedule rather than record again, and was right. Worked examples for both halves:
       `editor_typing_latency_baseline_100_000_lines` (publish the number, assert nothing) and snora
       0.52.0's CI ratio.
+      *(Fixed 2026-10-07, release 0.29.0: ten thousand lines against a hundred thousand (ten times the
+      work), timed back to back in one run, asserted under thirty times the reference's own time.
+      Verified stable quiet (ratio ≈10.1x) and under 32 concurrent `yes` processes at load 25
+      (ratio ≈9.0x, absolute times nearly tripled, the ratio barely moved). `test-process-leak.md`'s
+      2026-10-07 entry closes the row.)*
 
 ## Final Acceptance Decision
 
