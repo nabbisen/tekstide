@@ -193,6 +193,12 @@ measurement with no number in the evidence is not ticked.
       *(Captured 2026-10-07 from the running app: a file created, deleted and renamed externally in an
       expanded folder appears and disappears with no reopen and no keystroke. `evidence/pr-026-c/`, with a
       README that says what the captures prove and what they do not: latency and bursts are not in them.)*
+- [ ] **An unwatched control runs in the same process, under the same load** (required at review 462).
+      Watched-idle measured 8.05–8.41 ms against RFC-057's 5.3–6.8 (dev) and 7.876 (reviewer, load
+      14.22) on the same fixture — higher, at lower load. An idle watcher is claimed to cost nothing,
+      and **nobody can tell**, because the only unwatched figure is from another release on another
+      day. Three conditions in one run — unwatched, watched-idle, watched-burst — make the difference
+      a difference in the code. Before D8, not after.
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
       baseline harness.
       *(Harness and pre-D8 baseline, review 461's order: `editor_typing_latency_under_a_watched_burst`, four
