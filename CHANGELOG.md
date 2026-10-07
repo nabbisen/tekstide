@@ -33,11 +33,13 @@ action — new work, not a loop around `Ctrl+S`'s own save, because saving sever
 writes that can fail partway. One document's own save being blocked (an external change, an unsafe
 symlink, a write failure) does not cost any other document its own save: every open document is
 attempted regardless of an earlier one's own result, and the chrome says, afterward, how many of the
-open set were written and names each one that was not, with why — success included, so "nothing has
-happened yet" and "all of it worked" never look the same. Each of the N saves is the same
-temp-and-rename write a single `Ctrl+S` already was, so an N-document save-all costs the watcher the
-same N scans and N re-reads of the files just written that N separate single saves always would have —
-no new cost per document, only N of a cost `0.29.0` already measured for one.
+open set succeeded and names each one that failed, with why — success included, so "nothing has
+happened yet" and "all of it worked" never look the same. Each *dirty* document's own save is the same
+temp-and-rename write a single `Ctrl+S` already was — but a clean document's own save returns success
+without ever reaching that write, so an N-document save-all costs the watcher one scan and one re-read
+per document actually written, not N: at most, the count of documents that were dirty when the action
+was pressed. A save-all over a mostly-clean open set (one edited document among many open) costs the
+watcher the same single notice one `Ctrl+S` on that one document already would have.
 
 ## 0.29.0 - The Explorer Keeps Up On Its Own
 

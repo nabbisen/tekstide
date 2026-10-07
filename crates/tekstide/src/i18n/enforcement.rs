@@ -650,11 +650,11 @@ fn generic_args() -> CatalogArgs<'static> {
         .number("first", 1u32)
         .number("last", 1u32)
         .number("total", 1u32)
-        // RFC-065 PR-065-D: `editor-save-all-summary`'s `$written` -- `total` above is shared
+        // RFC-065 PR-065-D: `editor-save-all-summary`'s `$succeeded` -- `total` above is shared
         // with the same message's own `$total` and `explorer-rows-position`'s, no new entry
         // needed for that one. `editor-save-all-outcome-row`'s `$path` and `$reason` reuse
         // `path`/`reason` above the same way `external-change-dialog-body` already does.
-        .number("written", 1u32)
+        .number("succeeded", 1u32)
         // RFC-053 D7: `project-board-blocked-automation-names`'s list.
         .untrusted(
             "names",

@@ -370,11 +370,16 @@ impl ProjectContentWorkspace {
     /// the acceptance criteria name is a user told "saved" when some landed and some did not,
     /// without knowing which. Attempts **every** open document regardless of an earlier one's
     /// own failure (so one write failure does not silently cost the rest still to try), in
-    /// `self.documents`'s own order, each through the identical temp-and-rename path
-    /// `save_active_document` uses -- this is a sequencing difference, not a different write.
-    /// `self.status` updates only for the active document's own entry, if it is among them, the
-    /// same "status is the convenience field for the document on screen" rule
-    /// `refresh_document_by_canonical_path` already established for refresh.
+    /// `self.documents`'s own order, each through the identical `document.save(root, policy)`
+    /// call `save_active_document` uses -- this is a sequencing difference, not a different
+    /// write. **Not every attempt is a write, though**: `save()` itself returns
+    /// `Ok(SaveDecision::Saved)` for a clean document without ever reaching the real
+    /// temp-and-rename path (review 477's own finding -- see
+    /// [`DocumentSaveOutcome::succeeded`]'s own doc), so a save-all over a set with clean
+    /// documents in it costs the watcher one notice per *dirty* document actually written, not
+    /// one per document attempted. `self.status` updates only for the active document's own
+    /// entry, if it is among them, the same "status is the convenience field for the document
+    /// on screen" rule `refresh_document_by_canonical_path` already established for refresh.
     pub fn save_all_documents(
         &mut self,
         root: &ProjectRootHandle,
@@ -639,7 +644,15 @@ pub struct DocumentSaveOutcome {
 }
 
 impl DocumentSaveOutcome {
-    pub fn was_written(&self) -> bool {
+    /// **Not "was written to disk."** `Ok(SaveDecision::Saved)` is also what a *clean*
+    /// document's own `save()` returns, from an early return before
+    /// `write_text_via_temp_rename` is ever reached (`content::document`'s own `save`, the
+    /// `if !self.is_dirty()` arm) -- true, named this way, for review 477's own finding:
+    /// `was_written`/`written_count`/`all_written` claimed a disk write that a clean document
+    /// never makes, and that wrong word is what made "N saves cost N watcher notices" read as
+    /// true in `CHANGELOG.md` when it was not. This name says only what the `Result` actually
+    /// is: the attempt did not fail.
+    pub fn succeeded(&self) -> bool {
         matches!(self.result, Ok(SaveDecision::Saved))
     }
 }
@@ -652,19 +665,21 @@ pub struct SaveAllOutcome {
 }
 
 impl SaveAllOutcome {
-    pub fn all_written(&self) -> bool {
-        self.outcomes.iter().all(DocumentSaveOutcome::was_written)
+    /// See [`DocumentSaveOutcome::succeeded`]'s own doc: not "all written," since a clean
+    /// document among them was never written at all.
+    pub fn all_succeeded(&self) -> bool {
+        self.outcomes.iter().all(DocumentSaveOutcome::succeeded)
     }
 
-    pub fn written_count(&self) -> u32 {
+    pub fn succeeded_count(&self) -> u32 {
         self.outcomes
             .iter()
-            .filter(|outcome| outcome.was_written())
+            .filter(|outcome| outcome.succeeded())
             .count() as u32
     }
 
     pub fn failed_count(&self) -> u32 {
-        self.outcomes.len() as u32 - self.written_count()
+        self.outcomes.len() as u32 - self.succeeded_count()
     }
 }
 

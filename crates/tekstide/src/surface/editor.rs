@@ -52,16 +52,19 @@ fn save_decision_symbol(decision: SaveDecision) -> &'static str {
 
 /// RFC-065 PR-065-D, D6: the save-all result, stated -- "a partial save-all says which files
 /// were written and which were not" is this function's whole reason to exist. One line summing
-/// the counts, then one line per document that was **not** written, naming it (untrusted,
+/// the counts, then one line per document whose own save **failed**, naming it (untrusted,
 /// escaped, the same as [`chrome_line`]'s own path) and why -- never silent about a file that
-/// looked saved but was not. Factored out of [`view`] for the same testability reason as every
-/// other line function here.
+/// looked saved but was not. The summary's own "saved" counts
+/// [`SaveAllOutcome::succeeded_count`], which is defensible user-facing wording (a clean
+/// document really is saved) even though it is not a count of documents written to disk --
+/// see that method's own doc for why the two are not the same thing. Factored out of [`view`]
+/// for the same testability reason as every other line function here.
 pub(crate) fn save_all_notice_lines(catalog: &Catalog, outcome: &SaveAllOutcome) -> Vec<String> {
     let mut lines = vec![
         catalog.get_with_args(
             "editor-save-all-summary",
             &CatalogArgs::new()
-                .number("written", outcome.written_count())
+                .number("succeeded", outcome.succeeded_count())
                 .number("total", outcome.outcomes.len() as u32),
         ),
     ];

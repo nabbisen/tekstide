@@ -13451,8 +13451,8 @@ fn ctrl_shift_s_saves_every_open_document_through_real_routing() {
         .save_all_notice
         .as_ref()
         .expect("a save-all notice must be stored after Ctrl+Shift+S");
-    assert!(notice.all_written(), "{notice:?}");
-    assert_eq!(notice.written_count(), 2);
+    assert!(notice.all_succeeded(), "{notice:?}");
+    assert_eq!(notice.succeeded_count(), 2);
 }
 
 fn dir_write(dir: &std::path::Path, name: &str, contents: &str) {

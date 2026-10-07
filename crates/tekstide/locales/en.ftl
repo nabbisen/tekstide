@@ -765,7 +765,7 @@ editor-save-all-button = Save All
 # The save-all summary line: how many of the open set were actually written. Always shown
 # after a save-all runs, success included -- a save-all that only speaks up on failure would
 # leave a user unable to tell "nothing happened yet" from "all of it worked."
-editor-save-all-summary = Save all: { $written } of { $total } saved
+editor-save-all-summary = Save all: { $succeeded } of { $total } saved
 
 # One row per document save-all did **not** write, naming it and why -- `$path` is untrusted
 # and escaped the same way `editor-chrome`'s own path is. `$reason` is a compile-time symbol

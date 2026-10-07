@@ -752,10 +752,10 @@ fn saving_all_documents_writes_every_one_through_the_real_path() {
     let outcome = project.save_all_text_documents();
 
     assert!(
-        outcome.all_written(),
+        outcome.all_succeeded(),
         "both documents must be written: {outcome:?}"
     );
-    assert_eq!(outcome.written_count(), 2);
+    assert_eq!(outcome.succeeded_count(), 2);
     assert_eq!(outcome.failed_count(), 0);
     assert_eq!(
         std::fs::read_to_string(root.join("first.txt")).unwrap(),
@@ -797,10 +797,10 @@ fn a_partial_save_all_reports_which_documents_were_written_and_which_were_not() 
     let outcome = project.save_all_text_documents();
 
     assert!(
-        !outcome.all_written(),
+        !outcome.all_succeeded(),
         "one blocked document must make this a partial save-all: {outcome:?}"
     );
-    assert_eq!(outcome.written_count(), 2);
+    assert_eq!(outcome.succeeded_count(), 2);
     assert_eq!(outcome.failed_count(), 1);
 
     let by_path = |name: &str| {
@@ -810,9 +810,9 @@ fn a_partial_save_all_reports_which_documents_were_written_and_which_were_not() 
             .find(|item| item.relative_path == std::path::Path::new(name))
             .unwrap_or_else(|| panic!("{name} must have its own outcome entry"))
     };
-    assert!(by_path("first.txt").was_written());
-    assert!(!by_path("second.txt").was_written());
-    assert!(by_path("third.txt").was_written());
+    assert!(by_path("first.txt").succeeded());
+    assert!(!by_path("second.txt").succeeded());
+    assert!(by_path("third.txt").succeeded());
 
     assert_eq!(
         std::fs::read_to_string(root.join("first.txt")).unwrap(),
@@ -828,6 +828,59 @@ fn a_partial_save_all_reports_which_documents_were_written_and_which_were_not() 
     assert!(
         !root.join("second.txt").exists(),
         "the second document's own file must still be gone: nothing papered over the deletion"
+    );
+
+    cleanup_root(root);
+}
+
+/// Review 477's required item 3: both tests above edit every document before saving, which is
+/// exactly why the bug survived four tests and a three-run gate. A clean document's own `save()`
+/// returns `Ok(SaveDecision::Saved)` from an early return before `write_text_via_temp_rename` is
+/// ever reached, so it must be reported as [`DocumentSaveOutcome::succeeded`] while its file's
+/// mtime proves it was never actually rewritten.
+#[test]
+fn a_clean_document_in_the_open_set_succeeds_without_being_rewritten() {
+    let root = test_root("content-save-all-clean-document");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project.open_text_document("first.txt").unwrap();
+    project.replace_active_text("first edited\n").unwrap();
+    project.open_text_document("second.txt").unwrap();
+    // The second document is left clean: never edited after opening.
+
+    let second_mtime_before = std::fs::metadata(root.join("second.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    let outcome = project.save_all_text_documents();
+
+    assert!(
+        outcome.all_succeeded(),
+        "the clean document's own save() still returns Ok(Saved): {outcome:?}"
+    );
+    assert_eq!(outcome.succeeded_count(), 2);
+    assert_eq!(outcome.failed_count(), 0);
+
+    let second_mtime_after = std::fs::metadata(root.join("second.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(
+        second_mtime_before, second_mtime_after,
+        "the clean document must never be rewritten: succeeded() is not written()"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("second.txt")).unwrap(),
+        "second original\n",
+        "the clean document's own content on disk must be untouched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("first.txt")).unwrap(),
+        "first edited\n",
+        "the dirty document's own edit must really be on disk"
     );
 
     cleanup_root(root);
