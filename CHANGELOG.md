@@ -1,5 +1,111 @@
 # Changelog
 
+## 0.29.0 - The Explorer Keeps Up On Its Own
+
+Status: **scoped 2026-10-07.** `REQ-FILE-003`, `REQ-FILE-004` and `NFR-PERF-007` met and measured. RFC-026
+is now the watcher alone — the multi-document model it originally covered is **RFC-065**, with its own
+number and its own release, `0.30.0`.
+
+The explorer used to read a folder once and never again: a file created, deleted or renamed after you
+opened it stayed invisible until you closed and reopened the folder. It now watches — the project root,
+every folder you expand, and the folder of whatever file is open — and a change in any of them appears on
+its own. A burst of a thousand files landing in one folder costs **one** re-read, not a thousand, about
+250 ms after the first of them. Watching is per project, and if the kernel refuses another watch it stops
+entirely for that project rather than failing partway; the sidebar says so, in words, and reopening the
+project is what resumes it. The open file notices too: its header now names a change, a deletion, or a
+genuine conflict as soon as the watcher sees it, and a **Reload** button beside Save reaches the same
+dialog Ctrl+S already opened on a blocked save — directly, without first trying to save and having it
+refused. **The first new dependency in many releases**: `notify` 8.2.0, five crates on Linux, eighteen
+`Cargo.lock` entries counting every platform, CC0-1.0 licensed.
+
+### Added — the explorer and an open file notice a change without being asked
+
+- **A file created, deleted or renamed in an expanded folder (or the project root) appears without
+  reopening anything**, captured live from the running app (`REQ-FILE-003`). The explorer's own watch
+  scope is exactly what the user opened: the project root always, each expanded folder while it is
+  expanded, and the folder holding whichever file is open — nothing wider.
+- **A burst of changes is batched into one scan per directory, not one per change.** A thousand files
+  written into one watched folder inside a quarter-second window cost **3 scans** total across the whole
+  burst, measured against a simulated stream before any real watcher existed and again against a real one
+  after. The window is 250 ms, stated as a constant, not tuned.
+- **Typing does not stop while the watcher works** (`REQ-FILE-004`). Measured four ways in one process
+  under one load, over four rounds — unwatched, watched and idle, watched during the burst above, and
+  watched during the burst with the open file itself being rewritten — keystroke latency on a
+  100,000-line file stayed at p95 8.2–11.1 ms and p99 up to 12.0 ms, against budgets of 16 ms and 33 ms,
+  in every condition and every round but one, where a load spike from outside the measurement moved all
+  four conditions together and is recorded rather than discarded.
+- **The open document hears a change too, through the same states the save path already had.** A notice
+  naming the open file's path reaches it on the next batching window: a clean document becomes
+  `ExternalChanged` (its text kept, nothing reloaded), a dirty one `Conflict`, and a file that is gone is
+  `ExternalDeleted` — a new, distinct state, since "deleted" and "changed" are different facts and the
+  product no longer says the wrong one. The header names each: *(changed on disk, not reloaded)*,
+  *(deleted on disk, not reloaded)*, *(conflict)*.
+- **A Reload button beside Save reaches the external-change dialog directly**, without first attempting a
+  save and having it refused. It is shown only when there is something real to reload from —
+  `ExternalChanged` or `Conflict`, never a deleted file and never an ordinary document. Reload constructs a
+  fresh document, the same mechanism `0.28.0`'s own undo already relies on not crossing, so a reload still
+  discards undo history along with the content it replaces, and the product says so rather than pretending
+  otherwise.
+- **A kernel refusal stops watching for the whole project, never partway.** Forced in a test against a
+  fake backend: every watch is dropped, cleanly, with no crash. The sidebar says *"Folders are no longer
+  updating. Reopen the project to resume."* — two lines, chosen because both fit the sidebar's own width
+  where two other candidates did not — and reopening the project is the only thing that resumes it.
+- **A symlink that leaves the project root is never watched, and a loop never makes the watcher recurse.**
+  The access policy is the only way a directory can enter the watch scope; proved against a real escaping
+  symlink and a real loop, with a live watch, not by reasoning about the type.
+
+### Fixed — a deleted file read as merely changed, in two places
+
+- **Both the document refresh and a blocked save collapsed "the file is gone" into the same state as "the
+  file changed."** A deletion is a different fact from a change, and the product now says which one
+  happened, through `ProjectContentStatus::ExternalDeleted` and the header's own *(deleted on disk, not
+  reloaded)*. The save path had the identical collapse the refresh path did, found by checking every path
+  that can reach the dialog the new Reload button also opens, not only the one that surfaced first.
+- **An edit made after an external change stayed in the "nothing local to lose" state.** A clean document
+  the disk changed under, then edited, is local work the disk does not have — a conflict — and had been
+  left reading as a clean external change instead, which a later refresh or the save dialog would have
+  read as safe to discard without asking. Undoing back to the exact text that was opened still does not
+  clear a genuine conflict (`0.28.0`'s own rule, kept): only its own resolution does.
+
+### Fixed — a measurement that tested the machine instead of the code
+
+**Not this release's subject**, carried in the way `0.27.0` carried an unrelated pin fix:
+`change_review_content_view_build_cost_by_line_count_measurement` asserted an absolute 500 ms budget and
+had crossed it under load four separate times — `0.26.0`, twice during `0.28.0`'s own candidate and
+verification, and this release's own gate — each time explained after the fact by reporting the load
+average beside it rather than fixed. It now times a 10,000-line reference workload
+against a 100,000-line one — ten times the work — back to back in the same run, and asserts the larger
+costs under thirty times the smaller's own time. An ambient load spike moves both sides of that ratio
+together; a real regression moves only the ratio. Verified stable both quiet (≈10.1×) and under
+artificial load (≈9.0× while the absolute times nearly tripled).
+
+### Fixed — the book said things that were not true
+
+Found while documenting this release, all three predating it: **"The editor has no undo"** (`0.28.0`
+added real undo and redo, and the book was never updated); **"Not built"** still listing no file watcher,
+after this release shipped one; and the keyboard reference's own chord count, stale since before undo and
+redo existed (*"prints fifteen chords while the policy holds sixteen"* — the policy has held eighteen,
+seventeen bound and one reserved, since `0.28.0`). A release checklist step now reads the book against
+each release's own Added section for exactly this shape of staleness.
+
+### What this release does not do
+
+- **The multi-document model is not in this release.** One file open at a time, even across several
+  projects — `active_document` keeps its meaning. It is **RFC-065**, scheduled for `0.30.0`.
+- **Watching is per project and binary: live or stopped, nothing in between.** A refusal stops every
+  watch in that project at once; it does not degrade one folder at a time, and nothing retries on its own.
+- **The real kernel refusal path (`ENOSPC`, the inotify instance or watch limit) is evidenced by reading
+  the platform's own source, not by forcing the real limit in a test** — the limit is per-user and shared
+  with every other process on the machine, so a test cannot force it without disturbing everything else
+  running.
+- **A save costs one extra scan and a whole-file re-read of the file it just wrote**, since the save is
+  itself a change inside a folder the project watches. Measured at about 4 ms for a 3.3 MB file.
+- **The open-document refresh reads the whole file, every time**, bounded by the same 4 MiB editable cap
+  everything else is. With one document this is a few milliseconds; `RFC-065` inherits the question of
+  what a burst touching several open documents at once should cost, rather than this release deciding it
+  for a case it does not yet have.
+- **Everything `0.28.0` listed still holds**, including there being **no screen-reader support**.
+
 ## 0.28.0 - The Editor Knows Where You Are
 
 Status: **released on 2026-09-30.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.28.0` at `db1057d`. Post-publish: `0.28.0` passes all three checks, and **`0.27.0` still installs now that a newer core exists** — the first release whose predecessor the pin protected.

@@ -19,8 +19,9 @@ capabilities.
 
 ## What it does
 
-- **Several projects at once**, each with root-bound file access, a read-only explorer, a text
-  editor that will not silently overwrite a file changed on disk, and its own tab.
+- **Several projects at once**, each with root-bound file access, a read-only explorer that
+  watches the disk, a text editor with undo/redo that will not silently overwrite a file changed
+  on disk, and its own tab.
 - **Real terminals per project**, behind a conservative output-security policy, with a confirmation
   dialog for any multi-line paste.
 - **AI CLI runs under workspace trust.** A project starts Restricted, and launching an AI CLI takes a
@@ -38,8 +39,8 @@ It is early. Read these before relying on it:
   proof uses a controlled test executable.
 - **Command approval is built but unreachable.** No shipping AI CLI speaks its protocol, and it is
   cooperative, not enforced.
-- **No before/after diff, and no undo in the editor.** Terminal input latency is not verified
-  against its target.
+- **No before/after diff, and no multi-document editing** — one file open at a time. Terminal
+  input latency is not verified against its target.
 
 The full list, with the reasons, is [What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html). Deferred
 work is tracked in [Deferred work](https://nabbisen.github.io/tekstide/contributors/future-work.html).
