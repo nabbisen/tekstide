@@ -94,6 +94,14 @@ measurement with no number in the evidence is not ticked.
 - [ ] The core pin bumps with the version.
 - [ ] Commits are pushed once the gate is green.
 
+### Required at the candidate (review 471)
+
+- [ ] **Re-read `## 0.30.0` against what actually shipped.** It was written incrementally — which is
+      the better habit, because the numbers are in hand and the limitations are described by whoever
+      just met them — but it was written **before slices C and D existed**. A section that was accurate
+      when written can stop being accurate without anyone touching it. That is the cost of writing
+      early, and it is smaller than the one it avoids.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
