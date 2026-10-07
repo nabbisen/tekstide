@@ -17,7 +17,10 @@ and a permanent **Projects** tab returns to the board. Each project gets a bound
 scan, root-bound file access so nothing outside the project folder is reachable, UTF-8 text
 buffers, and a save that will not silently overwrite a file that changed on disk: a dialog offers
 to reload, every dismissal leaves the disk file untouched, and it only claims local changes will
-be lost when there are some.
+be lost when there are some. The open file's own header names a change or a deletion on disk as
+soon as the watcher sees it — *(changed on disk, not reloaded)*, *(deleted on disk, not
+reloaded)*, *(conflict)* — and a **Reload** button beside **Save** reaches the same dialog
+directly, without first attempting to save.
 
 The explorer is **read-only** — no rename, delete, or create.
 
@@ -30,10 +33,18 @@ the sidebar are drawn, and a line says which rows those are (*Rows 18–60 of 27
 A folder that cannot be read says so, and a link that points outside the project is marked *(blocked)*
 and cannot be opened. Folders are listed first. A folder is `▣` (open: `▢`) and a file `▫`; these are text symbols, so a machine
 without those glyphs shows a blank box, and everything the row says is still in words. The file open in the
-editor is marked `[open]`; the `>` is where the keyboard is. **The tree does not watch the disk**: a file created after you opened a folder
-appears when you close and reopen it. Each row is an icon, the **name**, and then the words that describe it
+editor is marked `[open]`; the `>` is where the keyboard is. Each row is an icon, the **name**, and then the words that describe it
 (`(collapsed)`, `[untracked]`, `[open]`…), so a name is never cut short by its own status; in a narrow sidebar a *long* name
 is still clipped at the right edge, without a marker, and the line under the tree shows the highlighted row whole.
+
+**The explorer watches the disk.** The project root, every folder you have expanded, and the
+folder holding the open file are watched; a file created, deleted, or renamed in one of them
+appears or disappears on its own, without closing and reopening the folder. A burst of changes in
+one folder is batched into a single re-read, about 250 ms after the first of them — never one
+re-read per change. Watching is per project: if the operating system refuses to place another
+watch, it stops entirely for that project, the sidebar says so (*Folders are no longer updating.
+Reopen the project to resume.*), and nothing is watched again until you do. Saving a file costs an
+extra re-read of the file you just wrote, since a save is itself a change inside a watched folder.
 
 **Ignored files.** Inside a Git repository, Tekstide asks **Git** which entries are ignored — it never reads a `.gitignore`
 itself — about the entries the sidebar is about to draw, and marks them `[ignored]`. **By default ignored *files* are not drawn**, and the directory says how many it left out (*2 ignored files hidden*); an
@@ -59,9 +70,12 @@ text column does not shift as you scroll past 10,000 lines (or any other power o
 as a character inserted into the file's text — a file whose contents happen to include something that looks like a caret is not
 confused with the real one.
 
-**The editor has no undo.** A mid-buffer edit is unrecoverable within the session past what
-`Backspace` can still reach. There is no syntax highlighting, language server, multi-cursor, or
-search, and files above 4 MiB are not editable.
+**The editor has undo and redo** (`Ctrl+Z` / `Ctrl+Shift+Z`), up to 500 edits deep; past that the
+oldest edit can no longer be undone, and the editor says so rather than silently dropping it.
+Reloading a file that changed on disk constructs a fresh document, so undo does not reach back
+across a reload — the history goes with the content it replaced, and the product does not pretend
+otherwise. There is no syntax highlighting, language server, multi-cursor, or search, and files
+above 4 MiB are not editable.
 
 File **names** in the explorer and the editor header are escaped, because they are untrusted,
 attacker-influenced text. File **contents** are deliberately not: the editor shows a file as it
@@ -244,7 +258,8 @@ configuration. See [Configuration](./configuration.md).
 
 ## Not built
 
-There is no file watcher or command palette (`Ctrl+Shift+P` is reserved and currently does
-nothing). For a consolidated list of what else is missing or deferred, see
+There is no command palette (`Ctrl+Shift+P` is reserved and currently does nothing), and no
+multi-document editing — one file open at a time, even across several projects. For a consolidated
+list of what else is missing or deferred, see
 [Deferred work](../contributors/future-work.md), which is a live index rather than a wish list —
 items leave it only when they are done or explicitly rejected.
