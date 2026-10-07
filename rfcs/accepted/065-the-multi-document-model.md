@@ -1,6 +1,6 @@
 # RFC-065: The Multi-Document Model
 
-Status: **Proposed 2026-10-07.** `0.30.0`, M13. Split from RFC-026 on 2026-10-07 when the watcher
+Status: **Accepted by the human owner 2026-10-07.** D1–D9 as written, plus D10–D13 — see *Decided on acceptance*. Proposed 2026-10-07. `0.30.0`, M13. Split from RFC-026 on 2026-10-07 when the watcher
 shipped alone. **Its first slice repairs a data-loss defect that is live in `0.29.0`.**
 
 ## Summary
@@ -112,3 +112,29 @@ The close dialog counts, and must count the set.
 - Gate green three times with `--no-fail-fast`, **0 fixture entries left**, the core pin bumped with
   the version, and **`cargo test --doc`** — the step `0.29.0` added after `--all-targets` was found
   never to have run the doctest guard.
+
+## Decided on acceptance (2026-10-07)
+
+**D1–D9 as written.** Four additions, two of which remove work rather than add it.
+
+**D10 — The close dialog needs no separate change.** Measured: `session.rs:1706` is
+`close_resources.dirty_files = file_state.dirty_file_count`, the **same count** D3 fixes. So the
+acceptance criterion about the close dialog is discharged by a **test**, not by a second code path.
+Said here so nobody builds one.
+
+**D11 — The switcher has room, and RFC-054's model already handles it.** Eighteen chords are held,
+all `Ctrl+Alt+<letter>` plus `Ctrl+S`, `Ctrl+Shift+{P,V,Z}` and `Ctrl+Z`. Most `Ctrl+Alt` letters are
+free, and RFC-054's fixed-point collision resolution refuses every participant on a clash — so adding
+one is a known operation, not a design question. D5's requirement is that it be **reachable**, not
+that it be novel.
+
+**D12 — Slice A's repair is demonstrated against the defect, not described.** The test is written
+first and shown **failing against today's code**, then fixed — the shape RFC-026 PR-026-C used when it
+planted the third file before any code that deletes existed. A repair whose test never saw the defect
+is a claim.
+
+**D13 — The per-document measurement reuses RFC-026's paired-control harness unchanged.** It exists,
+it carries its own control in the same run, and it took three attempts to get right (reviews 462, 463,
+464). Add a condition — N documents against one — and do not rebuild it.
+
+**Ships as `0.30.0`**, with slice A first and alone.

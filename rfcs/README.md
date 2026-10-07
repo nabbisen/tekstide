@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 065 | [The Multi-Document Model](./proposed/065-the-multi-document-model.md) | **Proposed 2026-10-07**, awaiting the owner. `0.30.0`, M13. **Its first slice repairs a data-loss defect live in `0.29.0`**: opening a second file discards the first's unsaved edits silently — no `dirty`, `unsaved` or `confirm` anywhere on the chain from `Action::Open` to `active_document = Some(document)`. `NFR-REL-005` names three causes and this is a fourth. **`REQ-EDIT-004` says "dirty *buffers*"** and `dirty_file_count` can only return 0 or 1 |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 065 | [The Multi-Document Model](./accepted/065-the-multi-document-model.md) | **Accepted 2026-10-07; D1–D9 as written, plus D10–D13.** `0.30.0`, M13. **Slice A repairs a data-loss defect live in `0.29.0`** — opening a second file discards the first's unsaved edits with no `dirty`, `unsaved` or `confirm` anywhere on the chain. D10 and D13 **remove** work: the close dialog is already fed by `dirty_file_count`, and RFC-026's paired-control harness is reused unchanged. [Handoff pack](./handoffs/065-multi-document/README.md) |
 | — | *(none: nothing is currently accepted and unbuilt)* | |
 
 
@@ -114,6 +114,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | 025 | [Notifications](./handoffs/025-notifications/README.md) — **M12**; **implemented and closed 2026-09-22** |
 | 030 | [Git Integration](./handoffs/030-git-integration/README.md) — **M12**; **implemented and closed 2026-09-23** |
 | 054 | [User Configuration Completion](./handoffs/054-user-configuration/README.md) — **M12**; **implemented and closed 2026-09-24, closing M12** |
+| 065 | [The Multi-Document Model](./handoffs/065-multi-document/README.md) — **M13**; opening a second file throws the first one's edits away |
 | 026 | [File Watcher](./handoffs/026-file-watcher/README.md) — **M13**; **implemented and closed 2026-10-07; released as `0.29.0`** |
 | 057 | [Editor Essentials](./handoffs/057-editor-essentials/README.md) — **M10 remainder**; **implemented and closed 2026-09-30** |
 | 056 | [AgentRun Report And Classification](./handoffs/056-agentrun-report/README.md) — **agent remainder**; **implemented and closed 2026-09-25** |
