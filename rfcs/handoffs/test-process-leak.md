@@ -1310,3 +1310,43 @@ the second recurrence of this same row today, in the previous response's own gat
 comments and one evidence `README.md` (the four fixes required at review 473), nothing near approval.
 Passed in isolation. **The gate was redone, not counted**: the final accepted three runs are
 `736 + 16 + 1085`, `736 + 16 + 1085`, `736 + 16 + 1085`.
+
+## Disposition, 2026-10-07 — review 474: row 5 stops being recorded and gets fixed
+
+**Ruling by the reviewer. This register has done its job and the answer has not changed in six
+weeks; that is now the problem.**
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` has been
+registered since **2026-08-25** (request 326) and appears in twelve places in this file. It failed
+**twice on 2026-10-07 alone**, in two consecutive gates whose entire diffs were documentation and
+doc comments. Each occurrence costs a redone three-run full-workspace gate. The disposition has
+been "known intermittent, redo the gate" every single time.
+
+A register exists to make an intermittent visible so that someone decides about it, not to
+accumulate rows. Eight-plus recurrences is a decision that was never taken.
+
+**The cause is already diagnosed here and I confirmed it in the test.** At
+`crates/tekstide-core/src/approval/tests/coordinator.rs:374`, the body ends:
+
+```rust
+drop(peer);
+assert!(
+    !coordinator.is_still_answerable(&agent_run_id, &proposal_id),
+    "once the peer closes its end, the same request must no longer be answerable"
+);
+```
+
+`drop(peer)` closes the socket locally; `is_still_answerable` asks the coordinator's own end whether
+the peer is gone. Between the local close and the coordinator's end observing it there is a kernel
+scheduling gap, and the assertion requires that gap to be exactly zero. Under load it is not.
+**This is a defect in the test, not in the product**: nothing in the design promises the close is
+observed instantaneously, and the product behaves correctly when it is observed.
+
+**The fix, and it closes two rows.** Poll `is_still_answerable` to `false` against a bounded
+deadline rather than demanding it on the first call. That keeps what the test is actually for —
+that the connection state is genuinely consulted and not cached — and drops the impossible
+instantaneity. The 2026-09-12 entry above already establishes that
+`an expired entry must not continue occupying the live budget` is *the same cause with a second
+name*; the same pattern fixes it, and both rows should be retired in one change.
+
+**Scheduled: before the `0.30.0` candidate**, because what it taxes is the candidate's own
+three-run gate. It is test-only, so it does not open a second RFC in the release.

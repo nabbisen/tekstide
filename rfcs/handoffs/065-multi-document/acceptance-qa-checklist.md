@@ -114,6 +114,28 @@ were left behind. A repo-wide grep for the phrase finds them; neither of us ran 
   `ProjectContentStatus` is deliberately active-document-scoped (PR-065-B's own design) and
   "open" was ambiguous there too.
 
+### Required at review 474
+
+The four fixes are correct, the contradiction `5c20605` created is closed, and running the sweep
+yourself before calling it done — finding `ExternalDeleted`'s doc comment — is the habit the last
+two reviews were asking for. My own sweep now returns nothing user-facing but one item.
+
+- [ ] **`docs/src/users/what-works-today.md:20` still describes the status in the singular**: "The
+  open file's own header names a change or a deletion on disk as soon as the watcher sees it." With
+  the set, each open document carries its own state
+  (`a_background_document_is_refreshed_by_its_own_path_without_touching_the_active_status`), and
+  the header shows the **active** one. So a background document can be changed or deleted on disk
+  and the user learns of it only on switching to it. **This became reachable only when PR-065-C
+  shipped** — before the switcher there was no way to reach a second document at all, so the
+  question did not arise. Say it: the header names the active document's status, and a background
+  document's change is waiting when you switch to it.
+
+**Not an item for this slice, ruled separately:** `is_still_answerable_reflects_the_real_connection_state`
+is no longer to be recorded and redone. It has flaked since 2026-08-25, twice on 2026-10-07 alone,
+both times on documentation-only diffs. I have confirmed the cause in the test and ruled it a test
+defect with a fix that retires two register rows at once; see **Disposition, 2026-10-07** at the end
+of `rfcs/handoffs/test-process-leak.md`. Scheduled before the `0.30.0` candidate, test-only.
+
 ## PR-065-D — save-all
 
 - [ ] **A partial save-all says which files were written and which were not.**
