@@ -1,11 +1,12 @@
 use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::agent::VerifiedCwd;
 use crate::approval::{
     AcceptedProposal, ApprovalCoordinator, ApprovalQueueLimitScope, ApprovalQueueLimits,
-    CommandProposal, DecideOutcome, ReceiveOutcome, SimpleDecision, classify,
+    CommandProposal, DecideOutcome, ProposalId, ReceiveOutcome, SimpleDecision, classify,
 };
 use crate::audit::{
     AuditCoordinator, AuditHealth, AuditPathRequest, AuditPathResolver, AuditStore,
@@ -360,6 +361,32 @@ fn deciding_an_unknown_proposal_returns_not_found() {
     assert!(matches!(outcome, DecideOutcome::NotFound));
 }
 
+/// `test-process-leak.md` row 5, disposed at review 474/475: `drop(peer)` closes the socket
+/// locally, but the coordinator's own end observes that close through the kernel, on its own
+/// schedule -- a gap that is not zero under load. This is not a defect in the product (nothing
+/// promises the close is observed instantaneously); it is a defect in demanding that observation
+/// on the very next call. Both tests that depend on an expired connection being observed poll
+/// `is_still_answerable` to the state they need against a bounded deadline, generous because
+/// what is being waited for is a kernel notification, not a fixed amount of work -- rather than
+/// asserting on the first call and failing when the kernel has not caught up yet.
+fn poll_until_no_longer_answerable(
+    coordinator: &ApprovalCoordinator,
+    agent_run_id: &AgentRunId,
+    proposal_id: &ProposalId,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if !coordinator.is_still_answerable(agent_run_id, proposal_id) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !coordinator.is_still_answerable(agent_run_id, proposal_id),
+        "once the peer closes its end, the same request must no longer be answerable"
+    );
+}
+
 /// RFC-022 PR-022-E ("the arrival model"): `is_still_answerable`'s own
 /// two states, isolated from the full real-adapter-process integration
 /// test (`approval::tests::reference_adapter`) -- a synthetic socket
@@ -392,10 +419,7 @@ fn is_still_answerable_reflects_the_real_connection_state() {
     );
 
     drop(peer);
-    assert!(
-        !coordinator.is_still_answerable(&agent_run_id, &proposal_id),
-        "once the peer closes its end, the same request must no longer be answerable"
-    );
+    poll_until_no_longer_answerable(&coordinator, &agent_run_id, &proposal_id);
 }
 
 /// The other two ways a request can stop being "still answerable" that
@@ -499,8 +523,14 @@ fn agent_run_queue_limit_is_enforced_and_only_counts_live_entries() {
          {outcome:?}"
     );
 
-    // Expire the first proposal -- its slot must now be free.
+    // Expire the first proposal -- its slot must now be free. The coordinator's own end
+    // observes the close on the kernel's schedule, not instantly (`test-process-leak.md` row
+    // 5's second name, the same cause as `poll_until_no_longer_answerable`'s own doc): poll the
+    // same live-or-expired check `receive_with_limits`'s own budget count uses
+    // (`is_connection_still_open`) before relying on the budget having freed up, rather than
+    // attempting the fourth receive on the very next line.
     drop(first_peer);
+    poll_until_no_longer_answerable(&coordinator, &agent_run_id, first.proposal_id());
     let fourth = proposal("proposal-4", &["git", "log", "-1"], PROJECT_ROOT);
     let (outcome, _fourth_peer) = receive_with_limits(
         &mut coordinator,
