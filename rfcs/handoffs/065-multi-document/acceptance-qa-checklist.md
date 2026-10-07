@@ -228,6 +228,38 @@ wrong here is a deterministic logic case that a plain test catches with no timin
       requirements-gap write-up was not done, which was true when that sentence was written but not
       by the time anyone would read it this response.
 
+### Required at review 479
+
+The requirements-gap write-up, the scan reasoning and the gate are all accepted, and the re-read
+genuinely found what it was meant to find — the entry had never named slice A. Three items remain,
+two of them things the re-read should have caught on the same pass.
+
+- [ ] **`rfcs/delivery-plan.md:30` now contradicts itself.** `7d01570` appended `REQ-EDIT-004`'s
+  correction to the Text-document coverage row — correctly — but the row still *opens* with
+  "Model complete, **single active document**." The same cell now says both that there is one
+  active document and that the open set is real and counts every one of them. This is the shape
+  caught at review 472 with `[open]`: the correction gets appended and the summary the correction
+  falsifies is left standing. The lead phrase must change. A repo-wide sweep for the claim finds
+  only this and `release-0.29.0.md:49`, which is a frozen record and correct for its own release.
+- [ ] **The entry never mentions undo — zero occurrences.** The release's headline is that opening
+  a second file no longer discards the first's unsaved edits, and slice A's own test is
+  `opening_a_second_file_leaves_the_first_s_undo_history_intact`. Undo and redo histories are
+  per-document (`undo_stack`/`redo_stack` are fields of the document) and survive both the open and
+  the switch. "Nothing is discarded" includes the undo history, and a user who lived with `0.29.0`
+  has every reason to ask. One clause in the repair paragraph.
+- [ ] **The entry never says every open document is watched.** Its only watcher mentions are
+  save-all's cost. `what-works-today.md` says it — required at review 474 — that a background
+  document's own disk change is detected the same way and is waiting when you switch to it. That is
+  new, user-visible behaviour of the multi-document model with no line in the release that ships it.
+
+**The core pin and the version bump: your reading is right, leave them.** Cutting the candidate is a
+separate step and the box's own wording ("bumps *with the version*") makes it a release-cut item.
+It stays unticked with the reason you gave.
+
+**Verified independently at this review**: the gate reproduces (`738 + 16 + 1089`, 0 failures); the
+`REQ-EDIT-004` coverage correction the changelog claims really is in the tree at `7d01570`; undo and
+redo are per-document by construction, so the switcher cannot undo into the wrong file.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
