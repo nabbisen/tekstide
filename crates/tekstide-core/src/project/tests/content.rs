@@ -243,3 +243,64 @@ fn a_save_blocked_by_a_deleted_file_reports_external_deleted_not_external_change
     );
     cleanup_root(root);
 }
+
+/// RFC-065 D12: the repair's own test, written first and shown failing against today's code.
+/// `Action::Open(path)` -> `open_active_project_text_document` -> `app.rs` -> `session.rs` ->
+/// `content.rs`'s own `open_text_document`, which (before this slice) did
+/// `self.active_document = Some(document)` with no check for `dirty`, `unsaved` or `confirm`
+/// anywhere on that chain -- a user who edits a file and opens another loses the first
+/// silently, undo history included. This is the one place in the product where a wrong claim
+/// costs a user work they cannot get back, so the test runs against the real defect before it
+/// runs against the fix (the shape RFC-026 PR-026-C used, planting the third file before any
+/// code that deletes existed).
+#[test]
+fn opening_a_second_file_leaves_the_first_s_text_and_dirty_state_intact() {
+    let root = test_root("content-open-second-keeps-first");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    std::fs::write(root.join("second.txt"), "second original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project
+        .open_text_document("first.txt")
+        .expect("the first document should open");
+    project
+        .replace_active_text("first original, with a real local edit\n")
+        .expect("a local edit on the first document");
+    assert_eq!(
+        project.content_workspace().dirty_file_count(),
+        1,
+        "test precondition: exactly one dirty document exists before the second is opened"
+    );
+
+    project
+        .open_text_document("second.txt")
+        .expect("the second document should open");
+
+    assert_eq!(
+        project.content_workspace().open_buffer_count(),
+        2,
+        "both documents must still be open -- the first was not discarded"
+    );
+    assert_eq!(
+        project.content_workspace().dirty_file_count(),
+        1,
+        "the first document's unsaved edit must still be counted, even though it is no \
+         longer the active one"
+    );
+
+    let first = project
+        .content_workspace()
+        .open_documents()
+        .find(|document| {
+            document.target().selected_relative_path == std::path::Path::new("first.txt")
+        })
+        .expect("the first document must still be in the open set");
+    assert_eq!(
+        first.text(),
+        "first original, with a real local edit\n",
+        "the first document's own edit must not have been silently discarded"
+    );
+    assert_eq!(first.state(), TextDocumentState::Dirty);
+
+    cleanup_root(root);
+}

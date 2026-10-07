@@ -19,7 +19,11 @@ pub struct ProjectContentWorkspace {
     selected_explorer_path: PathBuf,
     explorer_tree: ExplorerTree,
     explorer_status: ProjectExplorerStatus,
-    active_document: Option<TextDocument>,
+    /// RFC-065 D1/D2: the open set. `active_index` names which entry `active_document()`
+    /// and every other single-document accessor below reads; `active` keeps its old
+    /// meaning exactly, and a plural *open* set is what is new.
+    documents: Vec<TextDocument>,
+    active_index: Option<usize>,
     status: ProjectContentStatus,
 }
 
@@ -84,7 +88,20 @@ impl ProjectContentWorkspace {
     }
 
     pub fn active_document(&self) -> Option<&TextDocument> {
-        self.active_document.as_ref()
+        self.active_index.and_then(|index| self.documents.get(index))
+    }
+
+    fn active_document_mut(&mut self) -> Option<&mut TextDocument> {
+        let index = self.active_index?;
+        self.documents.get_mut(index)
+    }
+
+    /// RFC-065: every open document, active or not, in no particular order beyond
+    /// insertion. Read-only: nothing here switches which one is active (PR-065-C) or
+    /// bounds how many there are (PR-065-B's D4) -- this is the minimal way to look at
+    /// the set the counts below and the open-document repair's own test both need.
+    pub fn open_documents(&self) -> impl Iterator<Item = &TextDocument> {
+        self.documents.iter()
     }
 
     /// RFC-026 D1's inputs to the watch scope: the expanded folders and the folder of
@@ -97,8 +114,8 @@ impl ProjectContentWorkspace {
             .map(Path::to_path_buf)
             .collect();
         let open_document_directories = self
-            .active_document
-            .iter()
+            .active_document()
+            .into_iter()
             .filter_map(|document| {
                 document
                     .target()
@@ -111,7 +128,7 @@ impl ProjectContentWorkspace {
     }
 
     pub fn active_file_launch_assessment(&self) -> ProjectActiveFileLaunchAssessment {
-        let Some(document) = self.active_document.as_ref() else {
+        let Some(document) = self.active_document() else {
             return ProjectActiveFileLaunchAssessment {
                 active_path_hint: None,
                 state: None,
@@ -187,7 +204,12 @@ impl ProjectContentWorkspace {
         match TextDocument::open(root, &selected_relative_path, policy) {
             Ok(document) => {
                 self.selected_explorer_path = selected_relative_path;
-                self.active_document = Some(document);
+                // RFC-065 D1, the repair: the open set. Opening a file joins it rather
+                // than replacing whatever was there -- there is nothing left to discard,
+                // by construction. The set's own shape (true counts, a bound, a
+                // switcher) is PR-065-B/C; this is only the line that stops the loss.
+                self.documents.push(document);
+                self.active_index = Some(self.documents.len() - 1);
                 self.status = ProjectContentStatus::Opened;
                 Ok(())
             }
@@ -204,7 +226,7 @@ impl ProjectContentWorkspace {
         &mut self,
         text: impl Into<String>,
     ) -> Result<(), ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             self.status = ProjectContentStatus::EditError {
                 message: "no active text document".to_owned(),
             };
@@ -234,7 +256,7 @@ impl ProjectContentWorkspace {
         root: &ProjectRootHandle,
         policy: TextDocumentOpenPolicy,
     ) -> Result<SaveDecision, ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             self.status = ProjectContentStatus::SaveError {
                 message: "no active text document".to_owned(),
             };
@@ -289,7 +311,7 @@ impl ProjectContentWorkspace {
     /// moving the cursor cannot make `self.status` stale, so this never
     /// touches it, in either the success or the no-document case.
     pub fn set_active_cursor(&mut self, cursor: TextCursor) -> Result<(), ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             return Err(ProjectContentError::NoActiveDocument);
         };
         document.set_cursor(cursor);
@@ -304,7 +326,7 @@ impl ProjectContentWorkspace {
         &mut self,
         viewport: TextViewport,
     ) -> Result<(), ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             return Err(ProjectContentError::NoActiveDocument);
         };
         document.set_viewport(viewport);
@@ -320,7 +342,7 @@ impl ProjectContentWorkspace {
         &mut self,
         operation: EditOperation,
     ) -> Result<(), ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             return Err(ProjectContentError::NoActiveDocument);
         };
         document.record_edit_operation(operation);
@@ -333,7 +355,7 @@ impl ProjectContentWorkspace {
     /// edit already uses. `Ok(None)` (not an error) when there is nothing
     /// to undo.
     pub fn undo_active_document(&mut self) -> Result<Option<EditOperation>, ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             return Err(ProjectContentError::NoActiveDocument);
         };
         Ok(document.undo_operation())
@@ -341,7 +363,7 @@ impl ProjectContentWorkspace {
 
     /// The mirror of [`Self::undo_active_document`].
     pub fn redo_active_document(&mut self) -> Result<Option<EditOperation>, ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             return Err(ProjectContentError::NoActiveDocument);
         };
         Ok(document.redo_operation())
@@ -352,7 +374,7 @@ impl ProjectContentWorkspace {
         root: &ProjectRootHandle,
         policy: TextDocumentOpenPolicy,
     ) -> Result<ExternalChangeDecision, ProjectContentError> {
-        let Some(document) = self.active_document.as_mut() else {
+        let Some(document) = self.active_document_mut() else {
             self.status = ProjectContentStatus::RefreshError {
                 message: "no active text document".to_owned(),
             };
@@ -396,21 +418,25 @@ impl ProjectContentWorkspace {
         }
     }
 
+    /// RFC-065 D3/D9: counts the whole open set, not only the active document. The set's
+    /// own existence (D1's repair) makes this accurate for free; the coverage-row claim
+    /// that `REQ-EDIT-004`'s plural is **met**, rather than merely counted correctly, is
+    /// PR-065-B's to write, not this slice's.
     pub fn open_buffer_count(&self) -> u32 {
-        u32::from(self.active_document.is_some())
+        self.documents.len() as u32
     }
 
+    /// RFC-065 D3/D9: see [`Self::open_buffer_count`] -- the same reasoning, counting
+    /// every open document's own dirty state rather than only the active one's.
     pub fn dirty_file_count(&self) -> u32 {
-        u32::from(
-            self.active_document
-                .as_ref()
-                .is_some_and(TextDocument::is_dirty),
-        )
+        self.documents
+            .iter()
+            .filter(|document| document.is_dirty())
+            .count() as u32
     }
 
     pub fn active_path_hint(&self) -> Option<PathBuf> {
-        self.active_document
-            .as_ref()
+        self.active_document()
             .map(|document| document.target().selected_relative_path.clone())
     }
 }
@@ -421,7 +447,8 @@ impl Default for ProjectContentWorkspace {
             selected_explorer_path: PathBuf::new(),
             explorer_tree: ExplorerTree::default(),
             explorer_status: ProjectExplorerStatus::Empty,
-            active_document: None,
+            documents: Vec::new(),
+            active_index: None,
             status: ProjectContentStatus::Empty,
         }
     }
