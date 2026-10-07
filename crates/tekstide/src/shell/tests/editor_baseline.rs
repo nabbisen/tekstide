@@ -831,6 +831,12 @@ fn editor_typing_latency_under_a_watched_burst() {
         WatchCondition::BurstWithNDocuments => 4,
     };
     let mut p95 = [[0.0f64; 5]; 5];
+    // RFC-065 review 469's required fix: the delivery work itself (`run.delivery`, what the
+    // runtime did *between* keystrokes -- notices, drains, scans, refreshes), per round per
+    // condition, the same shape as `p95` above. D7's own question is whether the refresh
+    // cost scales with N; p95 keystroke latency cannot see it (the refresh runs between
+    // keystrokes, not during one), but this can.
+    let mut delivery_ms = [[0.0f64; 5]; 5];
     let mut burst_notes = Vec::new();
     for (round, order) in orders.iter().enumerate() {
         for &condition in order {
@@ -933,6 +939,7 @@ fn editor_typing_latency_under_a_watched_burst() {
             let totals = sorted_totals_ms(&run.stages);
             let at = index(condition);
             p95[round][at] = percentile(&totals, 0.95);
+            delivery_ms[round][at] = millis(run.delivery);
             println!(
                 "round {} {:<46} keystrokes {:>4}  p50 {:>6.3}  p95 {:>6.3}  p99 {:>6.3} ms",
                 round + 1,
@@ -942,14 +949,24 @@ fn editor_typing_latency_under_a_watched_burst() {
                 p95[round][at],
                 percentile(&totals, 0.99),
             );
+            // RFC-065 review 469: `BurstWithNDocuments` joins the two conditions this note
+            // already covered -- D7's own figure needs its delivery work reported the same
+            // way, not only the two conditions the D8 measurement originally cared about.
             if matches!(
                 condition,
-                WatchCondition::BurstBeforeD8 | WatchCondition::BurstWithD8
+                WatchCondition::BurstBeforeD8
+                    | WatchCondition::BurstWithD8
+                    | WatchCondition::BurstWithNDocuments
             ) {
+                let label = match condition {
+                    WatchCondition::BurstWithD8 => "with D8",
+                    WatchCondition::BurstWithNDocuments => "with N documents",
+                    _ => "before D8",
+                };
                 burst_notes.push(format!(
-                    "round {} {}: {} files written, {} notices, {} explorer scans applied, {:.1} ms of delivery between keystrokes (with D8 this includes the document refreshes)",
+                    "round {} {}: {} files written, {} notices, {} explorer scans applied, {:.1} ms of delivery between keystrokes (with D8/N documents this includes the document refreshes)",
                     round + 1,
-                    if matches!(condition, WatchCondition::BurstWithD8) { "with D8" } else { "before D8" },
+                    label,
                     run.files_written,
                     run.notices,
                     run.scans_applied,
@@ -989,25 +1006,53 @@ fn editor_typing_latency_under_a_watched_burst() {
     let median_d8_cost = median(&d8_cost);
     let median_n_cost = median(&n_cost);
     println!(
-        "median D8 cost over the five rounds (p95, with minus before): {median_d8_cost:+.3} ms"
+        "median D8 cost over the five rounds (p95 keystroke latency, with minus before): {median_d8_cost:+.3} ms"
     );
     println!(
-        "median {BURST_N_DOCUMENTS}-document cost over the five rounds (p95, N minus before): {median_n_cost:+.3} ms"
+        "median {BURST_N_DOCUMENTS}-document cost over the five rounds (p95 keystroke latency, N minus before): {median_n_cost:+.3} ms"
     );
-    // RFC-065 D7/D13's own figure: if one document's own refresh costs the D8 paired
-    // difference, N documents multiplying that cost by about N is what measurement 9
-    // assumed -- this is the ratio that tells whether it actually does. Reported, not used
-    // to tick anything on its own: the D8 entry itself is already at the edge of the
-    // harness's resolution (its own qa-evidence.md), so a two-stage paired difference is
-    // noisier still.
+    // RFC-065 review 469's own finding: p95 keystroke latency is the wrong quantity for this
+    // ratio -- the refresh runs *between* keystrokes, exactly where that figure cannot see
+    // it, which is why this came back 1.11x against measurement 9's own assumption of
+    // something near BURST_N_DOCUMENTS. Reported anyway, because "does holding N documents
+    // slow typing" is a true and useful question in its own right -- just not D7's.
     if median_d8_cost.abs() > 0.05 {
         println!(
-            "ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {:.2}x (near {BURST_N_DOCUMENTS}x would match measurement 9's assumption of one whole-file read per open document)",
+            "p95 keystroke-latency ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {:.2}x -- answers \"does holding N documents slow typing\", not D7's own question",
             median_n_cost / median_d8_cost
         );
     } else {
         println!(
-            "ratio not reported: the one-document (D8) cost is too close to zero to divide by meaningfully"
+            "p95 keystroke-latency ratio not reported: the one-document (D8) cost is too close to zero to divide by meaningfully"
+        );
+    }
+    // RFC-065 D7/D13's own figure, required at review 469: the delivery work itself (what
+    // the runtime does *between* keystrokes), not p95 keystroke latency. If one document's
+    // own refresh costs the D8 paired difference in delivery work, N documents multiplying
+    // that cost by about N is what measurement 9 assumed -- this is the ratio that actually
+    // tells whether it does.
+    let mut d8_delivery_cost = Vec::new();
+    let mut n_delivery_cost = Vec::new();
+    for row in delivery_ms.iter() {
+        d8_delivery_cost.push(row[3] - row[2]);
+        n_delivery_cost.push(row[4] - row[2]);
+    }
+    let median_d8_delivery_cost = median(&d8_delivery_cost);
+    let median_n_delivery_cost = median(&n_delivery_cost);
+    println!(
+        "median D8 cost over the five rounds (delivery work, with minus before): {median_d8_delivery_cost:+.3} ms"
+    );
+    println!(
+        "median {BURST_N_DOCUMENTS}-document cost over the five rounds (delivery work, N minus before): {median_n_delivery_cost:+.3} ms"
+    );
+    if median_d8_delivery_cost.abs() > 0.05 {
+        println!(
+            "delivery-work ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {:.2}x (near {BURST_N_DOCUMENTS}x would match measurement 9's assumption of one whole-file read per open document; this is D7's own figure)",
+            median_n_delivery_cost / median_d8_delivery_cost
+        );
+    } else {
+        println!(
+            "delivery-work ratio not reported: the one-document (D8) delivery cost is too close to zero to divide by meaningfully"
         );
     }
     for note in burst_notes {
