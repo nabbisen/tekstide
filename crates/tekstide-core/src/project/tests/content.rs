@@ -304,3 +304,50 @@ fn opening_a_second_file_leaves_the_first_s_text_and_dirty_state_intact() {
 
     cleanup_root(root);
 }
+
+/// RFC-065 D1's own boundary, found live while capturing evidence for this slice: reopening a
+/// path that is already open does not reuse the existing entry -- it opens a second, fresh
+/// one, and the first (however dirty) is untouched in the set. Deliberate, not a bug: reusing
+/// an already-open entry by path is identity/switching work (PR-065-B's counts, PR-065-C's
+/// switcher), and this slice's only job is that nothing already open is ever discarded. This
+/// test locks the actual, observed boundary in rather than leaving it as something a reviewer
+/// has to rediscover from a screenshot.
+#[test]
+fn reopening_an_already_open_path_adds_a_second_entry_rather_than_losing_the_first() {
+    let root = test_root("content-reopen-same-path-keeps-first");
+    std::fs::write(root.join("first.txt"), "first original\n").unwrap();
+    let mut project = project_at(&root);
+
+    project
+        .open_text_document("first.txt")
+        .expect("the document should open");
+    project
+        .replace_active_text("first original, with a real local edit\n")
+        .expect("a local edit on the document");
+
+    project
+        .open_text_document("first.txt")
+        .expect("reopening the same path must not be refused");
+
+    assert_eq!(
+        project.content_workspace().open_buffer_count(),
+        2,
+        "the reopen is a second entry, not a no-op and not a discard of the first"
+    );
+    assert_eq!(
+        project.content_workspace().dirty_file_count(),
+        1,
+        "the original, edited entry is still counted dirty"
+    );
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::Clean,
+        "the newly (re)opened entry reads the file fresh from disk and is clean"
+    );
+
+    cleanup_root(root);
+}
