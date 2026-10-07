@@ -1698,13 +1698,19 @@ pub enum Message {
         project_id: tekstide_core::project::ProjectId,
         completed: tekstide_core::project::ExplorerScanCompleted,
     },
-    /// RFC-026 D10, B2 step 2: the platform reported something in one project's
-    /// watched directories ([`project_watch_subscription`]). Step 2 only wakes; the
-    /// batcher's feed from these events is B2 step 3.
-    ProjectWatchWoke {
+    /// RFC-026 D10, B2 step 3: the platform reported something in one project's
+    /// watched directories ([`project_watch_subscription`]). Recorded into that
+    /// project's batcher by [`record_project_watch_notice`]; a `generation` that is no
+    /// longer the project's current one is a closed project's stale notice, dropped.
+    ProjectWatchNotice {
         project_id: tekstide_core::project::ProjectId,
         generation: u64,
+        notice: tekstide_core::project::WatchNotice,
     },
+    /// RFC-026 D3, B2 step 3: a scan window may have closed. Offered only while some
+    /// project has a directory waiting on its window ([`subscription`]), so an idle
+    /// app is not polled.
+    WatchDrainTick,
     /// RFC-052 PR-052-B: the size the layout engine gave the explorer's
     /// sidebar, published by [`crate::surface::frame::MeasureSize`] when it
     /// changes.
@@ -1948,7 +1954,8 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::RunRecordTick
         | Message::PanesRegionMeasured(_)
         | Message::ExplorerScanFinished { .. }
-        | Message::ProjectWatchWoke { .. }
+        | Message::ProjectWatchNotice { .. }
+        | Message::WatchDrainTick
         | Message::ExplorerViewportMeasured(_)
         | Message::EditorViewportMeasured(_)
         | Message::PathFieldPasteResolved(_) => None,
@@ -2764,9 +2771,16 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             reconcile_project_watch(state, &project_id);
             settle_explorer_highlight(state);
         }
-        // RFC-026 B2 step 2: nothing reads these yet. Step 3 feeds the batcher from
-        // the events the watcher holds; a stale generation is then dropped there.
-        Message::ProjectWatchWoke { .. } => {}
+        Message::ProjectWatchNotice {
+            project_id,
+            generation,
+            notice,
+        } => {
+            record_project_watch_notice(state, &project_id, generation, notice);
+        }
+        Message::WatchDrainTick => {
+            drain_project_watches(state);
+        }
         Message::ExplorerViewportMeasured(size) => {
             state.explorer_viewport = Some(size);
             settle_explorer_highlight(state);
@@ -4180,10 +4194,30 @@ fn ensure_explorer_scanned(state: &mut State) {
 /// How many tree rows the sidebar can draw, from the size the layout
 /// engine last gave it.
 fn explorer_window_capacity(state: &State) -> usize {
-    crate::surface::explorer::rows_that_fit(
+    let rows = crate::surface::explorer::rows_that_fit(
         state.explorer_viewport.map(|size| size.height),
         state.theme.font_size_body(),
-    )
+    );
+    // RFC-026 D2, B2 step 5: the stopped sentence takes two lines the window does not
+    // have. They come out of the rows only while it is shown, so nothing is clipped off
+    // the bottom of the sidebar. A stop is rare, so the window moving then is acceptable.
+    if active_watch_stopped(state) {
+        rows.saturating_sub(crate::surface::explorer::WATCH_STOPPED_LINES)
+            .max(1)
+    } else {
+        rows
+    }
+}
+
+/// Whether the active project's watching has stopped (RFC-026 D2): the one state the
+/// sidebar speaks about watching.
+fn active_watch_stopped(state: &State) -> bool {
+    state
+        .app_shell
+        .state()
+        .active_project_id()
+        .and_then(|project_id| state.project_watches.get(project_id))
+        .is_some_and(|watch| *watch.watcher.state() == tekstide_core::project::WatchState::Stopped)
 }
 
 /// How many lines the editor's body region can draw, from the size the layout
@@ -7092,6 +7126,50 @@ fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::projec
     }
 }
 
+/// RFC-026 D3, B2 step 3: one notice from a project's watcher, recorded into its batcher.
+/// A notice whose generation is not the project's current one is from a watcher that has
+/// since closed, and is dropped. The feed itself is in [`ProjectWatcher::record_changed_paths`],
+/// which records only directories the project watches.
+fn record_project_watch_notice(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+    generation: u64,
+    notice: tekstide_core::project::WatchNotice,
+) {
+    let Some(watch) = state.project_watches.get_mut(project_id) else {
+        return;
+    };
+    if watch.generation != generation {
+        return;
+    }
+    let now = std::time::Instant::now();
+    match notice {
+        tekstide_core::project::WatchNotice::Changed(paths) => {
+            watch.watcher.record_changed_paths(&paths, now);
+        }
+        tekstide_core::project::WatchNotice::Failed => watch.watcher.record_all_watched(now),
+    }
+}
+
+/// RFC-026 D3, B2 step 3: turns every window that has closed into an explorer scan request
+/// for its folder. A folder the explorer does not show asks for nothing
+/// ([`tekstide_core::project::ProjectSession::request_explorer_rescan`]); the scan itself
+/// runs on the explorer's own worker, so the render thread does no scan here.
+fn drain_project_watches(state: &mut State) {
+    let now = std::time::Instant::now();
+    let mut due = Vec::new();
+    for (project_id, watch) in state.project_watches.iter_mut() {
+        for request in watch.watcher.drain_due(now) {
+            due.push((project_id.clone(), request.directory));
+        }
+    }
+    for (project_id, directory) in due {
+        if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+            project.request_explorer_rescan(&directory);
+        }
+    }
+}
+
 /// RFC-026 D10, B2 step 2: one project's watch event stream, the shape
 /// [`explorer_scan_subscription`] uses. A dedicated OS thread blocks on the platform's
 /// events and forwards one wake per event; nothing blocks the render thread, and the
@@ -7141,13 +7219,14 @@ fn project_watch_stream(
             return;
         };
         std::thread::spawn(move || {
-            // `wait_for_event` returns false once the project's owner is dropped, which
+            // `wait_for_notice` returns `None` once the project's owner is dropped, which
             // is the project closing; the thread then ends rather than waiting forever.
-            while events.wait_for_event() {
+            while let Some(notice) = events.wait_for_notice() {
                 let sent =
-                    iced::futures::executor::block_on(output.send(Message::ProjectWatchWoke {
+                    iced::futures::executor::block_on(output.send(Message::ProjectWatchNotice {
                         project_id: project_id.clone(),
                         generation,
+                        notice,
                     }));
                 if sent.is_err() {
                     return;
@@ -7595,6 +7674,18 @@ pub fn subscription(state: &State) -> Subscription<Message> {
                 events,
             ));
         }
+    }
+    // RFC-026 D3, B2 step 3: a tick at the batching window, offered only while some
+    // directory is waiting on its window to close. Drains what has closed; stops being
+    // offered once nothing is pending, so an idle project costs nothing.
+    if state
+        .project_watches
+        .values()
+        .any(|watch| watch.watcher.has_pending_scans())
+    {
+        subscriptions.push(
+            iced::time::every(tekstide_core::project::SCAN_WINDOW).map(|_| Message::WatchDrainTick),
+        );
     }
     if subscriptions.is_empty() {
         routing
@@ -9160,6 +9251,7 @@ fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message
                         highlight: state.explorer_highlight,
                         top: state.explorer_top,
                         capacity: explorer_window_capacity(state),
+                        watch_stopped: active_watch_stopped(state),
                     },
                     &state.catalog,
                     &state.theme,

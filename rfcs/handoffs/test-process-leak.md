@@ -1213,3 +1213,21 @@ Not the slice: the change touches `project/watch` only, which nothing in the cha
 The failure message was not captured in the first two runs, which is the cost of filtering the gate's
 output; the next attempt kept the full logs. **The gate was redone, not counted.** This is the test
 that has now cost a gate attempt in three releases; the ratio fix is still unscheduled.
+
+## Recurrence, 2026-10-07 — RFC-026 B2 steps 3–5's first gate, load ~16
+
+**One failure in three full-workspace runs**, on the tree that adds the watcher's event feed, the
+drain tick and the stopped sentence:
+
+| Test | Runs | Register row |
+| --- | --- | --- |
+| `surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_render_path_agree` | once more (`stty size` did not parse) | row 787's entry, now a second occurrence |
+
+**The same test passed in isolation five times in a row** straight after (`uptime` 10.4), so the
+failure is the load-sensitive PTY timing already recorded, not the watcher. The other two runs
+were green with the same tree: 1808 passed, 0 failed, 5 ignored each.
+
+**What to watch.** The new watcher tests wait on real kernel events within 300 to 400 ms windows
+(`the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses` and
+`a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request`). They passed under this load, but a
+future flake in them should be recorded here with its load, not absorbed into a longer timeout.

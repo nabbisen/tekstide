@@ -641,7 +641,7 @@ fn a_change_in_a_watched_directory_reaches_the_owner_event_stream() {
         .take()
         .expect("the receiver is handed out once, to the waiter");
     let (sender, reported) = channel();
-    std::thread::spawn(move || sender.send(events.wait_for_event()).unwrap());
+    std::thread::spawn(move || sender.send(events.wait_for_notice().is_some()).unwrap());
     std::fs::write(directory.join("created.txt"), b"x").unwrap();
 
     assert_eq!(
@@ -667,7 +667,7 @@ fn dropping_the_owner_ends_its_event_stream() {
         .take()
         .expect("the receiver is handed out once, to the waiter");
     let (sender, reported) = channel();
-    std::thread::spawn(move || sender.send(events.wait_for_event()).unwrap());
+    std::thread::spawn(move || sender.send(events.wait_for_notice().is_some()).unwrap());
 
     drop(watcher);
 
@@ -685,7 +685,7 @@ fn a_platform_that_never_started_stops_watching_on_the_first_reconcile() {
     // A directory that exists: a missing one is dropped before the platform is asked.
     let root = Path::new("/dev/shm");
     let desired = desired_directories(root, &[], &[]);
-    let mut watcher = super::ProjectWatcher::refused_for_test(WatchRefusal::new("no inotify"));
+    let mut watcher = super::ProjectWatcher::unavailable(WatchRefusal::new("no inotify"));
     assert!(watcher.events().is_none());
 
     watcher.reconcile(&desired, Vec::new());
@@ -786,4 +786,223 @@ fn measured_reconcile_cost_per_expanded_directory() {
         drop(watcher);
         let _ = std::fs::remove_dir_all(&base);
     }
+}
+
+/// B2 step 3 (review 456): a changed path is recorded against its parent directory, and a
+/// drained window becomes a scan request for that directory. Driven by a real change.
+#[test]
+fn a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request() {
+    use std::sync::mpsc::channel;
+    use std::time::{Duration, Instant};
+
+    let directory = Path::new("/dev/shm/tekfeed-real");
+    let _ = std::fs::remove_dir_all(directory);
+    std::fs::create_dir_all(directory).unwrap();
+
+    let mut watcher = super::ProjectWatcher::open();
+    watcher.reconcile(
+        &BTreeSet::from([WatchedDirectory::for_test(directory)]),
+        Vec::new(),
+    );
+    let mut events = watcher.events().unwrap().take().unwrap();
+    let (sender, reported) = channel();
+    std::thread::spawn(move || {
+        while let Some(notice) = events.wait_for_notice() {
+            if sender.send(notice).is_err() {
+                break;
+            }
+        }
+    });
+    std::fs::write(directory.join("created.txt"), b"x").unwrap();
+    let super::WatchNotice::Changed(paths) = reported
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the kernel reports the new file")
+    else {
+        panic!("a new file is a change, not a failure");
+    };
+
+    let at = Instant::now();
+    watcher.record_changed_paths(&paths, at);
+    assert!(
+        watcher.has_pending_scans(),
+        "the change is waiting on its window"
+    );
+    assert!(
+        watcher.drain_due(at).is_empty(),
+        "nothing is due before the window closes"
+    );
+    let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
+    assert_eq!(due.len(), 1, "one directory, one scan request");
+    assert_eq!(due[0].directory, directory);
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+/// B2 step 3: a changed path whose parent is not watched is dropped, not recorded. This is
+/// what keeps an empty or unwatched directory from ever reaching the batcher.
+#[test]
+fn a_change_in_a_directory_we_do_not_watch_is_dropped() {
+    use std::time::Instant;
+
+    let mut watcher = super::ProjectWatcher::unavailable(WatchRefusal::new("unused"));
+    watcher.record_changed_paths(
+        &[
+            PathBuf::from("/nowhere/x"),
+            PathBuf::from("/"),
+            PathBuf::from("bare"),
+        ],
+        Instant::now(),
+    );
+    assert!(!watcher.has_pending_scans());
+}
+
+/// B2 step 3, the fallback: a failed notice rescans every watched directory, so nothing is
+/// trusted to have been quiet after events may have been lost.
+#[test]
+fn a_failed_notice_rescans_every_watched_directory() {
+    use std::time::Instant;
+
+    let root = Path::new("/dev/shm");
+    let mut watcher = super::ProjectWatcher::open();
+    watcher.reconcile(&desired_directories(root, &[], &[]), Vec::new());
+    assert_eq!(watcher.scope().watched_count(), 1);
+
+    let at = Instant::now();
+    watcher.record_all_watched(at);
+    let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
+
+    assert_eq!(due.len(), watcher.scope().watched_count());
+    assert_eq!(due[0].directory, root);
+}
+
+/// B2 step 3, the session side: a drained window asks for a scan only for a folder the
+/// explorer shows. The root and an expanded folder do; a collapsed folder and a path outside
+/// the project do not.
+#[test]
+fn a_drained_window_asks_for_a_scan_only_for_a_folder_the_explorer_shows() {
+    let (mut session, base) = real_session("rescan");
+    std::fs::create_dir_all(base.join("project/collapsed")).unwrap();
+    let _ = session.toggle_explorer_directory(Path::new("src"));
+    let canonical =
+        |relative: &str| std::fs::canonicalize(base.join("project").join(relative)).unwrap();
+
+    assert!(session.request_explorer_rescan(&std::fs::canonicalize(base.join("project")).unwrap()));
+    assert!(session.request_explorer_rescan(&canonical("src")));
+    assert!(!session.request_explorer_rescan(&canonical("collapsed")));
+    assert!(!session.request_explorer_rescan(&base.join("outside")));
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// B2 step 4 (review 456's hostile fixture, end to end): on a real tree with a symlink that
+/// leaves the root, a loop back to the root, and an expanded folder, the live watch covers
+/// exactly what the policy admits and nothing recurses. Every assertion is against the
+/// kernel's reports, not against the policy's own answer.
+#[test]
+fn the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses() {
+    use crate::project::root::{ProjectRootValidator, SymlinkPolicy};
+    use crate::project::{ProjectId, ProjectSession};
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    let base = PathBuf::from("/dev/shm/tekhostile");
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(project.join("collapsed/deeper")).unwrap();
+    std::fs::create_dir_all(base.join("outside")).unwrap();
+    std::os::unix::fs::symlink(base.join("outside"), project.join("link-out")).unwrap();
+    std::os::unix::fs::symlink(&project, project.join("loop")).unwrap();
+
+    let valid = ProjectRootValidator
+        .validate(&project, SymlinkPolicy::FailClosed)
+        .expect("the hostile fixture's root validates");
+    let mut session = ProjectSession::new(
+        ProjectId::for_test(1),
+        valid.display_name,
+        valid.selected_path,
+        valid.canonical_path,
+    );
+    for expanded in ["src", "loop", "link-out"] {
+        let _ = session.toggle_explorer_directory(Path::new(expanded));
+    }
+
+    let mut watcher = super::ProjectWatcher::open();
+    let (desired, refused) = session.watched_directories();
+    watcher.reconcile(&desired, refused);
+
+    let canonical_project = std::fs::canonicalize(&project).unwrap();
+    let watched: BTreeSet<PathBuf> = watcher
+        .scope()
+        .watched_paths()
+        .map(Path::to_path_buf)
+        .collect();
+    assert_eq!(
+        watched,
+        BTreeSet::from([canonical_project.clone(), canonical_project.join("src")]),
+        "the root and src are watched; the loop is the root again, and link-out is outside"
+    );
+    assert!(
+        watcher
+            .admission_refusals()
+            .iter()
+            .any(|(path, _)| path == Path::new("link-out")),
+        "the escaping link is refused, with its reason"
+    );
+
+    let mut events = watcher.events().unwrap().take().unwrap();
+    let (sender, notices) = channel();
+    std::thread::spawn(move || {
+        while let Some(notice) = events.wait_for_notice() {
+            if sender.send(notice).is_err() {
+                break;
+            }
+        }
+    });
+    let mentions = |notice: &super::WatchNotice, needle: &Path| match notice {
+        super::WatchNotice::Changed(paths) => paths.iter().any(|path| path.starts_with(needle)),
+        super::WatchNotice::Failed => false,
+    };
+
+    std::fs::write(base.join("outside/escaped.txt"), b"x").unwrap();
+    let outside_reported =
+        std::iter::from_fn(|| notices.recv_timeout(Duration::from_millis(400)).ok())
+            .any(|notice| mentions(&notice, &base.join("outside")));
+    assert!(
+        !outside_reported,
+        "a change outside the admitted set is not reported, in the whole window"
+    );
+
+    std::fs::create_dir_all(canonical_project.join("src/deeper")).unwrap();
+    let saw_creation = (0..20).any(|_| {
+        notices
+            .recv_timeout(Duration::from_millis(200))
+            .map(|notice| mentions(&notice, &canonical_project.join("src/deeper")))
+            == Ok(true)
+    });
+    assert!(
+        saw_creation,
+        "the watched src reports a folder created in it"
+    );
+    while notices.recv_timeout(Duration::from_millis(300)).is_ok() {}
+
+    std::fs::write(canonical_project.join("src/deeper/inside.txt"), b"x").unwrap();
+    let grandchild_reported =
+        std::iter::from_fn(|| notices.recv_timeout(Duration::from_millis(400)).ok())
+            .any(|notice| mentions(&notice, &canonical_project.join("src/deeper")));
+    assert!(
+        !grandchild_reported,
+        "a grandchild is not watched: a change one level below src is not reported, in the whole window"
+    );
+
+    std::fs::write(canonical_project.join("src/direct.txt"), b"x").unwrap();
+    assert!(
+        (0..20).any(|_| notices
+            .recv_timeout(Duration::from_millis(200))
+            .map(|notice| mentions(&notice, &canonical_project.join("src/direct.txt")))
+            == Ok(true)),
+        "a direct child of the watched src is reported"
+    );
+
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(&base);
 }

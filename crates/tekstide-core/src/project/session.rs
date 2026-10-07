@@ -1517,6 +1517,26 @@ impl ProjectSession {
         self.content_workspace.toggle_explorer_directory(path)
     }
 
+    /// RFC-026 D3: a drained scan window for `absolute` (a canonical directory). Requests
+    /// the scan only for a folder the explorer shows: the root, or an expanded folder. A
+    /// window for a collapsed folder changes nothing on screen, so it asks nothing. Returns
+    /// whether a scan was requested.
+    pub fn request_explorer_rescan(&mut self, absolute: &Path) -> bool {
+        let Ok(relative) = absolute.strip_prefix(&self.canonical_root_path) else {
+            return false;
+        };
+        let shown = relative.as_os_str().is_empty()
+            || self
+                .content_workspace
+                .explorer_tree()
+                .expanded_directories()
+                .any(|expanded| expanded == relative);
+        if shown {
+            self.content_workspace.request_explorer_scan(relative);
+        }
+        shown
+    }
+
     /// Every scan currently pending, runnable on any thread.
     pub fn explorer_scan_requests(&self) -> Vec<super::ExplorerScanRequest> {
         // The shell asks on every rebuild of its subscriptions; nearly always

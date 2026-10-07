@@ -20199,3 +20199,168 @@ fn a_project_is_watched_from_open_and_its_owner_is_removed_on_close() {
         "closing the project must drop its watch owner"
     );
 }
+
+/// RFC-026 D2, B2 step 5 (budget exhaustion, forced in the app): a project whose platform
+/// has stopped shows the stopped sentence and gives up exactly its two lines of rows; a
+/// project that is watching shows nothing and keeps every row.
+#[test]
+fn a_stopped_watch_says_so_in_the_sidebar_and_gives_up_two_rows() {
+    let (mut state, project_id) = state_with_a_real_project("watch-stopped-sidebar");
+    state.explorer_viewport = Some(iced::Size::new(300.0, 600.0));
+    super::reconcile_project_watch(&mut state, &project_id);
+    let live_capacity = super::explorer_window_capacity(&state);
+    assert!(!super::active_watch_stopped(&state));
+
+    state.project_watches.insert(
+        project_id.clone(),
+        super::ProjectWatch {
+            generation: 99,
+            watcher: tekstide_core::project::ProjectWatcher::unavailable(
+                tekstide_core::project::WatchRefusal::new("the platform refused"),
+            ),
+        },
+    );
+    super::reconcile_project_watch(&mut state, &project_id);
+
+    assert!(super::active_watch_stopped(&state));
+    assert_eq!(
+        super::explorer_window_capacity(&state),
+        live_capacity - crate::surface::explorer::WATCH_STOPPED_LINES,
+        "the two sentence lines come out of the rows, so nothing is clipped off the bottom"
+    );
+    assert_eq!(
+        crate::surface::explorer::watch_stopped_lines(&state.catalog),
+        vec![
+            "Folders are no longer updating.".to_string(),
+            "Reopen the project to resume.".to_string(),
+        ]
+    );
+}
+
+/// RFC-026 D10, B2 step 3: a notice from a generation that is no longer the project's
+/// current one is dropped; the current generation's notice is recorded.
+#[test]
+fn a_notice_from_a_closed_generation_is_dropped() {
+    let (mut state, project_id) = state_with_a_real_project("watch-stale-notice");
+    super::reconcile_project_watch(&mut state, &project_id);
+    let root = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .unwrap()
+        .canonical_root_path()
+        .clone();
+    let child = root.join("changed.txt");
+    let current = state.project_watches[&project_id].generation;
+
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        current + 1,
+        tekstide_core::project::WatchNotice::Changed(vec![child.clone()]),
+    );
+    assert!(
+        !state.project_watches[&project_id]
+            .watcher
+            .has_pending_scans()
+    );
+
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        current,
+        tekstide_core::project::WatchNotice::Changed(vec![child]),
+    );
+    assert!(
+        state.project_watches[&project_id]
+            .watcher
+            .has_pending_scans()
+    );
+}
+
+/// RFC-026 D3, B2 step 3: a change in the shown root, once its window closes, asks the
+/// explorer to rescan the root. The render thread does no scan; the request is what the
+/// explorer's own worker will pick up.
+#[test]
+fn a_closed_window_asks_the_explorer_to_rescan_the_shown_root() {
+    let (mut state, project_id) = state_with_a_real_project("watch-drain");
+    super::reconcile_project_watch(&mut state, &project_id);
+    let root = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .unwrap()
+        .canonical_root_path()
+        .clone();
+    let generation = state.project_watches[&project_id].generation;
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        generation,
+        tekstide_core::project::WatchNotice::Changed(vec![root.join("changed.txt")]),
+    );
+
+    std::thread::sleep(tekstide_core::project::SCAN_WINDOW + std::time::Duration::from_millis(50));
+    super::drain_project_watches(&mut state);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert!(
+        project
+            .content_workspace()
+            .explorer_tree()
+            .pending()
+            .any(|(path, _)| path.as_os_str().is_empty()),
+        "the root is requested for a rescan once its window closes"
+    );
+}
+
+/// RFC-026 D1, B2 step 2 and 5 (review 457's "live count", at app level): the watched set
+/// follows the live explorer. Enter on a folder expands it and the trigger reconciles the
+/// scope to root plus `src`; Enter again collapses it back to root; closing the project
+/// drops its owner. Driven through the real sidebar key path, not a core call.
+#[test]
+fn the_live_watch_scope_follows_expand_collapse_and_close() {
+    let mut state = explorer_project_state();
+    finish_explorer_scans(&mut state);
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+    super::reconcile_project_watch(&mut state, &project_id);
+    let watched = |state: &State| {
+        state
+            .project_watches
+            .get(&project_id)
+            .map(|watch| watch.watcher.scope().watched_count())
+    };
+    assert_eq!(
+        watched(&state),
+        Some(1),
+        "opening the project watches its root"
+    );
+
+    let rows = explorer_texts(&state);
+    let src = rows.iter().position(|row| row.contains("src")).unwrap();
+    state.explorer_highlight = src;
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    finish_explorer_scans(&mut state);
+    assert_eq!(watched(&state), Some(2), "expanding src adds exactly src");
+
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    finish_explorer_scans(&mut state);
+    assert_eq!(watched(&state), Some(1), "collapsing src removes it again");
+
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+    finish_explorer_scans(&mut state);
+    assert_eq!(watched(&state), Some(2));
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    assert!(
+        !state.project_watches.contains_key(&project_id),
+        "closing the project drops its watches with its owner"
+    );
+}

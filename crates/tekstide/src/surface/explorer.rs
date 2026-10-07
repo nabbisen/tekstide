@@ -443,6 +443,22 @@ pub struct ExplorerCursor {
     pub highlight: usize,
     pub top: usize,
     pub capacity: usize,
+    /// RFC-026 D2: watching has stopped for this project, so the sidebar says so above
+    /// the rows. The window already has [`WATCH_STOPPED_LINES`] fewer rows for it.
+    pub watch_stopped: bool,
+}
+
+/// The lines the sidebar takes for the stopped sentence (RFC-026 D2, review 454's Option
+/// C). Two, and the window gives up exactly two rows for them while shown.
+pub(crate) const WATCH_STOPPED_LINES: usize = 2;
+
+/// The stopped sentence, in the trusted catalog: no argument, so no path or platform text
+/// can reach it (C2, C3). Consequence first, then what the user can do.
+pub(crate) fn watch_stopped_lines(catalog: &Catalog) -> Vec<String> {
+    vec![
+        catalog.get("watch-stopped-sidebar"),
+        catalog.get("watch-stopped-sidebar-action"),
+    ]
 }
 
 /// Lines the sidebar keeps for things that are not tree rows (the status
@@ -529,7 +545,11 @@ pub fn view<'a, Message: 'a>(
     theme: &'a Theme,
     context: RowContext<'_>,
 ) -> Element<'a, Message> {
-    let lines = tree_lines(
+    let mut lines = Vec::new();
+    if cursor.watch_stopped {
+        lines.extend(watch_stopped_lines(catalog));
+    }
+    lines.extend(tree_lines(
         catalog,
         tree,
         status,
@@ -537,7 +557,7 @@ pub fn view<'a, Message: 'a>(
         cursor.top,
         cursor.capacity,
         context,
-    );
+    ));
     let rows: Vec<Element<'a, Message>> = lines
         .into_iter()
         .map(|line| {

@@ -57,6 +57,11 @@ impl WatchScope {
         self.watched.len()
     }
 
+    /// Every directory currently watched, in path order.
+    pub fn watched_paths(&self) -> impl Iterator<Item = &Path> {
+        self.watched.iter().map(PathBuf::as_path)
+    }
+
     pub fn is_watched(&self, directory: &Path) -> bool {
         self.watched.contains(directory)
     }
