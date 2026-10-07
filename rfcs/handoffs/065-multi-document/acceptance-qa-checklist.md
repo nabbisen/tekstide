@@ -32,7 +32,7 @@ measurement with no number in the evidence is not ticked.
 - [x] The bound is stated when reached.
 - [x] The watcher's scope follows the set: opening and closing documents changes the watched count,
       counted before and after.
-- [ ] **The per-document refresh measured on RFC-026's harness unchanged**, N documents against one,
+- [x] **The per-document refresh measured on RFC-026's harness unchanged**, N documents against one,
       with the control in the same run.
 - [x] `REQ-EDIT-004` met **for its own plural**, and the coverage row corrected from implying it
       already was.
@@ -51,16 +51,14 @@ measurement with no number in the evidence is not ticked.
       is **renamed to say what it now holds**, not deleted — the record that this was once true is
       worth keeping.
 
-### Required at review 469
-
-- [ ] **The N-document ratio is computed on delivery work, not on keystroke p95.** Measured at 469:
-      the ratio reads **1.11×**, but it is taken on p95 keystroke latency, and the refresh runs
-      *between* keystrokes where that figure cannot see it. The harness already prints the right
-      quantity — *"1.3 ms of delivery between keystrokes"* before D8, *"5.4 ms"* with it — and
-      excludes `BurstWithNDocuments` from that line (`editor_baseline.rs:945–947`). Report it, and
-      compute the ratio on it. **If it shows ~1× rather than ~10×, measurement 9 was wrong and that is
-      worth more than the box.**
-- [ ] *(Unblocked at 469:* the release-mode build needs `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`,
+- [x] **The N-document ratio is computed on delivery work, not on keystroke p95.** Fixed:
+      `delivery_ms[round][condition]` parallels `p95`, recording `run.delivery` for every condition
+      including `BurstWithNDocuments`. Real numbers, release mode, with
+      `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`: median D8 delivery cost **+4.244 ms**, median
+      10-document delivery cost **+37.294 ms**, **ratio 8.79×** — near the 10× measurement 9 assumed.
+      Confirms the assumption. The p95 ratio (0.63×) is also still reported, labeled for what it
+      actually answers ("does holding N documents slow typing", not D7's own question).
+- [x] *(Unblocked at 469:* the release-mode build needs `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`,
       the setting this project's own review-462 evidence records. 57 errors without it, clean with it.
       Not an `iced` mismatch.*)*
 

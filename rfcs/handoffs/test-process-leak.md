@@ -1280,3 +1280,13 @@ directory, or anything near it: the whole diff is `ProjectContentWorkspace`'s op
 `crates/tekstide/src/shell/tests.rs`. Re-run once, isolated, and passed. **The gate was redone, not
 counted**, per the same convention the 2026-09-29 entry used: the final accepted three runs are
 `731 + 16 + 1079`, `731 + 16 + 1079`, `731 + 16 + 1079`.
+
+## Recurrence, 2026-10-07 — RFC-065 PR-065-B's review-469 fix gate, load unmeasured
+
+**One failure in run 2 of a three-run full-workspace gate**, `TMPDIR=/dev/shm/tk065g2` (fixed, short):
+`shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
+failed; runs 1 and 3 both clean (`734 + 16 + 1083`, both runs). **Row 8, recurring in its own
+already-documented shape** -- the whole diff this response adds is the delivery-work ratio fix in
+`shell/tests/editor_baseline.rs` (a test-only file, the paired-control harness), nothing touching
+terminal termination. Re-run once, isolated, and passed. **The gate was redone, not counted**:
+the final accepted three runs are `734 + 16 + 1083`, `734 + 16 + 1083`, `734 + 16 + 1083`.

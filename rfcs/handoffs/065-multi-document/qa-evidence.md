@@ -186,40 +186,63 @@ by RFC-065 PR-065-B (2026-10-07)**: the open set is real, `open_buffer_count`/
 `dirty_file_count` count every open document, and the close dialog counts the same way through
 the same field (D10)" -- the same treatment RFC-057 gave `REQ-EDIT-002`'s own half-met row.
 
-### D7/D13, the per-document refresh measurement -- **not captured, disclosed**
+### D7/D13, the per-document refresh measurement
 
 RFC-026's paired-control harness (`shell/tests/editor_baseline.rs`,
 `editor_typing_latency_under_a_watched_burst`) is extended, not rebuilt, per D13: the single
 `touch_document: Option<(PathBuf, String)>` generalizes to `touch_documents: Vec<...>`, and a
 fifth condition, `WatchCondition::BurstWithNDocuments` (10 real documents, well below the real
 `open_document_limit` default of 20, opened and rewritten through the same path the explorer
-uses), joins the existing four in a 5-by-5 Latin square. The summary reports both the D8
-paired difference (one document) and this condition's own, plus their ratio against `N`.
+uses), joins the existing four in a 5-by-5 Latin square.
 
-**The real release-mode numbers could not be captured this response.** `cargo test --release
--p tekstide --tests` fails to compile with 57 `E0277`/`E0599` errors in
-`surface/frame/tests.rs` (an `iced` `Renderer` trait-bound mismatch) -- confirmed via `git
-stash` to pre-date every change in this response, on the exact same commit before any of
-today's work. A pre-existing, unrelated release-test-build blocker that affects any
-release-mode measurement in this crate today, not only this one.
+**Review 469's required correction**: the first pass computed the N/1 ratio on p95 keystroke
+latency (read 1.11x) rather than delivery work -- the refresh runs *between* keystrokes,
+exactly where p95 of the keystroke total cannot see it. `delivery_ms[round][condition]` now
+parallels `p95`, recording `run.delivery` (what the runtime does between keystrokes) for every
+condition; the per-condition note (previously `BurstBeforeD8`/`BurstWithD8` only) widens to
+include `BurstWithNDocuments`. The summary reports both ratios, labeled for what each answers:
+the p95 keystroke-latency one ("does holding N documents slow typing" -- a true, separate
+question, 0.63x this run) and the delivery-work one (D7's own question).
 
-Verified instead, in debug mode (timings not meaningful there, the mechanism is): the full
-5-round, 5-condition run was run by hand and produced coherent keystroke timings for every
-condition including the new one, through several full rounds, with no panic, before being
-stopped rather than run to completion at debug-mode speed. The non-ignored smoke test
-(`the_watched_burst_harness_delivers_the_burst_end_to_end`) passes in the regular gate.
+**The release-mode build needed `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`** -- not an
+`iced` version mismatch, as review 469 identified: the setting this project's own review-462
+evidence already records, needed because the suite's `()` renderer exists only with debug
+assertions on. `cargo test --release -p tekstide --tests` is clean with it set; the 57
+`E0277`/`E0599` errors without it are this project's own known precondition, not a defect.
 
-**This checklist box stays unticked, with this as the stated reason.** Fixing the release-test
-build is its own, unrelated piece of work, out of this slice's scope.
+**Real numbers, release mode, five rounds**:
 
-## Gate, PR-065-B (run this response, against commit `805a90d`)
+```
+median D8 cost over the five rounds (delivery work, with minus before): +4.244 ms
+median 10-document cost over the five rounds (delivery work, N minus before): +37.294 ms
+delivery-work ratio (10-document cost / one-document cost): 8.79x
+```
+
+8.79x against an expected ~10x **confirms measurement 9's own assumption**: the per-document
+refresh cost is close to linear in the number of open documents, each refresh costing roughly
+one whole-file read. The watcher's scope following the open set (this response's own earlier
+fix, `watch_inputs()`) is therefore a real, measured ~4 ms-per-document cost at `N=10`, not an
+assumed one -- and D4's own bound (`open_document_limit`, default 20) now has a measured
+figure behind it rather than only the reasoned one its own doc comment gives.
+
+Full output, including the per-round breakdown and the `BurstWithNDocuments` delivery notes
+(1000 files written, 2218 notices, 3 explorer scans applied, 37-40 ms of delivery per round),
+is in this response's own commit (`3d50652`)'s test run; not separately captured to a file,
+since the harness's own `#[ignore]`d, by-hand-run nature (its own doc comment) means this is
+not evidence a future gate re-derives automatically.
+
+## Gate, PR-065-B (run this response, against commit `19b5235`, plus the review-469 fix)
 
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean,
   throughout (checked after every change in this response, not only at the end).
 - `git diff --cached --check` after staging: clean, every time.
 - `cargo test --doc --workspace`: 2 passed, 0 failed.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**:
-  `734 + 16 + 1083` (+ `0+1+1` doctests), every run, 0 failures, 0 fixture entries left in each
-  run's own `TMPDIR`.
+  run 1 clean (`734 + 16 + 1083`), run 2 showed one failure in the already-documented
+  `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` flake
+  (`test-process-leak.md`, row 8) -- not the slice (the whole diff is the delivery-work ratio
+  fix in `editor_baseline.rs`, a test-only file; nothing touches terminal termination). Passed
+  in isolation; a dated recurrence row was added and **the gate was redone, not counted**.
+  Final accepted three runs: `734 + 16 + 1083`, every run, 0 fixture entries left each time.
 - No core-pin or version bump: `0.30.0` is the whole RFC's own target, not this slice's.
 - Commits pushed once this gate was green.
