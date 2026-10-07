@@ -319,3 +319,35 @@ inspection -- the same discipline every other chord in this table already has.
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
 - Commits pushed once this gate was green.
+
+## Review 472: three required fixes, none in the switcher's own code
+
+The switcher itself was accepted outright, independently reproduced (gate figures matched
+exactly; the collision test and the live captures were checked directly, not taken from the
+report). Three documentation gaps were required before the candidate, two of them repairs to
+PR-065-B's own aftermath that PR-065-C inherited:
+
+1. **`CHANGELOG.md`'s `## 0.30.0` status line** said the switcher was not done while both C
+   commits were already in the tree -- the first slice to close after review 471's own
+   "write the changelog incrementally" ruling closed without doing so. Fixed: the status line
+   now names A, B and C done; a new paragraph describes the switcher and, in the same place,
+   states that `[open]` widened its meaning.
+2. **`[open]`'s meaning widened in PR-065-B** (one file, introduced `bd88978`, to the whole open
+   set) **and nothing that described it was updated** -- found and fixed in three places, not
+   the two review 472 named: `what-works-today.md`'s own `[open]` sentence, the same page's
+   watcher-scope sentence (the identical staleness: "the folder holding the open file" was still
+   singular), and `surface::explorer`'s own `node_line_with` doc comment. Also corrected
+   `keyboard-reference.md`'s `Ctrl+S`/`Ctrl+Z` rows, where "the open file" had become ambiguous
+   (now "the active document").
+3. **The book did not say how a user tells which open document is active.** Added directly:
+   "the editor's own header, above the cursor line, is what names which open document is
+   active," in a new `what-works-today.md` paragraph describing the open set as a whole (the
+   bound, the switcher, `[open]`, and this). The page's "Not built" section also still claimed
+   "no multi-document editing" -- corrected to the real remaining gap, save-all, while in the
+   area.
+
+## Gate, review 472's fixes
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace --no-fail-fast`: `736 + 16 + 1085` (+ `0+1+1` doctests), 0 failed.
+- Commits pushed once this gate was green.

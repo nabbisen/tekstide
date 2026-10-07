@@ -138,10 +138,12 @@ pub(crate) fn node_line(
     node_line_with(catalog, node, expanded, false, git_summary)
 }
 
-/// [`node_line`] plus whether this is the row of the file that is open in the
-/// editor. **That is the "selection", and it is a word**: `[open]`, because
-/// the keyboard highlight (`> `) and the open file are two different things a
-/// user must tell apart, and neither may rest on colour (NFR-UX-002).
+/// [`node_line`] plus whether this row's own path is a member of the open set (RFC-065
+/// PR-065-B: every open document, not only the active one -- a project with three documents
+/// open marks all three rows). **That membership is a word**: `[open]`, because the keyboard
+/// highlight (`> `) and what is open are two different things a user must tell apart, and
+/// neither may rest on colour (NFR-UX-002). Which member is *active* is a third, narrower
+/// fact this tag does not carry -- the editor's own header names that.
 pub(crate) fn node_line_with(
     catalog: &Catalog,
     node: &ExplorerNode,

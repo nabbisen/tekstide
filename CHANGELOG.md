@@ -2,9 +2,9 @@
 
 ## 0.30.0 - The Multi-Document Model
 
-Status: **in progress.** RFC-065, PR-065-A (the repair) and PR-065-B (the set) are done; the switcher
-(PR-065-C) and save-all (PR-065-D) are not. This entry is written incrementally as slices close, not held
-back for the release; see `rfcs/handoffs/065-multi-document/` for the full handoff pack.
+Status: **in progress.** RFC-065, PR-065-A (the repair), PR-065-B (the set) and PR-065-C (the switcher)
+are done; save-all (PR-065-D) is not. This entry is written incrementally as slices close, not held back
+for the release; see `rfcs/handoffs/065-multi-document/` for the full handoff pack.
 
 **`0.29.0`'s own open question, answered**: that release's "what this release does not do" section said
 of the open-document refresh, "with one document this is a few milliseconds; the multi-document RFC
@@ -16,6 +16,16 @@ the 10× a linear cost would predict. At the open set's own bound of twenty docu
 extrapolates to roughly **78 ms** of delivery work per burst window, between keystrokes, invisible to
 typing latency itself but real CPU cost on the machine. The bound is now a number with a measurement
 behind it, not only a reasoned convention.
+
+**The switcher**: `Ctrl+Alt+F` cycles the active document to the next one in the open set, wrapping —
+keyboard-first and reachable, not a new tab bar (RFC-021's lesson: a model nobody can reach is not
+implemented). Each document's own cursor and viewport are restored exactly on return, never reset,
+since both already lived on the document itself and the switch never touches them. **The explorer's own
+`[open]` tag widened its meaning along the way**: introduced in a previous release to mark the one file
+open in the editor, it now marks every member of the open set — a project with three documents open
+shows `[open]` on all three rows, not one. A user who learned the old, singular meaning should read the
+tag as "open", not "the one on screen"; the editor's own header, above the cursor line, is what names
+*which* open document is active.
 
 ## 0.29.0 - The Explorer Keeps Up On Its Own
 

@@ -1290,3 +1290,13 @@ already-documented shape** -- the whole diff this response adds is the delivery-
 `shell/tests/editor_baseline.rs` (a test-only file, the paired-control harness), nothing touching
 terminal termination. Re-run once, isolated, and passed. **The gate was redone, not counted**:
 the final accepted three runs are `734 + 16 + 1083`, `734 + 16 + 1083`, `734 + 16 + 1083`.
+
+## Recurrence, 2026-10-07 — RFC-065 review 472's documentation-fix gate, load unmeasured
+
+**One failure in run 2 of a three-run full-workspace gate**, `TMPDIR=/dev/shm/tk065r2` (fixed, short):
+`approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` failed; runs 1
+and 3 both clean (`736 + 16 + 1085`, both runs). **Already-registered intermittent, recurring in its
+own documented shape** -- the whole diff this response adds is CHANGELOG.md, two book pages and one
+doc comment (the `[open]` meaning-widened fixes required at review 472), nothing near approval or its
+connection state. Passed in isolation. **The gate was redone, not counted**: the final accepted three
+runs are `736 + 16 + 1085`, `736 + 16 + 1085`, `736 + 16 + 1085`.

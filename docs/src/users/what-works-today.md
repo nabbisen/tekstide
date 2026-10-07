@@ -32,14 +32,17 @@ than 256 entries shows the first 256 and a row saying how many more there are; o
 the sidebar are drawn, and a line says which rows those are (*Rows 18–60 of 272*). Folders that are ignored (or, outside a Git repository, on a built-in list) are marked *(collapsed)* and can still be opened (see *Ignored files* below).
 A folder that cannot be read says so, and a link that points outside the project is marked *(blocked)*
 and cannot be opened. Folders are listed first. A folder is `▣` (open: `▢`) and a file `▫`; these are text symbols, so a machine
-without those glyphs shows a blank box, and everything the row says is still in words. The file open in the
-editor is marked `[open]`; the `>` is where the keyboard is. Each row is an icon, the **name**, and then the words that describe it
+without those glyphs shows a blank box, and everything the row says is still in words. **Every open
+document is marked `[open]`**, not only the one on screen — a project with several files open at once
+(see *Multiple documents* below) shows the tag on each of their rows; the `>` is where the keyboard is,
+and the editor's own header names which open document is active. Each row is an icon, the **name**, and then the words that describe it
 (`(collapsed)`, `[untracked]`, `[open]`…), so a name is never cut short by its own status; in a narrow sidebar a *long* name
 is still clipped at the right edge, without a marker, and the line under the tree shows the highlighted row whole.
 
 **The explorer watches the disk.** The project root, every folder you have expanded, and the
-folder holding the open file are watched; a file created, deleted, or renamed in one of them
-appears or disappears on its own, without closing and reopening the folder. A burst of changes in
+folder of every open document (not only the active one) are watched; a file created, deleted, or
+renamed in one of them appears or disappears on its own, without closing and reopening the
+folder. A burst of changes in
 one folder is batched into a single re-read, about 250 ms after the first of them — never one
 re-read per change. Watching is per project: if the operating system refuses to place another
 watch, it stops entirely for that project, the sidebar says so (*Folders are no longer updating.
@@ -76,6 +79,15 @@ Reloading a file that changed on disk constructs a fresh document, so undo does 
 across a reload — the history goes with the content it replaced, and the product does not pretend
 otherwise. There is no syntax highlighting, language server, multi-cursor, or search, and files
 above 4 MiB are not editable.
+
+**Multiple documents can be open at once**, up to 20 per project. Opening a file joins the set
+rather than replacing whatever was already open — editing one file and opening another loses
+nothing, and each document keeps its own text, undo history, cursor and viewport independently.
+`Ctrl+Alt+F` switches to the next open document, cycling with wraparound, restoring exactly where
+you left it. The sidebar's `[open]` tag marks every open document, not only the one on screen —
+**the editor's own header, above the cursor line, is what names which open document is active.**
+Opening a path that is already open switches to it in place rather than opening a second copy of
+it.
 
 File **names** in the explorer and the editor header are escaped, because they are untrusted,
 attacker-influenced text. File **contents** are deliberately not: the editor shows a file as it
@@ -259,7 +271,7 @@ configuration. See [Configuration](./configuration.md).
 ## Not built
 
 There is no command palette (`Ctrl+Shift+P` is reserved and currently does nothing), and no
-multi-document editing — one file open at a time, even across several projects. For a consolidated
-list of what else is missing or deferred, see
+save-all — each open document is still saved on its own (`Ctrl+S`), one at a time. For a
+consolidated list of what else is missing or deferred, see
 [Deferred work](../contributors/future-work.md), which is a live index rather than a wish list —
 items leave it only when they are done or explicitly rejected.

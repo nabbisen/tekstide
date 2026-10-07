@@ -16,8 +16,8 @@ ships with**: any of them except `Ctrl+Shift+P` can be moved in your configurati
 | `Ctrl+Alt+M` | Toggle Content / Terminal mode for the active project |
 | `Ctrl+Alt+T` | Launch a real terminal in the active project (switches to Terminal mode) |
 | `Ctrl+Shift+V` | Paste into the focused terminal |
-| `Ctrl+S` | Save the open file |
-| `Ctrl+Z` | Undo the last edit to the open file, up to 500 deep |
+| `Ctrl+S` | Save the active document |
+| `Ctrl+Z` | Undo the last edit to the active document, up to 500 deep |
 | `Ctrl+Shift+Z` | Redo an edit undone by `Ctrl+Z` |
 | `Ctrl+Alt+A` | Launch an AI CLI run in the active project — refused unless the project is trusted |
 | `Ctrl+Alt+U` | Open the Workspace Trust surface for the active project (grant or revoke) |
