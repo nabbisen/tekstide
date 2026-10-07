@@ -384,3 +384,52 @@ Both are stated here, not extrapolated into the box.
 clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR` (`/dev/shm/tkgN`):
 each run `1797 passed, 0 failed, 5 ignored`, 0 entries left after each, at load ~5 at the end of the
 runs.
+
+## Review 458 — steps 3, 4 and 5: the feed, the hostile tree live, and the sentence on screen
+
+**Step 3, the feed.** The event thread now sends `WatchNotice::Changed(paths)` or `WatchNotice::Failed`
+(`WatchEvents::wait_for_notice`). `ProjectWatcher::record_changed_paths` records each path against its
+parent **only if that parent is a directory the scope watches**; a path with no parent, or in an unwatched
+directory, is dropped, so an empty or unwatched directory never reaches the batcher. `Failed` records every
+watched directory (`record_all_watched`), a full rescan rather than trusting that nothing was lost. The app
+polls for drains with `WatchDrainTick`, offered only while some directory waits on its window. A drained
+request becomes a scan only for a folder the explorer shows: the root or an expanded folder
+(`ProjectSession::request_explorer_rescan`). The scan runs on the explorer's own worker, so the render
+thread does no scan. Notices from a closed generation are dropped (`record_project_watch_notice`).
+
+**Step 4, the hostile tree, live.** `the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses`
+(`/dev/shm/tekhostile`): an escaping symlink, a loop back to the root, and an expanded `src`. Asserted against
+the kernel's notices, not the policy's answer. The watched set is exactly the root and `src` (the loop is the
+root again, so it adds nothing). `link-out` is refused with its reason. A change outside the admitted set is
+not reported in the whole 400 ms window. A grandchild under `src` is not reported in the whole window. A
+direct child of `src` is reported.
+
+**Step 5, the sentence on screen.** When the active project's watching is `Stopped`, the explorer view draws
+`watch-stopped-sidebar` and `watch-stopped-sidebar-action` above the rows (trusted catalog, no arguments). The
+window gives up exactly `WATCH_STOPPED_LINES` = 2 rows while it is shown, because the sentence takes two lines
+the window does not have; without that, the bottom rows would be clipped without a word. A stop is rare, so
+the window moving when it happens is acceptable. Tests: `a_stopped_watch_says_so_in_the_sidebar_and_gives_up_two_rows`
+forces the stop through the real reconcile trigger (`ProjectWatcher::unavailable`) and asserts the two lines and
+the two rows.
+
+**Live count, app level** (review 458's requirement, now met). `the_live_watch_scope_follows_expand_collapse_and_close`
+drives the real sidebar Enter key: expand `src` takes the watched count from 1 to 2; collapse takes it back to 1;
+close drops the owner.
+
+**Offered compile-fail guard.** `WatchEvents`' doc comment carries a `compile_fail` doctest (`assert_clone`) and a
+companion `compile` doctest (`assert_send`) over the same path, so a rename breaks the pair. Both run under
+`cargo test -p tekstide-core --doc`.
+
+**Ablations** (`ablate.sh`, clean tree, each restored, `git status` clean after each):
+
+- A1, non-recursion: `RecursiveMode::NonRecursive` replaced with `Recursive` fails
+  `the_hostile_tree_…` at the grandchild assertion, "a grandchild is not watched … in the whole window".
+- A2, the feed's watched-parent check replaced with `if true`: fails
+  `a_change_in_a_directory_we_do_not_watch_is_dropped`.
+- A3, the toggle's reconcile removed: fails `the_live_watch_scope_follows_…` at the expansion.
+
+**Gate.** `cargo fmt --check` and `clippy --workspace --all-targets -D warnings` clean. Four full-workspace runs,
+`--no-fail-fast`, short fixed `TMPDIR`: run 1 failed once on `surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_render_path_agree`
+(`stty size` did not parse, under load ~16). That test passed five times in a row in isolation straight after. It is
+recorded as a second occurrence in `test-process-leak.md` (row 787 and the 2026-10-07 section). Runs 2, 3 and 4:
+each `1808 passed, 0 failed, 5 ignored`, 0 entries left after each. The three consecutive green runs are 2, 3 and 4.

@@ -94,20 +94,26 @@ measurement with no number in the evidence is not ticked.
 - [x] `dependency-advisories.md` carries the new crate the way it carries the existing three.
       *(A section for the five Linux crates, the platform-only lock entries, and the 9.0 re-check row;
       `cargo audit`: zero vulnerabilities, the same three warnings.)*
-- [ ] Watch scope is `expanded` + the root + open documents' folders. **Counted before and after**
+- [x] Watch scope is `expanded` + the root + open documents' folders. **Counted before and after**
       *(Step 1 (review 455): the session computes the admitted set from its own tree and document —
       `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated. The app does not reconcile
       it yet: that needs the watcher's owner decided, see review 456.)*
-      *(Step 2: reconciled on the triggers, and the owner exists per project. The live count across
-      expand, collapse and close is not measured in the running app, so the box stays open.)*
+      *(Step 2: reconciled on the triggers, and the owner exists per project.)*
+      *(Steps 3–5, review 458's live count: `the_live_watch_scope_follows_expand_collapse_and_close`
+      drives the real sidebar Enter key. Expanding `src` takes the watch count from 1 to 2, collapsing
+      takes it back to 1, and closing the project drops its owner. Ablated: the toggle's reconcile
+      removed, and the test fails at the expansion.)*
       expanding, collapsing and closing a project — a scope that only grows is a defect.
-      *(The policy is proven: `expanding_collapsing_and_closing_move_the_watched_count_exactly`. **Not
-      yet wired** to the live explorer tree and the open-document set — that is the next step, so the
-      box stays open.)*
+      *(The policy is proven: `expanding_collapsing_and_closing_move_the_watched_count_exactly`. Now
+      wired to the live explorer tree; the open-document set is counted at the document-open trigger.)*
 - [ ] **Budget exhaustion forced in a test**: no crash, today's fallback behaviour, and a sentence on
       screen saying watching stopped and why.
       *(Forced and tested against a fake backend — `a_refused_watch_stops_watching_and_drops_every_watch_without_crashing`.
-      **The sentence on screen is not written yet**, so this box stays open.)*
+      **Left open on one point, for the reviewer:** the sentence is written and drawn by the explorer
+      view whenever the project's watching is stopped (step 5), and the app test forces that stop and
+      proves the two lines are given up from the rows. But the box says "and why", and the sentence names
+      the consequence and the action, not the cause: review 452's C3 ruled that no cause text reaches the
+      screen. Which wording the box should carry is the reviewer's call, so I have not ticked it.)*
 - [x] **The policy guarantee lands with the wiring, not with its test** (ruled at review 455):
       `desired_directories` is `root.join(relative)` with **no policy consulted**, is `pub`, and takes
       arbitrary paths. D7 is a guarantee, so step 1 takes paths the explorer's access policy has
@@ -115,16 +121,23 @@ measurement with no number in the evidence is not ticked.
       *(Step 2 (review 456): the live reconcile takes only `watched_directories()`, which admits every
       directory through `WatchedDirectory::admit`. Nothing else reaches the owner. Proved by
       `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated at step 1.)*
-- [ ] *Offered at review 458, not required:* a `compile_fail` **doctest** guards `WatchEvents` against
+- [x] *Offered at review 458, not required:* a `compile_fail` **doctest** guards `WatchEvents` against
       a future `#[derive(Clone)]` — `fn assert_clone<T: Clone>()` called on it, which compiles only if
       it is `Clone`. **No dev-dependency**: rustdoc takes `compile_fail` and nothing here disables
       doctests. Pair it with a companion doctest that *does* compile over the same path, or a rename
       satisfies it silently.
-- [ ] Hostile fixture: a symlink leaving the root is not watched; a loop does not recurse.
+      *(Done: `WatchEvents`' doc comment carries the `compile_fail` and its companion `assert_send`
+      doctest over the same path. Both run under `cargo test -p tekstide-core --doc`.)*
+- [x] Hostile fixture: a symlink leaving the root is not watched; a loop does not recurse.
       *(Step 1 (review 455): the access policy is the only way into the scope — `WatchedDirectory` is
       constructible only through `admit` — and `the_access_policy_decides_what_the_scope_may_ever_hold`
       refuses a real escaping symlink and admits an in-root one. Non-recursion is by construction (single
       directories only). The end-to-end fixture, with a live tree and a live watch, is step 4: still open.)*
+      *(Step 4: `the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses`, a real tree
+      with an escaping link, a loop to the root, and an expanded folder. The watched set is exactly the
+      root and `src`; a change outside the admitted set is not reported; a grandchild is not reported; a
+      direct child is. Every check is on the kernel's notices. Ablated: recursive watching fails the
+      grandchild assertion. Ticked.)*
 - [x] **Ownership is per project** (ruled at review 456): each open project owns its backend, scope
       and receiver. Measured against (b), one process-wide watcher: the watch budget is **per user**
       (524,288), so (b) shares nothing that is scarce; instances are 1,024, so (a) costs one per
