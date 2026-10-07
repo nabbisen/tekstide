@@ -433,3 +433,33 @@ companion `compile` doctest (`assert_send`) over the same path, so a rename brea
 (`stty size` did not parse, under load ~16). That test passed five times in a row in isolation straight after. It is
 recorded as a second occurrence in `test-process-leak.md` (row 787 and the 2026-10-07 section). Runs 2, 3 and 4:
 each `1808 passed, 0 failed, 5 ignored`, 0 entries left after each. The three consecutive green runs are 2, 3 and 4.
+
+## Review 459 — the row floor is the last step, so the stop sentence cannot empty a short sidebar
+
+**The defect (review 459's finding).** `rows_that_fit` ends `.max(1)`, and the shell then subtracted the
+sentence's two lines with `saturating_sub`. At a short sidebar that gave 0 rows where the floor had given
+1 or 2 (`rows_that_fit` 1 → 0, 2 → 0, 3 → 1), a tree showing nothing while files exist.
+
+**The fix.** One function, `rows_that_fit(height, font_size, extra_lines)`, does the subtraction and the
+`.max(1)` in one expression, the floor last. The shell passes `WATCH_STOPPED_LINES` (2) as `extra_lines`
+while the sentence is shown, and no longer subtracts. The plain no-extra-lines form is the same function
+with 0, so no caller can undo the floor.
+
+**Test.** `the_stopped_sentence_never_takes_a_short_sidebar_to_no_rows`: at 160 px, where the window is one
+row, the sentence leaves one row; over heights 0 to 2,000 the window is never empty and the sentence never
+adds rows.
+
+**Ablation** (`ablate.sh`, clean tree, restored; `git status` clean after): the floor removed from
+`rows_that_fit`'s last expression fails the same test at `rows_that_fit(Some(160.0), 14.0, WATCH_STOPPED_LINES) >= 1`.
+
+**Gate.** `cargo fmt --check` and `clippy --workspace --all-targets -D warnings` clean after the single-function
+rename (the plain wrapper was dead code in the bin, which clippy denies). Three consecutive full-workspace
+runs, `--no-fail-fast`, short fixed `TMPDIR` (`/dev/shm/tkmN`): each `1809 passed, 0 failed, 5 ignored`,
+0 entries left after each, at load 15 to 28. An earlier run on the same tree (before the rename) failed once
+on the load-sensitive `change_review_content_view_build_cost_by_line_count_measurement` at load 19, 892 ms
+against 500 ms; that is recorded as a recurrence in `test-process-leak.md`, and the three green runs above
+are the consecutive set.
+
+**Boxes.** The floor box is ticked on this evidence. The budget box is ticked on the reviewer's ruling at
+review 459 (C3 governs: the sentence says what it means for the user and names no cause). The stale note in
+the scope box about reconciliation not yet being wired is removed.
