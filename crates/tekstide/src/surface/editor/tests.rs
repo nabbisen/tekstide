@@ -1165,3 +1165,23 @@ fn the_header_names_a_deleted_file_apart_from_a_changed_one_and_says_nothing_was
         "{changed}"
     );
 }
+
+/// RFC-026, release 0.29.0: the Reload button shows only for the two statuses that mean
+/// something real is on the other side of a reload, and never for the rest -- an ordinary
+/// document, a deleted file, or any error status.
+#[test]
+fn the_reload_button_shows_only_for_external_changed_and_conflict() {
+    use super::reload_button_is_shown;
+
+    assert!(reload_button_is_shown(
+        &ProjectContentStatus::ExternalChanged
+    ));
+    assert!(reload_button_is_shown(&ProjectContentStatus::Conflict));
+
+    assert!(!reload_button_is_shown(
+        &ProjectContentStatus::ExternalDeleted
+    ));
+    assert!(!reload_button_is_shown(&ProjectContentStatus::Opened));
+    assert!(!reload_button_is_shown(&ProjectContentStatus::Edited));
+    assert!(!reload_button_is_shown(&ProjectContentStatus::Empty));
+}

@@ -1534,6 +1534,15 @@ pub enum Message {
     /// `attempt_save_active_document` (via
     /// [`save_active_document_button_pressed`]'s own guard).
     SaveActiveDocumentButtonPressed,
+    /// RFC-026, release 0.29.0: the editor's own real "Reload" button
+    /// (`content_mode_editor_view`'s chrome, shown only when the active
+    /// document's status is `ExternalChanged` or `Conflict`). A user-driven
+    /// path to the same dialog `attempt_save_active_document`'s own
+    /// `BlockedExternalChange` arm opens, reached directly rather than only
+    /// discovered by trying to save. No keyboard accelerator: unlike Save,
+    /// this button is not always present, so a global chord would be bound
+    /// to an action that does nothing most of the time.
+    ReloadActiveDocumentButtonPressed,
     /// RFC-040 PR-040-C: `TrustSettings`'s own real "Launch AI CLI Run"
     /// button -- D2's "agent run where a trusted project's actions
     /// live." `Ctrl+Alt+A` is the accelerator; both converge on
@@ -1887,6 +1896,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::ToggleProjectModeButtonPressed
         | Message::LaunchTerminalButtonPressed
         | Message::SaveActiveDocumentButtonPressed
+        | Message::ReloadActiveDocumentButtonPressed
         | Message::LaunchAgentRunButtonPressed
         | Message::OpenCurrentAgentRunDetailButtonPressed
         | Message::OpenApprovalHistoryButtonPressed
@@ -2601,6 +2611,9 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::ToggleProjectModeButtonPressed => toggle_active_project_mode(state),
         Message::LaunchTerminalButtonPressed => launch_terminal_in_active_project(state),
         Message::SaveActiveDocumentButtonPressed => save_active_document_button_pressed(state),
+        Message::ReloadActiveDocumentButtonPressed => {
+            open_external_change_dialog_for_active_document(state)
+        }
         Message::LaunchAgentRunButtonPressed => launch_agent_run_in_active_project(state),
         Message::OpenCurrentAgentRunDetailButtonPressed => open_current_agent_run_detail(state),
         Message::OpenApprovalHistoryButtonPressed => open_approval_history(state),
@@ -5676,6 +5689,20 @@ fn attempt_save_active_document(state: &mut State) {
     if error.decision() != tekstide_core::content::SaveDecision::BlockedExternalChange {
         return;
     }
+    open_external_change_dialog_for_active_document(state);
+}
+
+/// RFC-026, release 0.29.0: the dialog [`attempt_save_active_document`]'s own
+/// `BlockedExternalChange` arm opens, factored out so it is also reachable directly --
+/// a user-driven reload, not only one discovered by trying to save and having it refused.
+///
+/// No status guard here: a real save attempt must still open this for every
+/// `BlockedExternalChange`, including a deleted file (`ExternalDeleted`), the same "never
+/// silent" behaviour it always had -- this function fixes nothing about that path. The direct
+/// Reload button is the only new caller, and its own visibility (`editor::view`, shown only
+/// for `ExternalChanged`/`Conflict`) is the guard for it, the same trust `editor-save-button`'s
+/// handler already places in its own render condition rather than re-checking it here.
+fn open_external_change_dialog_for_active_document(state: &mut State) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
     };
@@ -9502,7 +9529,10 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
             workspace.status(),
             &state.catalog,
             &state.theme,
-            Message::SaveActiveDocumentButtonPressed,
+            crate::surface::editor::EditorActions {
+                on_save: Message::SaveActiveDocumentButtonPressed,
+                on_reload: Message::ReloadActiveDocumentButtonPressed,
+            },
             crate::surface::editor::EditorWindow {
                 rows: editor_window_capacity(state),
                 columns: editor_column_capacity(state),

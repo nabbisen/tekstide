@@ -17056,36 +17056,38 @@ fn change_review_content_refuses_over_the_line_bound_and_names_it() {
 /// cost inside `iced`'s own renderer, which happens after `view`
 /// returns and is exactly what that convention excludes.
 ///
-/// Not a tight regression bound (machine-dependent) -- a diagnostic
-/// report, the same shape
-/// `real_repository_filesystem_scan_cost_headless_benchmark`
-/// (`tekstide-core`) already uses. Prints the real numbers
-/// `DEFAULT_MAX_DIFF_LINES` was set from.
+/// **Carried into `0.29.0` (release-0.29.0.md) after a fourth episode of the same failure
+/// shape**: `0.26.0`, the `0.28.0` candidate, the architect's own `0.28.0` verification, and
+/// RFC-026 PR-026-A's own gate (review 451). Each time the fix was to report the load average
+/// alongside an absolute-millisecond budget, which only explains a red run after the fact --
+/// it never stopped one. An absolute budget cannot distinguish "the view-build path got
+/// slower" from "the scheduler gave this thread less time," because it has no number from the
+/// same run to compare against; reporting load beside it is a guess about which, not a test of
+/// either.
 ///
-/// `suite-assumes-it-owns-the-machine.md`, item 2: this budget failed 6
-/// of 7 red runs in review 338's own gate, at a load average of 59.7 on
-/// a 32-core box -- load this project's own repeated full-suite runs
-/// produce. Every one of those failures was noise, not a regression, and
-/// the assertion's own message used to claim otherwise ("would indicate
-/// a real regression, not measurement noise") -- a claim this single
-/// number cannot support, since it cannot distinguish "the view-build
-/// path got slower" from "the scheduler gave this thread less time."
-/// Fixed by no longer claiming either: the message below states what
-/// budget was crossed and reports the load average alongside it, so the
-/// next reader can tell the two apart instead of being told which one it
-/// is. **Not `#[ignore]`**: this project's own precedent for a
-/// load-sensitive-but-real assertion is the flake register
-/// (`test-process-leak.md`), not silencing the test -- an ignored test
-/// stops being run at all, where a recorded, honestly-worded flake still
-/// runs, still reports, and still catches an actual regression the day
-/// one lands; only the interpretation of an occasional red run changes.
-/// Recorded there as a new row alongside this fix.
+/// **The fix: a ratio against a reference workload, timed in the same process, in the same
+/// run.** Ten times the line count must cost under some bounded multiple of the reference's
+/// own time, measured back to back so an ambient load spike lands on both sides of the ratio
+/// almost equally rather than on only one absolute number. This is RFC-026's own paired
+/// control (review 462) applied here instead of to a watched burst: the comparison lives
+/// inside one run, so the machine's own conditions cancel out of it rather than having to be
+/// read and reasoned about afterward. The multiple (`MAX_COST_RATIO`) is deliberately generous
+/// -- thirty times the time for ten times the work -- the same shape snora `0.52.0`'s own CI
+/// ratio uses, because the property worth catching is a real slowdown (a new allocation per
+/// line, an accidentally quadratic pass), not a gate so tight that ordinary noise trips it.
+///
+/// The full curve across every candidate line count is still printed, asserting nothing --
+/// `editor_typing_latency_baseline_100_000_lines`'s own "publish the number" half, kept here as
+/// a diagnostic a reader can scan even though it no longer decides pass or fail. **Not
+/// `#[ignore]`**: runs every time, the same reasoning the prior fix already established --
+/// where a budget crossed once belongs in `test-process-leak.md`, a budget that cannot be
+/// crossed by load at all is the better fix, which this is.
 #[test]
 fn change_review_content_view_build_cost_by_line_count_measurement() {
     let state = state_with(tekstide_core::shell::ApplicationShell::new());
     let line_text = "a realistic line of source code, roughly eighty columns wide, for measurement";
 
-    for &line_count in &[100usize, 1_000, 4_000, 10_000, 50_000, 100_000] {
+    let build_cost = |line_count: usize| -> std::time::Duration {
         let started = std::time::Instant::now();
         let content_elements: Vec<iced::Element<'_, Message>> = (0..line_count)
             .map(|_| {
@@ -17096,41 +17098,49 @@ fn change_review_content_view_build_cost_by_line_count_measurement() {
             })
             .collect();
         let elapsed = started.elapsed();
+        assert_eq!(content_elements.len(), line_count);
+        elapsed
+    };
 
+    // The reference and the ten-times-larger workload, timed back to back so the comparison
+    // is inside one run rather than across two runs the machine's own load can tell apart. A
+    // throwaway build at the reference size first, so the timed reference is not also paying
+    // for the allocator's own first-call growth.
+    const REFERENCE_LINES: usize = 10_000;
+    const SCALED_LINES: usize = REFERENCE_LINES * 10;
+    const MAX_COST_RATIO: u32 = 30;
+
+    let _ = build_cost(REFERENCE_LINES);
+    let reference_cost = build_cost(REFERENCE_LINES);
+    let scaled_cost = build_cost(SCALED_LINES);
+
+    eprintln!(
+        "change_review_content_view_build_cost_by_line_count_measurement ratio: \
+         reference={REFERENCE_LINES} lines in {}us, scaled={SCALED_LINES} lines (10x) in {}us, \
+         budget {MAX_COST_RATIO}x",
+        reference_cost.as_micros(),
+        scaled_cost.as_micros(),
+    );
+    assert!(
+        scaled_cost < reference_cost * MAX_COST_RATIO,
+        "ten times the work cost more than {MAX_COST_RATIO} times the time: {SCALED_LINES} \
+         lines took {}us against a {REFERENCE_LINES}-line reference of {}us in the same run. \
+         Both sides of this ratio were measured back to back, so machine load affects them \
+         almost equally -- this is a real slowdown in the view-build path, not noise.",
+        scaled_cost.as_micros(),
+        reference_cost.as_micros(),
+    );
+
+    // The full curve, published and not asserted on -- a reader can scan it without it being
+    // able to fail the gate on its own.
+    for &line_count in &[100usize, 1_000, 4_000, 10_000, 50_000, 100_000] {
+        let elapsed = build_cost(line_count);
         eprintln!(
-            "change_review_content_view_build_cost_by_line_count_measurement lines={line_count} \
-             elapsed_us={} elements_built={}",
+            "change_review_content_view_build_cost_by_line_count_measurement curve: \
+             lines={line_count} elapsed_us={}",
             elapsed.as_micros(),
-            content_elements.len()
-        );
-
-        assert!(
-            elapsed.as_millis() < 500,
-            "view-build cost at {line_count} lines exceeded the 500ms budget (NFR-PERF-003's own \
-             is 16ms p95) -- got {}ms. This is either a real regression or this machine was \
-             under load when it ran; load average (1min, from /proc/loadavg): {}. A number well \
-             above the core count points at load, not a regression -- rerun on an idle machine \
-             before treating this as one.",
-            elapsed.as_millis(),
-            one_minute_load_average()
-                .map_or_else(|| "unavailable".to_owned(), |load| load.to_string())
         );
     }
-}
-
-/// The 1-minute load average from `/proc/loadavg`'s own first field --
-/// Linux-only, matching every other `/proc`-reading diagnostic this test
-/// suite already has. `None` only if the file cannot be read or parsed
-/// (a non-Linux host, or a sandboxed environment without `/proc`); never
-/// asserted on, only reported alongside a failure so a reader can judge
-/// whether load explains it.
-fn one_minute_load_average() -> Option<f64> {
-    std::fs::read_to_string("/proc/loadavg")
-        .ok()?
-        .split_whitespace()
-        .next()?
-        .parse()
-        .ok()
 }
 
 /// RFC-034's own required measurement: the pack README warns that
@@ -20462,4 +20472,199 @@ fn a_deleted_open_document_reports_itself_and_keeps_its_text() {
         &tekstide_core::project::ProjectContentStatus::ExternalDeleted
     );
     assert_eq!(active_document_text(&state), "hello\n");
+}
+
+/// RFC-026, release 0.29.0: a blocked save against a deleted file still opens the dialog --
+/// the "never silent" behaviour `attempt_save_active_document` always had for a
+/// `BlockedExternalChange`, unaffected by factoring its tail into
+/// `open_external_change_dialog_for_active_document`. Reload is not offered for this status in
+/// the editor's own chrome (`reload_button_is_shown`'s own test covers that); this is the save
+/// path, which must still say something rather than nothing.
+#[test]
+fn a_blocked_save_against_a_deleted_file_still_opens_the_dialog() {
+    let (mut state, dir) = state_with_an_open_document("editor-save-deleted-file", "original");
+    std::fs::remove_file(dir.join("file.txt")).unwrap();
+
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("s".into()),
+        modifiers: iced::keyboard::Modifiers::CTRL,
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    assert!(
+        matches!(&state.modal, Some(ModalContent::ExternalChange(_))),
+        "a blocked save must never be silent, even against a file that is gone: {:?}",
+        state.modal
+    );
+}
+
+/// RFC-026, release 0.29.0: the Reload button's own handler opens the dialog directly, with no
+/// save attempted first -- a user-driven reload reached from the state the watcher's own notice
+/// put the document in, not discovered by trying to save and having it refused.
+#[test]
+fn the_reload_button_opens_the_dialog_directly_with_no_save_attempted() {
+    let (mut state, dir) = state_with_an_open_document("editor-reload-button-clean", "original");
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+    let generation = state.project_watches[&project_id].generation;
+    let document = std::fs::canonicalize(dir.join("file.txt")).unwrap();
+    std::fs::write(&document, "changed on disk").unwrap();
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        generation,
+        tekstide_core::project::WatchNotice::Changed(vec![document]),
+    );
+    std::thread::sleep(tekstide_core::project::SCAN_WINDOW + std::time::Duration::from_millis(50));
+    super::drain_project_watches(&mut state);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .content_workspace()
+            .status(),
+        &tekstide_core::project::ProjectContentStatus::ExternalChanged,
+        "test precondition: the watcher's own notice put the document in ExternalChanged"
+    );
+
+    let _ = super::update(&mut state, Message::ReloadActiveDocumentButtonPressed);
+
+    let Some(ModalContent::ExternalChange(modal)) = &state.modal else {
+        panic!(
+            "the Reload button must open the dialog directly: {:?}",
+            state.modal
+        );
+    };
+    assert!(
+        !modal.had_local_edits,
+        "no local edits existed, so the dialog must not claim any"
+    );
+}
+
+/// RFC-026, release 0.29.0: the Reload button's handler, reached while the document is a real
+/// conflict (a local edit on top of an external change), opens the dialog with
+/// `had_local_edits` true -- the same distinction the save path already makes, now reachable
+/// without a save attempt.
+#[test]
+fn the_reload_button_opens_the_dialog_with_had_local_edits_for_a_real_conflict() {
+    let (mut state, dir) = state_with_an_open_document("editor-reload-button-conflict", "original");
+    let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
+    let press = crate::input::KeyPress {
+        key: iced::keyboard::Key::Character("x".into()),
+        modifiers: iced::keyboard::Modifiers::empty(),
+    };
+    let proof =
+        crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
+    let routed = crate::input::route_non_modal_input(proof, &policy, state.focus, None, press);
+    let _ = super::update(&mut state, Message::Input(routed));
+
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+    let generation = state.project_watches[&project_id].generation;
+    let document = std::fs::canonicalize(dir.join("file.txt")).unwrap();
+    std::fs::write(&document, "changed on disk").unwrap();
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        generation,
+        tekstide_core::project::WatchNotice::Changed(vec![document]),
+    );
+    std::thread::sleep(tekstide_core::project::SCAN_WINDOW + std::time::Duration::from_millis(50));
+    super::drain_project_watches(&mut state);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .content_workspace()
+            .status(),
+        &tekstide_core::project::ProjectContentStatus::Conflict,
+        "test precondition: a local edit plus an external change is a real conflict"
+    );
+
+    let _ = super::update(&mut state, Message::ReloadActiveDocumentButtonPressed);
+
+    let Some(ModalContent::ExternalChange(modal)) = &state.modal else {
+        panic!(
+            "the Reload button must open the dialog directly: {:?}",
+            state.modal
+        );
+    };
+    assert!(
+        modal.had_local_edits,
+        "a real local edit exists, so the dialog must say so"
+    );
+}
+
+/// RFC-026, release 0.29.0: the full round trip through the **direct** Reload button --
+/// no save attempted first -- carries RFC-057 PR-057-D's mechanism exactly as the
+/// save-blocked path does: Reload takes disk's real content, and undo does not reach back
+/// across it. The user-driven path is a new door into the same mechanism, not a second one.
+#[test]
+fn the_reload_button_s_full_round_trip_takes_disk_content_and_undo_does_not_cross_it() {
+    let (mut state, dir) =
+        state_with_an_open_document("editor-reload-button-round-trip", "original");
+    press_typed_character(&mut state, "!");
+    assert_eq!(active_document_text(&state), "!original");
+
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+    let generation = state.project_watches[&project_id].generation;
+    let document = std::fs::canonicalize(dir.join("file.txt")).unwrap();
+    std::fs::write(&document, "external edit").unwrap();
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        generation,
+        tekstide_core::project::WatchNotice::Changed(vec![document]),
+    );
+    std::thread::sleep(tekstide_core::project::SCAN_WINDOW + std::time::Duration::from_millis(50));
+    super::drain_project_watches(&mut state);
+
+    let _ = super::update(&mut state, Message::ReloadActiveDocumentButtonPressed);
+    assert_eq!(
+        external_change_focus(&state.modal),
+        Some(ExternalChangeButton::Dismiss),
+        "test precondition: the direct button opens the dialog, focused on Dismiss by default"
+    );
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    assert_eq!(
+        external_change_focus(&state.modal),
+        Some(ExternalChangeButton::Reload)
+    );
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert!(state.modal.is_none(), "Reload must close the modal");
+    assert_eq!(
+        active_document_text(&state),
+        "external edit",
+        "Reload must take disk's real current content, reached directly as it does from a blocked save"
+    );
+
+    press_ctrl_z(&mut state);
+
+    assert_eq!(
+        active_document_text(&state),
+        "external edit",
+        "undo must not reach back across the reload and resurrect the discarded local edit"
+    );
 }

@@ -128,6 +128,19 @@ pub(crate) fn empty_lines(catalog: &Catalog, status: &ProjectContentStatus) -> V
     }
 }
 
+/// RFC-026, release 0.29.0: whether the chrome's Reload button is shown -- a user-driven
+/// reload, reachable without first trying to save and having it refused. Factored out of
+/// [`view`] for the same testability reason as [`empty_lines`]. `true` only when there is
+/// something real to reload from: `ExternalChanged` or `Conflict`. Never `ExternalDeleted`,
+/// where there is no disk content behind the path to reload, and never an ordinary
+/// `Clean`/`Dirty` document, where a reload would discard local work for no external reason.
+pub(crate) fn reload_button_is_shown(status: &ProjectContentStatus) -> bool {
+    matches!(
+        status,
+        ProjectContentStatus::ExternalChanged | ProjectContentStatus::Conflict
+    )
+}
+
 // ---- RFC-057 PR-057-B: the body is rows, and the viewport bounds them ------------
 //
 // **The editor never hands the whole file to one widget.** Measured in PR-057-A:
@@ -722,15 +735,25 @@ pub(crate) struct EditorWindow {
     pub columns: usize,
 }
 
+/// The two document-level messages the chrome's own buttons dispatch, the same
+/// one-struct-for-related-arguments shape [`EditorWindow`] already uses, and for the
+/// identical clippy-line reason: adding `on_reload` (RFC-026, release 0.29.0) as a bare
+/// positional argument beside `on_save` is what crossed it.
+pub(crate) struct EditorActions<Message> {
+    pub on_save: Message,
+    pub on_reload: Message,
+}
+
 pub fn view<'a, Message: 'a + Clone>(
     document: Option<&TextDocument>,
     status: &ProjectContentStatus,
     catalog: &'a Catalog,
     theme: &'a Theme,
-    on_save: Message,
+    actions: EditorActions<Message>,
     window: EditorWindow,
     on_body_measured: impl Fn(Size) -> Message + 'a,
 ) -> Element<'a, Message> {
+    let EditorActions { on_save, on_reload } = actions;
     let EditorWindow {
         rows: row_capacity,
         columns: column_capacity,
@@ -838,6 +861,16 @@ pub fn view<'a, Message: 'a + Clone>(
                 .on_press(on_save)
                 .into(),
             );
+            if reload_button_is_shown(status) {
+                chrome.push(
+                    crate::theme::button(
+                        *theme,
+                        text(catalog.get("editor-reload-button")).size(theme.font_size_body()),
+                    )
+                    .on_press(on_reload)
+                    .into(),
+                );
+            }
             chrome.push(body.into());
             column(chrome).spacing(6).into()
         }

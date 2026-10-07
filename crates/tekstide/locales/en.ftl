@@ -754,6 +754,12 @@ editor-cursor = Line {$line}, Column {$column}
 # no-op-shaped call on a clean document, not an error).
 editor-save-button = Save
 
+# RFC-026, release 0.29.0: a user-driven reload, the same action
+# `external-change-dialog-reload` offers from the save-blocked dialog, reachable
+# directly from the editor's own chrome. Shown only when `editor::view`'s own
+# guard says there is something real to reload: `ExternalChanged` or `Conflict`.
+editor-reload-button = Reload
+
 editor-empty = No file is open. Select a file in the explorer and press Enter.
 
 # RFC-057 D3: the undo depth bound is stated when reached, not silently
