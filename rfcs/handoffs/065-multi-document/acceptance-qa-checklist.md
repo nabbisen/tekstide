@@ -191,25 +191,44 @@ wrong here is a deterministic logic case that a plain test catches with no timin
 
 ## Whole-RFC
 
-- [ ] The requirements gap — **no `REQ-` names multi-document** — is written up for the owner, and no
-      `REQ-` is minted.
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
+- [x] The requirements gap — **no `REQ-` names multi-document** — is written up for the owner, and no
+      `REQ-` is minted. `rfcs/delivery-plan.md`, "Requirements gap: no `REQ-` names multi-document"
+      (2026-10-08, RFC-065 D8), the same disclosed-not-minted treatment undo got at RFC-057 D4.
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass. RFC-065 adds no
+      new colour-coded state (the `[open]` tag and the save-all notice are both text, not colour);
+      `no_catalog_string_names_an_internal_identifier` and
+      `every_source_locale_key_resolves_in_every_shipped_locale`
+      (`crates/tekstide/src/i18n/enforcement.rs`) pass directly, part of the three-run gate below.
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check` after
       staging, `rfc_docs_invariants`, **`cargo test --doc --workspace`** (the step `0.29.0` added
       after `--all-targets` was found never to run the doctest guard), **three consecutive
       full-workspace runs with `--no-fail-fast`**, **0 fixture entries left** in a fresh short
-      `TMPDIR` — a short fixed literal, not `mktemp`.
-- [ ] Every new intermittent failure has a dated row in `test-process-leak.md`.
-- [ ] The core pin bumps with the version.
-- [ ] Commits are pushed once the gate is green.
+      `TMPDIR` — a short fixed literal, not `mktemp`. All clean: `738 + 16 + 1089` (+ `0+1+1`
+      doctests), every run, `.git-exclude/tmp/479-gate-{1,2,3}.log`.
+- [x] Every new intermittent failure has a dated row in `test-process-leak.md`. None from these three
+      runs (all clean); the two review 478 found in its own run are already registered there ("New
+      rows, 2026-10-08 — review 478", `a79d808`), not mine to add a second time.
+- [ ] The core pin bumps with the version. Not yet: `0.30.0` has not been cut as a release candidate
+      (workspace version is still `0.29.0`), so there is no new version for the pin to bump to. A
+      release-step item, left for the candidate itself.
+- [ ] Commits are pushed once the gate is green. The Whole-RFC doc edits (this checklist,
+      `CHANGELOG.md`, `rfcs/delivery-plan.md`) are about to be committed and pushed with this
+      response; left unticked until that push lands.
 
 ### Required at the candidate (review 471)
 
-- [ ] **Re-read `## 0.30.0` against what actually shipped.** It was written incrementally — which is
+- [x] **Re-read `## 0.30.0` against what actually shipped.** It was written incrementally — which is
       the better habit, because the numbers are in hand and the limitations are described by whoever
       just met them — but it was written **before slices C and D existed**. A section that was accurate
       when written can stop being accurate without anyone touching it. That is the cost of writing
-      early, and it is smaller than the one it avoids.
+      early, and it is smaller than the one it avoids. **Found stale, now fixed**: the entry covered
+      D7's refresh measurement (B), the switcher (C) and save-all (D), but never slice A at all — the
+      RFC's own headline, "opening a second file with unsaved edits in the first loses nothing" — nor
+      B's own dedup/counts/bound/`REQ-EDIT-004` correction beyond one passing mention of the bound.
+      Both are now their own paragraph, first in the section since the repair is the release's
+      headline per the RFC's own acceptance criteria. The status line is also corrected: it said the
+      requirements-gap write-up was not done, which was true when that sentence was written but not
+      by the time anyone would read it this response.
 
 ## Final Acceptance Decision
 

@@ -316,6 +316,23 @@ Not treated as blocking, and not fixed by writing a new `REQ-EDIT` row into the 
 implementer's own slice — minting a requirement is the owner's call, not something a PR should back into to make its own
 checklist read clean. Revisit when the owner next touches `REQ-EDIT`'s numbering (or names this the moment to).
 
+### Requirements gap: no `REQ-` names multi-document (2026-10-08, RFC-065 D8)
+
+**Disclosed, not minted, the same treatment undo got at RFC-057 D4.** RFC-065 ships the open set
+(opening a second file no longer discards the first's unsaved edits), a keyboard switcher
+(`Ctrl+Alt+F`, D5) and save-all (`Ctrl+Shift+S`, D6). The roadmap's 1.0 minimum list names
+"multi-document editing"; no `REQ-` requirement does. `REQ-EDIT-001` covers opening, editing and
+saving "files," singular or plural, with no distinction; `REQ-EDIT-004`'s "dirty *buffers*"
+(plural) is the closest existing text, and this RFC is what first makes that plural true rather
+than vacuously met by one document (D3) — but it only *assumes* several buffers can exist, same
+as `NFR-REL-005` only assumed undo existed before RFC-057. Nothing names the switcher or save-all
+at all; D8 named this going in, the same way `what-the-editor-must-not-do.md`'s own table named
+undo's absence before RFC-057 wrote it.
+
+Not treated as blocking, and not fixed by writing a new `REQ-` row into the requirements document
+from inside this implementer's own slice — minting a requirement is the owner's call. Revisit when
+the owner next touches `REQ-EDIT`'s numbering, the same moment that would also settle undo's.
+
 ### Open question: does exporting a report deserve an audit record? (2026-09-25, RFC-056 D11)
 
 **Decided *not* in RFC-056, and recorded rather than dropped.** Exporting a report writes

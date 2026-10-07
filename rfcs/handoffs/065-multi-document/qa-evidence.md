@@ -539,3 +539,49 @@ was not being asked for.
   `738 + 16 + 1089` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left in each run's own
   `TMPDIR` afterward.
 - Commits pushed once this gate was green.
+
+## Whole-RFC
+
+**The requirements gap.** `rfcs/delivery-plan.md`, "Requirements gap: no `REQ-` names
+multi-document" (2026-10-08, RFC-065 D8) -- the same disclosed-not-minted treatment undo got at
+RFC-057 D4. No new `REQ-` minted.
+
+**The colour-alone, i18n completeness and internal-identifier scans.** RFC-065 adds no new
+colour-coded state -- the `[open]` tag and the save-all notice are both text. The two concrete
+scans, `no_catalog_string_names_an_internal_identifier` and
+`every_source_locale_key_resolves_in_every_shipped_locale`
+(`crates/tekstide/src/i18n/enforcement.rs`), pass as part of the gate below; no separate
+invocation exists for either, the same as every prior slice in this RFC.
+
+**Review 471's required item: `## 0.30.0` re-read against what shipped, and found stale.** The
+entry covered D7's refresh measurement (B), the switcher (C) and save-all (D), but never slice
+A -- the RFC's own headline, "opening a second file with unsaved edits in the first loses
+nothing" -- nor B's own dedup/counts/bound/`REQ-EDIT-004` correction beyond one passing mention
+of the bound tied to D7's extrapolation. `CHANGELOG.md` now carries both as their own paragraph,
+first in the section since the repair is the release's headline per the RFC's own acceptance
+criteria. The status line is also corrected: "the requirements-gap write-up... [is] not" done was
+true when that sentence was first written (before this response) but stale by the time anyone
+would read it now.
+
+**Flakes.** None from these three runs. The two review 478 found in its own run
+(`runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close`,
+`runtime::terminal::tests::a_job_that_leaves_the_session_via_setsid_survives_a_real_close`) are
+already registered at "New rows, 2026-10-08 -- review 478" in `test-process-leak.md` (`a79d808`),
+diagnosed by the reviewer (the row 2/5 pattern a third time: the wait condition does not know
+about the shell's own unexpanded echo of its marker), not a blocker, owned by the dev team.
+
+**Core pin and commits.** Not a release cut: the workspace version is still `0.29.0`, so there is
+no new version for `tekstide-core`'s pin to bump to -- a release-step item, left for the
+candidate. This response's own commits are pushed once its own gate is green, same as every prior
+one.
+
+## Gate, Whole-RFC
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `git diff --cached --check` after staging: clean.
+- `cargo test --test rfc_docs_invariants`: 16 passed, 0 failed.
+- `cargo test --doc --workspace`: `0 + 1 + 1`, 0 failed.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run** (a
+  short fixed literal, `/dev/shm/g479{1,2,3}`, not `mktemp`): `738 + 16 + 1089` (+ `0+1+1`
+  doctests), 0 failed, 0 fixture entries left in each run's own `TMPDIR` afterward.
+- Commits pushed once this gate was green.

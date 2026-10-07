@@ -2,10 +2,23 @@
 
 ## 0.30.0 - The Multi-Document Model
 
-Status: **in progress.** RFC-065's four slices (the repair, the set, the switcher, save-all) are all
-done; the requirements-gap write-up and the release candidate itself are not. This entry is written
+Status: **in progress.** RFC-065's four slices (the repair, the set, the switcher, save-all) and the
+requirements-gap write-up are all done; the release candidate itself is not. This entry is written
 incrementally as slices close, not held back for the release; see `rfcs/handoffs/065-multi-document/`
 for the full handoff pack.
+
+**The repair, and this release's headline**: opening a second file used to silently discard the
+first's unsaved edits — no prompt, no refusal, no record, a live defect shipping in `0.29.0`. The
+editor now holds an **open set** of documents rather than one, so opening a second file adds it to
+the set instead of replacing what was there, and there is nothing left to discard. Deduplicated by
+path: opening a file that is already in the set switches to its existing entry (text, dirty state
+and cursor untouched) rather than adding a second. `REQ-EDIT-004` has said "dirty *buffers*",
+plural, since it was written, and the product has only ever had one; the open set makes that plural
+real for the first time, and the requirements coverage row is corrected from implying it already
+was. The two counts a user reads from, and the close dialog, count the whole set through the same
+wiring they always used — only what they were counting changed. The set is bounded at **20 open
+documents**, refused with the open count and the limit stated once reached, even with a document
+already active.
 
 **`0.29.0`'s own open question, answered**: that release's "what this release does not do" section said
 of the open-document refresh, "with one document this is a few milliseconds; the multi-document RFC
