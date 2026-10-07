@@ -115,6 +115,11 @@ measurement with no number in the evidence is not ticked.
       *(Step 2 (review 456): the live reconcile takes only `watched_directories()`, which admits every
       directory through `WatchedDirectory::admit`. Nothing else reaches the owner. Proved by
       `the_session_wires_the_expanded_folders_into_the_desired_set`, ablated at step 1.)*
+- [ ] *Offered at review 458, not required:* a `compile_fail` **doctest** guards `WatchEvents` against
+      a future `#[derive(Clone)]` — `fn assert_clone<T: Clone>()` called on it, which compiles only if
+      it is `Clone`. **No dev-dependency**: rustdoc takes `compile_fail` and nothing here disables
+      doctests. Pair it with a companion doctest that *does* compile over the same path, or a rename
+      satisfies it silently.
 - [ ] Hostile fixture: a symlink leaving the root is not watched; a loop does not recurse.
       *(Step 1 (review 455): the access policy is the only way into the scope — `WatchedDirectory` is
       constructible only through `admit` — and `the_access_policy_decides_what_the_scope_may_ever_hold`
