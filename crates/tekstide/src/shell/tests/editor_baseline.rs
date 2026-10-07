@@ -479,6 +479,10 @@ struct BurstRun {
     scans_run: usize,
     scans_applied: usize,
     files_written: usize,
+    /// Wall time of the whole loop, and of the part after the burst thread had finished.
+    elapsed: std::time::Duration,
+    after_burst: std::time::Duration,
+    notices_after_burst: usize,
 }
 
 /// RFC-026 slice C, `REQ-FILE-004`: keystrokes measured in the same process as a watched burst,
@@ -496,6 +500,7 @@ fn keystrokes_under_a_watched_burst(
     min_keystrokes: usize,
     width: f32,
     watched: bool,
+    touch_document: Option<(std::path::PathBuf, String)>,
 ) -> BurstRun {
     use std::sync::mpsc::channel;
     use std::time::{Duration, Instant};
@@ -542,9 +547,21 @@ fn keystrokes_under_a_watched_burst(
         let root = root.clone();
         std::thread::spawn(move || {
             let mut written = 0;
+            // RFC-026 D8: the open document is rewritten every hundred files, alternating
+            // between two versions, so each rewrite is a real change the refresh must read.
+            let mut versions = touch_document.map(|(path, text)| {
+                let other = format!("external edit\n{text}");
+                (path, [text, other], 0usize)
+            });
             for index in 0..files {
                 if std::fs::write(root.join(format!("burst-{index:05}.txt")), b"x").is_ok() {
                     written += 1;
+                }
+                if let Some((path, versions, turn)) = versions.as_mut()
+                    && index % 100 == 99
+                {
+                    let _ = std::fs::write(&*path, versions[*turn % 2].as_bytes());
+                    *turn += 1;
                 }
                 std::thread::sleep(pace);
             }
@@ -561,7 +578,12 @@ fn keystrokes_under_a_watched_burst(
         scans_run: 0,
         scans_applied: 0,
         files_written: 0,
+        elapsed: Duration::ZERO,
+        after_burst: Duration::ZERO,
+        notices_after_burst: 0,
     };
+    let mut burst_finished_at: Option<Instant> = None;
+    let mut notices_at_burst_end = 0usize;
     let mut last_tick = Instant::now();
     let mut burst_done = burst.is_none();
     let mut quiet_since: Option<Instant> = None;
@@ -632,6 +654,10 @@ fn keystrokes_under_a_watched_burst(
         let progressed = deliver(state, &mut run, &mut last_tick, &mut launched);
         if !burst_done {
             burst_done = burst.as_ref().is_some_and(|handle| handle.is_finished());
+            if burst_done {
+                burst_finished_at = Some(Instant::now());
+                notices_at_burst_end = run.notices;
+            }
         }
         if started_at.elapsed() > Duration::from_secs(120) {
             break;
@@ -659,6 +685,11 @@ fn keystrokes_under_a_watched_burst(
         keystrokes += 1;
     }
 
+    run.elapsed = started_at.elapsed();
+    run.notices_after_burst = run.notices - notices_at_burst_end;
+    if let Some(finished) = burst_finished_at {
+        run.after_burst = finished.elapsed();
+    }
     if let Some(handle) = burst {
         run.files_written = handle.join().unwrap_or(0);
     }
@@ -680,6 +711,7 @@ fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
         5,
         880.0,
         true,
+        None,
     );
 
     assert_eq!(run.files_written, 100, "the burst wrote every file");
@@ -694,15 +726,19 @@ fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
     );
 }
 
-/// The three conditions of the watched-burst measurement, held in one process under one load.
+/// The conditions of the watched-burst measurement, in one process under one load.
 #[derive(Clone, Copy, Debug)]
 enum WatchCondition {
     /// The control: the project's owner removed, so no watch exists at all.
     Unwatched,
     /// The project watched, nothing happening.
     WatchedIdle,
-    /// The project watched while 1,000 files are written into its root.
-    WatchedBurst,
+    /// Watched while 1,000 files are written into the project root. The open document is not
+    /// touched, so this is the pipeline as it was before D8.
+    BurstBeforeD8,
+    /// The same burst, and the open document is rewritten every hundred files. This is the
+    /// pipeline with D8: each drain tick asks the document about its file.
+    BurstWithD8,
 }
 
 impl WatchCondition {
@@ -710,7 +746,8 @@ impl WatchCondition {
         match self {
             Self::Unwatched => "unwatched (control)",
             Self::WatchedIdle => "watched, nothing happening",
-            Self::WatchedBurst => "watched, during a 1,000-file burst",
+            Self::BurstBeforeD8 => "burst into the root (before D8)",
+            Self::BurstWithD8 => "burst, open document rewritten (with D8)",
         }
     }
 }
@@ -725,17 +762,15 @@ fn sorted_totals_ms(stages: &[Stage]) -> Vec<f64> {
     totals
 }
 
-/// **REQ-FILE-004's baseline (RFC-026 slice C), with its control, before D8** (review 462). The
-/// RFC-057 100,000-line fixture, the character-at-the-start keystroke, and three conditions in one
-/// process: unwatched (the control), watched and idle, and watched during a 1,000-file burst written
-/// into the project root at one file a millisecond. The conditions run in three rounds, each round
-/// in a different order, so position in the run is spread across them. Every run is a fresh
-/// project, so none carries another's state.
+/// **REQ-FILE-004, the pre-D8 control and the D8 before-and-after, in one frame** (review 462, and
+/// the D8 plan). The RFC-057 100,000-line fixture, the character-at-the-start keystroke, and four
+/// conditions in one process. The **D8 cost is the paired difference between the last two**: the same
+/// burst into the root, with and without the open document being rewritten, in the same round, so
+/// everything else is held constant. The control measures the watcher against no watcher at all.
 ///
-/// The figure that matters is the **paired difference** within a round, against the control, not any
-/// one absolute number: everything else is held constant, so the difference is the code's. This
-/// baseline does not discharge `REQ-FILE-004`, which the post-D8 measurement does, with the same
-/// frame and the same control.
+/// The conditions run in a 4 by 4 Latin square over four rounds, so each condition takes each
+/// position in the run once. Every run is a fresh project. The figure that matters is the paired
+/// difference within a round, not any absolute number.
 ///
 /// `cargo test --release -p tekstide editor_typing_latency_under_a_watched_burst -- --ignored --nocapture`
 #[test]
@@ -743,16 +778,8 @@ fn sorted_totals_ms(stages: &[Stage]) -> Vec<f64> {
 fn editor_typing_latency_under_a_watched_burst() {
     let text = fixture_text();
     let width = 880.0;
-    // Every order of the three conditions, once: position in the run is balanced exactly.
-    use WatchCondition::{Unwatched as U, WatchedBurst as B, WatchedIdle as I};
-    let orders = [
-        [U, I, B],
-        [U, B, I],
-        [I, U, B],
-        [I, B, U],
-        [B, U, I],
-        [B, I, U],
-    ];
+    use WatchCondition::{BurstBeforeD8 as R, BurstWithD8 as D, Unwatched as U, WatchedIdle as I};
+    let orders = [[U, R, D, I], [R, D, I, U], [D, I, U, R], [I, U, R, D]];
     println!(
         "fixture: {} lines, {} bytes; body font {} px; layout width {} px; keystroke: character at the start; budget NFR-PERF-003: p95 <= 16 ms, p99 <= 33 ms",
         FIXTURE_LINES,
@@ -760,13 +787,18 @@ fn editor_typing_latency_under_a_watched_burst() {
         crate::theme::Theme::default().font_size_body(),
         width
     );
-    // p95 of the keystroke total, per condition, per round.
-    let mut p95 = [[0.0f64; 3]; 6];
-    let mut p99 = [[0.0f64; 3]; 6];
+    // p95 of the keystroke total, per round, per condition (indexed by the enum's order).
+    let index = |condition: WatchCondition| match condition {
+        WatchCondition::Unwatched => 0,
+        WatchCondition::WatchedIdle => 1,
+        WatchCondition::BurstBeforeD8 => 2,
+        WatchCondition::BurstWithD8 => 3,
+    };
+    let mut p95 = [[0.0f64; 4]; 4];
     let mut burst_notes = Vec::new();
     for (round, order) in orders.iter().enumerate() {
         for &condition in order {
-            let (mut state, _dir) = state_with_an_open_document("editor-watched-round", &text);
+            let (mut state, dir) = state_with_an_open_document("editor-watched-round", &text);
             state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
             for _ in 0..3 {
                 let _ = one_keystroke(&mut state, character("w"), width);
@@ -779,6 +811,7 @@ fn editor_typing_latency_under_a_watched_burst() {
                     200,
                     width,
                     false,
+                    None,
                 ),
                 WatchCondition::WatchedIdle => keystrokes_under_a_watched_burst(
                     &mut state,
@@ -787,40 +820,53 @@ fn editor_typing_latency_under_a_watched_burst() {
                     200,
                     width,
                     true,
+                    None,
                 ),
-                WatchCondition::WatchedBurst => keystrokes_under_a_watched_burst(
+                WatchCondition::BurstBeforeD8 => keystrokes_under_a_watched_burst(
                     &mut state,
                     1_000,
                     std::time::Duration::from_millis(1),
                     30,
                     width,
                     true,
+                    None,
                 ),
+                WatchCondition::BurstWithD8 => {
+                    let document = std::fs::canonicalize(dir.join("file.txt"))
+                        .expect("the fixture document exists");
+                    keystrokes_under_a_watched_burst(
+                        &mut state,
+                        1_000,
+                        std::time::Duration::from_millis(1),
+                        30,
+                        width,
+                        true,
+                        Some((document, text.clone())),
+                    )
+                }
             };
             let totals = sorted_totals_ms(&run.stages);
-            let index = match condition {
-                WatchCondition::Unwatched => 0,
-                WatchCondition::WatchedIdle => 1,
-                WatchCondition::WatchedBurst => 2,
-            };
-            p95[round][index] = percentile(&totals, 0.95);
-            p99[round][index] = percentile(&totals, 0.99);
+            let at = index(condition);
+            p95[round][at] = percentile(&totals, 0.95);
             println!(
-                "round {} {:<36} keystrokes {:>4}  p50 {:>6.3}  p95 {:>6.3}  p99 {:>6.3} ms",
+                "round {} {:<46} keystrokes {:>4}  p50 {:>6.3}  p95 {:>6.3}  p99 {:>6.3} ms",
                 round + 1,
                 condition.description(),
                 run.stages.len(),
                 percentile(&totals, 0.50),
-                p95[round][index],
-                p99[round][index],
+                p95[round][at],
+                percentile(&totals, 0.99),
             );
-            if matches!(condition, WatchCondition::WatchedBurst) {
+            if matches!(
+                condition,
+                WatchCondition::BurstBeforeD8 | WatchCondition::BurstWithD8
+            ) {
                 burst_notes.push(format!(
-                    "round {}: {} files written, {} notices, {} explorer scans run, {} applied, {:.1} ms of delivery between keystrokes",
+                    "round {} {}: {} files written, {} notices, {} explorer scans applied, {:.1} ms of delivery between keystrokes (with D8 this includes the document refreshes)",
                     round + 1,
+                    if matches!(condition, WatchCondition::BurstWithD8) { "with D8" } else { "before D8" },
                     run.files_written,
                     run.notices,
-                    run.scans_run,
                     run.scans_applied,
                     millis(run.delivery),
                 ));
@@ -828,40 +874,63 @@ fn editor_typing_latency_under_a_watched_burst() {
         }
     }
     println!("\npaired differences from the control, per round (p95 of the keystroke total):");
-    let mut idle_diffs = Vec::new();
-    let mut burst_diffs = Vec::new();
+    let mut d8_cost = Vec::new();
     for (round, row) in p95.iter().enumerate() {
-        let idle = row[1] - row[0];
-        let burst = row[2] - row[0];
-        idle_diffs.push(idle);
-        burst_diffs.push(burst);
         println!(
-            "round {}: control {:.3} ms; watched-idle {:+.3} ms; watched-burst {:+.3} ms",
+            "round {}: control {:.3} ms; watched-idle {:+.3}; burst before D8 {:+.3}; burst with D8 {:+.3}; D8 cost (with minus before) {:+.3} ms",
             round + 1,
             row[0],
-            idle,
-            burst
+            row[1] - row[0],
+            row[2] - row[0],
+            row[3] - row[0],
+            row[3] - row[2],
         );
+        d8_cost.push(row[3] - row[2]);
     }
     let median = |values: &[f64]| {
         let mut sorted = values.to_vec();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        sorted[sorted.len() / 2]
+        (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
     };
     println!(
-        "median of the six rounds: watched-idle {:+.3} ms, watched-burst {:+.3} ms against the control",
-        median(&idle_diffs),
-        median(&burst_diffs)
-    );
-    println!(
-        "the control's p99 per round: {:.3?} ms",
-        p99.map(|row| row[0])
-    );
-    println!(
-        "the burst's p99 per round: {:.3?} ms",
-        p99.map(|row| row[2])
+        "median D8 cost over the four rounds (p95, with minus before): {:+.3} ms",
+        median(&d8_cost)
     );
     for note in burst_notes {
         println!("watch, {note}");
     }
+}
+
+/// Diagnostic for the D8 measurement: one run of the burst with the open document rewritten, printing
+/// where the time goes. Not a figure; run by hand to explain one.
+///
+/// `cargo test --release -p tekstide d8_burst_diagnostic -- --ignored --nocapture`
+#[test]
+#[ignore = "a diagnostic, run by hand to explain a D8 figure"]
+fn d8_burst_diagnostic() {
+    let text = fixture_text();
+    let width = 880.0;
+    let (mut state, dir) = state_with_an_open_document("editor-d8-diagnostic", &text);
+    state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
+    let document = std::fs::canonicalize(dir.join("file.txt")).unwrap();
+    let run = keystrokes_under_a_watched_burst(
+        &mut state,
+        1_000,
+        std::time::Duration::from_millis(1),
+        30,
+        width,
+        true,
+        Some((document, text.clone())),
+    );
+    println!(
+        "loop {:.1} ms; after the burst finished {:.1} ms; keystrokes {}; notices {} ({} after the burst); scans run {}, applied {}; delivery {:.1} ms",
+        millis(run.elapsed),
+        millis(run.after_burst),
+        run.stages.len(),
+        run.notices,
+        run.notices_after_burst,
+        run.scans_run,
+        run.scans_applied,
+        millis(run.delivery),
+    );
 }

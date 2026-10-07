@@ -180,6 +180,17 @@ impl TextDocument {
                         TextDocumentState::Dirty
                     }
                 }
+                // RFC-026 D8: the disk changed under a clean document, so text that differs from
+                // what was opened is local work the disk does not have, which is a conflict. Text
+                // back at the opened content has nothing local, so the external change stands. A
+                // `Conflict` is not cleared this way: it needs its own resolution (RFC-057).
+                TextDocumentState::ExternalChanged => {
+                    if self.last_known_snapshot.matches_content(&self.text) {
+                        TextDocumentState::ExternalChanged
+                    } else {
+                        TextDocumentState::Conflict
+                    }
+                }
                 other => other,
             };
         }

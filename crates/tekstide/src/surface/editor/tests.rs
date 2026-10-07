@@ -544,7 +544,7 @@ fn chrome_line_reports_clean_for_a_freshly_opened_document() {
     let document = open(&sandbox, "readme.md");
 
     assert_eq!(document.state(), TextDocumentState::Clean);
-    let line = chrome_line(&real_catalog(), &document);
+    let line = chrome_line(&real_catalog(), &document, &ProjectContentStatus::Opened);
     assert!(line.contains("readme.md"));
     assert!(!line.contains("unsaved"));
     assert!(!line.contains("changed on disk"));
@@ -582,7 +582,7 @@ fn chrome_line_escapes_a_bidi_override_in_the_path() {
     sandbox.write_file("proj\u{202E}gpj.exe", "content");
     let document = open(&sandbox, "proj\u{202E}gpj.exe");
 
-    let line = chrome_line(&real_catalog(), &document);
+    let line = chrome_line(&real_catalog(), &document, &ProjectContentStatus::Opened);
 
     assert!(
         line.contains("<U+202E>"),
@@ -1130,5 +1130,38 @@ fn cursor_line_renders_line_one_column_one_for_a_freshly_opened_document() {
     assert!(
         !line.contains('0'),
         "must render 1-indexed, not 0-indexed: {line:?}"
+    );
+}
+
+/// RFC-026 D8: a deleted file is named as deleted, not as changed, and the header says the text was
+/// not reloaded. The workspace status is what tells the two apart, since the document's own state is
+/// `ExternalChanged` for both. The changed wording is checked against the catalog entry it comes from,
+/// because a real changed document reaches that state through the core's refresh (its own test).
+#[test]
+fn the_header_names_a_deleted_file_apart_from_a_changed_one_and_says_nothing_was_reloaded() {
+    let sandbox = Sandbox::new("header-external");
+    sandbox.write_file("readme.md", "hello");
+    let document = open(&sandbox, "readme.md");
+    let catalog = real_catalog();
+
+    let deleted = chrome_line(&catalog, &document, &ProjectContentStatus::ExternalDeleted);
+    assert!(
+        deleted.contains("deleted on disk, not reloaded"),
+        "{deleted}"
+    );
+    assert!(!deleted.contains("changed on disk"), "{deleted}");
+
+    let changed = catalog.get_with_args(
+        "editor-chrome",
+        &crate::i18n::CatalogArgs::new()
+            .untrusted(
+                "path",
+                &tekstide_core::text_safety::quote_untrusted("readme.md"),
+            )
+            .trusted_symbol("state", "external-changed"),
+    );
+    assert!(
+        changed.contains("changed on disk, not reloaded"),
+        "{changed}"
     );
 }

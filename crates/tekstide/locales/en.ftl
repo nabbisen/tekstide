@@ -735,7 +735,8 @@ browse-dialog-choose-button = Open this folder
 # `TextDocumentState`, never the label function's own English word.
 editor-chrome = { $path }{ $state ->
     [dirty] {" (unsaved changes)"}
-    [external-changed] {" (changed on disk)"}
+    [external-changed] {" (changed on disk, not reloaded)"}
+    [external-deleted] {" (deleted on disk, not reloaded)"}
     [conflict] {" (conflict)"}
     [save-error] {" (save error)"}
    *[clean] {""}

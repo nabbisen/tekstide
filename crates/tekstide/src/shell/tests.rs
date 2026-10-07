@@ -20218,6 +20218,7 @@ fn a_stopped_watch_says_so_in_the_sidebar_and_gives_up_two_rows() {
             watcher: tekstide_core::project::ProjectWatcher::unavailable(
                 tekstide_core::project::WatchRefusal::new("the platform refused"),
             ),
+            document_touched: false,
         },
     );
     super::reconcile_project_watch(&mut state, &project_id);
@@ -20392,4 +20393,73 @@ fn a_project_open_before_the_state_is_built_is_watched_from_the_start() {
         1,
         "the root is watched"
     );
+}
+
+/// RFC-026 D8: an external change to the open document reaches it on the next drain, through the
+/// watcher's notice, and the document keeps its text. Nothing is reloaded silently.
+#[test]
+fn an_external_change_to_the_open_document_reaches_it_without_a_silent_reload() {
+    let (mut state, dir) = state_with_an_open_document("d8-external-change", "hello\n");
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+    let generation = state.project_watches[&project_id].generation;
+    let document = std::fs::canonicalize(dir.join("file.txt")).unwrap();
+
+    std::fs::write(&document, "changed on disk\n").unwrap();
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        generation,
+        tekstide_core::project::WatchNotice::Changed(vec![document.clone()]),
+    );
+    std::thread::sleep(tekstide_core::project::SCAN_WINDOW + std::time::Duration::from_millis(50));
+    super::drain_project_watches(&mut state);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert_eq!(
+        project.content_workspace().status(),
+        &tekstide_core::project::ProjectContentStatus::ExternalChanged,
+        "the notice reached the document on the drain"
+    );
+    assert_eq!(
+        active_document_text(&state),
+        "hello\n",
+        "the document's text is not replaced: no silent reload"
+    );
+}
+
+/// RFC-026 D8: a deleted open file reaches the document as its own state, `ExternalDeleted`, and
+/// its text is kept.
+#[test]
+fn a_deleted_open_document_reports_itself_and_keeps_its_text() {
+    let (mut state, dir) = state_with_an_open_document("d8-external-delete", "hello\n");
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project_id()
+        .cloned()
+        .unwrap();
+    let generation = state.project_watches[&project_id].generation;
+    let document = std::fs::canonicalize(dir.join("file.txt")).unwrap();
+
+    std::fs::remove_file(&document).unwrap();
+    super::record_project_watch_notice(
+        &mut state,
+        &project_id,
+        generation,
+        tekstide_core::project::WatchNotice::Changed(vec![document.clone()]),
+    );
+    std::thread::sleep(tekstide_core::project::SCAN_WINDOW + std::time::Duration::from_millis(50));
+    super::drain_project_watches(&mut state);
+
+    let project = state.app_shell.state().project(&project_id).unwrap();
+    assert_eq!(
+        project.content_workspace().status(),
+        &tekstide_core::project::ProjectContentStatus::ExternalDeleted
+    );
+    assert_eq!(active_document_text(&state), "hello\n");
 }

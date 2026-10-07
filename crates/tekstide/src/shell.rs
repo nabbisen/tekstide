@@ -7100,6 +7100,9 @@ fn git_summary_subscription(
 struct ProjectWatch {
     generation: u64,
     watcher: tekstide_core::project::ProjectWatcher,
+    /// RFC-026 D8: the active document's file was named by a notice (or events may have been
+    /// lost), so the next drain tick asks the document whether it changed on disk.
+    document_touched: bool,
 }
 
 /// Brings one open project's watches to its desired set (RFC-026 D1, D7). Called only
@@ -7122,6 +7125,7 @@ fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::projec
             ProjectWatch {
                 generation,
                 watcher: tekstide_core::project::ProjectWatcher::open(),
+                document_touched: false,
             },
         );
     }
@@ -7140,6 +7144,12 @@ fn record_project_watch_notice(
     generation: u64,
     notice: tekstide_core::project::WatchNotice,
 ) {
+    let document_path = state
+        .app_shell
+        .state()
+        .project(project_id)
+        .and_then(|project| project.content_workspace().active_document())
+        .map(|document| document.target().canonical_path.clone());
     let Some(watch) = state.project_watches.get_mut(project_id) else {
         return;
     };
@@ -7149,9 +7159,16 @@ fn record_project_watch_notice(
     let now = std::time::Instant::now();
     match notice {
         tekstide_core::project::WatchNotice::Changed(paths) => {
+            if document_path.is_some_and(|path| paths.contains(&path)) {
+                watch.document_touched = true;
+            }
             watch.watcher.record_changed_paths(&paths, now);
         }
-        tekstide_core::project::WatchNotice::Failed => watch.watcher.record_all_watched(now),
+        tekstide_core::project::WatchNotice::Failed => {
+            // Events may have been lost, so the document is asked about its file too.
+            watch.document_touched = true;
+            watch.watcher.record_all_watched(now);
+        }
     }
 }
 
@@ -7170,6 +7187,21 @@ fn drain_project_watches(state: &mut State) {
     for (project_id, directory) in due {
         if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
             project.request_explorer_rescan(&directory);
+        }
+    }
+    // RFC-026 D8: the active document is asked once per tick, and only when a notice named its
+    // file. The core's refresh keeps the document's text: a changed file marks the document, a
+    // deleted one reports itself, and nothing is reloaded.
+    let touched: Vec<tekstide_core::project::ProjectId> = state
+        .project_watches
+        .iter_mut()
+        .filter_map(|(project_id, watch)| {
+            std::mem::take(&mut watch.document_touched).then(|| project_id.clone())
+        })
+        .collect();
+    for project_id in touched {
+        if let Some(project) = state.app_shell.state_mut().project_mut(&project_id) {
+            let _ = project.refresh_active_text_document();
         }
     }
 }

@@ -50,10 +50,19 @@ impl WatchEvents {
     /// Blocks until the platform reports one thing, and returns it. `None` once the owning
     /// [`ProjectWatcher`] has been dropped, which is when the project closed, so the caller
     /// stops waiting for good.
+    ///
+    /// An access event is not a change, and is not returned. notify subscribes to `OPEN` on
+    /// every watched directory, so reading a watched file reports itself. The document refresh
+    /// reads its own file, so without this filter every refresh would be answered by a notice
+    /// that asks for another refresh (RFC-026 D8, found by the burst measurement: 239 root scans
+    /// in two minutes).
     pub fn wait_for_notice(&mut self) -> Option<WatchNotice> {
-        match self.receiver.recv().ok()? {
-            Ok(event) => Some(WatchNotice::Changed(event.paths)),
-            Err(_) => Some(WatchNotice::Failed),
+        loop {
+            match self.receiver.recv().ok()? {
+                Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => continue,
+                Ok(event) => return Some(WatchNotice::Changed(event.paths)),
+                Err(_) => return Some(WatchNotice::Failed),
+            }
         }
     }
 }

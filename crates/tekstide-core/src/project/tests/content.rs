@@ -101,3 +101,117 @@ fn a_dirty_document_saved_over_a_real_external_change_still_reports_conflict() {
 
     cleanup_root(root);
 }
+
+/// RFC-026 D8: a clean open document whose file is deleted on disk reports `ExternalDeleted`, and
+/// its text is kept as it was. Nothing is reloaded, and the deletion is a state the product can say.
+#[test]
+fn a_clean_document_whose_file_is_deleted_reports_external_deleted_and_keeps_its_text() {
+    let root = test_root("content-deleted-external");
+    std::fs::write(root.join("note.txt"), "original\n").expect("fixture file should be written");
+    let mut project = project_at(&root);
+    project
+        .open_text_document("note.txt")
+        .expect("a clean document should open");
+
+    std::fs::remove_file(root.join("note.txt")).expect("external delete should succeed");
+    project
+        .refresh_active_text_document()
+        .expect("a refresh of a deleted file is a decision, not an error");
+
+    let document = project.content_workspace().active_document().unwrap();
+    assert_eq!(
+        document.text(),
+        "original\n",
+        "a deletion reloads nothing and keeps the text"
+    );
+    assert_eq!(
+        project.content_workspace().status(),
+        &ProjectContentStatus::ExternalDeleted,
+        "a file that is gone is reported as deleted, not as changed"
+    );
+    cleanup_root(root);
+}
+
+/// RFC-026 D8: an unsaved edit survives an external change. A dirty document whose file changes on
+/// disk is in `Conflict`, and its local edit is still there: no silent reload, nothing discarded.
+#[test]
+fn a_dirty_document_keeps_its_edit_when_the_file_changes_on_disk() {
+    let root = test_root("content-dirty-external-keeps-edit");
+    std::fs::write(root.join("note.txt"), "original\n").expect("fixture file should be written");
+    let mut project = project_at(&root);
+    project
+        .open_text_document("note.txt")
+        .expect("a clean document should open");
+    project
+        .replace_active_text("local original\n")
+        .expect("a local edit on the open document");
+
+    std::fs::write(root.join("note.txt"), "external\n").expect("external write should succeed");
+    project
+        .refresh_active_text_document()
+        .expect("a refresh is a decision");
+
+    let document = project.content_workspace().active_document().unwrap();
+    assert_eq!(document.state(), TextDocumentState::Conflict);
+    assert!(
+        document.text().starts_with("local "),
+        "the unsaved edit is kept, not replaced by the disk's version: {:?}",
+        document.text()
+    );
+    cleanup_root(root);
+}
+
+/// RFC-026 D8, found while designing the burst measurement: a clean document that the disk changed
+/// under is `ExternalChanged`, and an edit made after that is local work the disk does not have. It
+/// must be a `Conflict`, so a later refresh and the save dialog both know there is something to lose.
+/// It was left as `ExternalChanged`, which reads as "nothing local to lose".
+#[test]
+fn an_edit_made_after_an_external_change_is_a_conflict_not_a_clean_change() {
+    let root = test_root("content-edit-after-external");
+    std::fs::write(root.join("note.txt"), "original\n").expect("fixture file should be written");
+    let mut project = project_at(&root);
+    project
+        .open_text_document("note.txt")
+        .expect("a clean document should open");
+
+    std::fs::write(root.join("note.txt"), "external\n").expect("external write should succeed");
+    project
+        .refresh_active_text_document()
+        .expect("a refresh is a decision");
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::ExternalChanged
+    );
+
+    project
+        .replace_active_text("local edit\n")
+        .expect("an edit on the open document");
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::Conflict,
+        "the edit is local work the disk does not have, so it is a conflict"
+    );
+
+    // A conflict is cleared by its own resolution, not by undoing the text back to what was opened.
+    project
+        .replace_active_text("original\n")
+        .expect("the edit undone back to the opened text");
+    assert_eq!(
+        project
+            .content_workspace()
+            .active_document()
+            .unwrap()
+            .state(),
+        TextDocumentState::Conflict,
+        "a conflict is not cleared just because the text coincides with what was opened"
+    );
+    cleanup_root(root);
+}

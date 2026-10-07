@@ -1006,3 +1006,52 @@ fn the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses()
     drop(watcher);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// RFC-026 D8, found by the burst measurement: notify reports opens on a watched directory, so a
+/// read of a watched file is an event. It is not a change, and must not reach the feed, or the
+/// document's own refresh would be answered by a notice asking for another refresh. A write is.
+#[test]
+fn reading_a_watched_file_is_not_reported_but_writing_it_is() {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    let directory = Path::new("/dev/shm/tekread-watched");
+    let _ = std::fs::remove_dir_all(directory);
+    std::fs::create_dir_all(directory).unwrap();
+    let file = directory.join("note.txt");
+    std::fs::write(&file, "original\n").unwrap();
+
+    let mut watcher = super::ProjectWatcher::open();
+    watcher.reconcile(
+        &BTreeSet::from([WatchedDirectory::for_test(directory)]),
+        Vec::new(),
+    );
+    let mut events = watcher.events().unwrap().take().unwrap();
+    let (sender, notices) = channel();
+    std::thread::spawn(move || {
+        while let Some(notice) = events.wait_for_notice() {
+            if sender.send(notice).is_err() {
+                break;
+            }
+        }
+    });
+
+    for _ in 0..5 {
+        let _ = std::fs::read(&file).unwrap();
+    }
+    let reported_by_reads =
+        std::iter::from_fn(|| notices.recv_timeout(Duration::from_millis(400)).ok()).count();
+    assert_eq!(reported_by_reads, 0, "reads are not changes");
+
+    std::fs::write(&file, "changed\n").unwrap();
+    let reported_by_write = (0..20).any(|_| {
+        matches!(
+            notices.recv_timeout(Duration::from_millis(200)),
+            Ok(super::WatchNotice::Changed(paths)) if paths.contains(&file)
+        )
+    });
+    assert!(reported_by_write, "the write is reported, with its path");
+
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(directory);
+}

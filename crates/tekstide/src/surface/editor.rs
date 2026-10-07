@@ -45,7 +45,18 @@ fn document_state_symbol(state: TextDocumentState) -> &'static str {
 /// `text_document_state_label`'s own English word). Factored out from
 /// [`view`] for the same testability reason `surface::explorer::node_line`
 /// is -- directly testable without `iced`.
-pub(crate) fn chrome_line(catalog: &Catalog, document: &TextDocument) -> String {
+pub(crate) fn chrome_line(
+    catalog: &Catalog,
+    document: &TextDocument,
+    status: &ProjectContentStatus,
+) -> String {
+    // RFC-026 D8: a file that is gone is named as gone, not as changed. The document's own state
+    // is `ExternalChanged` for both, so the workspace status is what tells them apart.
+    let state = if matches!(status, ProjectContentStatus::ExternalDeleted) {
+        "external-deleted"
+    } else {
+        document_state_symbol(document.state())
+    };
     let path = text_safety::quote_untrusted(
         &document
             .target()
@@ -57,7 +68,7 @@ pub(crate) fn chrome_line(catalog: &Catalog, document: &TextDocument) -> String 
         "editor-chrome",
         &CatalogArgs::new()
             .untrusted("path", &path)
-            .trusted_symbol("state", document_state_symbol(document.state())),
+            .trusted_symbol("state", state),
     )
 }
 
@@ -809,7 +820,7 @@ pub fn view<'a, Message: 'a + Clone>(
                 on_body_measured,
             );
             let mut chrome: Vec<Element<'a, Message>> = vec![
-                text(chrome_line(catalog, document))
+                text(chrome_line(catalog, document, status))
                     .size(theme.font_size_body())
                     .into(),
                 text(cursor_line(catalog, document))

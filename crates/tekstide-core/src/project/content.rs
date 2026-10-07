@@ -363,6 +363,13 @@ impl ProjectContentWorkspace {
                         ProjectContentStatus::Edited
                     }
                     ExternalChangeDecision::Unchanged => ProjectContentStatus::Opened,
+                    // RFC-026 D8: a file that is gone is a state the product can say, distinct
+                    // from one that changed. The document's text is kept either way.
+                    ExternalChangeDecision::ExternalChanged | ExternalChangeDecision::Conflict
+                        if !document.target().canonical_path.exists() =>
+                    {
+                        ProjectContentStatus::ExternalDeleted
+                    }
                     ExternalChangeDecision::ExternalChanged => {
                         ProjectContentStatus::ExternalChanged
                     }
@@ -492,13 +499,25 @@ pub enum ProjectContentStatus {
     Empty,
     Opened,
     Edited,
-    Saved { decision: SaveDecision },
+    Saved {
+        decision: SaveDecision,
+    },
     ExternalChanged,
+    /// RFC-026 D8: the open file was deleted on disk. Its text is kept, and nothing is reloaded.
+    ExternalDeleted,
     Conflict,
-    OpenError { message: String },
-    EditError { message: String },
-    SaveError { message: String },
-    RefreshError { message: String },
+    OpenError {
+        message: String,
+    },
+    EditError {
+        message: String,
+    },
+    SaveError {
+        message: String,
+    },
+    RefreshError {
+        message: String,
+    },
 }
 
 impl ProjectContentStatus {
@@ -509,6 +528,7 @@ impl ProjectContentStatus {
             Self::Edited => "edited",
             Self::Saved { .. } => "saved",
             Self::ExternalChanged => "external changed",
+            Self::ExternalDeleted => "external deleted",
             Self::Conflict => "conflict",
             Self::OpenError { .. } => "open error",
             Self::EditError { .. } => "edit error",
