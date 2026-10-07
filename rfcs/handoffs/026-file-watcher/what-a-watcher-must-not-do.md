@@ -62,6 +62,21 @@ It must not invent a second route to it, and in particular:
 `NFR-REL-005` is the requirement undo was added under. A watcher that discards a user's typing
 because a build touched the file is that same requirement failing, from the other direction.
 
+## 5. It must not react to its own reads
+
+**Found in D8, not merely feared: notify subscribes to `OPEN` on every watched directory.** The
+document refresh reads its own file to decide whether it changed, and that read is itself an event in
+a directory the project watches. Without a filter, each refresh was answered by a notice asking for
+another refresh — the first D8 measurement ran for two minutes after its burst had ended, with 239
+scans where three were expected. The fix drops access events at the consumer (`WatchEvents`), not by
+narrowing the platform subscription, so it holds whatever the platform decides to report.
+
+**The same shape, smaller and not a defect: every save now costs a scan and a whole-file re-read.**
+`write_text_via_temp_rename` writes inside the document's own parent, which is watched whenever that
+document is open. That write is a real, intended change — the filter does not drop it — and the
+refresh it triggers finds the text matches disk and the document stays `Clean`. About 4 ms at the
+3.3 MB fixture, every save, worth naming before someone measures saving and is surprised. (Review 464.)
+
 ## And the one that is not about watching
 
 **`open_buffer_count()` and `dirty_file_count()` are each `u32::from(<one Option>)`**, with one reader

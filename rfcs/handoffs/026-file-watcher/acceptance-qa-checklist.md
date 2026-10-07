@@ -193,33 +193,34 @@ measurement with no number in the evidence is not ticked.
       *(Captured 2026-10-07 from the running app: a file created, deleted and renamed externally in an
       expanded folder appears and disappears with no reopen and no keystroke. `evidence/pr-026-c/`, with a
       README that says what the captures prove and what they do not: latency and bursts are not in them.)*
-- [ ] **An unwatched control runs in the same process, under the same load** (required at review 462).
+- [x] **An unwatched control runs in the same process, under the same load** (required at review 462).
       Watched-idle measured 8.05–8.41 ms against RFC-057's 5.3–6.8 (dev) and 7.876 (reviewer, load
       14.22) on the same fixture — higher, at lower load. An idle watcher is claimed to cost nothing,
       and **nobody can tell**, because the only unwatched figure is from another release on another
       day. Three conditions in one run — unwatched, watched-idle, watched-burst — make the difference
       a difference in the code. Before D8, not after.
+      *(Done: all six orderings of the three conditions run, one round each, so position in the run is
+      balanced rather than hoped-for, and the figure is a paired difference within a round, not an
+      absolute. `evidence/pr-026-c/req-file-004-paired-baseline.md`.)*
 - [x] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
       baseline harness.
-      *(Harness and pre-D8 baseline, with its unwatched control (review 462): `editor_typing_latency_under_a_watched_burst`,
-      three runs of six rounds, one per order of unwatched, watched-idle and watched-burst, in one process. The
-      figure is the paired difference from the control: medians +0.14/+0.29 ms, +0.01/+0.10 ms and
-      −0.04/+0.06 ms (idle/burst). Resolves about half a millisecond at the median; round-to-round spread is
-      ±1 to 2 ms on a quiet machine. Run 2 had a load spike mid-run, recorded as such.
-      **Unticked on purpose:** a baseline is not the requirement. The box is ticked by the measurement after
-      D8, with the same protocol and both numbers. `evidence/pr-026-c/req-file-004-paired-baseline.md`.)* **Ruled at review 461: two numbers, and the box is ticked by the second.** A
-      pre-D8 baseline, then D8's wiring (which reads a file on the update thread), then a re-measure —
-      without the first, D8's cost is unattributable and "still within budget" cannot be told from
-      "always was". The requirement is a claim about the **shipped** system, so only the post-D8
-      number discharges it.
+      **Ruled at review 461: two numbers, and the box is ticked by the second.** A pre-D8 baseline,
+      then D8's wiring (which reads a file on the update thread), then a re-measure — without the
+      first, D8's cost is unattributable and "still within budget" cannot be told from "always was".
+      The requirement is a claim about the **shipped** system, so only the post-D8 number discharges it.
+      *(Pre-D8 baseline with the unwatched control, three runs of six rounds (review 462):
+      `evidence/pr-026-c/req-file-004-paired-baseline.md`. Post-D8 measurement, four conditions in a 4
+      by 4 Latin square in one frame — unwatched, idle, burst before D8, burst with D8 (review 464): p95
+      ≈8–9 ms and p99 12.0 ms against the 16/33 ms budget, measured four ways in one frame under one
+      load — **that is what discharges the requirement, not the delta between conditions** (review 464's
+      ruling: the box is about the absolute). The deterministic cost to carry forward is **about 4 ms of
+      work between keystrokes, per refreshed document**, from the refresh reading the file; the paired
+      median (+0.72 ms) is noisier than the effect it tries to resolve and is reported as being at the
+      edge of the harness's resolution, not used to tick anything on its own.
+      `evidence/pr-026-c/req-file-004-d8-measurement.md`.)*
 - [ ] *Recorded at 461:* captures use a **fresh `XDG_STATE_HOME`**, not only a fresh project fixture.
       `02-created-externally.png` reads "19 projects" — nothing leaked, since only a count is shown,
       but the same capture of the Project Board would have shown nineteen real paths.
-      *(Measured after D8 with the control in the same frame (review 462's order): one release run, four conditions
-      in a 4 by 4 Latin square, the RFC-057 fixture and keystroke. Median D8 cost on p95 +0.72 ms over four
-      rounds, with a round spread of −7.8 to +2.3 ms; round 3 is a load spike that moved every condition, and is
-      kept but not used. Work between keystrokes rose about 4 ms a burst with D8. Every p95 is inside 16 ms, with
-      and without D8. Ticked on that measurement with its numbers and limits. `evidence/pr-026-c/req-file-004-d8-measurement.md`.)*
 - [ ] **The book names the batching window** (moved here from A at review 450): by this slice a user
       can observe it, so it describes real behaviour rather than an internal constant.
 - [x] Unsaved edits survive an external change; **no silent reload**; a deleted open file is a state
