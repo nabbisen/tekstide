@@ -2,7 +2,7 @@
 
 ## 0.29.0 - The Explorer Keeps Up On Its Own
 
-Status: **scoped 2026-10-07.** `REQ-FILE-003`, `REQ-FILE-004` and `NFR-PERF-007` met and measured. RFC-026
+Status: **released on 2026-10-07.** Published to crates.io (`tekstide-core` and `tekstide`) and tagged `0.29.0` at `e346dfe`. Post-publish: `0.29.0` passes all three checks, and **`0.28.0` still installs** now that a newer core exists. Scoped 2026-10-07: `REQ-FILE-003`, `REQ-FILE-004` and `NFR-PERF-007` met and measured. RFC-026
 is now the watcher alone — the multi-document model it originally covered is **RFC-065**, with its own
 number and its own release, `0.30.0`.
 
