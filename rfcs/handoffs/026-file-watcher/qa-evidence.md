@@ -463,3 +463,27 @@ are the consecutive set.
 **Boxes.** The floor box is ticked on this evidence. The budget box is ticked on the reviewer's ruling at
 review 459 (C3 governs: the sentence says what it means for the user and names no cause). The stale note in
 the scope box about reconciliation not yet being wired is removed.
+
+## Review 460 — slice C, first item: `REQ-FILE-003` captured live
+
+**The capture.** From the running app (`target/debug/tekstide <fixture>`), on a throwaway fixture under
+`/dev/shm` (not `$HOME`). Window id 49, captured with `niri msg action screenshot-window --id 49` and read
+back with `wl-paste --type image/png`, the route in the shared memory. Every key was sent only after
+`niri msg --json focused-window` returned id 49. Expanded `src` with Enter. Then, from outside the app,
+`touch src/appeared.txt`, `rm src/appeared.txt`, and `mv src/main.rs src/renamed.rs`, each followed by a
+3 s wait and a capture. `appeared.txt` showed, then went, and `main.rs` became `renamed.rs`. Evidence and
+the statement of what it does not prove: `rfcs/handoffs/026-file-watcher/evidence/pr-026-c/`.
+
+**Not proved by it.** Latency (a 3 s wait, not a measurement), bursts, and open documents (the explorer
+updates; an open file's content does not, which is the next slice-C item).
+
+**A defect found while preparing the capture.** A project opened from the command line is open before
+`State` exists, so it never reaches the add-project arms that run the project-open reconcile. Its root was
+unwatched until a folder was toggled. The retention cleanup has the same boot-time shape (RFC-049 D2, found
+by a live walkthrough). Fixed by `reconcile_project_watches_for_open_projects`, called from `State::new`
+beside it. Test: `a_project_open_before_the_state_is_built_is_watched_from_the_start`, which failed before the
+fix. The capture itself did not depend on the fix, since expanding `src` placed its watch; the fix matters
+for changes in the root folder, which the capture did not exercise.
+
+**Gate.** fmt and clippy clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`:
+each `1810 passed, 0 failed, 5 ignored`, 0 entries left, load 12 to 16.

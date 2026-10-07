@@ -188,8 +188,11 @@ measurement with no number in the evidence is not ticked.
       the `.max(1)` in one expression, the floor last. The shell passes the extra lines and no longer subtracts. `the_stopped_sentence_never_takes_a_short_sidebar_to_no_rows` sweeps
       heights 0–2000 and pins 160 px, where the window is one row: it keeps one. Ablation: the floor
       removed from `rows_that_fit` fails it.)*
-- [ ] **`REQ-FILE-003` captured live**: a file created in an expanded folder appears without the user
+- [x] **`REQ-FILE-003` captured live**: a file created in an expanded folder appears without the user
       reopening it.
+      *(Captured 2026-10-07 from the running app: a file created, deleted and renamed externally in an
+      expanded folder appears and disappears with no reopen and no keystroke. `evidence/pr-026-c/`, with a
+      README that says what the captures prove and what they do not: latency and bursts are not in them.)*
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
       baseline harness.
 - [ ] **The book names the batching window** (moved here from A at review 450): by this slice a user
