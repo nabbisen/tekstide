@@ -138,13 +138,13 @@ of `rfcs/handoffs/test-process-leak.md`. Scheduled before the `0.30.0` candidate
 - [x] **A partial save-all says which files were written and which were not.** Proved on real
       files on disk, one document blocked by a real external deletion, at both the core and
       shell levels (real key routing) -- `qa-evidence.md`.
-- [x] Each save is the existing temp-and-rename path; N saves cost N watcher notices, and the
-      changelog says so. `save_all_documents` calls the identical `document.save(root, policy)`
-      method `save_active_document` already does, per document -- a structural fact, not a new
-      measurement, stated in `CHANGELOG.md`'s own `## 0.30.0` entry. A dedicated real-kernel
-      notice-count test was considered and not written, to avoid the exact class of timing
-      flakiness this session's own flake-register work (rows 2/5) just fixed elsewhere;
-      reasoning disclosed in `qa-evidence.md`.
+- [x] Each save is the existing temp-and-rename path, but only for a *dirty* document: `save()`
+      returns `Ok(SaveDecision::Saved)` for a clean one from an early return before
+      `write_text_via_temp_rename` is ever reached, so a save-all over N open documents costs the
+      watcher one notice per dirty document actually written, not N -- review 477's own finding,
+      measured directly rather than inferred. `CHANGELOG.md`'s `## 0.30.0` entry is corrected to say
+      so, and a core-level test (`a_clean_document_in_the_open_set_succeeds_without_being_rewritten`)
+      proves it on a real file's mtime; reasoning in `qa-evidence.md`.
 
 - [x] **The changelog carries the per-document refresh figure** (review 470): `CHANGELOG.md` now has
       a `## 0.30.0` entry, `Status: in progress`, answering `0.29.0`'s own open question directly —
@@ -158,7 +158,7 @@ Save-all's write path, its partial-failure reporting, the chord and the bookkeep
 and the gate reproduces on my own run (`738 + 16 + 1088`). But the one claim the slice chose *not*
 to test is false, and it is stated in three places.
 
-- [ ] **"N saves cost N watcher notices" is wrong, and the changelog says it.** A clean document is
+- [x] **"N saves cost N watcher notices" is wrong, and the changelog says it.** A clean document is
   never written: `content/document.rs`'s `save` returns `Ok(SaveDecision::Saved)` from an early
   `if !self.is_dirty()` return, *before* `write_text_via_temp_rename`. I measured it — two open
   documents, one edited, one untouched: `written_count()` reported **2**, and the untouched file's
@@ -167,17 +167,17 @@ to test is false, and it is stated in three places.
   *relative* half of the changelog sentence is right (it is the same as N separate `Ctrl+S`
   presses); the absolute "N scans and N re-reads of the files just written" is not. Fix the
   sentence in `CHANGELOG.md`, and untick the PR-065-D box that asserts it.
-- [ ] **`was_written`, `written_count` and `all_written` do not mean written.** All three rest on
+- [x] **`was_written`, `written_count` and `all_written` do not mean written.** All three rest on
   `matches!(self.result, Ok(SaveDecision::Saved))`, which is true for a document that was never
   touched. The user-facing string is defensible — a clean document *is* saved — but the identifiers
   and the changelog both say *written*, and that is the word that made the claim above look true.
   **Recommended: rename the three accessors; do not widen `SaveDecision`** for this. The enum is
   shared with the single-save path and the user does not need "1 written, 4 already saved"; what
   the user needs is that the summary is not read as a count of files touched.
-- [ ] **No test puts a clean document in the open set.** Both core tests edit every document before
+- [x] **No test puts a clean document in the open set.** Both core tests edit every document before
   saving, which is why this survived. Add one that leaves a document clean and asserts the file is
   not rewritten — mtime, as above, is enough — and that the reporting about it is truthful.
-- [ ] **A live capture is required after all.** Your reading of the wording is accurate: PR-065-D's
+- [x] **A live capture is required after all.** Your reading of the wording is accurate: PR-065-D's
   boxes do not say "captured live" the way PR-065-C's did, so this is me adding a requirement, not
   you missing one. Two reasons it is not ceremony here. This slice ships **the first visible control
   in RFC-065** — a "Save All" button and a multi-line notice — and no capture has ever shown either.

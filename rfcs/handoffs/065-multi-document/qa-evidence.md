@@ -470,3 +470,72 @@ call), not speculative.
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - `cargo test --workspace --no-fail-fast`: `738 + 16 + 1088` (+ `0+1+1` doctests), 0 failed.
 - Commits pushed once this gate was green.
+
+## Review 477: the watcher-notice claim was false, and the naming is what hid it
+
+Independently verified before touching anything: `TextDocument::save` (`content/document.rs`)
+returns `Ok(SaveDecision::Saved)` from an `if !self.is_dirty()` early return, *before*
+`write_text_via_temp_rename` is ever reached. The architect measured this directly (two open
+documents, one edited, one untouched: `written_count() == 2`, untouched file's mtime
+unchanged) rather than inferring it -- the review's own finding reproduces exactly on reading
+the function.
+
+**Fix 1: the false claim, in both places it was written.** `CHANGELOG.md`'s `## 0.30.0` save-all
+paragraph claimed "an N-document save-all costs the watcher the same N scans and N re-reads of
+the files just written that N separate single saves always would have." Rewritten: the cost is
+one scan and one re-read per document that was *dirty* when the action was pressed, not per
+document attempted -- a mostly-clean save-all (one edited document among many open) costs the
+watcher the same single notice one `Ctrl+S` on that one document already would have. The
+PR-065-D checklist box asserting the old claim is corrected to state the dirty-only cost
+directly, citing the new clean-document test (fix 3) as its evidence.
+
+**Fix 2: `was_written`/`written_count`/`all_written` renamed, `SaveDecision` left alone.** All
+three were `matches!(result, Ok(SaveDecision::Saved))`, true for a document nothing touched --
+the word "written" is what made fix 1's claim look true when it was written down. Renamed to
+`succeeded`/`succeeded_count`/`all_succeeded` (`crates/tekstide-core/src/project/content.rs`),
+with each accessor's own doc comment now stating directly that `Ok(Saved)` is not proof of a
+write and citing this review by number. `SaveDecision` itself is unchanged, per the review's own
+instruction -- the user does not need "1 written, 4 already saved," only a name that does not
+imply a write that did not happen. Call sites updated: `editor.rs`'s `save_all_notice_lines`
+(plus its own doc comment), the Fluent key `editor-save-all-summary`'s `$written` ->
+`$succeeded` (`en.ftl`), the i18n completeness registration in `enforcement.rs`'s
+`generic_args()`, and the two renamed-method call sites each in
+`crates/tekstide-core/src/project/tests/content.rs` and
+`crates/tekstide/src/shell/tests.rs`. The rendered English text itself is unchanged ("Save all:
+N of M saved") -- only the internal identifier and Fluent variable name changed, consistent with
+the review's own ruling that the user-facing "saved" wording is defensible.
+
+**Fix 3: a test that leaves a document clean.**
+`a_clean_document_in_the_open_set_succeeds_without_being_rewritten`
+(`crates/tekstide-core/src/project/tests/content.rs`): two documents, one edited, one never
+touched after opening; `save_all_documents` called once. Asserts `all_succeeded()` (true -- the
+clean document's own `save()` still returns `Ok(Saved)`), `succeeded_count() == 2`, the clean
+document's own file **mtime is unchanged** (`std::fs::metadata(...).modified()`, compared before
+and after, the same technique `a_found_transcript_takes_its_age_from_its_mtime` already uses in
+`project/tests/loading.rs`), and its content on disk is still the original text -- the
+deterministic, no-timing test the review said would have caught this, in contrast to the
+real-kernel notice-count test that was rightly declined.
+
+**Fix 4: a live capture, specifically the misleading case.** `evidence/pr-065-d/` (new): a
+throwaway `/dev/shm` fixture, two documents opened, only the first edited, `Ctrl+Shift+S`
+pressed once. The notice reads **"Save all: 2 of 2 saved"** with the second document never
+touched -- captured on screen, then proved false-looking-but-true on disk: `stat` mtimes taken
+immediately before and after show the first document's mtime advancing and the second's
+byte-identical, with the second file's content on disk unchanged. This is the first capture in
+RFC-065 to show the "Save All" button and the save-all notice at all, and the first to show the
+exact case the review named. Full sequence and the on-disk proof are in that folder's own
+`README.md`.
+
+**Scope decision 2 (declining a real-kernel notice-count test), accepted in part, nothing
+further required.** The review's own ruling was that declining a *timing* test was right, and
+the error was concluding no test at all was needed; fix 3 is the deterministic test that closes
+that gap. No new real-kernel test was added, consistent with the review's own ruling that one
+was not being asked for.
+
+## Gate, review 477's fixes
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**:
+  `738 + 16 + 1089` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left in each run's own
+  `TMPDIR` afterward.
+- Commits pushed once this gate was green.
