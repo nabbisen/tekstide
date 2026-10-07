@@ -225,6 +225,28 @@ above already describes, from the other end.
       shape as the filtered-gate rule in `test-process-leak.md`: a green summary that hides what you
       needed to see.
 
+## The Book Against The Changelog
+
+**Added 2026-10-07, after `0.28.0` shipped a contradiction.** Its changelog said *"The editor has undo
+and redo"* and `docs/src/users/what-works-today.md` said *"The editor has no undo."* — same release,
+same tag. The reviewer's verification checks the gate, the archives, the advisories and the
+post-publish install, and read neither document against the other.
+
+Two shapes, both found by the implementer rather than by the gate:
+
+- **A negative claim going stale.** *"The editor has no undo"*, and *"Not built"* still listing a file
+  watcher.
+- **A number drifting.** The keyboard reference printed fifteen chords while the policy held eighteen.
+
+- [ ] For every capability this release's **Added** section names, search
+      `docs/src/users/what-works-today.md` for a claim that it does not exist — *"no X"*, *"There is
+      no X"*, *"Not built"*.
+- [ ] For every count the book states, check it against the thing that holds the count, not against
+      the last edit of the sentence.
+
+The mechanical version is scheduled: `what-works-today.md` carries **no** invariants while the
+configuration page carries three, and that asymmetry is why one drifted and the other did not.
+
 ## Standing Watches
 
 Checked every release, because a watch that depends on someone remembering is not a watch.

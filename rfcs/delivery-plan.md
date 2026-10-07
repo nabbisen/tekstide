@@ -117,6 +117,19 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.34.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker** |
 | `0.35.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
 
+### `what-works-today.md` has no invariants, and it drifted (2026-10-07)
+
+**`0.28.0` shipped its changelog saying "The editor has undo and redo" and its book saying "The editor
+has no undo."** Same release, same tag, verified against both at `0.28.0`. The configuration page has
+three mechanical invariants — every rebindable action with its chord, every theme role and font key,
+the scrollback cap — and has never drifted. `what-works-today.md` has none, and carried a false
+negative claim for a whole release, plus a chord count stale by three.
+
+The release checklist now carries a directed human step. **The mechanical version is unscheduled:** an
+invariant that cross-checks the book's *"not built"* and *"no X"* claims against what the code
+provides. Written down because the asymmetry — three invariants on one page, none on the other — is
+the whole explanation for which page drifted.
+
 ### The split point, decided 2026-10-07: the watcher ships as `0.29.0`, the document model as `0.30.0`
 
 **RFC-026 named this as a planned option rather than leaving it to be discovered, and the evidence now
