@@ -51,6 +51,19 @@ measurement with no number in the evidence is not ticked.
       is **renamed to say what it now holds**, not deleted — the record that this was once true is
       worth keeping.
 
+### Required at review 469
+
+- [ ] **The N-document ratio is computed on delivery work, not on keystroke p95.** Measured at 469:
+      the ratio reads **1.11×**, but it is taken on p95 keystroke latency, and the refresh runs
+      *between* keystrokes where that figure cannot see it. The harness already prints the right
+      quantity — *"1.3 ms of delivery between keystrokes"* before D8, *"5.4 ms"* with it — and
+      excludes `BurstWithNDocuments` from that line (`editor_baseline.rs:945–947`). Report it, and
+      compute the ratio on it. **If it shows ~1× rather than ~10×, measurement 9 was wrong and that is
+      worth more than the box.**
+- [ ] *(Unblocked at 469:* the release-mode build needs `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`,
+      the setting this project's own review-462 evidence records. 57 errors without it, clean with it.
+      Not an `iced` mismatch.*)*
+
 ## PR-065-C — reaching the second document
 
 - [ ] A switcher, **keyboard-first, reachable, captured live**, no environment variable.
