@@ -38,15 +38,15 @@ measurement with no number in the evidence is not ticked.
 
 ### Required at review 468
 
-- [ ] **Opening a path that is already open switches to the existing entry** rather than adding a
+- [x] **Opening a path that is already open switches to the existing entry** rather than adding a
       second. Today two entries for one path means two documents that both believe they own the file;
       `save_active_document` saves the active one, so the older entry is unreachable — **until slice C
       adds a switcher, at which point saving both in either order silently overwrites one with the
       other.** A lost update the product creates against itself. Lands in **B**, not C: a fix in the
       same slice as the hazard is a race with review.
-- [ ] **The explorer's `[open]` tag marks set membership, not just the active document.** Correctly
+- [x] **The explorer's `[open]` tag marks set membership, not just the active document.** Correctly
       out of scope for A under D2; in scope here, as the visible counterpart to the counts.
-- [ ] When B changes the reopening behaviour, `reopening_an_already_open_path_adds_a_second_entry...`
+- [x] When B changes the reopening behaviour, `reopening_an_already_open_path_adds_a_second_entry...`
       is **renamed to say what it now holds**, not deleted — the record that this was once true is
       worth keeping.
 
