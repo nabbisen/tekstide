@@ -495,6 +495,7 @@ fn keystrokes_under_a_watched_burst(
     pace: std::time::Duration,
     min_keystrokes: usize,
     width: f32,
+    watched: bool,
 ) -> BurstRun {
     use std::sync::mpsc::channel;
     use std::time::{Duration, Instant};
@@ -511,23 +512,31 @@ fn keystrokes_under_a_watched_burst(
         .expect("the project is open")
         .canonical_root_path()
         .clone();
-    let generation = state.project_watches[&project_id].generation;
-    let events = state.project_watches[&project_id]
-        .watcher
-        .events()
-        .expect("notify starts on Linux")
-        .take()
-        .expect("the harness is the one waiter");
-
+    // The unwatched control removes the project's owner first: no watch, no notices, no drains,
+    // no scans. The same keystrokes, the same stages, in the same process.
+    if !watched {
+        state.project_watches.remove(&project_id);
+    }
+    let generation = state
+        .project_watches
+        .get(&project_id)
+        .map_or(0, |watch| watch.generation);
     let (notice_tx, notice_rx) = channel();
-    std::thread::spawn(move || {
-        let mut events = events;
-        while let Some(notice) = events.wait_for_notice() {
-            if notice_tx.send(notice).is_err() {
-                break;
+    if let Some(events) = state
+        .project_watches
+        .get(&project_id)
+        .and_then(|watch| watch.watcher.events())
+        .and_then(|slot| slot.take())
+    {
+        std::thread::spawn(move || {
+            let mut events = events;
+            while let Some(notice) = events.wait_for_notice() {
+                if notice_tx.send(notice).is_err() {
+                    break;
+                }
             }
-        }
-    });
+        });
+    }
 
     let burst = (files > 0).then(|| {
         let root = root.clone();
@@ -578,9 +587,10 @@ fn keystrokes_under_a_watched_burst(
                 },
             );
         }
-        if state.project_watches[&project_id]
-            .watcher
-            .has_pending_scans()
+        if state
+            .project_watches
+            .get(&project_id)
+            .is_some_and(|watch| watch.watcher.has_pending_scans())
             && last_tick.elapsed() >= tekstide_core::project::SCAN_WINDOW
         {
             *last_tick = Instant::now();
@@ -630,9 +640,10 @@ fn keystrokes_under_a_watched_burst(
             // The burst has finished and enough keystrokes are measured: stop typing, and
             // deliver until nothing is left, then stop.
             let idle = !progressed
-                && !state.project_watches[&project_id]
-                    .watcher
-                    .has_pending_scans();
+                && !state
+                    .project_watches
+                    .get(&project_id)
+                    .is_some_and(|watch| watch.watcher.has_pending_scans());
             if idle {
                 let since = *quiet_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= Duration::from_millis(300) {
@@ -668,6 +679,7 @@ fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
         std::time::Duration::from_micros(500),
         5,
         880.0,
+        true,
     );
 
     assert_eq!(run.files_written, 100, "the burst wrote every file");
@@ -682,12 +694,48 @@ fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
     );
 }
 
-/// **REQ-FILE-004's baseline (RFC-026 slice C), before D8.** Keystroke latency on the RFC-057
-/// 100,000-line fixture, the character-at-the-start scenario, measured twice: with the project
-/// watched and nothing happening (the idle watch), and while a 1,000-file burst is written into
-/// the project root at one file a millisecond (the burst). The burst is paced so it stays in flight
-/// across the keystrokes. This is the number D8 is measured against; it does not discharge
-/// `REQ-FILE-004`, which the post-D8 measurement does.
+/// The three conditions of the watched-burst measurement, held in one process under one load.
+#[derive(Clone, Copy, Debug)]
+enum WatchCondition {
+    /// The control: the project's owner removed, so no watch exists at all.
+    Unwatched,
+    /// The project watched, nothing happening.
+    WatchedIdle,
+    /// The project watched while 1,000 files are written into its root.
+    WatchedBurst,
+}
+
+impl WatchCondition {
+    fn description(self) -> &'static str {
+        match self {
+            Self::Unwatched => "unwatched (control)",
+            Self::WatchedIdle => "watched, nothing happening",
+            Self::WatchedBurst => "watched, during a 1,000-file burst",
+        }
+    }
+}
+
+/// The keystroke totals of one run, sorted, in milliseconds.
+fn sorted_totals_ms(stages: &[Stage]) -> Vec<f64> {
+    let mut totals: Vec<f64> = stages
+        .iter()
+        .map(|s| millis(s.update + s.view + s.layout))
+        .collect();
+    totals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    totals
+}
+
+/// **REQ-FILE-004's baseline (RFC-026 slice C), with its control, before D8** (review 462). The
+/// RFC-057 100,000-line fixture, the character-at-the-start keystroke, and three conditions in one
+/// process: unwatched (the control), watched and idle, and watched during a 1,000-file burst written
+/// into the project root at one file a millisecond. The conditions run in three rounds, each round
+/// in a different order, so position in the run is spread across them. Every run is a fresh
+/// project, so none carries another's state.
+///
+/// The figure that matters is the **paired difference** within a round, against the control, not any
+/// one absolute number: everything else is held constant, so the difference is the code's. This
+/// baseline does not discharge `REQ-FILE-004`, which the post-D8 measurement does, with the same
+/// frame and the same control.
 ///
 /// `cargo test --release -p tekstide editor_typing_latency_under_a_watched_burst -- --ignored --nocapture`
 #[test]
@@ -695,51 +743,125 @@ fn the_watched_burst_harness_delivers_the_burst_end_to_end() {
 fn editor_typing_latency_under_a_watched_burst() {
     let text = fixture_text();
     let width = 880.0;
-    let mut out = String::new();
-    out.push_str(&format!(
-        "fixture: {} lines, {} bytes; body font {} px; layout width {} px; keystroke: character at the start\n",
+    // Every order of the three conditions, once: position in the run is balanced exactly.
+    use WatchCondition::{Unwatched as U, WatchedBurst as B, WatchedIdle as I};
+    let orders = [
+        [U, I, B],
+        [U, B, I],
+        [I, U, B],
+        [I, B, U],
+        [B, U, I],
+        [B, I, U],
+    ];
+    println!(
+        "fixture: {} lines, {} bytes; body font {} px; layout width {} px; keystroke: character at the start; budget NFR-PERF-003: p95 <= 16 ms, p99 <= 33 ms",
         FIXTURE_LINES,
         text.len(),
         crate::theme::Theme::default().font_size_body(),
         width
-    ));
-    let idle = {
-        let (mut state, _dir) = state_with_an_open_document("editor-watched-idle", &text);
-        state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
-        for _ in 0..3 {
-            let _ = one_keystroke(&mut state, character("w"), width);
+    );
+    // p95 of the keystroke total, per condition, per round.
+    let mut p95 = [[0.0f64; 3]; 6];
+    let mut p99 = [[0.0f64; 3]; 6];
+    let mut burst_notes = Vec::new();
+    for (round, order) in orders.iter().enumerate() {
+        for &condition in order {
+            let (mut state, _dir) = state_with_an_open_document("editor-watched-round", &text);
+            state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
+            for _ in 0..3 {
+                let _ = one_keystroke(&mut state, character("w"), width);
+            }
+            let run = match condition {
+                WatchCondition::Unwatched => keystrokes_under_a_watched_burst(
+                    &mut state,
+                    0,
+                    std::time::Duration::ZERO,
+                    200,
+                    width,
+                    false,
+                ),
+                WatchCondition::WatchedIdle => keystrokes_under_a_watched_burst(
+                    &mut state,
+                    0,
+                    std::time::Duration::ZERO,
+                    200,
+                    width,
+                    true,
+                ),
+                WatchCondition::WatchedBurst => keystrokes_under_a_watched_burst(
+                    &mut state,
+                    1_000,
+                    std::time::Duration::from_millis(1),
+                    30,
+                    width,
+                    true,
+                ),
+            };
+            let totals = sorted_totals_ms(&run.stages);
+            let index = match condition {
+                WatchCondition::Unwatched => 0,
+                WatchCondition::WatchedIdle => 1,
+                WatchCondition::WatchedBurst => 2,
+            };
+            p95[round][index] = percentile(&totals, 0.95);
+            p99[round][index] = percentile(&totals, 0.99);
+            println!(
+                "round {} {:<36} keystrokes {:>4}  p50 {:>6.3}  p95 {:>6.3}  p99 {:>6.3} ms",
+                round + 1,
+                condition.description(),
+                run.stages.len(),
+                percentile(&totals, 0.50),
+                p95[round][index],
+                p99[round][index],
+            );
+            if matches!(condition, WatchCondition::WatchedBurst) {
+                burst_notes.push(format!(
+                    "round {}: {} files written, {} notices, {} explorer scans run, {} applied, {:.1} ms of delivery between keystrokes",
+                    round + 1,
+                    run.files_written,
+                    run.notices,
+                    run.scans_run,
+                    run.scans_applied,
+                    millis(run.delivery),
+                ));
+            }
         }
-        keystrokes_under_a_watched_burst(&mut state, 0, std::time::Duration::ZERO, 60, width)
+    }
+    println!("\npaired differences from the control, per round (p95 of the keystroke total):");
+    let mut idle_diffs = Vec::new();
+    let mut burst_diffs = Vec::new();
+    for (round, row) in p95.iter().enumerate() {
+        let idle = row[1] - row[0];
+        let burst = row[2] - row[0];
+        idle_diffs.push(idle);
+        burst_diffs.push(burst);
+        println!(
+            "round {}: control {:.3} ms; watched-idle {:+.3} ms; watched-burst {:+.3} ms",
+            round + 1,
+            row[0],
+            idle,
+            burst
+        );
+    }
+    let median = |values: &[f64]| {
+        let mut sorted = values.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted[sorted.len() / 2]
     };
-    out.push_str(&report(
-        "the project watched, nothing happening",
-        &idle.stages,
-    ));
-    let burst = {
-        let (mut state, _dir) = state_with_an_open_document("editor-watched-burst", &text);
-        state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
-        for _ in 0..3 {
-            let _ = one_keystroke(&mut state, character("w"), width);
-        }
-        keystrokes_under_a_watched_burst(
-            &mut state,
-            1_000,
-            std::time::Duration::from_millis(1),
-            30,
-            width,
-        )
-    };
-    out.push_str(&report(
-        "during a 1,000-file burst into the project root, one file a millisecond",
-        &burst.stages,
-    ));
-    out.push_str(&format!(
-        "watch, during the burst: {} files written, {} notices delivered, {} explorer scans run, {} results applied; delivery (the work between keystrokes, not counted in the keystroke figures) {:.1} ms in total\n",
-        burst.files_written,
-        burst.notices,
-        burst.scans_run,
-        burst.scans_applied,
-        millis(burst.delivery),
-    ));
-    println!("{out}");
+    println!(
+        "median of the six rounds: watched-idle {:+.3} ms, watched-burst {:+.3} ms against the control",
+        median(&idle_diffs),
+        median(&burst_diffs)
+    );
+    println!(
+        "the control's p99 per round: {:.3?} ms",
+        p99.map(|row| row[0])
+    );
+    println!(
+        "the burst's p99 per round: {:.3?} ms",
+        p99.map(|row| row[2])
+    );
+    for note in burst_notes {
+        println!("watch, {note}");
+    }
 }

@@ -524,3 +524,33 @@ system, so the box is ticked by the post-D8 measurement, with both numbers repor
 
 **Gate.** fmt and clippy clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed
 `TMPDIR`: each `1811 passed, 0 failed, 6 ignored`, 0 entries left.
+
+## Review 462 — the unwatched control, and the measurement's real resolution
+
+**The harness change.** `editor_typing_latency_under_a_watched_burst` now measures three conditions in one
+process under one load: unwatched (the control: the owner removed, so no watch, notices, drains or scans),
+watched and idle, and watched during a 1,000-file burst. All six orders of the three conditions run, one
+round each, so position in the run is balanced exactly. Idle and control runs take 200 keystrokes; the burst
+runs until it has settled (about 130 during it). The figure is the **paired difference** within a round.
+`keystrokes_under_a_watched_burst` takes a `watched` flag for the control.
+
+**Results** (`evidence/pr-026-c/req-file-004-paired-baseline.md`; p95 of the keystroke total, budget 16 ms):
+
+| run | median paired difference, watched idle | median paired difference, watched during the burst |
+| --- | ---: | ---: |
+| 1 (load 1.4 to 1.7) | +0.142 ms | +0.285 ms |
+| 2 (load 1.5, then a spike to 10.7) | +0.010 ms | +0.104 ms |
+| 3 (load 10.7 to 7.0) | −0.038 ms | +0.055 ms |
+
+The burst's median is at or above the idle median in every run, which is a small, consistent sign and not a
+demonstrated effect. The round-to-round spread is ±1 to 2 ms on a quiet machine, and about ±5 ms through run
+2's load spike, which hit rounds 5 and 6 in both conditions. The control cancels load only while load is steady
+across a round. **So the harness resolves about half a millisecond at the median and no better.** The post-D8
+measurement uses this protocol, and any change it reports is read against that floor.
+
+**Two round-1 and round-4 p99 outliers** (13 ms, run 1) are kept in the record, not removed.
+
+**Gate.** fmt and clippy clean. Three consecutive full-workspace runs, `--no-fail-fast`, short fixed `TMPDIR`: each
+`1811 passed, 0 failed, 6 ignored`, 0 entries left after each. Two defects of my own were caught on the way and
+fixed before the gate counted: a `.label()` call in the harness tripped the crate's source scan (renamed to
+`description()`), and a loop indexing the rounds failed clippy's `needless_range_loop`.

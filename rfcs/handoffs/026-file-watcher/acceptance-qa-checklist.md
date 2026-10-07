@@ -201,10 +201,13 @@ measurement with no number in the evidence is not ticked.
       a difference in the code. Before D8, not after.
 - [ ] **`REQ-FILE-004` measured**: editor keystroke latency under a watched burst, against RFC-057's
       baseline harness.
-      *(Harness and pre-D8 baseline, review 461's order: `editor_typing_latency_under_a_watched_burst`, four
-      runs, p95 8.05–8.41 ms idle and 8.12–8.39 ms during a 1,000-file burst, against NFR-PERF-003's 16 ms.
+      *(Harness and pre-D8 baseline, with its unwatched control (review 462): `editor_typing_latency_under_a_watched_burst`,
+      three runs of six rounds, one per order of unwatched, watched-idle and watched-burst, in one process. The
+      figure is the paired difference from the control: medians +0.14/+0.29 ms, +0.01/+0.10 ms and
+      −0.04/+0.06 ms (idle/burst). Resolves about half a millisecond at the median; round-to-round spread is
+      ±1 to 2 ms on a quiet machine. Run 2 had a load spike mid-run, recorded as such.
       **Unticked on purpose:** a baseline is not the requirement. The box is ticked by the measurement after
-      D8, with both numbers reported. `evidence/pr-026-c/req-file-004-baseline.md`, taken at load 6 to 11.)* **Ruled at review 461: two numbers, and the box is ticked by the second.** A
+      D8, with the same protocol and both numbers. `evidence/pr-026-c/req-file-004-paired-baseline.md`.)* **Ruled at review 461: two numbers, and the box is ticked by the second.** A
       pre-D8 baseline, then D8's wiring (which reads a file on the update thread), then a re-measure —
       without the first, D8's cost is unattributable and "still within budget" cannot be told from
       "always was". The requirement is a claim about the **shipped** system, so only the post-D8

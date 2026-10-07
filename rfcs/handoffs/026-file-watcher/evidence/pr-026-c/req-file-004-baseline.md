@@ -1,4 +1,6 @@
-# REQ-FILE-004 — the pre-D8 baseline (RFC-026 slice C)
+# REQ-FILE-004 — the pre-D8 baseline (RFC-026 slice C) — SUPERSEDED
+
+> Superseded by `req-file-004-paired-baseline.md`, which adds the unwatched control (review 462). Kept as the record of the first four runs, which had no control.
 
 Four runs of `cargo test --release -p tekstide editor_typing_latency_under_a_watched_burst -- --ignored --nocapture`, each with a fresh `XDG_STATE_HOME` under `/dev/shm`, `TMPDIR=/dev/shm/tkrel`, and `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true` (RFC-057's build, needed because the suite's `()` renderer exists only with debug assertions). Commit: 7086d81. rustc: rustc 1.99.0 (b940084d7 2026-09-28). CPU: AMD Ryzen 9 9950X 16-Core Processor, 32 threads.
 
