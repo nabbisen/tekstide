@@ -322,6 +322,52 @@ marker) and the release rule (**B must not reach a release without C**).
       do not depend on it.
 - [ ] **Live capture**, including the changed-on-disk case, not only the easy one.
 
+### Required at review 490 — a demonstrated data-loss defect in D5
+
+- [ ] **A recovered document whose file is over `DEFAULT_MAX_EDITABLE_BYTES` saves over it, and the
+  `Conflict` does not block.** Proven, not reasoned — a scratch test against the real code:
+
+  ```
+  state after recover = Conflict          <- the divergence was detected correctly
+  save SUCCEEDED (Saved)                  <- the conflict did not block it
+  file len after save = 15                <- a 5 MiB file, replaced by the recovered buffer
+  ```
+
+  **Why the guarantee fails.** `recover` stores `last_known_snapshot` as the live snapshot with
+  `content_hash: None`, documented as safe because *"a fresh read's own hash is `Some(_)` whenever
+  the file is within the policy's editable bound"*. Over the bound it is **`None` as well**
+  (`snapshot.rs`: `content_hash` is `None` when `metadata.len() > max_editable_bytes`), so the
+  later comparison finds the snapshots **equal** — and `save` guards only on
+  `current_snapshot != self.last_known_snapshot`, never on `state`. The comment states its own
+  assumption honestly; the assumption is just not always true.
+
+  **Why only recovery reaches it.** The ordinary path cannot: `open_text_document` refuses an
+  oversize file with `TooLarge`, so `last_known_snapshot` always holds a real `Some(hash)`.
+  `recover` never reads the file's content — it uses the recorded text — so it admits a document
+  for a file that could never have been opened, and that is where the asymmetry comes from.
+
+  **The property required, not the implementation**: a recovered document whose file has diverged
+  must never save over that file until the user resolves the conflict, **at any file size**.
+  Guarding `save` on the `Conflict` state would not depend on how a snapshot encodes absence;
+  refusing recovery onto an oversize file (the `recovered_as_missing` shape already used for a
+  directory in the path) would avoid the state entirely. Your choice — but a fix that only widens
+  the sentinel keeps the invariant resting on an encoding detail.
+
+- [ ] **Prove the "no undo history" notice renders**, as you disclosed. The i18n suite proves the key
+  resolves; §3 row 10 needs it on screen. The live capture can carry it.
+- [ ] **The live capture**, including the changed-on-disk case. Deferred on the owner's own
+  instruction about the shared desktop, not an omission — carried here so the slice is not closed
+  without it.
+
+**Accepted:** Amendment 1 is honoured **structurally** — `offer_recovery_for_opened_project` reads
+records and never consults the marker, which is stronger evidence than the fixtures. The defect you
+found yourself (the dedup switch stamping `Opened` over `Conflict`) was found by writing the
+end-to-end test first, which is the order that finds things. The per-project trigger is accepted:
+a global scan would have to name projects nothing has navigated to, and the purge already reaches
+records for a project never reopened. Not implementing the marker's wording role is fine —
+Amendment 1 said *may* colour, and nothing depends on it. Gate reproduces: `750 + 16 + 1115`,
+0 failures, 0 fixture entries.
+
 ## Whole-RFC
 
 - [ ] `REQ-RECOVER-002` and `REQ-RECOVER-005`'s coverage rows updated — and **the "where safe" and
