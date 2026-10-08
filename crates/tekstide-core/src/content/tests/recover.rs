@@ -1,7 +1,7 @@
 use super::{TestSandbox, root_handle, validate};
 use crate::content::{
-    ExternalChangeDecision, RecoveredBufferInit, TextCursor, TextDocument, TextDocumentOpenPolicy,
-    TextDocumentState, TextViewport,
+    DEFAULT_MAX_EDITABLE_BYTES, ExternalChangeDecision, RecoveredBufferInit, TextCursor,
+    TextDocument, TextDocumentOpenPolicy, TextDocumentSaveError, TextDocumentState, TextViewport,
 };
 use crate::project::ProjectId;
 use std::fs;
@@ -127,6 +127,95 @@ fn recovering_a_changed_file_still_reports_changed_on_the_next_refresh() {
         ExternalChangeDecision::Conflict,
         "the divergence recover() found must still be visible to a later refresh, not \
          erased by recover() having just read the same disk state itself"
+    );
+    assert_eq!(document.state(), TextDocumentState::Conflict);
+}
+
+/// RFC-027 PR-027-C, review 490's own found defect (a demonstrated data-loss bug, not a
+/// hypothetical): a recovered document whose real file is over the editable-bytes cap
+/// must never be saved over, even though the recorded-as-changed snapshot and a later
+/// fresh read of that same oversize file share `content_hash: None` (the cap's own
+/// encoding for "too large to hash") and would otherwise compare equal, making `save`'s
+/// own snapshot-equality guard see no divergence at all. The property holds **at any
+/// size**: `save` now refuses unconditionally while `state` is `Conflict`, never only
+/// when the snapshot comparison happens to still disagree -- every stated assumption in
+/// the fix this replaces (`content_hash: None` always mismatches a fresh `Some(_)`) is
+/// exactly what this test is against, per review 490's own instruction.
+#[test]
+fn recovering_an_oversize_changed_file_refuses_to_save_over_it() {
+    let sandbox = TestSandbox::new("text-recover-oversize-conflict");
+    let project_dir = sandbox.create_dir("project");
+    let oversize = vec![b'a'; (DEFAULT_MAX_EDITABLE_BYTES + 1) as usize];
+    let file_path = sandbox.create_file_with_contents("project/big.txt", &oversize);
+    let metadata = fs::metadata(&file_path).unwrap();
+    let root = root_handle(ProjectId::for_test(1), validate(&project_dir));
+
+    // The record's own captured length does not match the real file -- D5's "changed"
+    // case, the same shape `recover_with_changed_disk_file_restores_as_conflict` uses,
+    // just over the cap this time.
+    let mut document = TextDocument::recover(
+        &root,
+        "big.txt",
+        TextDocumentOpenPolicy::linux_mvp(),
+        recovered(
+            "tiny recovered text\n",
+            metadata.modified().unwrap(),
+            metadata.len() + 1,
+        ),
+    )
+    .expect("recovering a changed, oversize file must still succeed as a conflict");
+    assert_eq!(document.state(), TextDocumentState::Conflict);
+
+    let error = document
+        .save(&root, TextDocumentOpenPolicy::linux_mvp())
+        .expect_err("a Conflict document must never save over its own diverged file");
+    assert!(matches!(
+        error,
+        TextDocumentSaveError::ExternalChange { .. }
+    ));
+    assert_eq!(
+        fs::metadata(&file_path).unwrap().len(),
+        oversize.len() as u64,
+        "the real file on disk must be completely untouched by the refused save"
+    );
+}
+
+/// RFC-027 PR-027-C, review 490: the parallel case on the display side -- a `Conflict`
+/// document whose file is over the cap must not be reported `Unchanged` by a later
+/// refresh either, for the identical encoding reason the save-side test above exists.
+/// Unlike the save defect this is not a data-loss bug, but the same root cause: the
+/// mapping from `ExternalChangeDecision::Unchanged` to `ProjectContentStatus` reads
+/// `Edited`, hiding the Reload control for exactly the document that most needs it.
+#[test]
+fn refreshing_an_oversize_conflict_document_stays_conflict() {
+    let sandbox = TestSandbox::new("text-recover-oversize-refresh");
+    let project_dir = sandbox.create_dir("project");
+    let oversize = vec![b'a'; (DEFAULT_MAX_EDITABLE_BYTES + 1) as usize];
+    let file_path = sandbox.create_file_with_contents("project/big.txt", &oversize);
+    let metadata = fs::metadata(&file_path).unwrap();
+    let root = root_handle(ProjectId::for_test(1), validate(&project_dir));
+
+    let mut document = TextDocument::recover(
+        &root,
+        "big.txt",
+        TextDocumentOpenPolicy::linux_mvp(),
+        recovered(
+            "tiny recovered text\n",
+            metadata.modified().unwrap(),
+            metadata.len() + 1,
+        ),
+    )
+    .expect("recovering a changed, oversize file must still succeed as a conflict");
+
+    let decision = document
+        .refresh_external_state(&root, TextDocumentOpenPolicy::linux_mvp())
+        .expect("refreshing an oversize conflict document must not fail");
+
+    assert_eq!(
+        decision,
+        ExternalChangeDecision::Conflict,
+        "a conflict must stay reported once found, not revert to Unchanged just because \
+         an oversize file's own snapshot cannot carry a content hash to disagree with"
     );
     assert_eq!(document.state(), TextDocumentState::Conflict);
 }

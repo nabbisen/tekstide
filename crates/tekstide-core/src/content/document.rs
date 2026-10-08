@@ -428,6 +428,18 @@ impl TextDocument {
             };
 
         if current_snapshot == self.last_known_snapshot {
+            // The same encoding hole `save`'s own guard above exists for: an oversize
+            // file's snapshot is `content_hash: None` regardless of its real content, so
+            // this equality can hold even though the file has not stopped diverging. A
+            // conflict is resolved by an explicit reload (which replaces this whole
+            // struct), never by a refresh that merely finds nothing further has changed
+            // since the divergence was first recorded -- reporting `Unchanged` here would
+            // tell `refresh_document_by_canonical_path`'s own status mapping to show
+            // `Edited` instead of `Conflict`, hiding the Reload control for exactly the
+            // document that most needs it.
+            if self.state == TextDocumentState::Conflict {
+                return Ok(ExternalChangeDecision::Conflict);
+            }
             return Ok(ExternalChangeDecision::Unchanged);
         }
 
@@ -446,6 +458,23 @@ impl TextDocument {
         root: &ProjectRootHandle,
         policy: TextDocumentOpenPolicy,
     ) -> Result<SaveDecision, TextDocumentSaveError> {
+        // Review 490's own found defect: a `Conflict` document whose file is over the
+        // editable-bytes cap has a `last_known_snapshot` with `content_hash: None` --
+        // `TextDocument::recover`'s own, for a file it never read the content of -- and a
+        // *later* fresh read of that same oversize file is `None` too (`policy`'s own
+        // cap), so the snapshot-equality check just below this guard can find the two
+        // equal even though the file genuinely diverged. The property this slice actually
+        // needs ("a recovered document whose file has diverged must never save over it
+        // until the user resolves the conflict") must not depend on how a snapshot
+        // encodes absence -- checked here, structurally, before any disk read at all, so
+        // no snapshot shape can ever bypass it. Ordinary (non-recovered) documents are
+        // unaffected: `open_text_document` already refuses an oversize file outright, so
+        // an ordinary `Conflict` always carries a real hash and this guard is a no-op for
+        // it (the snapshot check below would have blocked it anyway).
+        if self.state == TextDocumentState::Conflict {
+            return Err(self.block_external_change(self.target.clone()));
+        }
+
         let current_target = match self.resolve_current_target(root) {
             Ok(target) => target,
             Err(error) if is_missing_current_target(&error) => {
