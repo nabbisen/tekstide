@@ -181,6 +181,39 @@ RFC-027's, and your test standing in with a stale record against a clean documen
 to work around it rather than through it. Your read of D11's consequence is right too: the close
 trigger will only ever find a record that is stale for some other reason.
 
+### Required at review 486
+
+The measurement fix is right and PR-027-B's numbers now stand up. One required item, which is not
+about this fix.
+
+- [ ] **There is no `## 0.31.0` changelog section, and two slices have closed.** Review 471 ruled
+  the incremental changelog mandatory *because* it is written as each slice closes, and this RFC's
+  own Whole-RFC checklist already carries that line. PR-027-A was arguably nothing to tell a user
+  about; **PR-027-B is not** — it ships a setting, a second Trust Settings figure, a privacy-page
+  section, and the first content this product writes outside a project since transcripts. Start the
+  section now, with B in it. At `0.30.0` the same omission produced a changelog that stated the
+  opposite of the tree for three reviews running.
+- [ ] **Whatever figure reaches that changelog carries the caveat it carries in the evidence.**
+  `0.30.0`'s entry published an extrapolation and labelled it one; the per-document cost here is
+  weaker than that — derived from the ten-document median alone, with the one-document point below
+  resolution — and the changelog must say so rather than inheriting the bare number.
+
+**Not required, worth one line each:**
+
+- The caveat fires on `ratio.abs() > BURST_N * 5.0`, a proxy, when the direct signal is already
+  computed two lines above: **the one-document spread straddling zero** is what makes it noise.
+  A moderately noisy run (ratio ~30×) would skip the caveat and still deserve it.
+- If a twenty-document condition is cheap — `dirty_documents` is already a parameter and the enum
+  has three arms — **measure at the bound instead of extrapolating to it.** Two measurable points
+  would establish the rate D8 asks for rather than assuming it. Only if cheap; the interval
+  decision does not need it.
+
+**The guard that hid the finding is worth naming**, because it will recur in a different shape: a
+numerical guard against a degenerate divisor suppressed the ratio *exactly* on the runs where the
+ratio was the finding. That is the same family as this project's filtered-gate rule — a safety check
+that removes the diagnostic in the one case it matters. You found it yourself; it is recorded here so
+the next harness does not reinvent it.
+
 ## PR-027-C — the offer
 
 - [ ] **Measurement 1 — the offer** lists each recoverable buffer with its project and path, and
