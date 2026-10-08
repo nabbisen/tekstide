@@ -1110,3 +1110,38 @@ product feature with its own decisions, not release tooling, and it does not bel
 
 Scheduled with M14, where it is worth having — a check for updates matters once updating is easy.
 It needs its own RFC when it is scheduled; no number is reserved yet.
+
+## Confirming a project close with an unsaved file kills its terminals and does not close it
+
+**Found at review 485 by the dev team (the close half) and traced at review 489 by the reviewer (the
+terminal half). Live in `0.30.0`. Owed as "I will raise it separately"; this is that.**
+
+The chain, read in the code and not yet reproduced live:
+
+1. A dirty document makes `assess_close` push a `DirtyFile` reason
+   (`core/src/close.rs`), so the assessment is not `SafeToClose`.
+2. The GUI shows the close modal, and the user confirms.
+3. `apply_project_close_confirmation` (`tekstide/src/shell.rs`) runs
+   **`terminate_project_live_work` first** — which collects every live terminal session and
+   terminates it — and only then calls `close_project`.
+4. `close_project` re-assesses, still finds the dirty file, and **returns without closing**.
+5. The modal was already dismissed by `Message::ModalActivate`.
+
+**So: the user confirms a close, their running shells are killed, the project stays open, and
+nothing says why.** The work destroyed is real and unrecoverable — a terminal session is not a
+buffer; there is no record of it to offer back.
+
+The code already names half of this against itself: *"If `close_project` still refused ... the
+project stays open ... a known, disclosed limitation ... rather than a forced bypass of the
+assessment."* **The disclosed half is the silence. The undisclosed half is that the termination has
+already happened by then**, so the choice is not between closing and doing nothing — it is between
+closing and destroying the live work without closing.
+
+**Refusing to force the close is right**, and nothing here argues for bypassing the assessment. The
+defect is the ordering and the silence: live work must not be terminated until the close is known to
+be going ahead, and a refused close must say so.
+
+**Severity: this is the same shape as the defect RFC-065's first slice repaired** — ordinary use,
+silent loss, shipping now. It is not RFC-027's, and RFC-058 (`0.32.0`, *A Project Held By One
+Process*) is a different subject. Recommended to the owner as its own small RFC, scheduled ahead of
+or alongside `0.32.0`.
