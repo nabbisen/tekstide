@@ -1,6 +1,7 @@
 # RFC-027: Crash Recovery and Unsaved Buffer Persistence
 
-Status: **Proposed 2026-10-08.** `0.31.0`, M13. Queued behind RFC-065 since the split of
+Status: **Accepted by the human owner 2026-10-08.** D1–D11 as written, plus D12–D15 — see
+*Decided on acceptance*. Proposed 2026-10-08. `0.31.0`, M13. Queued behind RFC-065 since the split of
 2026-10-07: you recover *buffers*, plural, so it always followed the document model. Requirements:
 `REQ-RECOVER-002`, `REQ-RECOVER-005`.
 
@@ -129,3 +130,38 @@ argument for default-off is that it writes the user's content to disk without th
 product's existing habit is to ask. **My recommendation: default-on, with the retained figure and
 the purge visible from the first release, and a setting to turn it off.** Losing unsaved work is the
 failure this exists to prevent, and a protection the user must first discover does not prevent it.
+
+## Decided on acceptance (2026-10-08)
+
+**D1–D11 as written.** Four additions. Three remove a design question the implementer would
+otherwise hit mid-slice; one answers the open question.
+
+**D12 — Two instances can run at once, so the marker is per-instance and fails safe.** There is no
+process-visible project lock — `REQ-PROJ-009` was moved out of the coverage table on 2026-09-23 for
+exactly that reason — so a second Tekstide can be started while the first is running. A single
+shared marker would make the second instance's startup read the first's live session as a crash.
+**The marker is named by pid, and "the previous session crashed" means a marker exists whose pid is
+not alive.**
+
+Pid reuse is the known hole: a stale marker whose number has been recycled by an unrelated process
+reads as still-running, and recovery is not offered. **That is the direction to fail in.** Not
+offering recovery costs the user a prompt; falsely offering stale text as if it were theirs is the
+failure this RFC exists to prevent. Disclose it; do not build a cleverer check for it in this RFC.
+
+**D13 — The record is a file under the state directory, never a row in the audit store.** The audit
+store's published promise, in `local-data-and-privacy.md`, is that it records what happened and
+never content — a refused paste is recorded without the pasted bytes. Putting buffer text into
+`audit_events` would break that promise in the one document that makes it. The records live in
+their own directory, one file each, `0600`, with a lifecycle (deleted on save) that has nothing in
+common with an append-only event log.
+
+**D14 — The purge already exists; do not build a second one.** A recovery record belongs to a
+project, and Trust Settings' per-project purge is where a user already goes to make a project's
+stored data go. Extend its count and its scope. A separate "clear recovery data" control would
+split one question across two screens.
+
+**D15 — Default-on, with the setting, the retained figure and the purge from the first release.**
+The open question is answered as recommended: losing unsaved work is the failure this exists to
+prevent, and a protection a user must first discover does not prevent it. The honesty obligations
+in D10 are what make default-on defensible, so they are not separable from it — a slice that turns
+this on without them is not this decision.

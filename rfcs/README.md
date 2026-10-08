@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 027 | [Crash Recovery and Unsaved Buffer Persistence](./proposed/027-crash-recovery-and-unsaved-buffer-persistence.md) | **Proposed 2026-10-08.** `0.31.0`, M13. `REQ-RECOVER-002`/`005`. Decides what their "where safe" and "where technically feasible" hedges mean; the second thing in the product to write the user's own content outside their project |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 027 | [Crash Recovery and Unsaved Buffer Persistence](./accepted/027-crash-recovery-and-unsaved-buffer-persistence.md) | **Accepted 2026-10-08.** `0.31.0`, M13. D1–D11 as written plus D12–D15. Handoff pack: [`027-crash-recovery/`](./handoffs/027-crash-recovery/README.md) |
 | — | *(none: nothing is currently accepted and unbuilt)* | |
 
 
@@ -75,6 +75,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 
 | RFC | Handoff Pack |
 | --- | --- |
+| 027 | [Crash Recovery and Unsaved Buffer Persistence](./handoffs/027-crash-recovery/README.md) — **M13**; accepted 2026-10-08, `0.31.0`; three slices, A before B before C |
 | 001 | [Product Scope, Foundation Release, and Non-Goals](./handoffs/001-product-scope-mvp-and-non-goals/README.md) |
 | 002 | [Core Domain Model: ProjectSession, TerminalSession, AgentRun, AuditEvent](./handoffs/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent/README.md) |
 | 003 | [Information Architecture and UI Mode Model](./handoffs/003-information-architecture-and-ui-mode-model/README.md) |
