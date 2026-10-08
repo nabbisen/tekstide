@@ -1042,3 +1042,47 @@ Status: active after `0.1.0`.
 ## Milestone Roadmap
 
 See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule, and [`delivery-plan.md`](./delivery-plan.md) for the ordered RFC queue, requirements gap analysis, and developer pick-up workflow.
+
+## Distribution and installation — owner's proposal, 2026-10-08, assessed
+
+Four ideas from the owner: a cross-platform one-liner installer, AUR packaging, an embedded
+auto-updater, and a small landing page. **Most of this is already scheduled**: RFC-029
+(*Documentation, CI, and Release Automation*, M14, `0.35.0`+) owns CI gates, a build matrix and
+release automation, and there is precedent for pulling a slice of it forward — minimal user
+documentation was pulled from RFC-029 to M9 at the owner's direction.
+
+**The facts this rests on.** Installation today is `cargo install tekstide`: a Rust toolchain and a
+multi-minute compile. `README.md` says *"Linux only. There is no evidence for any other platform."*
+RFC-028 (cross-platform) is queued and unstarted. CI is `docs.yml` alone — **this project has no
+build CI, no test CI and no release artifacts**; every gate is run by hand, by the dev team and by
+the reviewer.
+
+**1. AUR packaging — the cheapest and the best fit, recommended first.** A `PKGBUILD` needs no
+release pipeline: it can build from the crates.io tarball or a git tag. Distro packaging is the
+idiomatic install for the audience this product actually has. One constraint it imposes, which
+decides idea 3: **a packaged binary must never rewrite itself.**
+
+**2. Prebuilt binaries are the real win; the one-liner is the smaller half.** What costs a user
+today is the toolchain and the compile, not the length of the command. Binaries attached to a
+tagged release, with published checksums, remove that — and need the first build/release CI this
+project has had. On `curl | sh`: it executes remote code with the user's privileges, which sits
+badly beside a product whose posture is local-first, trust-gated and audited. If it is offered, the
+**verified form** — download, check the published checksum, then run — is what the README should
+show first. **The cross-platform half is blocked** regardless: there is nothing to install on macOS
+or Windows until RFC-028.
+
+**3. An embedded auto-updater — recommended against.** It is the largest attack surface the product
+could add: code that fetches and executes new code with the user's privileges. It conflicts with
+distro packaging, where a self-rewriting binary breaks package integrity. It conflicts with
+`cargo install`, where cargo owns the binary. And it would introduce this product's **first outbound
+network dependency**, which `local-data-and-privacy.md` would then have to document — an update
+check reveals that someone runs Tekstide, and when. If the convenience is wanted, the far cheaper
+form is an update *notification* that only tells the user and leaves the install to their package
+manager; still a network call, so opt-in and documented.
+
+**4. A landing page — cheap, useful, and a truth surface.** It belongs under the same discipline as
+the book: it must carry the Linux-only statement and the no-screen-reader statement, and must not
+imply a platform or a capability that does not exist. Marketing copy drifting from the product is
+the same defect class as a stale book page, and this project has spent many reviews on that.
+
+**Recommended order:** AUR → release binaries with CI → landing page. Updater: no.
