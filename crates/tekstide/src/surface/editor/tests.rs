@@ -17,10 +17,11 @@ use tekstide_core::content::TextCursor;
 use super::{
     RowPlan, apply_edit_key, caret_row_position, caret_split, chrome_line, columns_that_fit,
     cursor_line, document_state_symbol, empty_lines, gutter_digits, gutter_lines, navigate_cursor,
-    open_error_line, open_error_line_while_active, row_plan, rows_that_fit, save_all_notice_lines,
-    viewport_following, window_rows, windowed_line,
+    open_error_line, open_error_line_while_active, recovery_persist_refusal_lines, row_plan,
+    rows_that_fit, save_all_notice_lines, viewport_following, window_rows, windowed_line,
 };
 use crate::i18n::{Catalog, LocalePreference};
+use tekstide_core::recovery::{RecoveryPersistRefusal, RecoveryPersistRefusalReason};
 
 fn real_locales_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
@@ -1055,6 +1056,50 @@ fn save_all_notice_lines_summarizes_and_names_every_document_not_written() {
     assert!(
         !lines.iter().any(|line| line.contains("ok.txt")),
         "a document that was written must not get its own row: {lines:?}"
+    );
+}
+
+/// RFC-027 D9, §1 row 4: a refusal is named, not swallowed -- one line per refusal, the
+/// untrusted path escaped the same way `save_all_notice_lines`'s own rows already are, and
+/// nothing rendered at all when there is nothing to refuse.
+#[test]
+fn recovery_persist_refusal_lines_names_each_path_and_reason() {
+    let catalog = real_catalog();
+
+    assert!(
+        recovery_persist_refusal_lines(&catalog, &[]).is_empty(),
+        "nothing refused must render nothing"
+    );
+
+    let refusals = vec![
+        RecoveryPersistRefusal {
+            relative_path: "huge\u{202E}txt.exe".to_owned(),
+            reason: RecoveryPersistRefusalReason::TooLarge {
+                record_bytes: 9_000_000,
+                max_bytes_per_record: 8_388_608,
+            },
+        },
+        RecoveryPersistRefusal {
+            relative_path: "second.txt".to_owned(),
+            reason: RecoveryPersistRefusalReason::TotalBoundExceeded {
+                total_bytes_after_write: 200_000_000,
+                max_bytes_total: 192_000_000,
+            },
+        },
+    ];
+    let lines = recovery_persist_refusal_lines(&catalog, &refusals);
+    assert_eq!(lines.len(), 2, "one line per refusal: {lines:?}");
+    assert!(
+        lines[0].contains("<U+202E>"),
+        "the escaped override marker must reach the line: {lines:?}"
+    );
+    assert!(
+        !lines[0].contains('\u{202E}'),
+        "the raw override character must never reach the line: {lines:?}"
+    );
+    assert!(
+        lines[1].contains("second.txt"),
+        "the second refusal must name its own path: {lines:?}"
     );
 }
 

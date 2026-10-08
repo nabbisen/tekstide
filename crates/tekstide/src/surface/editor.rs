@@ -25,6 +25,7 @@ use tekstide_core::content::{
     EditOperation, SaveDecision, TextCursor, TextDocument, TextDocumentState, TextViewport,
 };
 use tekstide_core::project::{ProjectContentStatus, SaveAllOutcome};
+use tekstide_core::recovery::{RecoveryPersistRefusal, RecoveryPersistRefusalReason};
 use tekstide_core::text_safety;
 
 use crate::i18n::{Catalog, CatalogArgs};
@@ -81,6 +82,51 @@ pub(crate) fn save_all_notice_lines(catalog: &Catalog, outcome: &SaveAllOutcome)
         );
     }
     lines
+}
+
+/// RFC-027 D9, §1 row 4: "a buffer too large to persist is named to the user at the
+/// moment it stops being protected" -- one line per refusal, naming the path (untrusted,
+/// escaped, the same as [`chrome_line`]'s own) and why. No summary line the way
+/// [`save_all_notice_lines`] has one: an empty slice renders nothing at all, since there
+/// is no "N of M protected" count this feature offers to begin with (an app-wide bound
+/// can refuse a document belonging to a *different* project from the one on screen, so a
+/// per-project or per-document total would misstate what actually happened).
+pub(crate) fn recovery_persist_refusal_lines(
+    catalog: &Catalog,
+    refusals: &[RecoveryPersistRefusal],
+) -> Vec<String> {
+    refusals
+        .iter()
+        .map(|refusal| {
+            let path = text_safety::quote_untrusted(&refusal.relative_path);
+            match refusal.reason {
+                RecoveryPersistRefusalReason::TooLarge {
+                    record_bytes,
+                    max_bytes_per_record,
+                } => catalog.get_with_args(
+                    "editor-recovery-persist-refusal-too-large",
+                    &CatalogArgs::new()
+                        .untrusted("path", &path)
+                        .number("bytes", record_bytes)
+                        .number("limit", max_bytes_per_record),
+                ),
+                RecoveryPersistRefusalReason::TotalBoundExceeded {
+                    total_bytes_after_write,
+                    max_bytes_total,
+                } => catalog.get_with_args(
+                    "editor-recovery-persist-refusal-total-bound",
+                    &CatalogArgs::new()
+                        .untrusted("path", &path)
+                        .number("bytes", total_bytes_after_write)
+                        .number("limit", max_bytes_total),
+                ),
+                RecoveryPersistRefusalReason::Io => catalog.get_with_args(
+                    "editor-recovery-persist-refusal-io",
+                    &CatalogArgs::new().untrusted("path", &path),
+                ),
+            }
+        })
+        .collect()
 }
 
 /// The chrome header for an open document: its path (untrusted, escaped)
@@ -813,6 +859,10 @@ pub(crate) struct EditorActions<Message> {
 pub(crate) struct EditorWorkspaceState<'a> {
     pub status: &'a ProjectContentStatus,
     pub save_all_notice: Option<&'a SaveAllOutcome>,
+    /// RFC-027 PR-027-B, D9: the most recent recovery-persist pass's own refusals, if
+    /// any -- rendered the same "always in the active document's own chrome, regardless
+    /// of which document each row names" shape `save_all_notice` already has.
+    pub recovery_persist_refusals: &'a [RecoveryPersistRefusal],
 }
 
 pub fn view<'a, Message: 'a + Clone>(
@@ -827,6 +877,7 @@ pub fn view<'a, Message: 'a + Clone>(
     let EditorWorkspaceState {
         status,
         save_all_notice,
+        recovery_persist_refusals,
     } = workspace_state;
     let EditorActions {
         on_save,
@@ -939,6 +990,9 @@ pub fn view<'a, Message: 'a + Clone>(
                 for line in save_all_notice_lines(catalog, outcome) {
                     chrome.push(text(line).size(theme.font_size_status()).into());
                 }
+            }
+            for line in recovery_persist_refusal_lines(catalog, recovery_persist_refusals) {
+                chrome.push(text(line).size(theme.font_size_status()).into());
             }
             chrome.push(
                 crate::theme::button(

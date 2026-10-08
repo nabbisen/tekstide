@@ -838,6 +838,10 @@ const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
     "transcript/reader.rs",
     "transcript/run_record.rs",
     "runtime/git.rs",
+    // RFC-027 PR-027-B: `read_recovery_record_file` reads one recovery record's own small
+    // JSON envelope whole, the same shape `read_run_record` already has -- never a path
+    // inside the project.
+    "recovery/record.rs",
 ];
 
 fn tekstide_core_src_dir() -> PathBuf {

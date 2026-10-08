@@ -170,5 +170,6 @@ pub fn apply_safe_fields(
         font: candidate.font.clone(),
         terminal: candidate.terminal,
         explorer: candidate.explorer,
+        recovery: candidate.recovery,
     }
 }

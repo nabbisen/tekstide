@@ -4,6 +4,7 @@ mod load;
 mod model;
 mod path;
 mod profile;
+mod recovery;
 mod sensitive;
 mod terminal;
 
@@ -27,6 +28,7 @@ pub use path::{
     ConfigStoragePath,
 };
 pub use profile::to_ai_cli_profile;
+pub use recovery::RecoverySettings;
 pub use sensitive::{
     SecuritySensitiveDirection, SecuritySensitiveField, apply_safe_fields, direction,
     security_sensitive_diff,

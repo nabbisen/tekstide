@@ -103,24 +103,46 @@ depend on a marker filename this module does not recognise.
 
 ## PR-027-B — the record, with its purge
 
-- [ ] A **dirty** document gets a record; a **clean** one does not (D2, §3 row 12). Proved by what
+- [x] A **dirty** document gets a record; a **clean** one does not (D2, §3 row 12). Proved by what
       is on disk, not by a count the code reports about itself.
-- [ ] Records are `0600` in a `0700` directory (§2 row 6), checked by reading the mode.
-- [ ] No buffer content reaches the audit store (D13, §2 row 5).
-- [ ] **Measurement 3 — the cadence**, chosen against `editor_baseline.rs`'s paired harness with the
+      `a_dirty_document_gets_a_recovery_record_and_saving_removes_it`,
+      `undoing_back_to_clean_removes_the_stale_record_on_the_next_tick` (`shell::tests`).
+- [x] Records are `0600` in a `0700` directory (§2 row 6), checked by reading the mode.
+      `a_written_record_has_the_right_permissions_and_reads_back_exactly` (`recovery::tests`).
+- [x] No buffer content reaches the audit store (D13, §2 row 5). The record is a file under
+      `recovery/records/`, never a row anywhere the audit coordinator writes — nothing in this
+      slice's own code path touches `audit::AuditCoordinator` at all.
+- [x] **Measurement 3 — the cadence**, chosen against `editor_baseline.rs`'s paired harness with the
       control carried inside the same run (D7). The window is justified by the number, not the
-      number by the window.
-- [ ] **Measurement 4 — per-document cost** at one and at ten dirty documents, with twenty
-      extrapolated and **labelled as an extrapolation** (D8, §4 row 14).
-- [ ] **Measurement 5 — the bound** refuses a too-large buffer and names the buffer and the limit
-      (D9, §1 row 4).
-- [ ] **Measurement 6 — the record is gone** after a save, and after a close (D11, §2 row 7).
-- [ ] The per-project purge removes recovery records; Trust Settings' *Retained locally* figure
+      number by the window. `qa-evidence.md`'s own "Measurement 3" section:
+      `editor_typing_latency_under_a_recovery_persist_tick`.
+- [x] **Measurement 4 — per-document cost** at one and at ten dirty documents, with twenty
+      extrapolated and **labelled as an extrapolation** (D8, §4 row 14). Same run as measurement 3;
+      `qa-evidence.md`'s own "Measurement 4" section.
+- [x] **Measurement 5 — the bound** refuses a too-large buffer and names the buffer and the limit
+      (D9, §1 row 4). `a_record_over_the_per_record_bound_is_refused_and_nothing_is_written`,
+      `a_record_over_the_total_bound_is_refused_and_nothing_new_is_written` (`recovery::tests`);
+      named to the user live, `recovery_persist_refusal_lines_names_each_path_and_reason`
+      (`surface::editor::tests`).
+- [x] **Measurement 6 — the record is gone** after a save, and after a close (D11, §2 row 7).
+      `a_dirty_document_gets_a_recovery_record_and_saving_removes_it`,
+      `closing_a_project_removes_its_recovery_records` (`shell::tests`) — see `qa-evidence.md`'s own
+      disclosed finding about what "close" can and cannot mean for a genuinely dirty document in
+      this product today.
+- [x] The per-project purge removes recovery records; Trust Settings' *Retained locally* figure
       counts them (D10, D14, §2 row 8).
-- [ ] `local-data-and-privacy.md` has its section, **and the sentence saying the retained figure
+      `purging_a_projects_transcripts_also_purges_its_recovery_records` (`shell::tests`); a second,
+      separate Fluent line (`trust-settings-retained-recovery-records`), not folded into the
+      transcript figure.
+- [x] `local-data-and-privacy.md` has its section, **and the sentence saying the retained figure
       counts transcripts only is corrected** — it is made false by this slice.
-- [ ] The setting exists and defaults on (D15).
-- [ ] Nothing in this slice writes to a path inside the project (§1 row 1).
+- [x] The setting exists and defaults on (D15). `[recovery] persist_unsaved_buffers`,
+      `config/recovery.rs`, `RecoverySettings`'s own hand-written `Default` (not derived, which
+      would give `false`).
+- [x] Nothing in this slice writes to a path inside the project (§1 row 1). Every path this slice
+      ever opens for writing is under `<state_root>/recovery/records/`, checked by the module's own
+      doc comment and by every test in `recovery::tests` asserting against `records_dir`, never
+      against anything under a project root.
 
 ## PR-027-C — the offer
 

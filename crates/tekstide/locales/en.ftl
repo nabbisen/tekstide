@@ -779,6 +779,15 @@ editor-save-all-outcome-row = { $path } -- not saved: { $reason ->
    *[saved] { "" }
 }
 
+# RFC-027 D9, §1 row 4: named at the moment a dirty document's own unsaved text stops
+# being protected -- a refusal swallowed silently would be the exact "claims protection it
+# is not providing" row 4 forbids. `$path` is untrusted and escaped the same way
+# `editor-save-all-outcome-row`'s own is; `$bytes`/`$limit` have no plural machinery,
+# matching `trust-settings-retained-transcripts`'s own byte figures.
+editor-recovery-persist-refusal-too-large = { $path }: too large to protect against a crash ({ $bytes } bytes, over the { $limit }-byte limit)
+editor-recovery-persist-refusal-total-bound = { $path }: not protected against a crash -- would put retained recovery data over its own { $limit }-byte limit
+editor-recovery-persist-refusal-io = { $path }: could not be protected against a crash
+
 # RFC-026, release 0.29.0: a user-driven reload, the same action
 # `external-change-dialog-reload` offers from the save-blocked dialog, reachable
 # directly from the editor's own chrome. Shown only when `editor::view`'s own
@@ -953,6 +962,14 @@ trust-settings-retained-transcripts = Retained locally: { $count ->
     [one] {$count} transcript
    *[other] {$count} transcripts
 } ({ $bytes } bytes), not counting their run records
+# RFC-027 D10: a second, separate figure -- a recovery record is a different content
+# type from a transcript, so it gets its own line rather than being folded into the
+# count above (the §4.1 pattern: a number describing something adjacent to what it
+# names). Purged by the same button, per D14 -- no second purge control exists for it.
+trust-settings-retained-recovery-records = Unsaved-buffer recovery data retained locally: { $count ->
+    [one] {$count} document
+   *[other] {$count} documents
+} ({ $bytes } bytes)
 trust-settings-purge-button = Purge Project Transcripts…
 # RFC-050 PR-050-C (D6′): bytes under this state directory's `transcripts/` that
 # no purge will delete. After a recent-list reset this is every transcript the

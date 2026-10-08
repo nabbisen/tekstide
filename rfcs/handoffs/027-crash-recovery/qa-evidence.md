@@ -175,3 +175,185 @@ content from ever being cleaned is §2 row 7.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g483{1,2,3}`): `739 + 16 + 1096` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
   in each run's own `TMPDIR` afterward.
+
+## PR-027-B — the record, with its purge
+
+The slice that creates user content, and therefore the slice that ships its own purge, its own
+`Retained locally` figure and its own `local-data-and-privacy.md` section in the same response --
+D10's own ordering constraint, not a later one.
+
+### The record: text, cursor, viewport, the snapshot it was opened against -- never undo (D2, D3)
+
+`tekstide_core::recovery::record` (new): `RecoveryRecord` -- `relative_path`, `text`, cursor,
+viewport, and `RecoveryFileSnapshot` (`canonical_path`/`modified_at` at full `SystemTime`
+precision/`len`, deliberately **not** `content::FileSnapshot`'s own `content_hash`, which is
+documented "not persisted, not a durable file identity" -- D5's own three-way disk comparison,
+PR-027-C's job, only ever needs path/mtime/len, the same fields `TextDocument::save`'s existing
+external-change check already treats as what changed). No `undo_stack`/`redo_stack` field exists on
+the type at all -- not merely unpopulated, structurally absent, so there is no undo history for a
+future slice to accidentally start persisting.
+
+One file per record (`<pid-free, path-hash>.json`, a deterministic, non-cryptographic hash of the
+document's own relative path -- the same document always lands on the same file, so a later write
+replaces rather than accumulates), in its own project-scoped directory,
+`<state_root>/recovery/records/<project_id>/`, `0600` in a `0700` directory (D13, §2 row 6, checked
+by reading the real mode bits), written atomically (temp file, `create_new`, synced, renamed,
+directory synced) -- the identical durability shape `write_run_record` already has.
+
+`record_file_name_is_stable_and_distinct_per_path`, `record_round_trips_through_json_exactly`,
+`file_snapshot_round_trips_sub_second_precision` (`recovery::record::tests`);
+`a_written_record_has_the_right_permissions_and_reads_back_exactly`,
+`writing_the_same_document_twice_replaces_its_own_record`
+(`recovery::tests`) prove the write path directly, on real files, with real mode bits.
+
+### Two byte bounds, each refused before anything reaches disk, each named (D9, measurement 5)
+
+`RecoveryRetentionLimits { max_bytes_per_record, max_bytes_total }` (8 MiB / 192 MiB compiled
+defaults -- the per-record bound is headroom over the 4 MiB editable-open cap for the JSON
+envelope; the total is twenty records at that bound with headroom, matching the open set's own
+D4 bound). Both checked **before** any byte reaches disk: the per-record bound against the
+record's own serialized size; the total bound against every project's own on-disk bytes
+(`<state_root>/recovery/records/*/`, summed), **excluding** the document's own previous record so
+replacing it at the same size always fits even at an exact-total limit.
+
+`a_record_over_the_per_record_bound_is_refused_and_nothing_is_written`,
+`a_record_over_the_total_bound_is_refused_and_nothing_new_is_written` (`recovery::tests`) prove
+both refusals and that nothing is written on either. The refusal is named to the user at the
+moment it happens, not only logged: `RecoveryPersistRefusal`/`RecoveryPersistRefusalReason` (moved
+into `tekstide-core` so the render layer can depend on it without crossing into the shell crate --
+`RecoveryRecordWriteError` itself holds a non-`Clone` `io::Error`, unfit for a notice held across
+frames) renders as a new line per refusal in the editor's own chrome
+(`editor-recovery-persist-refusal-too-large`/`-total-bound`/`-io`), proved directly against the
+catalog (`recovery_persist_refusal_lines_names_each_path_and_reason`,
+`surface::editor::tests`, including the untrusted-path escaping `save_all_notice_lines`'s own
+rows already get).
+
+### Deleted the moment its own reason ends (D11, measurement 6)
+
+Three real triggers, not one: **save** (`attempt_save_active_document`/
+`save_all_documents_button_pressed`, removed the instant `SaveDecision::Saved` comes back -- a
+clean document counts, RFC-065 review 477's own lesson, and costs one `remove_recovery_record`
+call that is a no-op when there was never a record to begin with); **a tick finding the document
+clean again** (undo back to the text it was opened with, the periodic tick's own job, since D2's
+principle -- a clean document's content is already on disk -- applies the moment it becomes true,
+not only when it starts); and **the project closing** (every document it held has just stopped
+being open).
+
+`a_dirty_document_gets_a_recovery_record_and_saving_removes_it`,
+`undoing_back_to_clean_removes_the_stale_record_on_the_next_tick`,
+`closing_a_project_removes_its_recovery_records` (`shell::tests`) prove each trigger on real
+files.
+
+**A real product constraint found while writing the close test, disclosed rather than worked
+around**: this product's close assessment reads a project's own *live* dirty-document count, not
+disk, and confirming the close-project dialog does not discard a text document's own dirty state
+the way it terminates a live terminal session -- a genuinely dirty document cannot be closed
+through the ordinary confirm path at all today. The close test therefore writes its own stale
+record directly (standing in for one a crash, or an earlier dirty period already saved over, left
+behind) against an otherwise-clean document, which closes through the immediate `SafeToClose`
+path. This is a real, disclosed product behaviour, not a gap in this slice's own test coverage --
+and it means D11's "close" trigger will, in practice, only ever find a record to remove when that
+record is already stale for some other reason (a crash, or a save that happened to race a close
+attempt), never when the close itself is what makes the document stop being dirty.
+
+### The purge, the figure, and the privacy page -- in this same response (D10)
+
+`purge_project_recovery_records` is a new primitive in `tekstide-core`, shared by two real
+triggers rather than opening a second purge control (D14): the Trust Settings purge button
+(`apply_transcript_purge`, extended) and a project closing (above) both call it. Byte/record
+counting (`project_recovery_record_bytes`) mirrors `run_record_bytes`'s own "never a directory,
+never a symlink, never a stranger's file" discipline, proved against a stranger file planted
+directly in a project's own records directory
+(`an_unrecognised_file_in_the_records_directory_is_skipped_and_left_alone`) and against a second
+project's own records surviving the first's purge
+(`purging_one_project_leaves_another_projects_records_untouched`).
+
+`purging_a_projects_transcripts_also_purges_its_recovery_records` (`shell::tests`) proves the real
+trigger end to end. Trust Settings gets a second line, `trust-settings-retained-recovery-records`,
+beside the transcript figure -- not folded into it (two content types collapsed into one count is
+itself the §4.1 pattern this project's own review history keeps finding).
+`docs/src/users/local-data-and-privacy.md` gets its own section, and the sentence that said the
+retained figure "counts transcripts only" is corrected to say a second figure exists beside it.
+
+### The setting, default on (D15)
+
+`[recovery] persist_unsaved_buffers`, `config/recovery.rs`, mirroring `config/explorer.rs`'s own
+shape exactly except for the default direction -- `RecoverySettings` cannot derive `Default`
+(derived `Default` on a `bool` gives `false`), so `Default` is implemented by hand to give `true`.
+Forward-only, the same shape transcript capture's own decline already has: `false` stops new
+records; it does not delete ones that already exist. `docs/src/users/configuration.md` gets its own
+`[recovery]` table row and a `## Crash recovery` section, linking to the privacy page's own new
+section.
+
+### Measurement 3, the cadence (D7)
+
+`editor_typing_latency_under_a_recovery_persist_tick`
+(`crates/tekstide/src/shell/tests/editor_baseline.rs`), a new sibling to
+`editor_typing_latency_under_a_watched_burst` reusing the same fixture, the same real-`update`
+keystroke primitives and the same paired-round methodology -- not grafted into the watcher's own
+condition set, since a periodic persist tick and an external file-change burst are different
+mechanisms and intermixing them risked destabilising the existing, carefully-tuned RFC-026/RFC-065
+measurement. A real `Message::RecoveryPersistTick` is delivered through the real `update`
+whenever the interval has elapsed, driving the identical production code
+(`persist_recovery_records`), not a stand-in.
+
+Three conditions (idle/one dirty document/ten dirty documents, the fixture's own 100,000-line,
+3.3 MiB text, the largest realistic document size), five rounds, orders rotated. **Corrected once
+already**: the first pass reported total delivery over a fixed keystroke budget, which conflates
+cost-per-tick with tick-*count* (a slower condition leaves less wall-clock time per keystroke
+budget for later ticks to land in, so it fires more of them) -- the same shape of error review 469
+found in RFC-065's own D7 measurement, caught here before publishing a number rather than after.
+Fixed to report milliseconds **per tick**:
+
+```
+median one-dirty-document cost over the five rounds: +0.001 ms/tick
+median 10-dirty-document cost over the five rounds: +16.687 ms/tick
+per-document delivery cost (ten-document median / 10): 1.669 ms/tick
+extrapolated cost at the open set's own bound of 20 documents, all dirty: 33.374 ms/tick (extrapolation, not measured)
+```
+
+One document, even at the largest realistic size, costs nothing measurable. Ten costs about 1.67
+ms/document -- real, but only because every one of the ten is the maximum realistic size at once,
+not an ordinary case. **`RECOVERY_PERSIST_INTERVAL = 2` seconds**, chosen against this: the
+worst-case tick (twenty large documents, all dirty, extrapolated ~33 ms) is comparable to the
+keystroke latency budget itself, so the interval's job is to keep that case rare rather than
+per-keystroke-adjacent, not to make it cheap -- 2 seconds is double `RUN_RECORD_INTERVAL`'s own 1
+second for a much lighter write.
+
+Reproduce: `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo test --release -p tekstide
+editor_typing_latency_under_a_recovery_persist_tick -- --ignored --nocapture` (the release-mode
+`()`-renderer requirement review 469 already found for the sibling measurement).
+
+### Measurement 4, per-document cost at one and ten, twenty extrapolated and labelled (D8)
+
+The same run above *is* this measurement -- D7's cadence question and D8's per-document question
+are the same number, read two ways: the interval decision needs "what does the worst case cost,"
+and D8 needs "what does it cost per document." Both answers are in the block above, including the
+twenty-document figure labelled an extrapolation, not measured, per D8's own requirement.
+
+### An unrelated file-content-read guard, found and fixed
+
+`project::diff::tests::enumeration_confirms_only_the_closed_list_reads_full_file_content` failed
+on the first full-workspace run after this slice's own files existed: `recovery/record.rs`'s
+`read_recovery_record_file` (`file.read_to_end`) is a new full-file-content read, and this
+project's own enumeration test requires every such call site to be named, deliberately, in
+`FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`, not left to pass silently. Added, with a one-line
+reason (the same shape `run_record.rs`'s own entry already has: a record's own small envelope,
+read whole, never a path inside the project).
+
+### Flake disclosed, not counted
+
+One intermittent in the first full-workspace run:
+`surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_render_path_agree` --
+unrelated to this response (nothing it touches is anywhere near `surface::terminal`), already a
+known, registered PTY-timing flake (`test-process-leak.md` row 787, now a third occurrence),
+passed on immediate rerun in isolation. Recorded, gate redone rather than counted, per the
+register's own convention.
+
+## Gate, PR-027-B
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --doc --workspace`: `0 + 1 + 1`, 0 failed.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g484{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 6 ignored (the new
+  measurement test among them), 0 fixture entries left in each run's own `TMPDIR` afterward.

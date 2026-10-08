@@ -36,6 +36,9 @@ scrollback_lines = 5000             # lines of history a terminal keeps; at most
 
 [explorer]
 show_ignored = false                # draw the entries Git says are ignored; default false
+
+[recovery]
+persist_unsaved_buffers = true      # protect dirty documents against a crash; default true
 ```
 
 ## Keybindings
@@ -227,6 +230,15 @@ a global ignore file named by `core.excludesFile` is not applied. A repository w
 something Tekstide does not vouch for (a hook-like setting such as `core.fsmonitor`) is not asked at all, and the
 built-in list decides; so does a repository rooted at your home directory, because a dotfiles repository that
 ignores everything would otherwise hide every project under it.
+
+## Crash recovery
+
+`[recovery] persist_unsaved_buffers` is `true` by default. `false` stops Tekstide from writing new
+recovery records for dirty documents; it does not delete records that already exist, the same
+forward-only shape `transcript_capture_declined` already has for transcripts. See [Local data and
+privacy](./local-data-and-privacy.md#unsaved-buffer-recovery-data) for what gets written, where,
+and how it is bounded and purged. A value that is not `true` or `false` is not used, and the
+default stands. `Ctrl+Alt+C` applies a change without a restart.
 
 ## Why the file is this narrow
 

@@ -314,6 +314,7 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
     let document = ConfigurationDocument {
         terminal,
         explorer: extract_explorer(&mut root, &mut warnings, &mut fallbacks)?,
+        recovery: extract_recovery(&mut root, &mut warnings, &mut fallbacks)?,
         agent: extract_agent(&mut root, &mut warnings)?,
         resources: extract_resources(&mut root, &mut warnings)?,
         keybindings: extract_keybindings(&mut root, &mut warnings, &mut fallbacks)?,
@@ -664,6 +665,21 @@ fn extract_explorer(
     };
     let settings = super::explorer::take_show_ignored(&mut table, fallbacks);
     warn_unconsumed(table, "explorer", warnings);
+    Ok(settings)
+}
+
+/// **RFC-027 D15.** `[recovery]`: `persist_unsaved_buffers`. The same shape
+/// `extract_explorer` already uses; an unknown key warns.
+fn extract_recovery(
+    root: &mut toml::Table,
+    warnings: &mut Vec<ConfigWarning>,
+    fallbacks: &mut Vec<SettingFallback>,
+) -> Result<super::recovery::RecoverySettings, ConfigDiagnostic> {
+    let Some(mut table) = section_table(root, "recovery")? else {
+        return Ok(super::recovery::RecoverySettings::default());
+    };
+    let settings = super::recovery::take_persist_unsaved_buffers(&mut table, fallbacks);
+    warn_unconsumed(table, "recovery", warnings);
     Ok(settings)
 }
 

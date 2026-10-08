@@ -31,6 +31,7 @@ pub struct ConfigurationDocument {
     pub font: FontSettings,
     pub terminal: super::terminal::TerminalSettings,
     pub explorer: super::explorer::ExplorerSettings,
+    pub recovery: super::recovery::RecoverySettings,
 }
 
 /// **RFC-054 PR-054-A.** The rebinds that survived validation: only rebinds

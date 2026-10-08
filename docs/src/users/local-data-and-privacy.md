@@ -107,7 +107,9 @@ A run that was still going when Tekstide closed says it does not know when it en
 them, its classification and notes, which are your own words — stays, and the run is still listed. Purging
 afterwards removes it, whether or not the transcript is still there: **Purge** in Trust Settings is what
 asks for a run's stored data to go. The purge dialog counts runs and the bytes of their transcripts *and*
-records; Trust Settings' *Retained locally* figure counts transcripts only, and says so.
+records; Trust Settings' *Retained locally* figure counts transcripts, and a second figure beside it
+counts unsaved-buffer recovery data (below) — two different content types, two separate numbers, never
+folded into one.
 
 The run's folder is removed only when nothing else is left in it: **a file Tekstide did not write is never
 deleted, and it keeps its folder.** A `run.json` Tekstide cannot read is renamed `run.json.corrupt` beside the
@@ -163,9 +165,48 @@ with Tekstide closed.
 **One limitation remains: a plain terminal (`Ctrl+Alt+T`) is not recorded.** Only AI CLI runs
 are.
 
+## Unsaved-buffer recovery data
+
+**Tekstide can detect that it did not exit cleanly, and offer back what was unsaved when it
+crashed.** Two parts: a per-instance marker, written at every launch and removed at every clean
+exit, so a marker left behind at the next launch means the previous one did not exit cleanly; and,
+for every **dirty** document, a small side record — its text, cursor and viewport, and the file it
+was opened against — written periodically while you type, so there is something to offer back.
+
+**It never writes the file you are editing.** This is not autosave. The record lives entirely
+outside your project, at `$XDG_STATE_HOME/tekstide/recovery/` (`~/.local/state/tekstide/recovery/`
+if `XDG_STATE_HOME` is unset); the file on disk is never touched by it.
+
+**A clean document has no record.** Only a document with unsaved edits gets one — the same
+reasoning transcripts and every other retained content in this product already follow: if it is
+already on disk, writing a second copy protects nothing. The record is removed the moment the
+document is saved, and every record a project holds goes when that project closes.
+
+**Bounded, and a refusal is never silent.** A single document's own record, and the total across
+every open project, are each capped. A buffer too large to fit is named on screen, at the moment
+its own protection stops — not discovered only later, at a restart that has nothing to offer for
+it.
+
+**Counted and purged exactly like a transcript.** Trust Settings shows how much recovery data a
+project is retaining, right beside its transcript figure, and the same **Purge** button removes
+both — there is no separate control for it.
+
+**On by default, with a setting to turn it off.** `[recovery] persist_unsaved_buffers = false` in
+your configuration file stops new records from being written; it does not delete ones that already
+exist, the same forward-only shape transcript capture's own decline already has. Losing unsaved
+work is the failure this feature exists to prevent, and a protection you have to find and enable
+first does not prevent it — which is why it ships on.
+
+**To remove every recovery record, delete the `recovery/records/` directory** — the path is
+above — preferably with Tekstide closed. Deleting `recovery/instances/` as well just means the
+next launch cannot tell whether this one exited cleanly; harmless, and self-correcting at the
+launch after that.
+
 ## Where the full policies live
 
 The retention and purge policies, and the audit store's own retention rules, are specified in the
 RFCs that own them — RFC-011 for transcripts and RFC-013 for the audit store, both under
-`rfcs/done/` in the repository. [Security decisions](../contributors/security-decisions.md) is
-the canonical home for the reasoning behind the behaviour described here.
+`rfcs/done/` in the repository, and RFC-027 for crash detection and recovery data, under
+`rfcs/accepted/` while it is still being implemented. [Security
+decisions](../contributors/security-decisions.md) is the canonical home for the reasoning behind
+the behaviour described here.

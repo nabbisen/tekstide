@@ -445,6 +445,17 @@ const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_mi
 /// user's own annotations are written at once, not on this interval.
 const RUN_RECORD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// RFC-027 D7: how often a dirty document's own recovery record is brought up to date.
+/// Chosen against the paired-control harness, not by taste --
+/// `editor_baseline.rs`'s own `editor_typing_latency_under_a_recovery_persist_tick`
+/// measured one dirty 3.3 MiB document (the largest realistic size) at essentially free
+/// (+0.001 ms/tick) and ten at +16.7 ms/tick (~1.67 ms/document), extrapolating to ~33
+/// ms/tick at the open set's own 20-document bound (D4) -- a real cost, but only in the
+/// worst case of many large documents dirty at once. 2 seconds keeps that worst case rare
+/// rather than per-keystroke-adjacent, well above `RUN_RECORD_INTERVAL`'s own 1 s for a
+/// much cheaper write. See `qa-evidence.md`'s own measurement section for the full numbers.
+const RECOVERY_PERSIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// RFC-022 PR-022-E ("the arrival model"), response 227: how long a
 /// freshly promoted approval dialog ignores modal input for -- long
 /// enough that a keystroke already in flight (typing mid-word, or
@@ -787,6 +798,15 @@ pub struct State {
     /// the same "most recent attempt" shape every other notice field here uses), not on a
     /// timer or a navigation away.
     save_all_notice: Option<tekstide_core::project::SaveAllOutcome>,
+    /// RFC-027 PR-027-B, D9: the most recent recovery-persist pass's own refusals, if
+    /// any -- the same shell-local, transient, "most recent attempt" shape every other
+    /// notice field here uses. Replaced wholesale on every `RecoveryPersistTick`
+    /// (`Vec::new()` when nothing was refused, not `None` -- a tick that refused
+    /// something last time and refuses nothing this time must stop saying so). **Named to
+    /// the user at the moment it happens** (D9, §1 row 4): a buffer too large, or one that
+    /// would push the app-wide total over its own bound, is a protection that silently
+    /// stopped, and silence here is exactly what D9 forbids.
+    recovery_persist_refusals: Vec<tekstide_core::recovery::RecoveryPersistRefusal>,
     /// RFC-019 PR-019-B: which row of the *currently rendered* explorer
     /// listing the keyboard cursor is on. Shell-local UI state, not a
     /// duplicate of core's -- core has no concept of "which row a
@@ -1240,6 +1260,15 @@ impl ConfigurationState {
             .is_some_and(|store| store.current().explorer.show_ignored)
     }
 
+    /// **RFC-027 D15.** `recovery.persist_unsaved_buffers`; `true` with no store or no
+    /// key -- the opposite fallback direction from `explorer_show_ignored` above, since
+    /// this setting's own compiled default is *on*, not off.
+    fn recovery_persist_unsaved_buffers(&self) -> bool {
+        self.store
+            .as_ref()
+            .is_none_or(|store| store.current().recovery.persist_unsaved_buffers)
+    }
+
     /// D9. Falls back to the compiled constant when there is no store,
     /// so a caller never has to handle "unset" -- the same totality
     /// `ConfigurationDocument`'s own defaults provide.
@@ -1370,6 +1399,7 @@ impl State {
             agent_run_launch_notice: None,
             terminal_paste_notice: None,
             save_all_notice: None,
+            recovery_persist_refusals: Vec::new(),
             explorer_highlight: 0,
             explorer_top: 0,
             explorer_viewport: None,
@@ -1717,6 +1747,16 @@ pub enum Message {
     /// and writes only the ones that differ from what was last written, so an
     /// idle run costs a comparison.
     RunRecordTick,
+    /// RFC-027 PR-027-B, D7: a dirty document's own unsaved text, cursor and viewport are
+    /// persisted to a recovery record. A plain interval, offered only while some open
+    /// project has a dirty document -- the same "checked but usually absent" shape
+    /// `RunRecordTick` already has. Every currently dirty document is rewritten each tick
+    /// (no unchanged-skip optimisation: this slice measures the real per-tick cost, D8,
+    /// rather than an optimised one); a document found clean (saved, or undone back to
+    /// the text it was opened with) has its own stale record removed, the same "a clean
+    /// document's content is already on disk" principle D2 states for why one is never
+    /// written in the first place.
+    RecoveryPersistTick,
     /// Response 233: fired by a live entry's control on the
     /// `ApprovalHistory` surface. Reuses the exact same `ApprovalDialog`
     /// construction `evaluate_promotion` uses (see
@@ -2000,6 +2040,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::ApprovalPollTick
         | Message::RunReportFieldPasteResolved(_)
         | Message::RunRecordTick
+        | Message::RecoveryPersistTick
         | Message::PanesRegionMeasured(_)
         | Message::ExplorerScanFinished { .. }
         | Message::ProjectWatchNotice { .. }
@@ -2828,6 +2869,9 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::RunRecordTick => {
             persist_agent_run_records(&mut state.app_shell);
         }
+        Message::RecoveryPersistTick => {
+            persist_recovery_records(state);
+        }
         Message::OpenApprovalHistoryEntry(approval_id) => {
             open_approval_history_entry(state, &approval_id);
         }
@@ -3443,6 +3487,22 @@ fn record_restricted_mode_blocked_if_applicable(
 /// otherwise unchanged, since isolation belongs in the one place the
 /// root is resolved, not here where it is merely used.
 fn open_real_agent_run_state_root() -> Option<std::path::PathBuf> {
+    let state_dir = resolve_agent_run_state_dir()?;
+    std::fs::create_dir_all(&state_dir).ok()?;
+    Some(state_dir)
+}
+
+/// RFC-027 PR-027-B: recovery records live under the same `<state_root>/recovery/`
+/// `AppStatePathProvider::linux_default` already resolves for `recent-projects.json`,
+/// the audit store and transcripts -- "one resolution, many consumers"
+/// (`recent/store.rs`'s own `state_dir` doc), not a fresh, independently-isolated lookup.
+/// **Reuses `resolve_agent_run_state_dir`, not `AppStatePathProvider::linux_default`
+/// directly**, specifically for its `#[cfg(test)]` isolation: every site this function
+/// is called from (the persist tick, a project close, the purge) is reachable from
+/// `update()`, which a test drives directly, and `suite-assumes-it-owns-the-machine.md`'s
+/// own lesson is exactly that a production call site reachable from a test must not be
+/// able to resolve the real, developer-owned state root.
+fn open_real_recovery_state_root() -> Option<std::path::PathBuf> {
     let state_dir = resolve_agent_run_state_dir()?;
     std::fs::create_dir_all(&state_dir).ok()?;
     Some(state_dir)
@@ -5130,6 +5190,7 @@ fn attempt_close_project_tab(state: &mut State, project_id: tekstide_core::proje
             );
             if closed {
                 state.project_watches.remove(&project_id);
+                remove_project_recovery_records_best_effort(&project_id);
             }
             finish_project_close_navigation(state);
         }
@@ -5228,6 +5289,7 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
         // Closing the project drops its watch owner: its watches and its event
         // stream go with it (RFC-026 R6, by ownership).
         state.project_watches.remove(&project_id);
+        remove_project_recovery_records_best_effort(&project_id);
         finish_project_close_navigation(state);
     }
     // If `close_project` still refused (something other than terminals
@@ -5738,15 +5800,43 @@ fn approval_request_is_live(
 /// the same "rendered by the surface, not a second notice" shape
 /// `terminal_launch_notice` deliberately does *not* use here.
 fn attempt_save_active_document(state: &mut State) {
-    let Err(tekstide_core::project::ProjectContentError::Save(error)) =
-        state.app_shell.save_active_project_text_document()
-    else {
+    let result = state.app_shell.save_active_project_text_document();
+    if matches!(result, Ok(tekstide_core::content::SaveDecision::Saved)) {
+        // RFC-027 D11, measurement 6: the record's reason just ended, successful save
+        // included even when nothing was actually rewritten (a clean document still
+        // counts as "saved" -- RFC-065 review 477's own lesson, and the same reason this
+        // slice's own periodic tick never wrote one for a clean document in the first
+        // place).
+        remove_active_document_recovery_record_best_effort(state);
+    }
+    let Err(tekstide_core::project::ProjectContentError::Save(error)) = result else {
         return;
     };
     if error.decision() != tekstide_core::content::SaveDecision::BlockedExternalChange {
         return;
     }
     open_external_change_dialog_for_active_document(state);
+}
+
+/// RFC-027 D11: the active document's own recovery record, removed the moment its save
+/// succeeds. Reads the relative path from the active document itself rather than from
+/// `result`, since `SaveDecision` does not carry a path and a save never changes which
+/// document is active.
+fn remove_active_document_recovery_record_best_effort(state: &State) {
+    let Some(project) = state.app_shell.state().active_project() else {
+        return;
+    };
+    let Some(document) = project.content_workspace().active_document() else {
+        return;
+    };
+    let Some(state_root) = open_real_recovery_state_root() else {
+        return;
+    };
+    let _ = tekstide_core::recovery::remove_recovery_record(
+        &state_root,
+        project.id().as_str(),
+        &document.target().selected_relative_path,
+    );
 }
 
 /// RFC-026, release 0.29.0: the dialog [`attempt_save_active_document`]'s own
@@ -5805,6 +5895,27 @@ fn save_all_documents_button_pressed(state: &mut State) {
         return;
     }
     let outcome = state.app_shell.save_all_active_project_text_documents();
+    // RFC-027 D11: every document this save-all actually succeeded on (RFC-065's own
+    // `succeeded()` -- a clean document counts, and already has no record to remove,
+    // per `remove_recovery_record`'s own "missing is not an error") has its recovery
+    // record removed the same moment `attempt_save_active_document` would for one.
+    if let Some(project_id) = state
+        .app_shell
+        .state()
+        .active_project()
+        .map(|project| project.id().clone())
+        && let Some(state_root) = open_real_recovery_state_root()
+    {
+        for document_outcome in &outcome.outcomes {
+            if document_outcome.succeeded() {
+                let _ = tekstide_core::recovery::remove_recovery_record(
+                    &state_root,
+                    project_id.as_str(),
+                    &document_outcome.relative_path,
+                );
+            }
+        }
+    }
     state.save_all_notice = Some(outcome);
 }
 
@@ -7807,6 +7918,21 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     {
         subscriptions.push(iced::time::every(RUN_RECORD_INTERVAL).map(|_| Message::RunRecordTick));
     }
+    // RFC-027 D15/D7: only while persistence is on and some open project actually has a
+    // dirty document -- the same "checked but usually absent" shape as the branch above;
+    // an idle, all-clean session (or one with the setting off) costs nothing.
+    if state.configuration.recovery_persist_unsaved_buffers()
+        && state
+            .app_shell
+            .state()
+            .projects()
+            .iter()
+            .any(|project| project.content_workspace().dirty_file_count() > 0)
+    {
+        subscriptions.push(
+            iced::time::every(RECOVERY_PERSIST_INTERVAL).map(|_| Message::RecoveryPersistTick),
+        );
+    }
     // RFC-030 PR-030-B, review 410: one subscription per project with a
     // Git evaluation in flight -- `begin_git_summary_refresh` sets the
     // flag; this is what actually spawns the background read for it, and
@@ -9640,6 +9766,7 @@ fn content_mode_editor_view(state: &State) -> Element<'_, Message> {
             crate::surface::editor::EditorWorkspaceState {
                 status: workspace.status(),
                 save_all_notice: state.save_all_notice.as_ref(),
+                recovery_persist_refusals: &state.recovery_persist_refusals,
             },
             &state.catalog,
             &state.theme,
@@ -11087,6 +11214,117 @@ pub(crate) fn persist_agent_run_records(app_shell: &mut ApplicationShell) {
     }
 }
 
+/// RFC-027 PR-027-B, D2/D7/D9: one pass over every open project's own open documents.
+/// A dirty document's own record is written (or, D9, refused and named); a clean one's
+/// stale record (saved, or undone back to clean) is removed -- `remove_recovery_record`'s
+/// own "missing is not an error" means a document that never had one costs one syscall
+/// attempt, not a conditional.
+pub(crate) fn persist_recovery_records(state: &mut State) {
+    let Some(state_root) = open_real_recovery_state_root() else {
+        state.recovery_persist_refusals = Vec::new();
+        return;
+    };
+    let limits = tekstide_core::recovery::RecoveryRetentionLimits::default_limits();
+    let mut refusals = Vec::new();
+
+    let project_ids: Vec<_> = state
+        .app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect();
+    for project_id in project_ids {
+        let Some(project) = state.app_shell.state().project(&project_id) else {
+            continue;
+        };
+        let records: Vec<_> = project
+            .content_workspace()
+            .open_documents()
+            .map(|document| {
+                let relative_path = document
+                    .target()
+                    .selected_relative_path
+                    .display()
+                    .to_string();
+                (
+                    relative_path,
+                    document.is_dirty(),
+                    recovery_record_for(document),
+                )
+            })
+            .collect();
+        for (relative_path, dirty, record) in records {
+            if dirty {
+                let result = tekstide_core::recovery::write_recovery_record(
+                    &state_root,
+                    project_id.as_str(),
+                    &record,
+                    limits,
+                );
+                if let Err(error) = result {
+                    refusals.push(tekstide_core::recovery::RecoveryPersistRefusal {
+                        relative_path,
+                        reason: error.into(),
+                    });
+                }
+            } else {
+                let _ = tekstide_core::recovery::remove_recovery_record(
+                    &state_root,
+                    project_id.as_str(),
+                    std::path::Path::new(&relative_path),
+                );
+            }
+        }
+    }
+    state.recovery_persist_refusals = refusals;
+}
+
+/// RFC-027 D11, measurement 6: a project's own recovery records go the moment the
+/// project closes -- every one of its documents has just stopped being open, the same
+/// "its own reason ended" principle D11 states for a saved or recovered buffer. Shares
+/// `purge_project_recovery_records` with the explicit Trust Settings purge (D14: one
+/// removal path, two triggers) rather than a second one. Best-effort: a project closing
+/// successfully must never be undone by a recovery-record removal failing, the same
+/// "closing is what already happened" reasoning `state.project_watches.remove` beside it
+/// already follows without checking a result either.
+fn remove_project_recovery_records_best_effort(project_id: &tekstide_core::project::ProjectId) {
+    let Some(state_root) = open_real_recovery_state_root() else {
+        return;
+    };
+    let _ =
+        tekstide_core::recovery::purge_project_recovery_records(&state_root, project_id.as_str());
+}
+
+/// RFC-027 D2: the buffer's own text, cursor, viewport and the `FileSnapshot` it was
+/// opened against -- never the undo/redo stacks (D3; the *offer*, PR-027-C's own job,
+/// is what must say a recovered buffer comes back without them).
+fn recovery_record_for(
+    document: &tekstide_core::content::TextDocument,
+) -> tekstide_core::recovery::RecoveryRecord {
+    let cursor = document.cursor();
+    let viewport = document.viewport();
+    let snapshot = document.last_known_snapshot();
+    tekstide_core::recovery::RecoveryRecord {
+        version: tekstide_core::recovery::RECOVERY_RECORD_VERSION,
+        relative_path: document
+            .target()
+            .selected_relative_path
+            .display()
+            .to_string(),
+        text: document.text().to_owned(),
+        cursor_line: cursor.line,
+        cursor_column: cursor.column,
+        viewport_first_visible_line: viewport.first_visible_line,
+        viewport_first_visible_column: viewport.first_visible_column,
+        snapshot: tekstide_core::recovery::RecoveryFileSnapshot::from_system_time(
+            &snapshot.canonical_path,
+            snapshot.modified_at,
+            snapshot.len,
+        ),
+    }
+}
+
 /// Bytes under all of `transcripts/`, claimed by the open and recent projects.
 fn transcript_disk_usage_for(
     app_shell: &ApplicationShell,
@@ -11420,6 +11658,15 @@ fn apply_transcript_purge(state: &mut State, modal: &TranscriptPurgeModal) {
         }
     }
     refresh_transcript_disk_usage(state);
+    // RFC-027 D14: extends this same purge rather than a second entry point -- a
+    // recovery record belongs to the project the same way a transcript does, and this is
+    // where a user already goes to make a project's stored data go.
+    if let Some(state_root) = open_real_recovery_state_root() {
+        let _ = tekstide_core::recovery::purge_project_recovery_records(
+            &state_root,
+            modal.project_id.as_str(),
+        );
+    }
 }
 
 /// RFC-022 PR-022-E: a compile-time literal symbol for `RiskLevel`, the
@@ -11646,6 +11893,29 @@ fn trust_settings_view(state: &State) -> Element<'_, Message> {
         .size(state.theme.font_size_body())
         .into(),
     );
+    // RFC-027 D10: a second line, not folded into the one above -- two different
+    // content types collapsed into one count would itself be the §4.1 pattern this
+    // project's own review history keeps finding, a number describing something
+    // adjacent to what it names.
+    if let Some(state_root) = open_real_recovery_state_root() {
+        let (recovery_count, recovery_bytes) =
+            tekstide_core::recovery::project_recovery_record_bytes(
+                &state_root,
+                project.id().as_str(),
+            );
+        lines.push(
+            text(
+                state.catalog.get_with_args(
+                    "trust-settings-retained-recovery-records",
+                    &CatalogArgs::new()
+                        .number("count", recovery_count)
+                        .number("bytes", recovery_bytes),
+                ),
+            )
+            .size(state.theme.font_size_body())
+            .into(),
+        );
+    }
     if let Some(line) = trust_settings_unclaimed_transcripts_line(state) {
         lines.push(text(line).size(state.theme.font_size_body()).into());
     }

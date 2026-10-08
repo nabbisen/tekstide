@@ -11,9 +11,9 @@ use super::{
     AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ConfigurationState,
     ExternalChangeButton, FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton,
     ModalContent, PasteConfirmButton, PathFieldError, ProjectCloseButton, State,
-    TerminalPasteRefusal, TranscriptPurgeButton, TrustGrantButton, agent_run_launch_audit_notice,
-    agent_run_launch_refusal_text, apply_recovery_outcome, attempt_agent_run_launch_with_profile,
-    attempt_agent_run_launch_with_profile_and_state_root,
+    TerminalPasteRefusal, TranscriptPurgeButton, TranscriptPurgeModal, TrustGrantButton,
+    agent_run_launch_audit_notice, agent_run_launch_refusal_text, apply_recovery_outcome,
+    attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, configured_agent_run_launch_plan,
     content_within_bound, evaluate_promotion, focus_marker, main_area_key, main_area_label,
     modal_scrim_style, open_audit_store_recording_failure, open_real_audit_store,
@@ -20978,4 +20978,231 @@ fn state_holds_the_instance_marker_for_its_whole_lifetime_so_a_normal_exit_remov
     );
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+// --- RFC-027 PR-027-B: recovery records ---
+
+fn type_character(state: &mut State, ch: char) {
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Surface(
+            crate::input::surface_input_for_test(
+                FocusZone::MainArea,
+                crate::input::KeyPress {
+                    key: iced::keyboard::Key::Character(ch.to_string().into()),
+                    modifiers: iced::keyboard::Modifiers::empty(),
+                },
+            ),
+        )),
+    );
+}
+
+fn recovery_records_dir_for(project_id: &tekstide_core::project::ProjectId) -> PathBuf {
+    let state_root =
+        super::resolve_agent_run_state_dir().expect("a test build always has its own state root");
+    tekstide_core::recovery::records_dir(&state_root, project_id.as_str())
+}
+
+/// RFC-027 D2, D7: a real `RecoveryPersistTick` writes a record for a dirty document and
+/// nothing for a clean one; saving the document removes the record at once rather than
+/// waiting for the next tick (D11, measurement 6).
+#[test]
+fn a_dirty_document_gets_a_recovery_record_and_saving_removes_it() {
+    let (mut state, _dir) = state_with_an_open_document("recovery-tick-save", "first\n");
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("the fixture project must be active")
+        .id()
+        .clone();
+
+    let _ = super::update(&mut state, Message::RecoveryPersistTick);
+    assert!(
+        std::fs::read_dir(recovery_records_dir_for(&project_id))
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true),
+        "a clean document must get no record"
+    );
+
+    type_character(&mut state, '!');
+    assert_eq!(active_document_text(&state), "!first\n");
+
+    let _ = super::update(&mut state, Message::RecoveryPersistTick);
+    let records_dir = recovery_records_dir_for(&project_id);
+    let records = tekstide_core::recovery::read_project_recovery_records(
+        &super::resolve_agent_run_state_dir().unwrap(),
+        project_id.as_str(),
+    );
+    assert_eq!(
+        records.len(),
+        1,
+        "the dirty document must get exactly one record"
+    );
+    assert_eq!(records[0].1.text, "!first\n");
+    assert_eq!(records[0].1.relative_path, "file.txt");
+
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::SaveActiveDocument,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+    assert!(
+        std::fs::read_dir(&records_dir)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true),
+        "saving must remove the record at once, not wait for the next tick"
+    );
+}
+
+/// RFC-027 D2: a document undone back to the text it was opened with is clean again, and
+/// the next tick removes its own now-stale record -- the same principle that stops one
+/// from ever being written for a document that was never dirty.
+#[test]
+fn undoing_back_to_clean_removes_the_stale_record_on_the_next_tick() {
+    let (mut state, _dir) = state_with_an_open_document("recovery-tick-undo", "first\n");
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("the fixture project must be active")
+        .id()
+        .clone();
+
+    type_character(&mut state, '!');
+    let _ = super::update(&mut state, Message::RecoveryPersistTick);
+    assert_eq!(
+        tekstide_core::recovery::read_project_recovery_records(
+            &super::resolve_agent_run_state_dir().unwrap(),
+            project_id.as_str(),
+        )
+        .len(),
+        1,
+        "the fixture's own precondition: a record must exist before the undo"
+    );
+
+    press_ctrl_z(&mut state);
+    assert_eq!(
+        active_document_text(&state),
+        "first\n",
+        "the fixture's own precondition: undo must really land back on the opened text"
+    );
+
+    let _ = super::update(&mut state, Message::RecoveryPersistTick);
+    assert!(
+        tekstide_core::recovery::read_project_recovery_records(
+            &super::resolve_agent_run_state_dir().unwrap(),
+            project_id.as_str(),
+        )
+        .is_empty(),
+        "a document clean again (by undo) must have its stale record removed"
+    );
+}
+
+/// RFC-027 D11: closing a project removes every one of its own recovery records --
+/// every document it held has just stopped being open. The record is written directly
+/// here, standing in for one a crash (or an earlier dirty period, already saved over)
+/// left behind: this product's own close assessment reads a document's *live* dirty
+/// state, not disk, so a genuinely dirty document cannot be closed through the ordinary
+/// confirm path at all -- a separate, real product behaviour, not this test's concern.
+#[test]
+fn closing_a_project_removes_its_recovery_records() {
+    let (mut state, dir) = state_with_an_open_document("recovery-close", "first\n");
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("the fixture project must be active")
+        .id()
+        .clone();
+    let state_root = super::resolve_agent_run_state_dir().unwrap();
+    let record = tekstide_core::recovery::RecoveryRecord {
+        version: tekstide_core::recovery::RECOVERY_RECORD_VERSION,
+        relative_path: "file.txt".to_owned(),
+        text: "leftover\n".to_owned(),
+        cursor_line: 0,
+        cursor_column: 0,
+        viewport_first_visible_line: 0,
+        viewport_first_visible_column: 0,
+        snapshot: tekstide_core::recovery::RecoveryFileSnapshot::from_system_time(
+            std::path::Path::new("/does/not/matter.txt"),
+            std::time::SystemTime::UNIX_EPOCH,
+            9,
+        ),
+    };
+    tekstide_core::recovery::write_recovery_record(
+        &state_root,
+        project_id.as_str(),
+        &record,
+        tekstide_core::recovery::RecoveryRetentionLimits::default_limits(),
+    )
+    .expect("writing the fixture's own stale record should succeed");
+    assert_eq!(
+        tekstide_core::recovery::read_project_recovery_records(&state_root, project_id.as_str())
+            .len(),
+        1,
+        "the fixture's own precondition: a record must exist before the close"
+    );
+
+    super::attempt_close_project_tab(&mut state, project_id.clone());
+
+    assert!(
+        state.app_shell.state().project(&project_id).is_none(),
+        "the fixture's own precondition: a clean project must close through the \
+         immediate SafeToClose path, no confirmation needed"
+    );
+    assert!(
+        tekstide_core::recovery::read_project_recovery_records(&state_root, project_id.as_str())
+            .is_empty(),
+        "closing the project must remove its own recovery records"
+    );
+    let _ = dir;
+}
+
+/// RFC-027 D14: the existing per-project transcript purge also removes recovery records
+/// -- one removal path, two triggers, not a second purge control.
+#[test]
+fn purging_a_projects_transcripts_also_purges_its_recovery_records() {
+    let (mut state, _dir) = state_with_an_open_document("recovery-purge", "first\n");
+    let project_id = state
+        .app_shell
+        .state()
+        .active_project()
+        .expect("the fixture project must be active")
+        .id()
+        .clone();
+    type_character(&mut state, '!');
+    let _ = super::update(&mut state, Message::RecoveryPersistTick);
+    assert_eq!(
+        tekstide_core::recovery::read_project_recovery_records(
+            &super::resolve_agent_run_state_dir().unwrap(),
+            project_id.as_str(),
+        )
+        .len(),
+        1,
+        "the fixture's own precondition: a record must exist before the purge"
+    );
+
+    super::apply_transcript_purge(
+        &mut state,
+        &TranscriptPurgeModal {
+            project_id: project_id.clone(),
+            transcript_count: 0,
+            retained_bytes: 0,
+            still_being_written: 0,
+            running_run_transcripts: 0,
+            focus: TranscriptPurgeButton::Cancel,
+        },
+    );
+
+    assert!(
+        tekstide_core::recovery::read_project_recovery_records(
+            &super::resolve_agent_run_state_dir().unwrap(),
+            project_id.as_str(),
+        )
+        .is_empty(),
+        "the transcript purge must also remove this project's own recovery records"
+    );
 }

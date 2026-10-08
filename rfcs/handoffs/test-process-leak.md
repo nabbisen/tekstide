@@ -1469,3 +1469,15 @@ tests fail the gate twice, once on the assertion and once on the leak.**
 fixture clean itself on unwinding, the way `test_support`'s own
 `kill_on_drop_child_does_not_leak_across_a_panic` already establishes for a `Child`. Owner: the dev
 team, with the rows above.
+
+## New row, 2026-10-08 — RFC-027 PR-027-B gate
+
+| Test | Runs | Register row |
+| --- | --- | --- |
+| `surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_render_path_agree` | once | row 787's entry, now a third occurrence |
+
+Full workspace run otherwise clean (`743 + 16 + 1107`, 1 failed, 0 entries left); passed in
+isolation on the immediate rerun. The load-sensitive PTY timing already recorded at row 787 and its
+second occurrence above, not a regression in this response's own recovery-record work -- nothing
+this response touches is anywhere near `surface::terminal`. Gate redone, not counted, per this
+register's own convention.

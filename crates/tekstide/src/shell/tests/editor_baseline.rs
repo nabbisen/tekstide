@@ -1093,3 +1093,187 @@ fn d8_burst_diagnostic() {
         millis(run.delivery),
     );
 }
+
+/// RFC-027 D7/D8: keystrokes measured in the same process as the real recovery-persist tick
+/// -- the direct analogue of [`keystrokes_under_a_watched_burst`] for a periodic, debounced
+/// background write rather than an external file-change burst. Between keystrokes, a real
+/// `Message::RecoveryPersistTick` is delivered through the real `update` whenever
+/// `interval` has elapsed since the last one, the same "checked but usually absent" shape
+/// the production subscription itself uses -- this harness drives the identical production
+/// code path (`persist_recovery_records`), not a stand-in. `dirty_documents` lets the caller
+/// choose how many of the open set are actually dirty (and therefore actually written) each
+/// tick, for the paired one-document/ten-document comparison D8 asks for.
+struct RecoveryPersistRun {
+    stages: Vec<Stage>,
+    delivery: std::time::Duration,
+    ticks: usize,
+}
+
+fn keystrokes_with_recovery_persist_tick(
+    state: &mut State,
+    interval: std::time::Duration,
+    keystrokes: usize,
+    width: f32,
+) -> RecoveryPersistRun {
+    let mut run = RecoveryPersistRun {
+        stages: Vec::new(),
+        delivery: std::time::Duration::ZERO,
+        ticks: 0,
+    };
+    let mut last_tick = std::time::Instant::now();
+    for _ in 0..keystrokes {
+        if last_tick.elapsed() >= interval {
+            last_tick = std::time::Instant::now();
+            let started = std::time::Instant::now();
+            super::super::persist_recovery_records(state);
+            run.delivery += started.elapsed();
+            run.ticks += 1;
+        }
+        run.stages.push(one_keystroke(state, character("x"), width));
+    }
+    run
+}
+
+/// RFC-027 D7/D8: **the recovery-persist measurement.** The control is zero dirty
+/// background documents (the active one typed into is itself clean until its own first
+/// keystroke, so the earliest ticks persist nothing); the treatment opens
+/// [`BURST_N_DOCUMENTS`] documents and dirties every one of them before typing starts, so
+/// every tick genuinely writes all of them. Three conditions -- one dirty document (the
+/// active one, typed into), ten, and an idle control with none -- in a paired round,
+/// repeated five times, orders rotated the same way [`editor_typing_latency_under_a_watched_burst`]
+/// already rotates its own five. The figure that matters is the **per-document delivery
+/// cost**, not an absolute keystroke latency: D7's own question is what the tick costs
+/// between keystrokes, which keystroke p95 cannot see any more than it could for D8
+/// (review 469's own lesson, carried here from the start rather than re-discovered).
+///
+/// `cargo test --release -p tekstide editor_typing_latency_under_a_recovery_persist_tick -- --ignored --nocapture`
+#[test]
+#[ignore = "a measurement, not a check: release build, see the module doc"]
+fn editor_typing_latency_under_a_recovery_persist_tick() {
+    let text = fixture_text();
+    let width = 880.0;
+    let interval = std::time::Duration::from_millis(50);
+    #[derive(Clone, Copy, Debug)]
+    enum Condition {
+        Idle,
+        OneDirty,
+        TenDirty,
+    }
+    use Condition::{Idle as I, OneDirty as O, TenDirty as T};
+    let orders = [[I, O, T], [O, T, I], [T, I, O], [I, T, O], [O, I, T]];
+    let index = |condition: Condition| match condition {
+        Condition::Idle => 0,
+        Condition::OneDirty => 1,
+        Condition::TenDirty => 2,
+    };
+    println!(
+        "fixture: {} lines, {} bytes; tick interval under measurement: {:.0} ms; budget NFR-PERF-003: p95 <= 16 ms, p99 <= 33 ms",
+        FIXTURE_LINES,
+        text.len(),
+        millis(interval),
+    );
+    // Per-tick, not total: the tick fires on a wall-clock interval, and a slower tick (more
+    // dirty documents) leaves less of the fixed keystroke budget's own wall-clock time for
+    // further ticks to land in -- tick *counts* differ between conditions (4 for Idle/
+    // OneDirty, 6 for TenDirty in this run), so comparing totals over a fixed keystroke
+    // count conflates "costs more per tick" with "fewer/more ticks happened to fire."
+    let mut delivery_per_tick_ms = [[0.0f64; 3]; 5];
+    for (round, order) in orders.iter().enumerate() {
+        for &condition in order {
+            let (mut state, dir) = state_with_an_open_document("recovery-persist-round", &text);
+            state.editor_viewport = Some(Size::new(880.0, VIEWPORT_HEIGHT));
+            let dirty_documents = match condition {
+                Condition::Idle => 0,
+                Condition::OneDirty => 1,
+                Condition::TenDirty => BURST_N_DOCUMENTS,
+            };
+            // Every document beyond the primary one is opened and dirtied directly
+            // (`replace_active_project_text`, the same real API `attempt_undo_active_document`
+            // already uses) before any keystroke is measured -- only the primary document's
+            // own typing is timed, so the paired comparison holds everything but the dirty
+            // *count* constant.
+            for extra in 1..dirty_documents {
+                let name = format!("extra-{extra:02}.txt");
+                std::fs::write(dir.join(&name), &text)
+                    .expect("an extra fixture document should be writable");
+                state
+                    .app_shell
+                    .open_active_project_text_document(&name)
+                    .expect("an extra fixture document should open");
+                let _ = state
+                    .app_shell
+                    .replace_active_project_text(format!("x{text}"));
+            }
+            state
+                .app_shell
+                .open_active_project_text_document("file.txt")
+                .expect("switching back to the primary document must succeed");
+            if dirty_documents >= 1 {
+                let _ = state
+                    .app_shell
+                    .replace_active_project_text(format!("x{text}"));
+            }
+            for _ in 0..3 {
+                let _ = one_keystroke(&mut state, character("w"), width);
+            }
+
+            let run = keystrokes_with_recovery_persist_tick(&mut state, interval, 30, width);
+            let at = index(condition);
+            let per_tick = millis(run.delivery) / run.ticks.max(1) as f64;
+            delivery_per_tick_ms[round][at] = per_tick;
+            println!(
+                "round {} {:<11} keystrokes {:>4}  ticks {:>3}  delivery {:>8.3} ms total  {:>7.3} ms/tick",
+                round + 1,
+                format!("{condition:?}"),
+                run.stages.len(),
+                run.ticks,
+                millis(run.delivery),
+                per_tick,
+            );
+        }
+    }
+    println!("\npaired differences from the idle control, per round (ms/tick):");
+    let mut one_doc_cost = Vec::new();
+    let mut ten_doc_cost = Vec::new();
+    for (round, row) in delivery_per_tick_ms.iter().enumerate() {
+        println!(
+            "round {}: idle {:.3} ms/tick; one dirty {:+.3}; ten dirty {:+.3}",
+            round + 1,
+            row[0],
+            row[1] - row[0],
+            row[2] - row[0],
+        );
+        one_doc_cost.push(row[1] - row[0]);
+        ten_doc_cost.push(row[2] - row[0]);
+    }
+    let median = |values: &[f64]| {
+        let mut sorted = values.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mid = sorted.len() / 2;
+        if sorted.len().is_multiple_of(2) {
+            (sorted[mid - 1] + sorted[mid]) / 2.0
+        } else {
+            sorted[mid]
+        }
+    };
+    let median_one = median(&one_doc_cost);
+    let median_ten = median(&ten_doc_cost);
+    println!("median one-dirty-document cost over the five rounds: {median_one:+.3} ms/tick");
+    println!(
+        "median {BURST_N_DOCUMENTS}-dirty-document cost over the five rounds: {median_ten:+.3} ms/tick"
+    );
+    if median_one.abs() > 0.001 {
+        println!(
+            "ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {:.2}x -- close to {BURST_N_DOCUMENTS} if the per-document cost is linear",
+            median_ten / median_one
+        );
+    }
+    let per_document_ms = median_ten / BURST_N_DOCUMENTS as f64;
+    println!(
+        "per-document delivery cost (ten-document median / {BURST_N_DOCUMENTS}): {per_document_ms:.3} ms/tick"
+    );
+    let extrapolated_20 = per_document_ms * 20.0;
+    println!(
+        "extrapolated cost at the open set's own bound of 20 documents, all dirty: {extrapolated_20:.3} ms/tick (extrapolation, not measured)"
+    );
+}
