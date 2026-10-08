@@ -103,22 +103,10 @@ fn scan_and_clean_stale_markers(instances_dir: &Path) -> io::Result<Vec<Detected
     for entry in entries {
         let entry = entry?;
         // Not a filename this code ever wrote -- ignore rather than delete something this
-        // module does not recognise. Review 481: `0` and anything past `i32::MAX` are
-        // rejected here too, not only non-numeric names -- `libc::kill` treats pid `0` as
-        // "my own process group" and a `u32` cast of anything past `i32::MAX` wraps to a
-        // negative `pid_t`, where `-1` means "every process I may signal." Both read as
-        // "alive" to `pid_is_alive` regardless of whether the real process the filename
-        // once named still exists, so an unvalidated pid in that range could never be
-        // cleaned. `InstanceMarker::create` only ever writes a real `std::process::id()`,
-        // which is never `0` and never exceeds `i32::MAX` on Linux -- this is defense
-        // against a malformed or adversarial filename, not a case this module's own writer
-        // produces.
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u32>().ok())
-            .filter(|pid| (1..=i32::MAX as u32).contains(pid))
-        else {
+        // module does not recognise. `local-data-and-privacy.md`'s own rule already covers
+        // this: "a file Tekstide did not write is never deleted" (review 482's correction to
+        // review 481 -- not "always either live or removable").
+        let Some(pid) = entry.file_name().to_str().and_then(marker_filename_to_pid) else {
             continue;
         };
         if pid_is_alive(pid) {
@@ -129,6 +117,22 @@ fn scan_and_clean_stale_markers(instances_dir: &Path) -> io::Result<Vec<Detected
         }
     }
     Ok(detected)
+}
+
+/// Review 481/482: a marker filename is only ever a pid this module itself could have
+/// written (`InstanceMarker::create`'s own `std::process::id()`), so anything outside
+/// `1..=i32::MAX` is rejected here, before it can ever reach [`pid_is_alive`]'s own
+/// `libc::kill` cast. `0` would probe the caller's own process group; a `u32` past
+/// `i32::MAX` wraps to a negative `pid_t`, where `-1` means "every process I may signal" --
+/// both always answer "alive" regardless of whether a real process by that name ever
+/// existed. Factored out from the scan's own loop (review 482) because a test asserting
+/// only `detected_crashes` cannot tell "rejected at parse time" from "accepted, then read
+/// as alive": both leave the file on disk and report no crash, so only this function's own
+/// return value can prove the filter is still there.
+fn marker_filename_to_pid(name: &str) -> Option<u32> {
+    name.parse::<u32>()
+        .ok()
+        .filter(|pid| (1..=i32::MAX as u32).contains(pid))
 }
 
 /// RFC-027 D12: production's own version of
@@ -160,5 +164,22 @@ mod tests {
         // is the largest value the type can hold, chosen because a real system is
         // vanishingly unlikely to have ever allocated it.
         assert!(!pid_is_alive(i32::MAX as u32));
+    }
+
+    /// Review 482: asserted directly against the parse, not against `detected_crashes` --
+    /// `0` and `u32::MAX` leave a marker on disk and report no crash whether they are
+    /// rejected here or merely misread as "alive" downstream, so only this function's own
+    /// return value can tell the filter apart from its absence.
+    #[test]
+    fn marker_filename_to_pid_rejects_zero_and_anything_past_i32_max() {
+        assert_eq!(marker_filename_to_pid("999999999"), Some(999_999_999));
+        assert_eq!(marker_filename_to_pid("0"), None);
+        assert_eq!(marker_filename_to_pid(&u32::MAX.to_string()), None);
+        assert_eq!(
+            marker_filename_to_pid(&(i32::MAX as u32).to_string()),
+            Some(i32::MAX as u32),
+            "i32::MAX itself is still a valid pid_t"
+        );
+        assert_eq!(marker_filename_to_pid("not-a-pid"), None);
     }
 }

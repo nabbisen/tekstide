@@ -130,13 +130,48 @@ classified as a live sibling and never classified as a crash; they are simply no
 recognises.
 
 `an_out_of_range_marker_filename_is_neither_a_crash_nor_a_live_sibling`
-(`crates/tekstide-core/src/recovery/tests.rs`) reproduces the review's own three-row table
-directly: `999999999` still detected and removed; `0` and `u32::MAX` both left on disk, neither
-reported.
+(`crates/tekstide-core/src/recovery/tests.rs`) reproduced the review's own three-row table at the
+`start_instance` level: `999999999` still detected and removed; `0` and `u32::MAX` both left on
+disk, neither reported. **Superseded by review 482's own finding below** -- that test passed
+whether or not the fix was actually present, so it is not kept as a second, weaker copy.
 
 ### Gate, review 481's fix
 
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g482{1,2,3}`): `739 + 16 + 1096` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
+  in each run's own `TMPDIR` afterward.
+
+## Review 482: the fix was right, its test proved nothing, and my own justification was wrong
+
+**The test passed without the fix** -- the review's own ablation, not mine: `InstanceStartup`
+carries only `detected_crashes`, and `0`/`u32::MAX` produce no detected crash either way, before
+the fix because `pid_is_alive` answers "alive" and after it because the parse-time filter rejects
+the filename -- the same observable outcome either way.
+
+**Fixed by testing the property the fix actually establishes, not its downstream effect.** The
+filename-to-pid step is its own named function now, `marker_filename_to_pid`
+(`crates/tekstide-core/src/recovery/instance.rs`), asserted directly:
+`marker_filename_to_pid_rejects_zero_and_anything_past_i32_max`
+(`recovery::instance::tests`) asserts `"0"` and `"4294967295"` both yield `None`, `"999999999"`
+and `i32::MAX`'s own string yield `Some` of themselves, and a non-numeric name yields `None` too.
+**Ablated against this response's own commit**, `.filter(|pid| (1..=i32::MAX as u32).contains(pid))`
+removed: this test fails immediately, the moment the filter goes -- verified before trusting it as
+the fix's own proof, not assumed from reading the code.
+
+**Review 481's own justification was wrong, and the fix is right not to have delivered it.** The
+required item was framed as "a marker is always either live or removable"; `0` and `u32::MAX`
+never become removable under this fix, and they should not --
+`local-data-and-privacy.md`'s own published rule is "a file Tekstide did not write is never
+deleted," and a filename this module does not recognise is, by definition, one we did not write.
+The actual property this fix protects is narrower, and belongs to PR-027-B: a recovery record's
+own cleanup must never depend on a marker filename this module does not recognise, since an
+ignored marker is harmless on its own but an ignored marker that stops a record of real user
+content from ever being cleaned is §2 row 7.
+
+### Gate, review 482's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g483{1,2,3}`): `739 + 16 + 1096` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
   in each run's own `TMPDIR` afterward.
