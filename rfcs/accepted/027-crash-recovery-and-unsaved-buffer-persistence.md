@@ -165,3 +165,37 @@ The open question is answered as recommended: losing unsaved work is the failure
 prevent, and a protection a user must first discover does not prevent it. The honesty obligations
 in D10 are what make default-on defensible, so they are not separable from it — a slice that turns
 this on without them is not this decision.
+
+## Amendment 1 (2026-10-08, review 485): records without a marker are ordinary, not a bug
+
+**D1 and the risk document's §3 row 11 are wrong as written, and they are mine.** Both say that
+recovery data found with no marker is "a bug in our own cleanup", to be reported as one rather than
+consumed. That assumed records can only exist alongside a live or crashed marker. They can't be
+relied on to.
+
+**Verified against the real binary at review 485.** A clean window close removes the marker — its
+`Drop` runs, proven at review 481 — and **leaves the records on disk**. Nothing removes records on
+exit; the only removals are save, a tick finding the document clean, and project close. And there
+is **no guard anywhere against quitting with unsaved work**: the window close path runs no close
+assessment, so "edit, don't save, quit" is an ordinary, unguarded action. A restart then finds
+records and no marker, and today says nothing about them.
+
+So the state D1 called a bug is the normal consequence of quitting with unsaved work — and it is
+the case where a user most wants their work back. `REQ-RECOVER-002` is not crash-scoped either: it
+says restore buffers "where safe", with no mention of how the last session ended.
+
+**Amended:**
+
+- **The offer is driven by the presence of records, not by the marker.** PR-027-C offers whatever
+  records exist, whether or not a crash was detected.
+- **The marker's job is to describe, not to gate.** It distinguishes *how* the previous session
+  ended, and the offer's wording may differ between "did not exit cleanly" and an ordinary quit.
+  Nothing is withheld because no crash was detected.
+- **§3 row 11 is narrowed** to what it should always have said: a record whose *project* no longer
+  exists, or that this module cannot parse, is a cleanup problem and is reported — not merely
+  "records without a marker".
+
+**Consequence for PR-027-B as shipped**, stated so it is not discovered later: between B and C, a
+user who quits with unsaved work leaves their content on disk with nothing offering it back and
+nothing removing it but a purge they must go and find. That is acceptable only because C is next.
+**This RFC must not reach a release with B in and C out.**

@@ -144,6 +144,43 @@ depend on a marker filename this module does not recognise.
       doc comment and by every test in `recovery::tests` asserting against `records_dir`, never
       against anything under a project root.
 
+### Required at review 485
+
+The slice is substantial and mostly right: D10's ordering honoured (purge, figure, setting and the
+privacy-page correction all in with the first content written), `0700`/`0600` asserted by reading
+the mode, no buffer content in the audit store, a clean document never written, the record type
+carrying no undo field at all, and the file-content-read guard found and named rather than
+silenced. Catching review 469's tick-count confound **before** publishing was the right instinct.
+Two required items.
+
+- [ ] **The two medians contradict each other, and the published per-document figure follows only
+  one of them.** Same run, same 3.3 MiB fixture: one dirty document costs **+0.001 ms/tick**, ten
+  cost **+16.687 ms/tick**. That is **16,687× for 10× the work**, and the per-document figure
+  (1.669 ms) comes from dividing the ten-document median by ten — which your own one-document
+  measurement denies by a factor of 1,669. The 20-document extrapolation (33.374 ms) rests on the
+  linearity those two numbers jointly disprove. The likely explanation is that the one-document
+  delta is **below this harness's resolution**, in which case say that — `+0.001 ms/tick` printed
+  as a cost is a noise floor wearing a number's clothes — and publish the per-round spread, not
+  only the medians, so a reader can see it. **RFC-065 D7 got this right by publishing the ratio
+  against what linearity predicts (9.2× where 10× was expected); computing that same ratio here
+  would have surfaced this immediately.**
+- [ ] **Records with no marker are ordinary, not a bug — and the rule that said otherwise was
+  mine.** See **Amendment 1** on the RFC. Verified live: a clean window close removes the marker and
+  **leaves the records**, and a restart then says nothing about them; there is no guard anywhere
+  against quitting with unsaved work. Nothing in PR-027-B needs changing for this — the amendment
+  changes **PR-027-C**, which must offer whatever records exist rather than gating on a detected
+  crash. **It also means this RFC must not reach a release with B in and C out**: between them, a
+  user who quits with unsaved work leaves content on disk that nothing offers back and nothing
+  removes but a purge they have to go and find.
+
+**On the close-path constraint you disclosed:** confirmed, pre-existing, and already a known
+limitation in the product's own code — `apply_project_close_confirmation` says in as many words
+that a refused close leaves the project open with the modal already dismissed. **It is a real
+defect** (a dialog offering an action it then does not perform, with no explanation) but it is not
+RFC-027's, and your test standing in with a stale record against a clean document is the right way
+to work around it rather than through it. Your read of D11's consequence is right too: the close
+trigger will only ever find a record that is stale for some other reason.
+
 ## PR-027-C — the offer
 
 - [ ] **Measurement 1 — the offer** lists each recoverable buffer with its project and path, and
