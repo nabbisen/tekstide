@@ -80,6 +80,27 @@ fix. I should have cited that line at 481 instead of inventing a property that c
   filename the module does not recognise.** An ignored marker is fine; an ignored marker that strands
   a record of user content is §2 row 7. Prove it when records land.
 
+### Closed at review 483 — PR-027-A accepted
+
+Nothing required. The test now tests the property, and I confirmed it rather than taking the
+report: ablating the range filter with `ablate.sh` fails
+`marker_filename_to_pid_rejects_zero_and_anything_past_i32_max` immediately
+(`left: Some(0), right: None`), and the tree restores clean. Gate reproduces on my own run:
+`739 + 16 + 1096`, `0+1+1` doctests, 0 failures, 0 fixture entries left.
+
+**Removing the old end-to-end test rather than keeping it alongside was the right call**, and worth
+recording as a judgement rather than a tidy-up: a test that passes either way, sitting next to one
+that does not, reads to the next person as two proofs where there is one. Deleting it is the honest
+state.
+
+Everything PR-027-A set out to prove is proved, most of it against the real binary at review 481:
+the marker is created by pid and removed by a clean close through the window manager, a real
+`SIGKILL` leaves it, a restart detects and names it, two concurrent instances leave each other
+alone, and no buffer content is written anywhere.
+
+**PR-027-B is next**, and carries review 482's forward constraint: a record's own cleanup must never
+depend on a marker filename this module does not recognise.
+
 ## PR-027-B — the record, with its purge
 
 - [ ] A **dirty** document gets a record; a **clean** one does not (D2, §3 row 12). Proved by what
