@@ -2,11 +2,12 @@
 
 ## 0.31.0 - The Crash Is Detected, Not Guessed
 
-Status: **in progress.** RFC-027's first two slices (the marker, the record with its purge) are
-done; the third (the offer) is not, and this release cannot ship without it — closing a project's
-own documents, or quitting the application, leaves any recovery record on disk with nothing yet to
-offer it back. This entry is written incrementally as slices close, not held back for the release;
-see `rfcs/handoffs/027-crash-recovery/` for the full handoff pack.
+Status: **in progress.** RFC-027's three slices (the marker, the record with its purge, the offer)
+are all implemented and gated; what remains before the candidate is the offer's own live capture
+and a direct proof that its "no undo history" notice is actually shown, not only present in the
+catalog — both tracked in `rfcs/handoffs/027-crash-recovery/acceptance-qa-checklist.md`'s own
+`PR-027-C` section. This entry is written incrementally as slices close, not held back for the
+release; see `rfcs/handoffs/027-crash-recovery/` for the full handoff pack.
 
 **A crash is detected, not guessed.** Tekstide now writes a small marker at every launch and
 removes it at every clean exit, so a marker still there at the next launch means the previous one
@@ -46,6 +47,20 @@ at twenty documents. **One document's own cost could not be measured** in any ru
 inside the harness's own round-to-round noise, straddling zero, rather than landing on a stable
 number — the confirmed rate is between ten and twenty documents, not from one, and is not claimed
 to hold below ten.
+
+**And now there is somewhere to bring it back.** Opening a project with recovery records on disk —
+whichever way it is opened — offers them back: each recoverable document, named by its own path,
+restored on acceptance with the text, cursor and viewport it had when it was last written, but
+never its undo history. Declining leaves every file, and every record, exactly as it was; nothing
+here is a one-way door until a document is actually accepted. What the offer is driven by is the
+record's own presence on disk, **never** whether the previous session left behind a crash marker —
+a clean window close already removes that marker while leaving the records behind, and quitting
+with unsaved work is unguarded today, so a record with no marker is the ordinary case this exists
+for, not a defect. The file on disk is compared against what the record itself last saw: unchanged
+restores the document dirty, exactly as it was; changed or deleted since restores it through the
+same conflict machinery an already-open document's own external change already uses — no new
+vocabulary for either case, and the deleted case is told apart from the changed one the identical
+way it already is anywhere else in the editor.
 
 ## 0.30.0 - The Multi-Document Model
 

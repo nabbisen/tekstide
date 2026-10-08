@@ -204,6 +204,71 @@ fn a_written_record_has_the_right_permissions_and_reads_back_exactly() {
     cleanup_root(root);
 }
 
+/// RFC-027 PR-027-C, D6/measurement 2 (crash half): the real round trip, proven against a
+/// real `SIGKILL`, not a `simulate_crash()` helper (§4 row 15) -- the same discipline
+/// `a_real_sigkill_leaves_a_marker_a_later_startup_detects_as_a_crash` already established
+/// for PR-027-A's own marker. A real, short-lived process stands in for the crashed
+/// instance (as that test's own doc explains: the marker/record writes happen in *this*
+/// process, since the stand-in never ran Tekstide's own code, only existed to have a real,
+/// killable pid); what is proven here is that both the marker and the record it wrote
+/// genuinely survive a real kill and reap, intact and distinct from a merely-simulated
+/// crash -- the disk-comparison half of the round trip (unchanged/changed/gone) is
+/// `TextDocument::recover`'s own job and is proven directly against real files in
+/// `tekstide::content::tests::recover`, which needs no process at all to exercise.
+#[test]
+fn a_real_sigkill_leaves_the_crashed_instances_own_recovery_record_intact() {
+    let _real_process_slot = crate::test_support::RealProcessLimiter::acquire();
+    let root = test_root("recovery-real-sigkill-round-trip");
+
+    let mut child = std::process::Command::new("sleep")
+        .arg("5")
+        .spawn()
+        .expect("spawn a real, short-lived sleep process");
+    let pid = child.id();
+
+    // Stands in for the crashed instance's own marker (`InstanceMarker::create`) and its
+    // own unsaved edit's record (`write_recovery_record`, the real product function) --
+    // both written here, exactly as `a_real_sigkill_leaves_a_marker_a_later_startup_
+    // detects_as_a_crash`'s own doc explains doing for the marker alone.
+    std::fs::create_dir_all(instances_dir(&root)).expect("instances dir should be creatable");
+    let stale_marker = instances_dir(&root).join(pid.to_string());
+    std::fs::write(&stale_marker, b"").expect("the stale marker should be writable");
+    let record = sample_record("unsaved.txt", "edited but never saved\n");
+    write_recovery_record(
+        &root,
+        "proj-1",
+        &record,
+        RecoveryRetentionLimits::default_limits(),
+    )
+    .expect("writing the crashed instance's own record should succeed");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // "Restart": the real detection scan, and the real record read -- the two facts
+    // Amendment 1 says the offer is actually driven by (the record's own presence, with
+    // the marker only coloring *how* it is described, never gating whether it appears).
+    let startup = start_instance(&root).expect("starting an instance should succeed");
+    assert_eq!(
+        startup.detected_crashes,
+        vec![crate::recovery::DetectedCrash { pid }],
+        "the real, now-dead pid must be reported as a detected crash"
+    );
+    let records = read_project_recovery_records(&root, "proj-1");
+    assert_eq!(
+        records.len(),
+        1,
+        "the crashed instance's own record must survive the real kill intact"
+    );
+    assert_eq!(
+        records[0].1, record,
+        "the record read back after the real kill must be byte-for-byte what was written \
+         before it, not merely present"
+    );
+
+    cleanup_root(root);
+}
+
 /// RFC-027: writing the same document's own record twice replaces it in place -- one
 /// file per document, not one per write.
 #[test]

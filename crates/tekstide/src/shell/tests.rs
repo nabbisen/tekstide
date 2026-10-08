@@ -21206,3 +21206,279 @@ fn purging_a_projects_transcripts_also_purges_its_recovery_records() {
         "the transcript purge must also remove this project's own recovery records"
     );
 }
+
+// --- RFC-027 PR-027-C: the offer ---
+
+fn recovery_record_for_fixture(
+    relative_path: &str,
+    text: &str,
+    file: &std::path::Path,
+) -> tekstide_core::recovery::RecoveryRecord {
+    let metadata = std::fs::metadata(file).expect("fixture file must exist");
+    tekstide_core::recovery::RecoveryRecord {
+        version: tekstide_core::recovery::RECOVERY_RECORD_VERSION,
+        relative_path: relative_path.to_owned(),
+        text: text.to_owned(),
+        cursor_line: 0,
+        cursor_column: 0,
+        viewport_first_visible_line: 0,
+        viewport_first_visible_column: 0,
+        snapshot: tekstide_core::recovery::RecoveryFileSnapshot::from_system_time(
+            file,
+            metadata.modified().unwrap(),
+            metadata.len(),
+        ),
+    }
+}
+
+/// RFC-027 PR-027-C, Amendment 1: a project opened before `State` exists (the
+/// CLI-argument shape `offer_recovery_for_open_projects` exists for) with a recovery
+/// record already on disk is offered the moment `State::new` runs -- driven by the
+/// record's own presence, never a crash marker (none is passed to `State::new` here at
+/// all, and the offer still appears).
+#[test]
+fn a_project_with_recovery_records_is_offered_at_state_construction() {
+    let dir = fresh_project_dir("recovery-offer-boot");
+    let file = dir.join("file.txt");
+    std::fs::write(&file, "saved\n").unwrap();
+    let mut app_shell = ApplicationShell::new();
+    let project_id = match app_shell.add_project_from_path(&dir).unwrap() {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {
+            panic!("fixture: a freshly created directory must be newly added")
+        }
+    };
+
+    let state_root = super::resolve_agent_run_state_dir().unwrap();
+    tekstide_core::recovery::write_recovery_record(
+        &state_root,
+        project_id.as_str(),
+        &recovery_record_for_fixture("file.txt", "unsaved edit\n", &file),
+        tekstide_core::recovery::RecoveryRetentionLimits::default_limits(),
+    )
+    .expect("writing the fixture's own record should succeed");
+
+    let state = state_with(app_shell);
+
+    match &state.modal {
+        Some(ModalContent::RecoveryOffer(modal)) => {
+            assert_eq!(modal.project_id, project_id);
+            assert_eq!(modal.items.len(), 1);
+            assert_eq!(modal.items[0].relative_path, Path::new("file.txt"));
+            assert_eq!(modal.items[0].outcome, None);
+        }
+        other => panic!("expected the recovery offer modal, got {other:?}"),
+    }
+}
+
+/// RFC-027 PR-027-C: a project with no recovery records opens exactly as it always did --
+/// the presence check is the whole gate, so an ordinary open (nothing ever having been
+/// dirty, or everything already saved) opens no modal at all.
+#[test]
+fn a_project_with_no_recovery_records_opens_no_modal() {
+    let dir = fresh_project_dir("recovery-offer-none");
+    std::fs::write(dir.join("file.txt"), "saved\n").unwrap();
+    let mut app_shell = ApplicationShell::new();
+    app_shell.add_project_from_path(&dir).unwrap();
+
+    let state = state_with(app_shell);
+
+    assert!(state.modal.is_none());
+}
+
+/// RFC-027 PR-027-C, D5 "unchanged"/measurement 1: activating the highlighted row
+/// recovers it into the open set as `Dirty` with the recorded text, makes it visible the
+/// same way any other file-open does, and removes its own record at once (D11) -- the
+/// modal itself stays open (there may be more than one row), with the row's own outcome
+/// recorded rather than the row disappearing.
+#[test]
+fn activating_a_recoverable_row_recovers_it_and_removes_its_record() {
+    let dir = fresh_project_dir("recovery-offer-accept");
+    let file = dir.join("file.txt");
+    std::fs::write(&file, "saved\n").unwrap();
+    let mut app_shell = ApplicationShell::new();
+    let project_id = match app_shell.add_project_from_path(&dir).unwrap() {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {
+            panic!("fixture: a freshly created directory must be newly added")
+        }
+    };
+    let state_root = super::resolve_agent_run_state_dir().unwrap();
+    tekstide_core::recovery::write_recovery_record(
+        &state_root,
+        project_id.as_str(),
+        &recovery_record_for_fixture("file.txt", "unsaved edit\n", &file),
+        tekstide_core::recovery::RecoveryRetentionLimits::default_limits(),
+    )
+    .unwrap();
+    let mut state = state_with(app_shell);
+    assert!(
+        matches!(state.modal, Some(ModalContent::RecoveryOffer(_))),
+        "fixture precondition: the offer must be open before activating anything"
+    );
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert_eq!(
+        active_document_text(&state),
+        "unsaved edit\n",
+        "the recovered buffer must be visible, through the same open path any other \
+         file-activation already uses"
+    );
+    assert!(
+        tekstide_core::recovery::read_project_recovery_records(&state_root, project_id.as_str())
+            .is_empty(),
+        "D11: recovering removes the record at once, not on the next persist tick"
+    );
+    match &state.modal {
+        Some(ModalContent::RecoveryOffer(modal)) => {
+            assert_eq!(
+                modal.items[0].outcome,
+                Some(super::RecoveryOfferOutcome::Recovered),
+                "the row's own outcome must say what happened"
+            );
+        }
+        other => panic!("the modal must stay open after one row is recovered, got {other:?}"),
+    }
+}
+
+/// RFC-027 PR-027-C, D5 "changed": accepting a row whose file has since changed on disk
+/// must surface the Reload control -- `editor::reload_button_is_shown`'s own test proves
+/// the status-to-button mapping; this proves the real chain
+/// (`recover_text_document` → `open_text_document` → `refresh_active_text_document`)
+/// actually arrives at `ProjectContentStatus::Conflict`, not a plain `Opened` that would
+/// silently hide the same control `open_text_document`'s own dedup switch shows for every
+/// other already-open path it switches to.
+#[test]
+fn activating_a_row_whose_file_has_changed_surfaces_the_reload_control() {
+    let dir = fresh_project_dir("recovery-offer-accept-changed");
+    let file = dir.join("file.txt");
+    std::fs::write(&file, "saved\n").unwrap();
+    let mut app_shell = ApplicationShell::new();
+    let project_id = match app_shell.add_project_from_path(&dir).unwrap() {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {
+            panic!("fixture: a freshly created directory must be newly added")
+        }
+    };
+    let state_root = super::resolve_agent_run_state_dir().unwrap();
+    let mut record = recovery_record_for_fixture("file.txt", "unsaved edit\n", &file);
+    // The record's own captured length no longer matches the file now on disk -- D5's
+    // own "changed" case.
+    record.snapshot.len += 1;
+    tekstide_core::recovery::write_recovery_record(
+        &state_root,
+        project_id.as_str(),
+        &record,
+        tekstide_core::recovery::RecoveryRetentionLimits::default_limits(),
+    )
+    .unwrap();
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert_eq!(active_document_text(&state), "unsaved edit\n");
+    let project = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .expect("fixture project must still be open");
+    assert_eq!(
+        project.content_workspace().status(),
+        &tekstide_core::project::ProjectContentStatus::Conflict,
+        "a changed-on-disk recovery must surface through the existing Conflict status, \
+         the same one the Reload control already renders from"
+    );
+    match &state.modal {
+        Some(ModalContent::RecoveryOffer(modal)) => {
+            assert_eq!(
+                modal.items[0].outcome,
+                Some(super::RecoveryOfferOutcome::RecoveredAsConflict)
+            );
+        }
+        other => panic!("expected the offer to stay open, got {other:?}"),
+    }
+}
+
+/// RFC-027 PR-027-C, D5 "gone": accepting a row whose file has since been deleted must
+/// surface `ExternalDeleted`, the same existing status an already-open document gets for
+/// the identical disk state (`refresh_document_by_canonical_path`'s own mapping) -- never
+/// a state this slice invented, and never a plain `Opened` that would claim the file is
+/// still there.
+#[test]
+fn activating_a_row_whose_file_is_gone_surfaces_external_deleted() {
+    let dir = fresh_project_dir("recovery-offer-accept-gone");
+    let file = dir.join("file.txt");
+    std::fs::write(&file, "saved\n").unwrap();
+    let mut app_shell = ApplicationShell::new();
+    let project_id = match app_shell.add_project_from_path(&dir).unwrap() {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {
+            panic!("fixture: a freshly created directory must be newly added")
+        }
+    };
+    let state_root = super::resolve_agent_run_state_dir().unwrap();
+    tekstide_core::recovery::write_recovery_record(
+        &state_root,
+        project_id.as_str(),
+        &recovery_record_for_fixture("file.txt", "unsaved edit\n", &file),
+        tekstide_core::recovery::RecoveryRetentionLimits::default_limits(),
+    )
+    .unwrap();
+    std::fs::remove_file(&file).unwrap();
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert_eq!(active_document_text(&state), "unsaved edit\n");
+    let project = state
+        .app_shell
+        .state()
+        .project(&project_id)
+        .expect("fixture project must still be open");
+    assert_eq!(
+        project.content_workspace().status(),
+        &tekstide_core::project::ProjectContentStatus::ExternalDeleted,
+    );
+}
+
+/// RFC-027 PR-027-C, measurement 1: declining the offer (Escape) leaves every file --
+/// and every record -- on disk exactly as it was. Nothing about recovery is a one-way
+/// door until a row is actually activated.
+#[test]
+fn dismissing_the_offer_leaves_every_record_on_disk_untouched() {
+    let dir = fresh_project_dir("recovery-offer-decline");
+    let file = dir.join("file.txt");
+    std::fs::write(&file, "saved\n").unwrap();
+    let mut app_shell = ApplicationShell::new();
+    let project_id = match app_shell.add_project_from_path(&dir).unwrap() {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {
+            panic!("fixture: a freshly created directory must be newly added")
+        }
+    };
+    let state_root = super::resolve_agent_run_state_dir().unwrap();
+    tekstide_core::recovery::write_recovery_record(
+        &state_root,
+        project_id.as_str(),
+        &recovery_record_for_fixture("file.txt", "unsaved edit\n", &file),
+        tekstide_core::recovery::RecoveryRetentionLimits::default_limits(),
+    )
+    .unwrap();
+    let mut state = state_with(app_shell);
+
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(state.modal.is_none());
+    assert_eq!(
+        tekstide_core::recovery::read_project_recovery_records(&state_root, project_id.as_str())
+            .len(),
+        1,
+        "declining must leave the record exactly as it was"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "saved\n",
+        "declining must leave the file on disk exactly as it was"
+    );
+}

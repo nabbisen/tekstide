@@ -765,6 +765,16 @@ fn generic_args() -> CatalogArgs<'static> {
             "branch",
             &tekstide_core::text_safety::quote_untrusted("fixture-branch"),
         )
+        // RFC-027 PR-027-C: `recovery-offer-title`'s `$project` -- a project display
+        // name, untrusted, routed through `quote_untrusted` the same way `branch`/`name`/
+        // `path` above are. `recovery-offer-row`'s own `$path` reuses the `path` arg
+        // already present; only `$outcome`, a trusted selector symbol not covered by
+        // `reason`/`state`/`kind`'s own arms, is new alongside it.
+        .untrusted(
+            "project",
+            &tekstide_core::text_safety::quote_untrusted("fixture-project"),
+        )
+        .trusted_symbol("outcome", "pending")
 }
 
 fn shipped_additional_locales() -> Vec<String> {

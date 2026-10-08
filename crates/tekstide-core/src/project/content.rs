@@ -2,9 +2,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::content::{
-    EditOperation, ExternalChangeDecision, SaveDecision, TextCursor, TextDocument,
-    TextDocumentEditError, TextDocumentOpenError, TextDocumentOpenPolicy, TextDocumentRefreshError,
-    TextDocumentSaveError, TextDocumentState, TextViewport,
+    EditOperation, ExternalChangeDecision, RecoveredBufferInit, SaveDecision, TextCursor,
+    TextDocument, TextDocumentEditError, TextDocumentOpenError, TextDocumentOpenPolicy,
+    TextDocumentRefreshError, TextDocumentSaveError, TextDocumentState, TextViewport,
 };
 use crate::project::explorer_tree::{
     ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
@@ -278,6 +278,57 @@ impl ProjectContentWorkspace {
                 Err(ProjectContentError::Open(error))
             }
         }
+    }
+
+    /// RFC-027 PR-027-C, Amendment 1/D5: inserts a document recovered from a crash-
+    /// recovery record into the open set. Shares [`Self::open_text_document`]'s own
+    /// structural checks, in the same order, for the same reason (RFC-065 D4: the bound is
+    /// checked before any disk read) -- but does not share its body, because recovery must
+    /// never switch to an already-open path the way opening one by hand does (see
+    /// [`ProjectContentError::RecoveryPathAlreadyOpen`]'s own doc) and never reads the
+    /// text from disk at all ([`TextDocument::recover`] reads only enough metadata to
+    /// compare against the record's own snapshot). Leaves `active_index` and `self.status`
+    /// untouched -- recovering a buffer does not put it on screen; a caller that wants that
+    /// calls [`Self::open_text_document`] on the same path afterward, which the existing
+    /// dedup switch then resolves with no further disk read.
+    ///
+    /// Returns the new entry's own index in the open set on success, so the caller can read
+    /// back [`TextDocument::state`] and [`FileAccessTarget::canonical_path`]'s existence to
+    /// learn which of the three disk outcomes (D5) resulted, the same two facts
+    /// [`Self::refresh_document_by_canonical_path`] already reads to tell `Conflict` from
+    /// `ExternalDeleted` -- this method mints no separate outcome type for it.
+    pub fn recover_text_document(
+        &mut self,
+        root: &ProjectRootHandle,
+        selected_relative_path: impl AsRef<Path>,
+        policy: TextDocumentOpenPolicy,
+        recovered: RecoveredBufferInit,
+        open_document_limit: Option<u32>,
+    ) -> Result<usize, ProjectContentError> {
+        let selected_relative_path = selected_relative_path.as_ref().to_path_buf();
+
+        if self
+            .documents
+            .iter()
+            .any(|document| document.target().selected_relative_path == selected_relative_path)
+        {
+            return Err(ProjectContentError::RecoveryPathAlreadyOpen {
+                relative_path: selected_relative_path,
+            });
+        }
+
+        if let Some(limit) = open_document_limit
+            && self.documents.len() as u32 >= limit
+        {
+            let open = self.documents.len() as u32;
+            return Err(ProjectContentError::OpenSetAtLimit { open, limit });
+        }
+
+        let document = TextDocument::recover(root, &selected_relative_path, policy, recovered)
+            .map_err(ProjectContentError::Open)?;
+
+        self.documents.push(document);
+        Ok(self.documents.len() - 1)
     }
 
     /// RFC-065 PR-065-B: the Reload button's own entry point, split out of
@@ -841,6 +892,14 @@ pub enum ProjectContentError {
         open: u32,
         limit: u32,
     },
+    /// RFC-027 PR-027-C: the offer's own path is already in the open set. Unlike opening a
+    /// file by hand, recovery does not switch to it -- the already-open entry may hold
+    /// different text than the record (the user could have reopened and re-edited it since
+    /// restart), so overwriting it silently is exactly the kind of cross-document leak
+    /// RFC-065's own repair was about not having. The caller is told to leave it alone.
+    RecoveryPathAlreadyOpen {
+        relative_path: PathBuf,
+    },
 }
 
 impl fmt::Display for ProjectContentError {
@@ -856,6 +915,11 @@ impl fmt::Display for ProjectContentError {
             Self::OpenSetAtLimit { open, limit } => write!(
                 formatter,
                 "too many documents are open to open another: {open} are open, limit is {limit}"
+            ),
+            Self::RecoveryPathAlreadyOpen { relative_path } => write!(
+                formatter,
+                "{} is already open, so the recovered buffer was not applied over it",
+                relative_path.display()
             ),
         }
     }

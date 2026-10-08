@@ -70,6 +70,14 @@ impl RecoveryFileSnapshot {
             len,
         }
     }
+
+    /// RFC-027 PR-027-C: the inverse of [`Self::from_system_time`] -- what
+    /// `TextDocument::recover`'s own disk comparison (D5) is given to compare against the
+    /// file as it stands now.
+    pub fn modified_at(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(self.modified_at_secs, self.modified_at_nanos)
+    }
 }
 
 /// RFC-027 D9: a buffer whose own record would exceed the per-record bound. Named so the

@@ -788,6 +788,27 @@ editor-recovery-persist-refusal-too-large = { $path }: too large to protect agai
 editor-recovery-persist-refusal-total-bound = { $path }: not protected against a crash -- would put retained recovery data over its own { $limit }-byte limit
 editor-recovery-persist-refusal-io = { $path }: could not be protected against a crash
 
+# RFC-027 PR-027-C, Amendment 1: offered by the presence of recovery records, never by the
+# crash marker -- `$project` is the project's own display name, untrusted and escaped the
+# same way every other project-name rendering already is.
+recovery-offer-title = Recover unsaved work in { $project }?
+# D3: the offer itself has to say so, since nothing about the recovered buffer shows it.
+recovery-offer-no-undo-notice = Recovered documents come back without their undo history.
+# `$path` is untrusted, escaped the same way `external-change-dialog-body`'s own path is;
+# `$outcome` is a small, fixed, program-chosen symbol, not raw error text (see
+# `RecoveryOfferRefusalReason`'s own doc for why). D5's own two disk outcomes (unchanged,
+# changed-or-gone) are `recovered`/`conflict`; the rest are this call's own refusals.
+recovery-offer-row = { $path }{ $outcome ->
+    [recovered]  — recovered
+    [conflict]  — recovered (the file on disk has since changed)
+    [already-open]  — not recovered: already open
+    [at-limit]  — not recovered: too many documents are already open
+    [other]  — not recovered
+   *[pending] {""}
+}
+recovery-offer-done-button = Done
+recovery-offer-hint = Tab/Shift+Tab moves focus; Enter recovers the highlighted document; Escape leaves the rest for next time.
+
 # RFC-026, release 0.29.0: a user-driven reload, the same action
 # `external-change-dialog-reload` offers from the save-blocked dialog, reachable
 # directly from the editor's own chrome. Shown only when `editor::view`'s own

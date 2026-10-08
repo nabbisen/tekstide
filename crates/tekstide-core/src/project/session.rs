@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 
 use crate::close::{CloseResourceProviderState, CloseResourceSummary};
 use crate::content::{
-    EditOperation, ExternalChangeDecision, SaveDecision, TextCursor, TextDocumentOpenPolicy,
-    TextViewport,
+    EditOperation, ExternalChangeDecision, RecoveredBufferInit, SaveDecision, TextCursor,
+    TextDocumentOpenPolicy, TextViewport,
 };
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
@@ -1478,6 +1478,42 @@ impl ProjectSession {
         self.sync_file_state_from_content_workspace();
         self.set_open_surface(ProjectOpenSurface::TextEditor);
         self.set_mode(ProjectMode::Content);
+        result
+    }
+
+    /// RFC-027 PR-027-C, D5/Amendment 1: inserts a buffer recovered from a crash-recovery
+    /// record into the open set, comparing the record's own snapshot against the file as
+    /// it stands now (see [`ProjectContentWorkspace::recover_text_document`] and
+    /// [`crate::content::TextDocument::recover`] for the three-way comparison itself).
+    ///
+    /// Deliberately **does not** call [`Self::set_open_surface`]/[`Self::set_mode`] the
+    /// way [`Self::open_text_document`] does -- recovering a buffer is not the same act as
+    /// activating it on screen (RFC-065 D1/D2's own distinction between the open set and
+    /// what is active already draws this line); a caller that wants the recovered buffer
+    /// visible calls [`Self::open_text_document`] on the same path afterward, which the
+    /// existing dedup switch resolves with no further disk read, the exact same route and
+    /// mode change every other file-activation path already goes through. This is also
+    /// why this method does not duplicate `open_text_document`'s own mode-switching logic:
+    /// a future guard added there (RFC-067 D8: a file activation must never move a user
+    /// out of a terminal they are watching) is inherited automatically by every caller
+    /// that chains into it, this one included, rather than needing its own copy.
+    pub fn recover_text_document(
+        &mut self,
+        selected_relative_path: impl AsRef<std::path::Path>,
+        recovered: RecoveredBufferInit,
+    ) -> Result<(), ProjectContentError> {
+        let root = ProjectRootHandle::from_project_session(self);
+        let result = self
+            .content_workspace
+            .recover_text_document(
+                &root,
+                selected_relative_path,
+                TextDocumentOpenPolicy::linux_mvp(),
+                recovered,
+                self.resource_limits.open_document_limit,
+            )
+            .map(|_index| ());
+        self.sync_file_state_from_content_workspace();
         result
     }
 

@@ -699,6 +699,16 @@ pub(crate) enum ModalContent {
     /// `safe_close_decision` (§4: "both outcomes, not only the
     /// destructive one"), just a different one, not a silent no-op.
     ProjectClose(ProjectCloseModal),
+    /// RFC-027 PR-027-C, Amendment 1: offered the moment a project with recovery records
+    /// on disk becomes open this session -- see [`offer_recovery_for_opened_project`] for
+    /// the trigger itself (the presence of records, never the crash marker). Shares
+    /// `FolderBrowser`'s own shape, not the paste dialog's: `ModalActivate` recovers the
+    /// highlighted row and the modal **stays open** (there is more than one row to act
+    /// on), so only `ModalDismiss`/Escape is "closes without further consequence" here --
+    /// and even then, every row already recovered stays recovered (D11: recovering is one
+    /// of the three things that removes a record, and declining what is left untouched
+    /// means exactly that: the *remaining* records, never the ones already accepted).
+    RecoveryOffer(RecoveryOfferModal),
 }
 
 /// RFC-038 PR-038-G: `scan`/`highlight` are always a **valid** scan --
@@ -722,6 +732,67 @@ pub(crate) struct FolderBrowserModal {
     /// `add_project_from_path` call, the same failure shapes, the same
     /// "never a raw path in the error type itself" discipline.
     open_error: Option<PathFieldError>,
+}
+
+/// RFC-027 PR-027-C, D5: one recoverable buffer, named by its own project-relative path --
+/// never by the record's content-stable filename hash, which is an on-disk detail this
+/// surface has no reason to show. `outcome` is `None` until the row is activated; after
+/// that it holds what [`recover_highlighted_offer_item`] learned --
+/// `Recovered`/`RecoveredAsConflict` for D5's own two disk outcomes (unchanged vs.
+/// changed-or-gone), or `Refused` when recovering was not possible at all -- so the row
+/// can say what happened instead of silently vanishing into the open set.
+#[derive(Debug, Clone)]
+pub(crate) struct RecoveryOfferItem {
+    relative_path: std::path::PathBuf,
+    record: tekstide_core::recovery::RecoveryRecord,
+    outcome: Option<RecoveryOfferOutcome>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum RecoveryOfferOutcome {
+    /// D5 "unchanged": the buffer is back, dirty, exactly as it was captured.
+    Recovered,
+    /// D5 "changed" or "gone": recovered into the open set as a `Conflict`, through the
+    /// same existing path a live document's own external change already uses -- never a
+    /// state this constructor invented for the occasion.
+    RecoveredAsConflict,
+    /// Refused -- named rather than silently dropped (RFC-027 D9's own "a refusal is named
+    /// to the user" obligation, extended by analogy to this refusal, which is not a byte
+    /// bound but the same kind of fact: something that stopped being offered and must say
+    /// so). The record is left on disk untouched either way (measurement 1's own promise
+    /// extends to a refused recovery, not only a declined one). Carries a small, fixed
+    /// reason symbol, never the raw error's own `Display` text -- the same
+    /// `trusted_symbol` discipline `external_change_dialog_body`'s own "reason" argument
+    /// already uses, rather than routing arbitrary error text through the catalog.
+    Refused(RecoveryOfferRefusalReason),
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum RecoveryOfferRefusalReason {
+    /// `ProjectContentError::RecoveryPathAlreadyOpen`.
+    AlreadyOpen,
+    /// `ProjectContentError::OpenSetAtLimit`.
+    OpenSetAtLimit,
+    /// Every other `ProjectContentError` this call can return (access/root-escape/
+    /// symlink/size-cap/encoding failures on the live file being compared against) --
+    /// named generically, the same "the actionable fact does not depend on which syscall
+    /// failed" reasoning `RecoveryPersistRefusalReason::Io` already applies on the write
+    /// side.
+    Other,
+}
+
+/// RFC-027 PR-027-C, Amendment 1: the restart offer -- see [`ModalContent::RecoveryOffer`]
+/// and [`offer_recovery_for_opened_project`] for the trigger and the "stays open across
+/// more than one row" shape. `project_display_name` is read once, at the moment the offer
+/// opens, from the same [`ProjectSession::display_name`] every other per-project surface
+/// already reads -- not re-read live, since nothing on this modal can rename the project
+/// while it is open.
+#[derive(Debug, Clone)]
+pub(crate) struct RecoveryOfferModal {
+    project_id: tekstide_core::project::ProjectId,
+    project_display_name: String,
+    items: Vec<RecoveryOfferItem>,
+    highlight: usize,
 }
 
 impl Default for ModalContent {
@@ -1457,6 +1528,10 @@ impl State {
         // walkthrough): a command-line project is open before `State` exists and never reaches
         // the add-project arms, so its watch is placed here rather than at a call site.
         reconcile_project_watches_for_open_projects(&mut state);
+        // RFC-027 PR-027-C, Amendment 1: the same gap, same reason -- a command-line
+        // project is open before `State` exists and never reaches the three mid-session
+        // add-project arms that each call `offer_recovery_for_opened_project` themselves.
+        offer_recovery_for_open_projects(&mut state);
         state
     }
 
@@ -1578,6 +1653,11 @@ pub enum Message {
     /// `Message::FolderBrowserChooseCurrentDirectory` directly rather
     /// than adding a second message for it.
     FolderBrowserRowPressed(usize),
+    /// RFC-027 PR-027-C: a real, clickable row on the recovery offer -- same shape as
+    /// [`Message::FolderBrowserRowPressed`]: sets `highlight` to this index and calls
+    /// [`activate_current_modal`], the function `Enter` already calls for this modal, so
+    /// a mouse decision and a keyboard decision run through the identical recovery call.
+    RecoveryOfferRowPressed(usize),
     /// RFC-040 PR-040-C: the workspace's own real, clickable mode
     /// toggle -- `main_area_view`'s new small header, visible in both
     /// Content and Terminal Immersion. `Ctrl+Alt+M` is the same action's
@@ -2021,6 +2101,9 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::ProjectCloseClosePressed
         | Message::FolderBrowserRowPressed(_)
         | Message::FolderBrowserChooseCurrentDirectory
+        // RFC-027 PR-027-C: a recovery-offer row, the same classification as a folder
+        // browser row -- a real click committing a real decision against this modal.
+        | Message::RecoveryOfferRowPressed(_)
         | Message::ModalDismiss => Some(ClickMessageKind::ModalDecision),
 
         // -- not click-originated: `ModalActivate`/`ModalFocusNext`/
@@ -2168,6 +2251,14 @@ fn activate_current_modal(state: &mut State) {
         Some(ModalContent::FolderBrowser(mut modal)) => {
             navigate_folder_browser(&mut modal);
             state.modal = Some(ModalContent::FolderBrowser(modal));
+        }
+        // RFC-027 PR-027-C: the same "does not represent a final decision" shape
+        // `FolderBrowser` just above already has -- there is more than one row here too,
+        // and activating one must not close the rest off from the user. `modal` is put
+        // back explicitly, same reason.
+        Some(ModalContent::RecoveryOffer(mut modal)) => {
+            recover_highlighted_offer_item(state, &mut modal);
+            state.modal = Some(ModalContent::RecoveryOffer(modal));
         }
         Some(ModalContent::LayerDemo { .. })
         | Some(ModalContent::PasteConfirmation(_))
@@ -2618,6 +2709,12 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
                     modal.highlight = (modal.highlight + 1).min(row_count - 1);
                 }
             }
+            // RFC-027 PR-027-C: the same clamped-list shape `FolderBrowser` already uses
+            // just above -- a list of rows to move through, not a small button set.
+            Some(ModalContent::RecoveryOffer(modal)) if !modal.items.is_empty() => {
+                modal.highlight = (modal.highlight + 1).min(modal.items.len() - 1);
+            }
+            Some(ModalContent::RecoveryOffer(_)) => {}
             None => {}
         },
         Message::ModalFocusPrevious => match state.modal.as_mut() {
@@ -2634,6 +2731,9 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::ConfigurationReload(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::Help) => {}
             Some(ModalContent::FolderBrowser(modal)) => {
+                modal.highlight = modal.highlight.saturating_sub(1);
+            }
+            Some(ModalContent::RecoveryOffer(modal)) => {
                 modal.highlight = modal.highlight.saturating_sub(1);
             }
             None => {}
@@ -2708,6 +2808,12 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::FolderBrowserRowPressed(index) => {
             if let Some(ModalContent::FolderBrowser(modal)) = state.modal.as_mut() {
+                modal.highlight = index;
+            }
+            activate_current_modal(state);
+        }
+        Message::RecoveryOfferRowPressed(index) => {
+            if let Some(ModalContent::RecoveryOffer(modal)) = state.modal.as_mut() {
                 modal.highlight = index;
             }
             activate_current_modal(state);
@@ -4953,6 +5059,9 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
             trigger_git_summary_refresh(&mut state.app_shell, &project_id);
+            // RFC-027 PR-027-C, Amendment 1: this is exactly the reopen a crash or an
+            // unsaved quit leaves records for -- the project the user is returning to.
+            offer_recovery_for_opened_project(state, &project_id);
         }
         // Should not normally happen -- a `Recent*`-kind row is, by
         // construction, not currently open -- but if the board's rows
@@ -5586,6 +5695,9 @@ fn attempt_open_project_from_path_field(state: &mut State) {
             // project, so purge and the figures cover what exists.
             load_earlier_transcripts_for_opened_project(state, &project_id);
             trigger_git_summary_refresh(&mut state.app_shell, &project_id);
+            // RFC-027 PR-027-C, Amendment 1: a typed path reaching a project with
+            // recovery records is as much a reopen as the board's own row is.
+            offer_recovery_for_opened_project(state, &project_id);
             state.path_field.clear();
             state.path_field_requested = false;
         }
@@ -5731,6 +5843,11 @@ fn choose_current_browsed_directory(state: &mut State) {
             load_earlier_transcripts_for_opened_project(state, &project_id);
             trigger_git_summary_refresh(&mut state.app_shell, &project_id);
             state.modal = None;
+            // RFC-027 PR-027-C, Amendment 1: after clearing the folder browser's own
+            // modal, never before -- `offer_recovery_for_opened_project`'s own
+            // `state.modal.is_some()` guard must see the slot empty, the same ordering
+            // reason every other modal-opening call in this file already respects.
+            offer_recovery_for_opened_project(state, &project_id);
         }
         Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
             state.modal = None;
@@ -6189,7 +6306,11 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         // both must read as active so modal exclusivity holds
         // while they are open.
         | Some(ModalContent::ConfiguredProfileFirstUse(_))
-        | Some(ModalContent::ConfigurationReload(_)) => {
+        | Some(ModalContent::ConfigurationReload(_))
+        // RFC-027 PR-027-C: same generic bucket, same reason -- not a terminal-paste
+        // concern, but modal exclusivity still needs it to read as active while it is
+        // open.
+        | Some(ModalContent::RecoveryOffer(_)) => {
             TerminalTrustedUiState::SecurityDialogActive
         }
     }
@@ -7828,6 +7949,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::ConfigurationReload(modal) => {
                 configuration_reload_dialog_view(state, modal)
             }
+            ModalContent::RecoveryOffer(modal) => recovery_offer_modal_view(state, modal),
         };
         let scrim = center(modal_view).style(modal_scrim_style(state.theme));
         stack![base, opaque(scrim)].into()
@@ -10230,6 +10352,81 @@ fn folder_browser_modal_view<'a>(
     modal_dialog_box(state, lines.into(), footer.into())
 }
 
+/// RFC-027 PR-027-C: the restart offer -- see [`ModalContent::RecoveryOffer`]'s own doc
+/// for why `Enter`/a row click recovers and keeps the modal open rather than closing it
+/// like most dialogs here. `row_outcome_symbol`/`row_text` are free functions, not
+/// inlined, so the escaping and symbol-selection they do is directly testable without
+/// going through `iced`'s `Element` tree -- the same split `external_change_dialog_body`
+/// and `paste_preview` already use.
+fn recovery_offer_modal_view<'a>(
+    state: &'a State,
+    modal: &'a RecoveryOfferModal,
+) -> Element<'a, Message> {
+    let project = tekstide_core::text_safety::quote_untrusted(&modal.project_display_name);
+    let title = state.catalog.get_with_args(
+        "recovery-offer-title",
+        &CatalogArgs::new().untrusted("project", &project),
+    );
+
+    let mut lines = column![
+        text(title).size(state.theme.font_size_heading()),
+        text(state.catalog.get("recovery-offer-no-undo-notice")).size(state.theme.font_size_body()),
+    ]
+    .spacing(6);
+
+    for (index, item) in modal.items.iter().enumerate() {
+        let marker = if index == modal.highlight { "> " } else { "  " };
+        let row_text = recovery_offer_row_text(&state.catalog, item);
+        lines = lines.push(
+            crate::theme::button(
+                state.theme,
+                text(format!("{marker}{row_text}")).size(state.theme.font_size_body()),
+            )
+            .on_press(Message::RecoveryOfferRowPressed(index)),
+        );
+    }
+
+    let footer = column![
+        crate::theme::button(
+            state.theme,
+            text(state.catalog.get("recovery-offer-done-button"))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::ModalDismiss),
+        text(state.catalog.get("recovery-offer-hint")).size(state.theme.font_size_status()),
+    ]
+    .spacing(MODAL_SECTION_SPACING_PX);
+
+    modal_dialog_box(state, lines.into(), footer.into())
+}
+
+/// Factored out of [`recovery_offer_modal_view`] for the same testability reason
+/// [`external_change_dialog_body`]/[`paste_preview`] already are: the escaping and the
+/// outcome-symbol selection are the properties worth proving directly, not only through
+/// `iced`'s own `Element` tree.
+fn recovery_offer_row_text(catalog: &Catalog, item: &RecoveryOfferItem) -> String {
+    let path =
+        tekstide_core::text_safety::quote_untrusted(&item.relative_path.display().to_string());
+    let outcome = match &item.outcome {
+        None => "pending",
+        Some(RecoveryOfferOutcome::Recovered) => "recovered",
+        Some(RecoveryOfferOutcome::RecoveredAsConflict) => "conflict",
+        Some(RecoveryOfferOutcome::Refused(RecoveryOfferRefusalReason::AlreadyOpen)) => {
+            "already-open"
+        }
+        Some(RecoveryOfferOutcome::Refused(RecoveryOfferRefusalReason::OpenSetAtLimit)) => {
+            "at-limit"
+        }
+        Some(RecoveryOfferOutcome::Refused(RecoveryOfferRefusalReason::Other)) => "other",
+    };
+    catalog.get_with_args(
+        "recovery-offer-row",
+        &CatalogArgs::new()
+            .untrusted("path", &path)
+            .trusted_symbol("outcome", outcome),
+    )
+}
+
 fn layer_composition_demo_modal(state: &State, focus: ModalButton) -> Element<'_, Message> {
     // RFC-040 PR-040-B: neither button here has ever had a real
     // decision to record (this modal's own doc: "still scaffolding"),
@@ -11329,6 +11526,168 @@ fn recovery_record_for(
             snapshot.modified_at,
             snapshot.len,
         ),
+    }
+}
+
+/// RFC-027 PR-027-C: `Enter`/a row click's own real handler -- recovers the highlighted
+/// item into the open set, makes it visible the same way every other file-open path
+/// already does (see [`ProjectSession::recover_text_document`]'s own doc for why that
+/// chain, not a copy of its mode-switching logic, is what this calls), and records what
+/// happened on the row itself rather than closing the modal (there is more than one row
+/// here, and D4 means every row is its own decision). Already-recovered rows
+/// (`outcome.is_some()`) are a no-op: a second `Enter` must not attempt a second recovery
+/// against a path already in the open set.
+fn recover_highlighted_offer_item(state: &mut State, modal: &mut RecoveryOfferModal) {
+    let Some(item) = modal.items.get_mut(modal.highlight) else {
+        return;
+    };
+    if item.outcome.is_some() {
+        return;
+    }
+
+    let relative_path = item.relative_path.clone();
+    let recovered = tekstide_core::content::RecoveredBufferInit {
+        text: item.record.text.clone(),
+        cursor: tekstide_core::content::TextCursor {
+            line: item.record.cursor_line,
+            column: item.record.cursor_column,
+        },
+        viewport: tekstide_core::content::TextViewport {
+            first_visible_line: item.record.viewport_first_visible_line,
+            first_visible_column: item.record.viewport_first_visible_column,
+        },
+        recorded_modified_at: item.record.snapshot.modified_at(),
+        recorded_len: item.record.snapshot.len,
+    };
+
+    let Some(project) = state.app_shell.state_mut().project_mut(&modal.project_id) else {
+        return;
+    };
+    item.outcome = Some(
+        match project.recover_text_document(&relative_path, recovered) {
+            Ok(()) => {
+                // D11: recovering is one of the three triggers that removes a record --
+                // immediately, not left for the next persist tick to find a document that no
+                // longer needs one.
+                if let Some(state_root) = open_real_recovery_state_root() {
+                    let _ = tekstide_core::recovery::remove_recovery_record(
+                        &state_root,
+                        modal.project_id.as_str(),
+                        &relative_path,
+                    );
+                }
+                // Visible the moment it is accepted -- the same route every other
+                // file-activation path already uses.
+                let _ = project.open_text_document(&relative_path);
+                // `open_text_document`'s own dedup switch (the path this just took, since
+                // `recover_text_document` already placed the entry in the open set) sets
+                // `ProjectContentStatus` to a plain `Opened` unconditionally -- it has no
+                // reason to know about an individual document's own `Conflict`/`Dirty`
+                // state, because every *other* caller of that switch is activating a
+                // document nothing just found divergent. This call is what actually
+                // re-derives `Conflict`/`ExternalDeleted` through the existing machinery
+                // (`refresh_document_by_canonical_path`'s own mapping) -- the real reason
+                // `TextDocument::recover` deliberately leaves `last_known_snapshot` unable
+                // to match a fresh read when the file was changed or gone (see that
+                // constructor's own doc): this refresh is what reads that mismatch back.
+                let _ = project.refresh_active_text_document();
+                let is_conflict = project
+                    .content_workspace()
+                    .open_documents()
+                    .find(|document| document.target().selected_relative_path == relative_path)
+                    .is_some_and(|document| {
+                        document.state() == tekstide_core::content::TextDocumentState::Conflict
+                    });
+                if is_conflict {
+                    RecoveryOfferOutcome::RecoveredAsConflict
+                } else {
+                    RecoveryOfferOutcome::Recovered
+                }
+            }
+            Err(tekstide_core::project::ProjectContentError::RecoveryPathAlreadyOpen {
+                ..
+            }) => RecoveryOfferOutcome::Refused(RecoveryOfferRefusalReason::AlreadyOpen),
+            Err(tekstide_core::project::ProjectContentError::OpenSetAtLimit { .. }) => {
+                RecoveryOfferOutcome::Refused(RecoveryOfferRefusalReason::OpenSetAtLimit)
+            }
+            Err(_) => RecoveryOfferOutcome::Refused(RecoveryOfferRefusalReason::Other),
+        },
+    );
+}
+
+/// RFC-027 PR-027-C, Amendment 1: the offer's own trigger is the presence of recovery
+/// records for this project -- never the crash marker (D1's own marker-based detection
+/// plays no gating role here; see review 489's own restatement of Amendment 1). A clean
+/// window close removes the marker and leaves the records, and quitting with unsaved work
+/// is unguarded today, so "records, no marker" is the ordinary case this exists for, not
+/// a bug. Called at every point a project becomes newly open this session -- the same
+/// per-call-site duplication `trigger_git_summary_refresh`/
+/// `load_earlier_transcripts_for_opened_project` already use, for the reason
+/// `verify_restored_trust`'s own doc gives: there is no single point every newly-opened
+/// project passes through (except the CLI-argument path -- see
+/// [`offer_recovery_for_open_projects`] for that one).
+///
+/// Guarded by `state.modal.is_some()`, the same discipline every other modal-opening
+/// function in this file already applies -- a project add can land while a different
+/// modal is already open (`reopen_recent_project`'s own doc explains why), and this is
+/// not the call that should win that collision silently.
+fn offer_recovery_for_opened_project(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+) {
+    if state.modal.is_some() {
+        return;
+    }
+    let Some(state_root) = open_real_recovery_state_root() else {
+        return;
+    };
+    let records =
+        tekstide_core::recovery::read_project_recovery_records(&state_root, project_id.as_str());
+    if records.is_empty() {
+        return;
+    }
+    let Some(project) = state.app_shell.state().project(project_id) else {
+        return;
+    };
+    let project_display_name = project.display_name().to_owned();
+    let items = records
+        .into_iter()
+        .map(|(_, record)| RecoveryOfferItem {
+            relative_path: std::path::PathBuf::from(&record.relative_path),
+            record,
+            outcome: None,
+        })
+        .collect();
+    state.modal = Some(ModalContent::RecoveryOffer(RecoveryOfferModal {
+        project_id: project_id.clone(),
+        project_display_name,
+        items,
+        highlight: 0,
+    }));
+}
+
+/// RFC-027 PR-027-C, RFC-049 D2's own shape: the CLI-argument path opens its project
+/// before `State` exists, so (like `run_transcript_retention_for_open_projects`/
+/// `reconcile_project_watches_for_open_projects` beside it) the offer for one of those
+/// projects runs once here, inside the constructor, rather than at a `main.rs` call site a
+/// future edit could delete with nothing noticing. Offers at most one project's own
+/// records -- the first (in open order) that has any -- since only one modal can be open
+/// at a time; a second crashed project opened the same way is offered the next time it is
+/// reopened, exactly as any declined offer already is (nothing about declining, or never
+/// being reached this run, removes its records).
+fn offer_recovery_for_open_projects(state: &mut State) {
+    let ids: Vec<_> = state
+        .app_shell
+        .state()
+        .projects()
+        .iter()
+        .map(|project| project.id().clone())
+        .collect();
+    for id in ids {
+        if state.modal.is_some() {
+            return;
+        }
+        offer_recovery_for_opened_project(state, &id);
     }
 }
 

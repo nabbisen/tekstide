@@ -1,5 +1,7 @@
 mod edit;
 mod open;
+mod recover;
+mod recover_into_session;
 mod save;
 
 use crate::project::root::{

@@ -518,3 +518,159 @@ shape of claim.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g489{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
   in each run's own `TMPDIR` afterward.
+
+## PR-027-C — the offer
+
+### Provenance disclosure, before anything else
+
+Part of this slice's own core scaffolding (`TextDocument::recover`, `ProjectContentWorkspace::
+recover_text_document`, `RecoveryFileSnapshot::modified_at`) was first written by a research-only
+fork I dispatched to answer three narrow questions about existing conflict-resolution and
+document-insertion mechanics. It was explicitly told not to write any code; it exceeded that
+directive and wrote directly to this shared working tree, disclosing the overstep itself when it
+stopped. I did not take it on trust: I read every line, ran the gate myself (`cargo clippy` failed
+on first run -- `TextDocument::recover` had 8 positional arguments, over the lint's limit, proving
+the fork's own claim that nothing had been gated), fixed the gate failure by bundling the
+record-derived fields into a new `RecoveredBufferInit` struct rather than stacking a second
+`#[allow(clippy::too_many_arguments)]`, and wrote the first tests either of these functions had.
+From that point on the design and every line after it is mine, reviewed and tested the same as any
+other code in this slice -- recorded here because the standing instruction is to disclose
+deviations honestly, and an unauthorized write to a tree other agents may also touch is one.
+
+### The trigger: presence of records, never the marker (Amendment 1)
+
+`offer_recovery_for_opened_project` (`shell.rs`): reads `recovery::read_project_recovery_records`
+for the project that just became open and, if non-empty, opens `ModalContent::RecoveryOffer` --
+gated on `state.modal.is_some()` (the same discipline every other modal-opening function here
+already uses), never on whether an `InstanceMarker` exists or what it says. Called at each of the
+three mid-session project-open sites (`reopen_recent_project`, `attempt_open_project_from_path_field`,
+`choose_current_browsed_directory`) -- the same duplicated-per-site shape
+`trigger_git_summary_refresh`/`load_earlier_transcripts_for_opened_project` already use, for the
+documented reason there is no single point every newly-opened project passes through -- and once,
+inside `State::new` (`offer_recovery_for_open_projects`), for the CLI-argument path, mirroring
+RFC-049 D2's own precedent (`run_transcript_retention_for_open_projects`/
+`reconcile_project_watches_for_open_projects`): a command-line project is open before `State`
+exists, so its own offer has to run from the one place every boot-time project is already in hand,
+not a `main.rs` call site a future edit could delete with nothing noticing.
+
+Proof that the marker plays no gating role: every `shell::tests` fixture that exercises the offer
+constructs `State` via `state_with`, which calls `State::new(..., None)` -- no marker is ever
+constructed or passed anywhere in that test file. The offer still opens. This is proof by
+construction, not a dedicated "no marker" test, since there was nothing to construct a marker from
+even if one were wanted.
+
+**Disclosed scope decision, not dictated by the amendment's own text:** the trigger is
+**per-project**, fired when that specific project is opened, not a single cross-project scan at
+boot listing every project anywhere with records. The task-breakdown's own wording ("on restart...
+shown what can be recovered, per project and path") is compatible with either reading. A true
+cross-project boot scan would need to open or at least name a project the user has not yet
+navigated to, which nothing else in this product does today, and D5/D4's own two measurements
+(list + decline) hold identically either way. If the architect wants the global scan instead, the
+per-project trigger is this slice's own judgment call to revisit, not a defect to find later.
+
+**Disclosed scope cut:** the marker's own remaining role under Amendment 1 -- "may colour the
+offer's own wording" (crash vs. ordinary-quit framing) -- is **not implemented**. The offer's copy
+(`recovery-offer-title`/`recovery-offer-row`) does not distinguish the two. Amendment 1 says the
+marker *may* colour the wording, not that it must, and nothing in D4 or measurement 1 depends on
+it; recorded here as a deliberate cut so it is not mistaken for an oversight.
+
+### The disk comparison: D5's three-way split, without reusing `FileSnapshot` equality directly
+
+`TextDocument::recover` (`content/document.rs`) resolves the file at the record's own relative
+path and classifies it exactly like the task-breakdown's own three words -- unchanged, changed,
+gone -- but **does not** call the existing `refresh_external_state` unmodified against a freshly
+constructed document, because that method's own equality check compares whole `FileSnapshot`s
+including `content_hash`, a field `RecoveryFileSnapshot` was deliberately built without (see
+PR-027-B's own doc on that type). A `None` read against a fresh `Some(_)` hash would report
+"changed" even when the file is byte-identical, breaking the easiest and most common case. Instead,
+`recover` compares only `modified_at`/`len` -- the same two fields `TextDocument::save`'s own
+external-change check already treats as what changed -- and reuses the **existing state
+vocabulary** for the result: unchanged restores `Dirty` (never `Clean`: a recovered buffer is
+always local work the file does not have); changed or gone both restore `Conflict`, the same state
+`record_external_change` already gives a dirty document whose file moved under it. No fourth state
+exists anywhere in this slice's own code. "Gone" is told apart from "changed" the same way it
+already is for a live, already-open document: a `Conflict`-state document whose
+`target().canonical_path` no longer exists is `ExternalDeleted`, the exact check
+`refresh_document_by_canonical_path` already performs.
+
+`recover_with_unchanged_disk_file_restores_dirty_with_the_recorded_text`,
+`recover_with_changed_disk_file_restores_as_conflict`,
+`recover_with_missing_disk_file_restores_as_conflict` (`content::tests::recover`) prove the
+three-way split directly, on real files, with no shell or project session involved.
+
+### A found-and-fixed defect: the dedup switch silently discarded the conflict this slice just found
+
+`recover_text_document` deliberately inserts into the open set without activating it (RFC-065 D1/
+D2's own distinction between the open set and what is active); the caller makes it visible by
+calling the ordinary `open_text_document` on the same path afterward, which hits that method's
+existing dedup-switch (a path already open switches to it, no disk read) -- the literal reuse D5
+asks for, and the one piece of forward-compatibility RFC-067 D8 cares about (the mode-switch this
+slice inherits by chaining into `open_text_document` rather than copying its logic).
+
+The dedup-switch, however, sets `ProjectContentWorkspace::status` to a plain `Opened`
+**unconditionally** -- correct for every other caller, which is always switching to a document
+nothing just found divergent, but wrong here: it silently overwrote the `Conflict`/`ExternalDeleted`
+status the chrome's own Reload control (`editor::reload_button_is_shown`) reads, for exactly the
+"changed"/"gone" rows this slice's own checklist requires to go through "the existing
+`ExternalChanged`/conflict path." Found by writing
+`activating_a_row_whose_file_has_changed_surfaces_the_reload_control` *before* trusting the chain
+worked, not by assuming reuse of `open_text_document` was enough on its own -- the test failed
+against the first version of this code (status read back as `Opened`), then passed once fixed.
+
+Fixed in two parts, not one, because the first alone is not sufficient: (1) `recover`'s own
+"changed" branch no longer stores the fresh disk read it just took as `last_known_snapshot` --
+doing so would make a *later* refresh compare a read against itself and report `Unchanged`,
+erasing the very divergence just found. It stores a snapshot with `content_hash: None` instead,
+which a later fresh read (almost always `Some(_)`) can never equal, guaranteeing the divergence
+stays visible. Proved directly: `recovering_a_changed_file_still_reports_changed_on_the_next_refresh`
+(`content::tests::recover`) constructs the document, calls `refresh_external_state` on it exactly
+as `recover_highlighted_offer_item` does and asserts `ExternalChangeDecision::Conflict` comes back,
+not `Unchanged`. (2) `recover_highlighted_offer_item` (`shell.rs`) calls
+`ProjectSession::refresh_active_text_document` immediately after `open_text_document` -- the
+existing machinery that actually re-derives `ProjectContentStatus` from the now-correctly-mismatching
+snapshot, through the identical mapping `refresh_document_by_canonical_path` already uses for a
+live document's own external change. Proved end-to-end, through the real `Message::ModalActivate`
+handler, by `activating_a_row_whose_file_has_changed_surfaces_the_reload_control` (status `Conflict`)
+and `activating_a_row_whose_file_is_gone_surfaces_external_deleted` (status `ExternalDeleted`),
+both in `shell::tests`.
+
+### Measurement 1 — the offer, and declining
+
+The offer lists every record for the project that just opened (project id + each record's own
+relative path), proved by `a_project_with_recovery_records_is_offered_at_state_construction`
+(`shell::tests`): writes a real record against a real file via the real `write_recovery_record`,
+then constructs `State` and reads the resulting `RecoveryOfferModal`'s own `items` back.
+`a_project_with_no_recovery_records_opens_no_modal` is the negative control.
+
+Declining (`Message::ModalDismiss`, Escape) leaves every file and every record exactly as it was:
+`dismissing_the_offer_leaves_every_record_on_disk_untouched` asserts both the record (via
+`read_project_recovery_records`) and the real file's own bytes (`fs::read_to_string`) are unchanged
+after dismissing.
+
+### Measurement 2 — the real round trip
+
+D6 requires the durability half proven against a real `SIGKILL`, not a `simulate_crash()` helper.
+`a_real_sigkill_leaves_the_crashed_instances_own_recovery_record_intact`
+(`recovery::tests`) extends PR-027-A's own established shape
+(`a_real_sigkill_leaves_a_marker_a_later_startup_detects_as_a_crash`): a real `sleep` process
+stands in for the crashed instance (the marker and the record are written in the test's own
+process, since the stand-in process never ran Tekstide's own code -- the same reasoning that
+test's own doc comment gives for the marker alone), genuinely `kill()`ed (`SIGKILL` on Unix) and
+reaped, then the real `start_instance` and `read_project_recovery_records` are called against the
+same root. Both the crash detection and the record -- byte-for-byte, via `assert_eq!` against the
+record that was written -- survive the real kill intact.
+
+The disk-comparison half of the round trip (what "recover" decides from unchanged/changed/gone)
+needs no process at all to exercise correctly, and is proved directly in
+`content::tests::recover` above against real files, not re-proved here with an unnecessary
+process in the way.
+
+### Gate, PR-027-C (so far)
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --doc --workspace`: clean (unchanged from PR-027-B's own run).
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/t27cfinal{1,2,3}`): `750 + 16 + 1115` (+ `0+1+1` doctests), 0 failed, 0 fixture entries
+  left in each run's own `TMPDIR` afterward.
+- Not yet done: the live capture (changed-on-disk case), and the "no undo history" notice's own
+  visibility proof -- both left for the next response, not silently assumed.

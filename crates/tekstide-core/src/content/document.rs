@@ -1,9 +1,10 @@
 use std::fmt;
 use std::path::Path;
+use std::time::SystemTime;
 
 use crate::project::root::{
-    FileAccessBlockedReason, FileAccessError, FileAccessSymlinkStatus, FileAccessTarget,
-    ProjectFileAccessPolicy, ProjectRootHandle,
+    FileAccessBlockedReason, FileAccessContainmentStatus, FileAccessError, FileAccessSymlinkStatus,
+    FileAccessTarget, ProjectFileAccessPolicy, ProjectRootHandle,
 };
 
 use super::edit::TextDocumentEditError;
@@ -31,6 +32,20 @@ pub struct TextViewport {
     /// the same D9 rule -- the least movement that keeps the cursor's column
     /// on screen. Columns, not bytes: the same unit `TextCursor.column` uses.
     pub first_visible_column: usize,
+}
+
+/// RFC-027 PR-027-C: the fields [`TextDocument::recover`] takes from a recovery record,
+/// bundled so the constructor (and [`crate::project::content::ProjectContentWorkspace::recover_text_document`],
+/// which forwards it) stay under clippy's argument-count lint without an `#[allow]` --
+/// every field here comes from the same `RecoveryRecord`, so grouping them loses no
+/// caller-side clarity the way bundling unrelated parameters would.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecoveredBufferInit {
+    pub text: String,
+    pub cursor: TextCursor,
+    pub viewport: TextViewport,
+    pub recorded_modified_at: SystemTime,
+    pub recorded_len: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,6 +129,144 @@ impl TextDocument {
             redo_stack: Vec::new(),
             undo_bound_reached: false,
         })
+    }
+
+    /// RFC-027 PR-027-C, D3/D5: builds a document from a recovery record instead of from
+    /// disk -- `recovered.text`/`cursor`/`viewport` are the record's own, and undo/redo
+    /// start empty (D3: a recovered buffer carries no history; nothing here could
+    /// reconstruct it anyway, since it was never persisted). `recovered.recorded_modified_at`/
+    /// `recorded_len` are the record's own snapshot of the file *as it stood when the
+    /// record was written* -- compared here against the file as it stands now, the same
+    /// two fields `TextDocument::save`'s own external-change check already treats as what
+    /// changed (never the content hash, which the record does not carry -- see
+    /// `RecoveryFileSnapshot`'s own doc).
+    ///
+    /// A recovered buffer is always local work the file on disk does not have, so this
+    /// never produces `Clean` or plain `ExternalChanged`: unchanged restores it `Dirty`,
+    /// exactly as it was when captured; changed or gone make it `Conflict`, the same state
+    /// `record_external_change` already gives a dirty document whose file moved under it.
+    /// A caller deriving a display status from the result should use the identical
+    /// `Conflict` + "does the file still exist" check `refresh_document_by_canonical_path`
+    /// already uses for `ExternalDeleted` -- this constructor mints no fourth state.
+    pub fn recover(
+        root: &ProjectRootHandle,
+        selected_relative_path: impl AsRef<Path>,
+        policy: TextDocumentOpenPolicy,
+        recovered: RecoveredBufferInit,
+    ) -> Result<Self, TextDocumentOpenError> {
+        let RecoveredBufferInit {
+            text,
+            cursor,
+            viewport,
+            recorded_modified_at,
+            recorded_len,
+        } = recovered;
+        let selected_relative_path = selected_relative_path.as_ref();
+
+        let resolved = ProjectFileAccessPolicy.resolve_existing(root, selected_relative_path);
+        let target = match resolved {
+            Ok(target) => target,
+            Err(error) if is_missing_current_target(&error) => {
+                return Ok(Self::recovered_as_missing(
+                    target_for_missing_recovery_path(error),
+                    text,
+                    cursor,
+                    viewport,
+                ));
+            }
+            Err(error) => return Err(TextDocumentOpenError::Access(error)),
+        };
+
+        if !target.canonical_path.is_file() {
+            // Resolved to something other than a regular file (e.g. a directory now
+            // occupies the path) -- there is no file content to compare against, the
+            // same "nothing to offer back" shape as an outright-missing path.
+            return Ok(Self::recovered_as_missing(target, text, cursor, viewport));
+        }
+
+        let current_snapshot =
+            match file_snapshot_for_current_disk(&target, policy.max_editable_bytes) {
+                Ok(snapshot) => snapshot,
+                Err(error) if is_external_snapshot_shape_change(&error) => {
+                    return Ok(Self::recovered_as_missing(target, text, cursor, viewport));
+                }
+                Err(error) => {
+                    return Err(TextDocumentOpenError::ReadFailed {
+                        target: error.target,
+                        kind: error.kind,
+                    });
+                }
+            };
+
+        let unchanged = current_snapshot.modified_at == recorded_modified_at
+            && current_snapshot.len == recorded_len;
+
+        // When the file has moved on, `last_known_snapshot` must not become
+        // `current_snapshot` as read just above: a *later* `refresh_external_state`/`save`
+        // re-reads the disk and compares against whatever is stored here, and comparing a
+        // fresh read against itself would report `Unchanged`, silently losing the very
+        // divergence this constructor just found (and, with it, the `Conflict`
+        // `ProjectContentStatus` the caller's own `refresh_active_text_document` call
+        // depends on to show the Reload control -- see `recover_highlighted_offer_item`'s
+        // own doc). `content_hash: None` guarantees that later comparison sees a mismatch
+        // -- a fresh read's own hash is `Some(_)` whenever the file is within the policy's
+        // editable bound, so `None != Some(_)` holds regardless of `modified_at`/`len`.
+        let last_known_snapshot = if unchanged {
+            current_snapshot
+        } else {
+            FileSnapshot {
+                content_hash: None,
+                ..current_snapshot
+            }
+        };
+
+        Ok(Self {
+            target,
+            text,
+            last_known_snapshot,
+            state: if unchanged {
+                TextDocumentState::Dirty
+            } else {
+                TextDocumentState::Conflict
+            },
+            cursor,
+            viewport,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            undo_bound_reached: false,
+        })
+    }
+
+    /// The `recover` shape for "there is no live file to compare against" (gone, or
+    /// resolved to a non-file): always `Conflict` -- a recovered buffer is always local
+    /// work, and a dirty document whose file is missing is a conflict by the same rule
+    /// `record_external_change` already applies. `last_known_snapshot` is a placeholder:
+    /// any future `save`/`refresh_external_state` call resolves the target again first and
+    /// hits the identical missing-path branch before ever reaching a snapshot comparison
+    /// (see `is_missing_current_target`'s callers), so this value is never compared.
+    fn recovered_as_missing(
+        target: FileAccessTarget,
+        text: String,
+        cursor: TextCursor,
+        viewport: TextViewport,
+    ) -> Self {
+        let last_known_snapshot = FileSnapshot {
+            canonical_path: target.canonical_path.clone(),
+            modified_at: SystemTime::UNIX_EPOCH,
+            len: 0,
+            content_hash: None,
+        };
+        Self {
+            target,
+            text,
+            last_known_snapshot,
+            state: TextDocumentState::Conflict,
+            cursor,
+            viewport,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            undo_bound_reached: false,
+        }
     }
 
     pub fn target(&self) -> &FileAccessTarget {
@@ -402,6 +555,24 @@ impl TextDocument {
 
 fn is_missing_current_target(error: &FileAccessError) -> bool {
     error.reason == FileAccessBlockedReason::MissingPath
+}
+
+/// RFC-027 PR-027-C: a `FileAccessTarget` for a recovery record whose file is gone,
+/// built from the resolve failure's own already-computed fields rather than a fresh
+/// `fs::canonicalize` (which cannot succeed against a path that does not exist). This is
+/// the same stand-in role an already-open document's own stale `self.target` plays for
+/// `save`'s `MissingPath` branch -- a stable identity to display and to re-resolve
+/// against later, not a claim that the path was freshly verified.
+fn target_for_missing_recovery_path(error: FileAccessError) -> FileAccessTarget {
+    FileAccessTarget {
+        project_id: error.project_id,
+        selected_relative_path: error.selected_relative_path,
+        selected_absolute_path: error.selected_absolute_path.clone(),
+        canonical_path: error.selected_absolute_path,
+        root_canonical_path: error.root_canonical_path,
+        symlink_status: FileAccessSymlinkStatus::NoSymlink,
+        containment_status: FileAccessContainmentStatus::InsideRoot,
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

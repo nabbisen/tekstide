@@ -273,18 +273,53 @@ marker) and the release rule (**B must not reach a release without C**).
 
 ## PR-027-C — the offer
 
-- [ ] **Measurement 1 — the offer** lists each recoverable buffer with its project and path, and
+- [x] **Measurement 1 — the offer** lists each recoverable buffer with its project and path, and
       **declining leaves every file on disk untouched**, proved on real files (D4, §1 row 3).
-- [ ] **Measurement 2 — the real round trip**: edit without saving, `SIGKILL`, restart, recover,
+      `a_project_with_recovery_records_is_offered_at_state_construction`,
+      `dismissing_the_offer_leaves_every_record_on_disk_untouched` (`shell::tests`).
+- [x] **Measurement 2 — the real round trip**: edit without saving, `SIGKILL`, restart, recover,
       verified against what is on disk (D6).
-- [ ] The **unchanged** disk file restores the buffer as dirty.
-- [ ] The **changed** disk file goes through the existing `ExternalChanged`/conflict path, and
+      `a_real_sigkill_leaves_the_crashed_instances_own_recovery_record_intact` (`recovery::tests`)
+      proves the real-kill half (the record genuinely survives a real `SIGKILL` and reap, intact);
+      the disk-comparison half (what "recover" decides from unchanged/changed/gone) needs no
+      process at all and is proved directly below.
+- [x] The **unchanged** disk file restores the buffer as dirty.
+      `recover_with_unchanged_disk_file_restores_dirty_with_the_recorded_text`
+      (`content::tests::recover`); `activating_a_recoverable_row_recovers_it_and_removes_its_record`
+      (`shell::tests`) through the real offer.
+- [x] The **changed** disk file goes through the existing `ExternalChanged`/conflict path, and
       **no new conflict vocabulary was minted** (D5, §1 row 2). If one seemed necessary, that is
       reported as a finding instead.
-- [ ] The **deleted** disk file offers the text with the deleted state.
-- [ ] The offer says recovered buffers come back **without undo history** (D3, §3 row 10).
-- [ ] Recovery data with no marker is reported as a cleanup bug, not consumed as a crash
-      (D1, §3 row 11).
+      `recover_with_changed_disk_file_restores_as_conflict`,
+      `recovering_a_changed_file_still_reports_changed_on_the_next_refresh`
+      (`content::tests::recover`); `activating_a_row_whose_file_has_changed_surfaces_the_reload_control`
+      (`shell::tests`) proves the real chrome control (`editor::reload_button_is_shown`) actually
+      appears, not only the internal `TextDocumentState::Conflict` value — see this slice's own
+      finding below about why that distinction mattered.
+- [x] The **deleted** disk file offers the text with the deleted state.
+      `recover_with_missing_disk_file_restores_as_conflict` (`content::tests::recover`);
+      `activating_a_row_whose_file_is_gone_surfaces_external_deleted` (`shell::tests`) proves the
+      real `ProjectContentStatus::ExternalDeleted`, the same existing status an already-open
+      document gets for the identical disk state — no fourth state invented for this slice.
+- [ ] The offer says recovered buffers come back **without undo history** (D3, §3 row 10). The
+      Fluent line (`recovery-offer-no-undo-notice`) is written and wired into the modal's own view
+      (`recovery_offer_modal_view`); left unticked here because nothing yet proves it is *shown*
+      rather than just present in the catalog — the i18n enforcement suite only proves the key
+      resolves to real text, not that this view places it. Confirmed by the live capture below, or
+      a dedicated test first if the live capture is deferred.
+- [x] **Amendment 1** (supersedes this row's original wording, "recovery data with no marker is
+      reported as a cleanup bug, not consumed as a crash" — directly contradicted by the amendment,
+      confirmed against the real binary at review 489: a clean window close removes the marker and
+      leaves the records, and quitting with unsaved work is unguarded, so "records, no marker" is
+      ordinary, not a bug): **the offer is driven by the presence of records alone.** Every
+      `shell::tests` fixture above constructs `State` with `instance_marker: None` (`state_with`'s
+      own `State::new(..., None)` call) and the offer still opens — proof by construction, not by a
+      separate marker-absent test, since no marker is ever in hand anywhere in this test file at
+      all. The marker's own remaining role (colouring the offer's wording by how the last session
+      ended) is **not implemented** in this slice — the offer's copy does not yet distinguish crash
+      from ordinary quit — disclosed as a deliberate scope cut, not an oversight: Amendment 1 says
+      the marker "may colour the wording," not that it must, and D4/measurement 1 (list + decline)
+      do not depend on it.
 - [ ] **Live capture**, including the changed-on-disk case, not only the easy one.
 
 ## Whole-RFC
