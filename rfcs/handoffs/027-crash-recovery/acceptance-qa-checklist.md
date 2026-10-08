@@ -5,13 +5,19 @@ its own; the Whole-RFC section is checked once at the end.
 
 ## PR-027-A — the marker
 
-- [ ] A real `SIGKILL` of a real process leaves a marker whose pid is not alive; a clean exit leaves
-      none. Not a `simulate_crash()` helper (D6, §4 row 15).
-- [ ] **Two concurrent instances do not make each other look crashed** (D12). Start a second while
-      the first runs; neither reports a crash.
-- [ ] The liveness check is production code. `test_support` is not imported by the product.
-- [ ] Pid reuse is disclosed in the write-up, with its direction of failure named.
-- [ ] Nothing user-facing, and no buffer content written anywhere.
+- [x] A real `SIGKILL` of a real process leaves a marker whose pid is not alive; a clean exit leaves
+      none. Not a `simulate_crash()` helper (D6, §4 row 15). `qa-evidence.md`:
+      `a_real_sigkill_leaves_a_marker_a_later_startup_detects_as_a_crash`,
+      `a_clean_exit_leaves_no_marker_behind`.
+- [x] **Two concurrent instances do not make each other look crashed** (D12). Start a second while
+      the first runs; neither reports a crash. `a_concurrent_sibling_instance_is_not_reported_as_a_crash`.
+- [x] The liveness check is production code. `test_support` is not imported by the product.
+      `recovery::instance::pid_is_alive`, not `#[cfg(test)]`.
+- [x] Pid reuse is disclosed in the write-up, with its direction of failure named. `qa-evidence.md`'s
+      own "Pid reuse is disclosed, not fixed" section; direction: not offered, never falsely offered.
+- [x] Nothing user-facing, and no buffer content written anywhere.
+      `a_first_run_detects_nothing_and_writes_only_its_own_marker` asserts the only file on disk
+      is the marker itself.
 
 ## PR-027-B — the record, with its purge
 

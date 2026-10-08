@@ -49,6 +49,7 @@ fn state_with_configuration(
         catalog,
         tekstide_core::audit::AuditHealth::default(),
         configuration,
+        None,
     )
 }
 
@@ -20928,4 +20929,53 @@ fn the_reload_button_s_full_round_trip_takes_disk_content_and_undo_does_not_cros
         "external edit",
         "undo must not reach back across the reload and resurrect the discarded local edit"
     );
+}
+
+/// RFC-027 PR-027-A: `State` really holds this instance's own marker for its whole
+/// lifetime, not merely constructs it and lets it drop somewhere before reaching `State` --
+/// proven with a real marker on disk, a real `State` built with it, a real drop, and a real
+/// check after, the same shape `test_support::KillOnDropChild`'s own tests already use.
+#[test]
+fn state_holds_the_instance_marker_for_its_whole_lifetime_so_a_normal_exit_removes_it() {
+    let root = std::env::temp_dir().join(format!(
+        "tekstide-state-instance-marker-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+
+    let startup = tekstide_core::recovery::start_instance(&root)
+        .expect("starting a real instance should succeed");
+    let marker_path = startup.marker.path().to_path_buf();
+    assert!(
+        marker_path.is_file(),
+        "the marker must exist before State is built"
+    );
+
+    let app_shell = ApplicationShell::new();
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let state = State::new(
+        app_shell,
+        catalog,
+        tekstide_core::audit::AuditHealth::default(),
+        ConfigurationState::unconfigured(),
+        Some(startup.marker),
+    );
+    assert!(
+        marker_path.is_file(),
+        "building State must not have dropped the marker early"
+    );
+
+    drop(state);
+
+    assert!(
+        !marker_path.exists(),
+        "State going out of scope -- the same thing a normal application exit does -- must \
+         remove the marker through its own Drop"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
 }

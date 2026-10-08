@@ -110,6 +110,41 @@ fn boot() -> shell::State {
         tekstide_core::config::ConfigPathProvider::linux_default(),
     );
 
+    // RFC-027 PR-027-A, D1/D12: a crash is detected, not guessed. Resolved
+    // independently of `store` below rather than sharing one
+    // `AppStatePathProvider` -- the established shape this crate already uses
+    // (`resolve_audit_state_dir` does the same for the audit store): the
+    // resolution is a cheap, stateless env-var read, and `RecentProjectStore::new`
+    // below takes its own provider by value. `None` only when the environment
+    // itself cannot be resolved, the same condition `store` already degrades on;
+    // crash detection is not allowed to fail the boot a missing `HOME` should not
+    // be able to crash.
+    let instance_marker = match AppStatePathProvider::linux_default() {
+        Ok(path_provider) => {
+            match tekstide_core::recovery::start_instance(path_provider.state_dir()) {
+                Ok(startup) => {
+                    for crash in &startup.detected_crashes {
+                        // PR-027-A: detection reported internally only -- there is
+                        // no recovery record yet (PR-027-B) for anything to offer.
+                        eprintln!(
+                            "tekstide: the previous session (pid {}) did not exit cleanly",
+                            crash.pid
+                        );
+                    }
+                    Some(startup.marker)
+                }
+                Err(error) => {
+                    eprintln!("tekstide: crash detection unavailable: {error}");
+                    None
+                }
+            }
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            None
+        }
+    };
+
     let mut store = match AppStatePathProvider::linux_default() {
         Ok(path_provider) => Some(RecentProjectStore::new(path_provider)),
         Err(error) => {
@@ -158,8 +193,14 @@ fn boot() -> shell::State {
     // `State::new`, not from this function (response 397, U2) -- a call site
     // here would be a line someone can delete with no test noticing, which is
     // how the command-line open came to have no cleanup at all.
-    shell::State::new(app_shell, catalog, audit_health, configuration)
-        .with_recent_project_list_repair(recent_projects_repair)
+    shell::State::new(
+        app_shell,
+        catalog,
+        audit_health,
+        configuration,
+        instance_marker,
+    )
+    .with_recent_project_list_repair(recent_projects_repair)
 }
 
 /// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI

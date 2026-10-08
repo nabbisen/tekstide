@@ -1087,6 +1087,19 @@ pub struct State {
     /// anyway.
     audited_agent_runs:
         std::collections::HashMap<tekstide_core::domain::AgentRunId, AuditedAgentRunIdentity>,
+    /// RFC-027 PR-027-A, D1/D12: this instance's own crash-detection marker, written in
+    /// `boot()` and held for the whole application lifetime so a normal exit's own `Drop`
+    /// removes it -- the same "field lives as long as `State` does" shape `audit_health`
+    /// already has. **Never read, by design**: this field's only job is to exist for as
+    /// long as `State` does, so its `Drop` fires at the same moment -- the leading `_`
+    /// is the same "held only for its `Drop`" signal `test_support::RealProcessSlot`'s own
+    /// callers already spell with `let _real_process_slot = ...`, here on a struct field
+    /// instead of a local. `None` only when `AppStatePathProvider::linux_default()` itself
+    /// failed (no `HOME`/`XDG_STATE_HOME`), the same condition that already leaves
+    /// `RecentProjectStore` unconstructed in `boot()`; crash detection degrades silently
+    /// in that case rather than failing the boot a missing environment variable should
+    /// not be able to crash.
+    _instance_marker: Option<tekstide_core::recovery::InstanceMarker>,
 }
 
 /// RFC-045 PR-045-B: what `boot()` made of the user's configuration
@@ -1260,6 +1273,7 @@ impl State {
         catalog: Catalog,
         mut audit_health: tekstide_core::audit::AuditHealth,
         configuration: ConfigurationState,
+        instance_marker: Option<tekstide_core::recovery::InstanceMarker>,
     ) -> Self {
         // RFC-032 PR-032-C, response 245: the audit store, not the
         // user-writable recent-projects cache, is authoritative for
@@ -1386,6 +1400,7 @@ impl State {
             recent_project_list_repair: None,
             transcript_cleanup_notice: None,
             audited_agent_runs: std::collections::HashMap::new(),
+            _instance_marker: instance_marker,
         };
         // RFC-054 PR-054-B: the configured family, before the first frame.
         crate::theme::set_ui_font(state.theme.font());
