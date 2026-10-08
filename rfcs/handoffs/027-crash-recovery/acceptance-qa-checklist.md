@@ -324,8 +324,16 @@ marker) and the release rule (**B must not reach a release without C**).
 
 ### Required at review 490 — a demonstrated data-loss defect in D5
 
-- [ ] **A recovered document whose file is over `DEFAULT_MAX_EDITABLE_BYTES` saves over it, and the
-  `Conflict` does not block.** Proven, not reasoned — a scratch test against the real code:
+- [x] **A recovered document whose file is over `DEFAULT_MAX_EDITABLE_BYTES` saves over it, and the
+  `Conflict` does not block.** **Fixed and verified at review 491** — I re-ran review 490's own
+  scratch scenario against the fix: `save refused`, the 5 MiB file **untouched at 5242880 bytes**,
+  and `refresh_external_state` now reports `Conflict` rather than `Unchanged`. Ablating the guard
+  fails `recovering_an_oversize_changed_file_refuses_to_save_over_it`, so the test is load-bearing.
+  The structural fix was the right one: guarding on `state` cannot be bypassed by any snapshot
+  shape, and the exit from `Conflict` is an explicit reload that replaces the document, so the
+  guard traps nobody.
+
+  ~~Original finding:~~ Proven, not reasoned — a scratch test against the real code:
 
   ```
   state after recover = Conflict          <- the divergence was detected correctly
