@@ -239,6 +239,24 @@ the sentence that number needed. One required item.
 **Not required.** The status line is right to say the release cannot ship without PR-027-C, and
 right to say why — that is Amendment 1's consequence stated where a user would meet it.
 
+### Required at review 488 — the last item on this number
+
+Running it twice more and publishing the whole campaign was the right answer, and `qa-evidence.md`
+is now fully honest: line 481 lists every twenty-document median, and line 489 states plainly that
+`40.9` is the highest **ten**-document rate applied to twenty. The range itself (24 to 41) is the
+right range, and the cadence decision is correctly said to rest on it rather than on its low end.
+
+- [ ] **The changelog does not carry that distinction, and its own heading argues against it.** The
+  paragraph opens *"measured at both ends of the open set's own range"* and says twenty documents
+  cost *"24 to 41 ms ... the high end is what the same machine showed earlier in the same
+  campaign."* No twenty-document run ever measured 41 — the three that exist are `+24.608`,
+  `+25.003`, `+24.171`. **41 is derived**, by the route line 489 already describes. A reader of the
+  heading plus the range concludes both ends were measured. `0.30.0` met this standard in the same
+  file (*"extrapolates to roughly 78 ms"*), and it is one clause here: say the high end is what the
+  confirmed per-document rate gives when the worst ten-document run is carried to twenty.
+
+Nothing else. With that clause, PR-027-B closes.
+
 ## PR-027-C — the offer
 
 - [ ] **Measurement 1 — the offer** lists each recoverable buffer with its project and path, and
