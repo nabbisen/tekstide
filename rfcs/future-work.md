@@ -1145,3 +1145,28 @@ be going ahead, and a refused close must say so.
 silent loss, shipping now. It is not RFC-027's, and RFC-058 (`0.32.0`, *A Project Held By One
 Process*) is a different subject. Recommended to the owner as its own small RFC, scheduled ahead of
 or alongside `0.32.0`.
+
+## RFC-063 (`iced_selector`) has a named motivating case now — review 492
+
+**The gap, stated precisely, because "GUI verification" is too vague to schedule against.**
+
+This project's established pattern is to factor a view's text into a pure function and test that —
+*"Factored out of [`view`] ... directly testable without `iced`"*, in `surface/editor.rs` and
+everywhere else. It exists because an `iced` view tree cannot be queried, so the function is the
+only testable seam.
+
+**Every test written that way proves the text is produced, never that the view places it.** Shown
+at review 492, not argued: `recovery_offer_header_includes_the_no_undo_history_notice` asserts the
+two header lines the recovery offer renders. I ablated the **view's own push** of the second line,
+replacing it with an empty string — **the test still passed.** The dev team's reasoning that
+nothing sits between computing and pushing is true today and held by nothing.
+
+So for every line function in this codebase:
+
+- **What is proven:** the catalog resolves, and the function returns the right text.
+- **What is not:** that any view places it, or that a later edit cannot silently drop it.
+- **What closes it once:** a live capture. **What would hold it:** RFC-063.
+
+The risk document's §3 row 10 (*the offer must say recovered buffers come back without undo
+history*) is the first requirement in this project whose proof rests entirely on that gap, which is
+what makes it worth naming here rather than leaving as a general unease.
