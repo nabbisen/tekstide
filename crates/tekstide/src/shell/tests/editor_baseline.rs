@@ -1134,17 +1134,25 @@ fn keystrokes_with_recovery_persist_tick(
     run
 }
 
+/// RFC-027 D4: the open set's own bound (RFC-065 D4), and -- per review 486's second note --
+/// a condition this harness measures *at*, not only extrapolates to, since twenty documents
+/// is cheap enough to add once nineteen extra are already a loop over `dirty_documents`.
+const RECOVERY_OPEN_SET_BOUND: usize = 20;
+
 /// RFC-027 D7/D8: **the recovery-persist measurement.** The control is zero dirty
 /// background documents (the active one typed into is itself clean until its own first
-/// keystroke, so the earliest ticks persist nothing); the treatment opens
-/// [`BURST_N_DOCUMENTS`] documents and dirties every one of them before typing starts, so
-/// every tick genuinely writes all of them. Three conditions -- one dirty document (the
-/// active one, typed into), ten, and an idle control with none -- in a paired round,
-/// repeated five times, orders rotated the same way [`editor_typing_latency_under_a_watched_burst`]
-/// already rotates its own five. The figure that matters is the **per-document delivery
-/// cost**, not an absolute keystroke latency: D7's own question is what the tick costs
-/// between keystrokes, which keystroke p95 cannot see any more than it could for D8
-/// (review 469's own lesson, carried here from the start rather than re-discovered).
+/// keystroke, so the earliest ticks persist nothing); each treatment opens and dirties its
+/// own document count before typing starts, so every tick genuinely writes all of them.
+/// Four conditions -- idle, one dirty document (the active one, typed into), ten, and
+/// twenty (the open set's own bound, D4, measured directly rather than only extrapolated
+/// to, per review 486) -- in a paired round, repeated five times, orders rotated a simple
+/// cyclic step rather than a pure Latin square (four conditions do not divide five rounds
+/// evenly; acceptable for an `#[ignore]`d measurement, not a claim of the same rigour
+/// [`editor_typing_latency_under_a_watched_burst`]'s own 5-by-5 square has). The figure
+/// that matters is the **per-document delivery cost**, not an absolute keystroke latency:
+/// D7's own question is what the tick costs between keystrokes, which keystroke p95 cannot
+/// see any more than it could for D8 (review 469's own lesson, carried here from the start
+/// rather than re-discovered).
 ///
 /// `cargo test --release -p tekstide editor_typing_latency_under_a_recovery_persist_tick -- --ignored --nocapture`
 #[test]
@@ -1158,13 +1166,18 @@ fn editor_typing_latency_under_a_recovery_persist_tick() {
         Idle,
         OneDirty,
         TenDirty,
+        TwentyDirty,
     }
-    use Condition::{Idle as I, OneDirty as O, TenDirty as T};
-    let orders = [[I, O, T], [O, T, I], [T, I, O], [I, T, O], [O, I, T]];
+    use Condition::{Idle as I, OneDirty as O, TenDirty as T, TwentyDirty as W};
+    let base = [I, O, T, W];
+    let orders: [[Condition; 4]; 5] = std::array::from_fn(|round| {
+        std::array::from_fn(|position| base[(position + round) % base.len()])
+    });
     let index = |condition: Condition| match condition {
         Condition::Idle => 0,
         Condition::OneDirty => 1,
         Condition::TenDirty => 2,
+        Condition::TwentyDirty => 3,
     };
     println!(
         "fixture: {} lines, {} bytes; tick interval under measurement: {:.0} ms; budget NFR-PERF-003: p95 <= 16 ms, p99 <= 33 ms",
@@ -1174,10 +1187,10 @@ fn editor_typing_latency_under_a_recovery_persist_tick() {
     );
     // Per-tick, not total: the tick fires on a wall-clock interval, and a slower tick (more
     // dirty documents) leaves less of the fixed keystroke budget's own wall-clock time for
-    // further ticks to land in -- tick *counts* differ between conditions (4 for Idle/
-    // OneDirty, 6 for TenDirty in this run), so comparing totals over a fixed keystroke
-    // count conflates "costs more per tick" with "fewer/more ticks happened to fire."
-    let mut delivery_per_tick_ms = [[0.0f64; 3]; 5];
+    // further ticks to land in -- tick *counts* differ between conditions, so comparing
+    // totals over a fixed keystroke count conflates "costs more per tick" with "fewer/more
+    // ticks happened to fire."
+    let mut delivery_per_tick_ms = [[0.0f64; 4]; 5];
     for (round, order) in orders.iter().enumerate() {
         for &condition in order {
             let (mut state, dir) = state_with_an_open_document("recovery-persist-round", &text);
@@ -1186,6 +1199,7 @@ fn editor_typing_latency_under_a_recovery_persist_tick() {
                 Condition::Idle => 0,
                 Condition::OneDirty => 1,
                 Condition::TenDirty => BURST_N_DOCUMENTS,
+                Condition::TwentyDirty => RECOVERY_OPEN_SET_BOUND,
             };
             // Every document beyond the primary one is opened and dirtied directly
             // (`replace_active_project_text`, the same real API `attempt_undo_active_document`
@@ -1235,16 +1249,19 @@ fn editor_typing_latency_under_a_recovery_persist_tick() {
     println!("\npaired differences from the idle control, per round (ms/tick):");
     let mut one_doc_cost = Vec::new();
     let mut ten_doc_cost = Vec::new();
+    let mut twenty_doc_cost = Vec::new();
     for (round, row) in delivery_per_tick_ms.iter().enumerate() {
         println!(
-            "round {}: idle {:.3} ms/tick; one dirty {:+.3}; ten dirty {:+.3}",
+            "round {}: idle {:.3} ms/tick; one dirty {:+.3}; ten dirty {:+.3}; twenty dirty {:+.3}",
             round + 1,
             row[0],
             row[1] - row[0],
             row[2] - row[0],
+            row[3] - row[0],
         );
         one_doc_cost.push(row[1] - row[0]);
         ten_doc_cost.push(row[2] - row[0]);
+        twenty_doc_cost.push(row[3] - row[0]);
     }
     let median = |values: &[f64]| {
         let mut sorted = values.to_vec();
@@ -1263,35 +1280,47 @@ fn editor_typing_latency_under_a_recovery_persist_tick() {
     };
     let median_one = median(&one_doc_cost);
     let median_ten = median(&ten_doc_cost);
+    let median_twenty = median(&twenty_doc_cost);
     let (one_min, one_max) = spread(&one_doc_cost);
     let (ten_min, ten_max) = spread(&ten_doc_cost);
+    let (twenty_min, twenty_max) = spread(&twenty_doc_cost);
     println!(
         "median one-dirty-document cost over the five rounds: {median_one:+.3} ms/tick (spread {one_min:+.3} .. {one_max:+.3})"
     );
     println!(
         "median {BURST_N_DOCUMENTS}-dirty-document cost over the five rounds: {median_ten:+.3} ms/tick (spread {ten_min:+.3} .. {ten_max:+.3})"
     );
+    println!(
+        "median {RECOVERY_OPEN_SET_BOUND}-dirty-document cost over the five rounds: {median_twenty:+.3} ms/tick (spread {twenty_min:+.3} .. {twenty_max:+.3})"
+    );
     // Review 485's required fix: RFC-065 D7 published this ratio unconditionally and found
     // 9.2x against a 10x expectation -- publishing it here, always, is what would have shown
     // this run's own 16,687x before the per-document figure below was written down. A ratio
     // that explodes is itself the finding, not a reason to suppress it.
-    let ratio = median_ten / median_one;
     println!(
-        "ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {ratio:.1}x -- {BURST_N_DOCUMENTS}x would match linear scaling"
+        "ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {:.1}x -- {BURST_N_DOCUMENTS}x would match linear scaling",
+        median_ten / median_one
     );
-    if ratio.abs() > (BURST_N_DOCUMENTS as f64) * 5.0 {
+    println!(
+        "ratio ({RECOVERY_OPEN_SET_BOUND}-document cost / one-document cost): {:.1}x -- {RECOVERY_OPEN_SET_BOUND}x would match linear scaling",
+        median_twenty / median_one
+    );
+    // Review 486's first note: fire on the direct signal (the one-document spread straddling
+    // zero), not a proxy threshold on the ratio -- a moderately noisy run could produce a
+    // ratio that looks plausible while still resting on a one-document number that is noise.
+    if one_min <= 0.0 && one_max >= 0.0 {
         println!(
-            "the one-document delta ({median_one:+.3} ms/tick, spread {one_min:+.3} .. {one_max:+.3}) is at or below this harness's own \
-             resolution -- its spread straddles zero, the signature of round-to-round noise, not a measured per-document cost. The \
-             per-document figure below rests on the ten-document measurement alone, not on a confirmed linear rate between one and ten."
+            "the one-document delta ({median_one:+.3} ms/tick, spread {one_min:+.3} .. {one_max:+.3}) straddles zero -- at or below \
+             this harness's own resolution, the signature of round-to-round noise, not a measured per-document cost. The per-document \
+             figure below rests on the ten/twenty-document measurements alone, not on a confirmed linear rate from one."
         );
     }
-    let per_document_ms = median_ten / BURST_N_DOCUMENTS as f64;
     println!(
-        "per-document delivery cost, derived from the ten-document median alone ({median_ten:+.3} / {BURST_N_DOCUMENTS}): {per_document_ms:.3} ms/tick"
+        "per-document delivery cost, derived from the ten-document median alone ({median_ten:+.3} / {BURST_N_DOCUMENTS}): {:.3} ms/tick",
+        median_ten / BURST_N_DOCUMENTS as f64
     );
-    let extrapolated_20 = per_document_ms * 20.0;
     println!(
-        "extrapolated cost at the open set's own bound of 20 documents, all dirty: {extrapolated_20:.3} ms/tick (extrapolation, not measured, assumes the ten-document rate holds)"
+        "per-document delivery cost, derived from the twenty-document median alone ({median_twenty:+.3} / {RECOVERY_OPEN_SET_BOUND}): {:.3} ms/tick -- measured directly at the open set's own bound, not extrapolated (review 486's second note)",
+        median_twenty / RECOVERY_OPEN_SET_BOUND as f64
     );
 }

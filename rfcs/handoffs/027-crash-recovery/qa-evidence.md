@@ -343,6 +343,31 @@ worst-case number, which is the one real signal here: ten large documents, all d
 per-keystroke-adjacent -- double `RUN_RECORD_INTERVAL`'s own 1 second for a much heavier write --
 regardless of what the true per-document rate turns out to be between one document and ten.
 
+**Third correction (review 486's own two notes, neither required, both applied).** The caveat fired
+on a proxy (`ratio.abs() > N * 5.0`) rather than the direct signal -- a moderately noisy run could
+produce a plausible-looking ratio while still resting on one-document noise. Fixed to fire on the
+direct signal: the one-document spread itself straddling zero. And, since `dirty_documents` was
+already a loop parameter, a fourth condition was added -- **twenty dirty documents, the open set's
+own bound (D4), measured directly rather than only extrapolated to**:
+
+```
+median one-dirty-document cost over the five rounds: +0.016 ms/tick (spread -0.040 .. +0.472)
+median 10-dirty-document cost over the five rounds: +12.336 ms/tick (spread +11.746 .. +16.195)
+median 20-dirty-document cost over the five rounds: +24.608 ms/tick (spread +23.841 .. +32.003)
+ratio (10-document cost / one-document cost): 755.9x -- 10x would match linear scaling
+ratio (20-document cost / one-document cost): 1508.0x -- 20x would match linear scaling
+the one-document delta straddles zero -- at or below this harness's own resolution
+per-document delivery cost, derived from the ten-document median alone (+12.336 / 10): 1.234 ms/tick
+per-document delivery cost, derived from the twenty-document median alone (+24.608 / 20): 1.230 ms/tick -- measured directly at the open set's own bound, not extrapolated
+```
+
+**This is a materially stronger result than the extrapolation it replaces.** The ten-document and
+twenty-document per-document rates agree to within 0.3% (1.234 vs 1.230 ms/document) -- two
+independently measured points on the same line, not one point and an assumption. The one-document
+signal is still noise (spread straddles zero, consistent with every prior run), so the rate is
+confirmed **between ten and twenty**, not from one, and the twenty-document figure quoted from here
+on is **measured, not extrapolated**: ~24.6 ms/tick at the open set's own bound, all dirty.
+
 Reproduce: `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo test --release -p tekstide
 editor_typing_latency_under_a_recovery_persist_tick -- --ignored --nocapture` (the release-mode
 `()`-renderer requirement review 469 already found for the sibling measurement).
@@ -351,12 +376,12 @@ editor_typing_latency_under_a_recovery_persist_tick -- --ignored --nocapture` (t
 
 The same run above *is* this measurement -- D7's cadence question and D8's per-document question
 are the same number, read two ways. D8 asks for the cost "at one and at ten dirty documents, with
-twenty extrapolated and labelled as an extrapolation" (§4 row 14); this harness measures exactly
-that shape, and review 485's own correction is precisely about not overstating what the
-one-document half of it actually shows. The honest answer: **ten documents cost +16.7 to +20.4
-ms/tick, measured directly; one document's own cost is below this harness's resolution, not
-measured to a number worth publishing as one; twenty is an extrapolation from the ten-document
-figure alone**, labelled as such in the test's own output and here.
+twenty extrapolated and labelled as an extrapolation" (§4 row 14); review 486's own second note
+asked for twenty to be measured directly instead, which this harness now does. The honest answer:
+**ten and twenty documents both cost real, consistent amounts (~1.23 ms/document at both points,
+~24.6 ms/tick at twenty, measured, not extrapolated); one document's own cost is below this
+harness's resolution, not measured to a number worth publishing as one.** Twenty is no longer an
+extrapolation at all -- review 486's own second note is why.
 
 ### An unrelated file-content-read guard, found and fixed
 
@@ -412,4 +437,28 @@ must not reach a release with B shipped and C not.
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g486{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
+  in each run's own `TMPDIR` afterward.
+
+## Review 486: a `## 0.31.0` changelog section, and the measurement strengthened further
+
+Required item, fixed: `CHANGELOG.md` gets a `## 0.31.0 - The Crash Is Detected, Not Guessed`
+entry, written incrementally (RFC-065's own established shape), covering what PR-027-A and
+PR-027-B actually ship -- the marker, the record, the purge, the figure, the setting -- with the
+per-document cost stated carrying the same caveat it carries here, not as a bare number.
+
+Both optional notes applied too (see "Measurement 3" above for the full third correction): the
+caveat now fires on the direct signal (the one-document spread straddling zero) rather than a
+proxy ratio threshold, and a twenty-document condition was added and measured directly at the open
+set's own bound rather than only extrapolated to -- cheap, since `dirty_documents` was already a
+loop parameter. The result is materially stronger than what it replaces: ten and twenty documents
+now agree on a per-document rate to within 0.3% (1.234 vs 1.230 ms/document), two independently
+measured points rather than one point and an assumption. `RECOVERY_PERSIST_INTERVAL`'s own doc
+comment updated to match.
+
+### Gate, review 486's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --test rfc_docs_invariants`: 16 passed, 0 failed.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g487{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
   in each run's own `TMPDIR` afterward.

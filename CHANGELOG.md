@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.31.0 - The Crash Is Detected, Not Guessed
+
+Status: **in progress.** RFC-027's first two slices (the marker, the record with its purge) are
+done; the third (the offer) is not, and this release cannot ship without it — closing a project's
+own documents, or quitting the application, leaves any recovery record on disk with nothing yet to
+offer it back. This entry is written incrementally as slices close, not held back for the release;
+see `rfcs/handoffs/027-crash-recovery/` for the full handoff pack.
+
+**A crash is detected, not guessed.** Tekstide now writes a small marker at every launch and
+removes it at every clean exit, so a marker still there at the next launch means the previous one
+did not exit cleanly — a real `SIGKILL` leaves it, a clean window close removes it, and two
+Tekstides running at once never mistake each other for a crash. Detected only, for now: there is
+nothing yet to offer back.
+
+**An unsaved document now has somewhere to come back from.** Every **dirty** document gets a small
+side record — its text, cursor and viewport, and the file it was opened against — written
+periodically while you type, entirely outside your project; the file you are editing is never
+touched by it. A clean document gets no record at all, and one that becomes dirty gets one the
+moment it does: the same "only what is not already on disk" reasoning the rest of this product's
+retained content already follows. The record is gone the instant its own reason ends — saved,
+undone back to clean, or its project closed — and a byte bound, named to you at the moment it would
+be exceeded, keeps the largest realistic document from writing more than it should.
+
+**Counted and purged exactly like a transcript, from the same release that starts writing it.**
+Trust Settings shows how much recovery data a project is retaining, in its own line beside the
+transcript figure, and the same **Purge** button removes both. `[recovery]
+persist_unsaved_buffers = true` is the setting, on by default and forward-only (turning it off
+does not delete what already exists) — a protection a user has to find and enable first does not
+prevent the loss this feature exists to prevent.
+
+**What this costs, measured at both ends of the open set's own range, not assumed in between.**
+Ten dirty documents, each at the largest realistic size, cost about **12.3 ms** of delivery work
+per persist pass; twenty — the open set's own bound — cost about **24.6 ms**, measured directly
+rather than extrapolated to. The two points agree on a per-document rate to within 0.3% (about
+**1.23 ms per document** either way), which is the number the write cadence (every 2 seconds) is
+chosen against. **One document's own cost could not be measured**: in every run its own signal sat
+inside the harness's own round-to-round noise, straddling zero, rather than landing on a stable
+number — the confirmed rate is between ten and twenty documents, not from one, and is not claimed
+to hold below ten.
+
 ## 0.30.0 - The Multi-Document Model
 
 Status: **scoped 2026-10-08.** `REQ-EDIT-004` met for its own plural. No `REQ-` names
