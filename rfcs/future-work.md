@@ -1085,4 +1085,28 @@ the book: it must carry the Linux-only statement and the no-screen-reader statem
 imply a platform or a capability that does not exist. Marketing copy drifting from the product is
 the same defect class as a stale book page, and this project has spent many reviews on that.
 
-**Recommended order:** AUR → release binaries with CI → landing page. Updater: no.
+**Decided 2026-10-08 (owner).** All of it waits for **M14**, and nothing is pulled forward.
+RFC-029's own scope line now names AUR packaging, the installer script and the landing page, since
+a build matrix produces artifacts but names no channel. The cross-platform half of the installer
+depends on RFC-028, which is M14 too, so the sequencing already works.
+
+**The auto-updater is replaced by a user-clicked "Check for updates" — the owner's own
+counter-proposal, and a better one.** It removes everything the objection was about: no background
+traffic, no self-rewriting binary, so no conflict with AUR or `cargo install`, and no path that
+executes fetched code. It is still this product's **first outbound network request**, so it is a
+product feature with its own decisions, not release tooling, and it does not belong inside RFC-029:
+
+- **Ask crates.io**, where the product is actually published. No endpoint to stand up, no server to
+  run, and the authoritative answer.
+- **Report, never install.** It names the installed version and the latest one. It must not guess
+  how the user installed — telling an AUR user to `cargo install` would be wrong — so it offers a
+  link, not a command.
+- **A failed check says it failed.** No network, a timeout or a proxy must never render as "you are
+  up to date". This project has spent many reviews on exactly that distinction.
+- **It never nags.** No startup check, no periodic check, no badge. It happens when the button is
+  pressed and not otherwise — which is the whole reason it is defensible.
+- **`local-data-and-privacy.md` documents it**: what the request reveals (that someone runs
+  Tekstide, when, from which address) and that nothing else is sent.
+
+Scheduled with M14, where it is worth having — a check for updates matters once updating is easy.
+It needs its own RFC when it is scheduled; no number is reserved yet.
