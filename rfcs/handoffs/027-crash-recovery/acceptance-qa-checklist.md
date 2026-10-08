@@ -19,6 +19,38 @@ its own; the Whole-RFC section is checked once at the end.
       `a_first_run_detects_nothing_and_writes_only_its_own_marker` asserts the only file on disk
       is the marker itself.
 
+### Required at review 481
+
+The slice is correct and I verified the whole of it against the real binary, including the thing
+you disclosed as unverified. One required item, and it is required because of what PR-027-B does
+next, not because of anything it costs today.
+
+- [ ] **Validate the pid parsed from a marker filename before casting it.** `parse::<u32>()` feeds
+  `pid as libc::pid_t` unbounded. I planted three markers and ran the real binary: `999999999` was
+  detected and removed correctly, but **`0` and `4294967295` survived the scan and always will** —
+  `kill(0, 0)` probes the caller's own process group, and `4294967295` casts to `-1`, which probes
+  every process the caller may signal. Both answer "alive", so neither marker can ever be cleaned.
+  Today that is two stray files and it fails in the safe direction. **It stops being harmless in
+  PR-027-B**: a record whose lifecycle is tied to a marker that can never be removed is user content
+  that outlives its reason, which is §2 row 7 of the risk document. Reject `0` and anything above
+  `i32::MAX` at parse time, so a marker is always either live or removable.
+
+**Verified live against `target/debug/tekstide`, not from the report** — these are not asks, they
+are what I ran:
+
+- The marker is created named by the app's own pid; a real `SIGKILL` leaves it behind.
+- A restart detects it, names the pid on stderr (*"the previous session (pid 2635125) did not exit
+  cleanly"*) and removes it.
+- **A real window close through the window manager drops `State` and removes the marker.** Your
+  reading of `iced_winit` 0.14.1 was right, and it is no longer a structural claim — see below.
+- Two concurrent real instances hold both markers; the second reports nothing and does not touch
+  the first's.
+- The only files under the state directory are `recent-projects.json`, its `.bak`, and the markers.
+  **No buffer content is written anywhere**, checked on the filesystem rather than from the code.
+- `test_support` is `#[cfg(test)]` at `lib.rs:31`, so production genuinely cannot reach it; the
+  three remaining mentions in product source are doc comments.
+- Gate reproduces: `739 + 16 + 1095`, 0 failures, 0 fixture entries left.
+
 ## PR-027-B — the record, with its purge
 
 - [ ] A **dirty** document gets a record; a **clean** one does not (D2, §3 row 12). Proved by what
