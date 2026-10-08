@@ -674,3 +674,54 @@ process in the way.
   left in each run's own `TMPDIR` afterward.
 - Not yet done: the live capture (changed-on-disk case), and the "no undo history" notice's own
   visibility proof -- both left for the next response, not silently assumed.
+
+## Review 490: a recovered oversize file is saved over -- the conflict is set and never consulted
+
+Required item 1, a real data-loss bug, demonstrated by the reviewer against the real code rather
+than reasoned about: `recover`'s own "changed" branch stores `last_known_snapshot` with
+`content_hash: None` on the stated assumption that a later fresh read is `Some(_)` "whenever the
+file is within the policy's editable bound" -- true for every file this slice's own tests had
+tried, and false for any file over `DEFAULT_MAX_EDITABLE_BYTES` (4 MiB), where a fresh read is
+`content_hash: None` too (`file_snapshot_for_current_disk`'s own shape). The two `None`s compared
+equal, `save`'s own guard (`current_snapshot != self.last_known_snapshot`) found no divergence, and
+a tiny recovered buffer silently replaced a real 5 MiB file. Only recovery can reach this: the
+ordinary open path refuses an oversize file outright (`TooLarge`), so an ordinary document's own
+`last_known_snapshot` always carries a real hash; `recover` never reads the file's content at all,
+which is exactly what let it admit a document for a file that could never have been opened by hand.
+
+**Fixed structurally, per the review's own framing** ("the property required, not the
+implementation... guarding `save` on the `Conflict` state does not depend on how a snapshot encodes
+absence"), not by trying to encode "always different" more cleverly:
+
+- `TextDocument::save` now refuses unconditionally while `self.state == Conflict`, checked as the
+  very first thing, before any disk read at all -- no snapshot shape, at any file size, can bypass
+  it. For an ordinary (non-recovered) document this is a no-op (the snapshot guard below it would
+  already have blocked the save), so nothing about today's non-recovery behaviour changes.
+- `TextDocument::refresh_external_state` carries the identical guard on its own `Unchanged` branch.
+  Not required by the review (it is a display bug, not a data-loss one), but the same root cause: an
+  oversize `Conflict` document's later refresh would otherwise report `Unchanged` too, and
+  `refresh_document_by_canonical_path`'s own mapping reads that as `Edited`, hiding the Reload
+  control for exactly the document that most needs it. Disclosed and fixed alongside the required
+  item rather than left as a known residual gap, since the fix was one guard, not a redesign.
+
+**Tested against the exact assumption the removed comment stated**, per the review's own
+instruction ("every stated assumption in it is a test case"): both new tests build a real file over
+the 4 MiB cap on disk, recover a record whose own length does not match it (D5's "changed" case),
+and assert against the real result --
+`recovering_an_oversize_changed_file_refuses_to_save_over_it` (save refused, `TextDocumentSaveError
+::ExternalChange`, and the real file's own byte length on disk unchanged afterward) and
+`refreshing_an_oversize_conflict_document_stays_conflict` (`ExternalChangeDecision::Conflict`, not
+`Unchanged`) (`content::tests::recover`).
+
+**Ablated, not merely passing**: `rfcs/handoffs/ablate.sh` against the `save` guard alone, on a
+clean tree (commit `c07d7ff`) -- `recovering_an_oversize_changed_file_refuses_to_save_over_it` fails
+without it (`Saved`, not an error), confirming the test is load-bearing, not accidentally green.
+
+### Gate, review 490's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/t27r490g{1,2,3}`): `750 + 16 + 1117`, 0 failed, 0 fixture entries left each time.
+- Not yet done, exactly as review 490's own remaining required items say: the "no undo history"
+  notice's own visibility proof, and the live capture (held off at the owner's instruction).
