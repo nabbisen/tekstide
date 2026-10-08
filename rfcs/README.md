@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 067 | [The Sidebar Is Not A Mode](./proposed/067-the-sidebar-is-not-a-mode.md) | **Proposed 2026-10-08.** `0.33.0`, M13. Switching to terminals takes the file tree away and leaves *“Files are listed here in Content mode.”* in its place |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 067 | [The Sidebar Is Not A Mode](./accepted/067-the-sidebar-is-not-a-mode.md) | **Accepted 2026-10-08.** `0.33.0`, M13. D1–D6 as written, plus D7–D9. Handoff pack: [`067-sidebar-not-a-mode/`](./handoffs/067-sidebar-not-a-mode/README.md) |
 | 066 | [A Refused Close Must Not Have Already Terminated](./accepted/066-a-refused-close-must-not-have-already-terminated.md) | **Accepted 2026-10-08.** `0.32.0`, M13. D1–D5 as written; D3 decided: the modal refuses up front. Repairs a defect live in `0.30.0` |
 | 027 | [Crash Recovery and Unsaved Buffer Persistence](./accepted/027-crash-recovery-and-unsaved-buffer-persistence.md) | **Accepted 2026-10-08.** `0.31.0`, M13. D1–D11 as written plus D12–D15. Handoff pack: [`027-crash-recovery/`](./handoffs/027-crash-recovery/README.md) |
 | — | *(none: nothing is currently accepted and unbuilt)* | |
@@ -77,6 +77,8 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 
 | RFC | Handoff Pack |
 | --- | --- |
+| 066 | [A Refused Close Must Not Have Already Terminated](./handoffs/066-refused-close/README.md) — **M13**; accepted 2026-10-08, `0.32.0`; reproduce before repairing |
+| 067 | [The Sidebar Is Not A Mode](./handoffs/067-sidebar-not-a-mode/README.md) — **M13**; accepted 2026-10-08, `0.33.0`; the third slice may correctly build nothing |
 | 027 | [Crash Recovery and Unsaved Buffer Persistence](./handoffs/027-crash-recovery/README.md) — **M13**; accepted 2026-10-08, `0.31.0`; three slices, A before B before C |
 | 001 | [Product Scope, Foundation Release, and Non-Goals](./handoffs/001-product-scope-mvp-and-non-goals/README.md) |
 | 002 | [Core Domain Model: ProjectSession, TerminalSession, AgentRun, AuditEvent](./handoffs/002-core-domain-model-projectsession-terminalsession-agentrun-auditevent/README.md) |

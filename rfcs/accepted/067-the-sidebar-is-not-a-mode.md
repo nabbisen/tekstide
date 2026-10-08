@@ -1,6 +1,6 @@
 # RFC-067: The Sidebar Is Not A Mode
 
-Status: **Proposed 2026-10-08.** `0.33.0`, M13. From the owner's question of 2026-10-08: can a
+Status: **Accepted by the human owner 2026-10-08.** D1–D6 as written; **the open question decided: activating a file switches to Content mode** — see *Decided on acceptance*. Proposed 2026-10-08. `0.33.0`, M13. From the owner's question of 2026-10-08: can a
 project tab show the file tree, a document and several terminals at once, while staying clean? No
 requirement names this; it is a UX defect in what the project tab already offers.
 
@@ -82,3 +82,23 @@ internal. A user should not have to learn what a slot is to read their own scree
 **My recommendation: 1.** Option 3 is a click whose effect is invisible, which is exactly the thing
 this project's own standard forbids; option 2 puts a control on screen and then ignores it. Being
 moved somewhere is a result a user can see and undo.
+
+## Decided on acceptance (2026-10-08)
+
+**D1–D6 as written. The open question is decided, and one consequence of deciding it is written
+down here so the implementer does not have to find it.**
+
+**D7 — Activating a file in terminal mode switches to Content mode and shows it.** The alternatives
+were a control that is visible and ignored, or a click whose effect the user cannot see. Being moved
+somewhere is a result a user can observe and reverse; the other two are not.
+
+**D8 — The switch must be the user's own action, and must not happen for any other reason.** This
+is the hazard D7 creates: once activating a file can change the mode, anything else that opens a
+document could too. **RFC-027's own recovery offer opens documents** (`0.31.0`, shipping before
+this), and a background refresh touches them. Neither may move the user out of a terminal they are
+watching. **Only an explicit activation in the tree changes the mode** — not an open performed on
+the user's behalf, not a refresh, not a recovery restore.
+
+**D9 — Nothing is removed from terminal mode to make room.** The six-terminal bound, the session
+bar and the two visible slots are untouched. This RFC gives the sidebar back its contents; it does
+not renegotiate the main area.
