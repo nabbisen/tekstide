@@ -1256,24 +1256,42 @@ fn editor_typing_latency_under_a_recovery_persist_tick() {
             sorted[mid]
         }
     };
+    let spread = |values: &[f64]| {
+        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (min, max)
+    };
     let median_one = median(&one_doc_cost);
     let median_ten = median(&ten_doc_cost);
-    println!("median one-dirty-document cost over the five rounds: {median_one:+.3} ms/tick");
+    let (one_min, one_max) = spread(&one_doc_cost);
+    let (ten_min, ten_max) = spread(&ten_doc_cost);
     println!(
-        "median {BURST_N_DOCUMENTS}-dirty-document cost over the five rounds: {median_ten:+.3} ms/tick"
+        "median one-dirty-document cost over the five rounds: {median_one:+.3} ms/tick (spread {one_min:+.3} .. {one_max:+.3})"
     );
-    if median_one.abs() > 0.001 {
+    println!(
+        "median {BURST_N_DOCUMENTS}-dirty-document cost over the five rounds: {median_ten:+.3} ms/tick (spread {ten_min:+.3} .. {ten_max:+.3})"
+    );
+    // Review 485's required fix: RFC-065 D7 published this ratio unconditionally and found
+    // 9.2x against a 10x expectation -- publishing it here, always, is what would have shown
+    // this run's own 16,687x before the per-document figure below was written down. A ratio
+    // that explodes is itself the finding, not a reason to suppress it.
+    let ratio = median_ten / median_one;
+    println!(
+        "ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {ratio:.1}x -- {BURST_N_DOCUMENTS}x would match linear scaling"
+    );
+    if ratio.abs() > (BURST_N_DOCUMENTS as f64) * 5.0 {
         println!(
-            "ratio ({BURST_N_DOCUMENTS}-document cost / one-document cost): {:.2}x -- close to {BURST_N_DOCUMENTS} if the per-document cost is linear",
-            median_ten / median_one
+            "the one-document delta ({median_one:+.3} ms/tick, spread {one_min:+.3} .. {one_max:+.3}) is at or below this harness's own \
+             resolution -- its spread straddles zero, the signature of round-to-round noise, not a measured per-document cost. The \
+             per-document figure below rests on the ten-document measurement alone, not on a confirmed linear rate between one and ten."
         );
     }
     let per_document_ms = median_ten / BURST_N_DOCUMENTS as f64;
     println!(
-        "per-document delivery cost (ten-document median / {BURST_N_DOCUMENTS}): {per_document_ms:.3} ms/tick"
+        "per-document delivery cost, derived from the ten-document median alone ({median_ten:+.3} / {BURST_N_DOCUMENTS}): {per_document_ms:.3} ms/tick"
     );
     let extrapolated_20 = per_document_ms * 20.0;
     println!(
-        "extrapolated cost at the open set's own bound of 20 documents, all dirty: {extrapolated_20:.3} ms/tick (extrapolation, not measured)"
+        "extrapolated cost at the open set's own bound of 20 documents, all dirty: {extrapolated_20:.3} ms/tick (extrapolation, not measured, assumes the ten-document rate holds)"
     );
 }

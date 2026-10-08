@@ -298,27 +298,50 @@ whenever the interval has elapsed, driving the identical production code
 (`persist_recovery_records`), not a stand-in.
 
 Three conditions (idle/one dirty document/ten dirty documents, the fixture's own 100,000-line,
-3.3 MiB text, the largest realistic document size), five rounds, orders rotated. **Corrected once
-already**: the first pass reported total delivery over a fixed keystroke budget, which conflates
-cost-per-tick with tick-*count* (a slower condition leaves less wall-clock time per keystroke
-budget for later ticks to land in, so it fires more of them) -- the same shape of error review 469
-found in RFC-065's own D7 measurement, caught here before publishing a number rather than after.
-Fixed to report milliseconds **per tick**:
+3.3 MiB text, the largest realistic document size), five rounds, orders rotated. **Corrected
+twice**, both times before trusting the number, not after:
+
+**First correction (before review 485).** The first pass reported total delivery over a fixed
+keystroke budget, which conflates cost-per-tick with tick-*count* (a slower condition leaves less
+wall-clock time per keystroke budget for later ticks to land in, so it fires more of them) -- the
+same shape of error review 469 found in RFC-065's own D7 measurement. Fixed to report milliseconds
+**per tick**.
+
+**Second correction (review 485's own required item).** The per-tick fix produced
+`median one-dirty-document cost: +0.001 ms/tick` and `median ten-document cost: +16.687 ms/tick`
+-- a ratio of **16,687x for 10x the work**, which the published "per-document" figure (the
+ten-document median divided by ten) silently assumed was linear. The code's own guard against
+dividing by a near-zero one-document figure suppressed the ratio printout instead of surfacing it,
+which is exactly backwards: a ratio that explodes **is** the finding. Fixed to publish the ratio
+unconditionally (the same thing RFC-065 D7 already does, where it came back 9.2x against a 10x
+expectation) and the per-round spread beside each median, re-run twice for a real number rather
+than reasoned about:
 
 ```
-median one-dirty-document cost over the five rounds: +0.001 ms/tick
-median 10-dirty-document cost over the five rounds: +16.687 ms/tick
-per-document delivery cost (ten-document median / 10): 1.669 ms/tick
-extrapolated cost at the open set's own bound of 20 documents, all dirty: 33.374 ms/tick (extrapolation, not measured)
+median one-dirty-document cost over the five rounds: -0.030 ms/tick (spread -0.166 .. +0.248)
+median 10-dirty-document cost over the five rounds: +20.442 ms/tick (spread +19.260 .. +23.810)
+ratio (10-document cost / one-document cost): -671.9x -- 10x would match linear scaling
+the one-document delta (-0.030 ms/tick, spread -0.166 .. +0.248) is at or below this harness's own resolution
+per-document delivery cost, derived from the ten-document median alone (+20.442 / 10): 2.044 ms/tick
+extrapolated cost at the open set's own bound of 20 documents, all dirty: 40.884 ms/tick (extrapolation, not measured, assumes the ten-document rate holds)
 ```
 
-One document, even at the largest realistic size, costs nothing measurable. Ten costs about 1.67
-ms/document -- real, but only because every one of the ten is the maximum realistic size at once,
-not an ordinary case. **`RECOVERY_PERSIST_INTERVAL = 2` seconds**, chosen against this: the
-worst-case tick (twenty large documents, all dirty, extrapolated ~33 ms) is comparable to the
-keystroke latency budget itself, so the interval's job is to keep that case rare rather than
-per-keystroke-adjacent, not to make it cheap -- 2 seconds is double `RUN_RECORD_INTERVAL`'s own 1
-second for a much lighter write.
+A first re-run (before fixing the suppression) gave ten-document +16.7 ms/tick and the original
+run's own `+0.001`; this one gives +20.4 and `-0.030` -- both one-document spreads straddle zero
+across two independent runs, the signature of round-to-round noise rather than a measured
+per-document cost, on this measuring machine's own load. **The ten-document cost is real and
+consistently an order of magnitude above idle across both runs (+16.7 to +20.4 ms/tick); the
+one-document cost is not independently confirmed by this harness at all.** The per-document figure
+and the twenty-document extrapolation both rest on the ten-document measurement alone, dividing by
+ten and scaling by two -- an assumption of linearity, not a demonstration of it, stated as such
+rather than dressed as a confirmed rate.
+
+**This does not change the interval decision**, because that decision only ever needed the
+worst-case number, which is the one real signal here: ten large documents, all dirty, cost
++16.7 to +20.4 ms/tick, a real cost comparable to the keystroke latency budget itself.
+**`RECOVERY_PERSIST_INTERVAL = 2` seconds** keeps that measured worst case rare rather than
+per-keystroke-adjacent -- double `RUN_RECORD_INTERVAL`'s own 1 second for a much heavier write --
+regardless of what the true per-document rate turns out to be between one document and ten.
 
 Reproduce: `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo test --release -p tekstide
 editor_typing_latency_under_a_recovery_persist_tick -- --ignored --nocapture` (the release-mode
@@ -327,9 +350,13 @@ editor_typing_latency_under_a_recovery_persist_tick -- --ignored --nocapture` (t
 ### Measurement 4, per-document cost at one and ten, twenty extrapolated and labelled (D8)
 
 The same run above *is* this measurement -- D7's cadence question and D8's per-document question
-are the same number, read two ways: the interval decision needs "what does the worst case cost,"
-and D8 needs "what does it cost per document." Both answers are in the block above, including the
-twenty-document figure labelled an extrapolation, not measured, per D8's own requirement.
+are the same number, read two ways. D8 asks for the cost "at one and at ten dirty documents, with
+twenty extrapolated and labelled as an extrapolation" (§4 row 14); this harness measures exactly
+that shape, and review 485's own correction is precisely about not overstating what the
+one-document half of it actually shows. The honest answer: **ten documents cost +16.7 to +20.4
+ms/tick, measured directly; one document's own cost is below this harness's resolution, not
+measured to a number worth publishing as one; twenty is an extrapolation from the ten-document
+figure alone**, labelled as such in the test's own output and here.
 
 ### An unrelated file-content-read guard, found and fixed
 
@@ -357,3 +384,32 @@ register's own convention.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g484{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 6 ignored (the new
   measurement test among them), 0 fixture entries left in each run's own `TMPDIR` afterward.
+
+## Review 485: the measurement's own ratio, suppressed instead of surfaced
+
+Required item 1, fixed -- see "Measurement 3, the cadence (D7)" above for the full correction and
+the re-measured numbers. Summary: the published "1.67 ms/document" figure was the ten-document
+median divided by ten, silently assuming linearity the one-document measurement (median
+`+0.001 ms/tick`) did not confirm -- the ratio between the two is 16,687x against a 10x
+expectation, and the code's own near-zero guard suppressed the ratio printout rather than showing
+it. Fixed to publish the ratio unconditionally (RFC-065 D7's own precedent) and the per-round
+spread beside each median; re-run twice, both runs show the one-document spread straddling zero
+(noise), and the ten-document cost consistently an order of magnitude above idle (+16.7 to
++20.4 ms/tick across the two runs). `RECOVERY_PERSIST_INTERVAL` is unchanged at 2 seconds: the
+interval decision only ever depended on the real, worst-case ten-document number, not on the
+per-document rate the one-document measurement cannot actually supply.
+
+Required item 2 is **Amendment 1 to the RFC itself**, not a PR-027-B change: closing a window
+cleanly removes the crash marker but leaves any recovery records behind, with nothing today (no
+PR-027-C yet) that offers them back or removes them except a manual purge -- "edit, don't save,
+quit" is exactly the case a user most wants their work back from, and it is not crash-scoped.
+Nothing in this response changes as a result; the review's own ruling is that the offer (PR-027-C)
+must be driven by the *presence* of records rather than gated by the marker, and that this RFC
+must not reach a release with B shipped and C not.
+
+### Gate, review 485's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g486{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
+  in each run's own `TMPDIR` afterward.
