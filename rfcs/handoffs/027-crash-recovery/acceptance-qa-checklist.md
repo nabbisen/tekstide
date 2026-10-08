@@ -257,6 +257,20 @@ right range, and the cadence decision is correctly said to rest on it rather tha
 
 Nothing else. With that clause, PR-027-B closes.
 
+### Closed at review 489 — PR-027-B accepted
+
+Nothing required. The paragraph now says what was measured and what was derived, in its own words:
+the heading claims only ten and twenty, the three direct twenty-document runs are given as 24 to 25,
+and **41 ms is stated not to be a measurement** with its derivation shown. Gate reproduces on my own
+run: `744 + 16 + 1107`, 0 failures, 0 fixture entries left.
+
+Five reviews on one paragraph was not waste. The number it now carries — a within-run linear rate,
+an honest between-run range, a derived worst case labelled as derived, and a lower bound it
+explicitly declines to claim — is the most carefully stated measurement this project has published.
+
+**PR-027-C next**, carrying Amendment 1 (the offer is driven by the records, not gated by the
+marker) and the release rule (**B must not reach a release without C**).
+
 ## PR-027-C — the offer
 
 - [ ] **Measurement 1 — the offer** lists each recoverable buffer with its project and path, and
