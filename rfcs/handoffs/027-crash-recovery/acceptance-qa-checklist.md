@@ -301,12 +301,13 @@ marker) and the release rule (**B must not reach a release without C**).
       `activating_a_row_whose_file_is_gone_surfaces_external_deleted` (`shell::tests`) proves the
       real `ProjectContentStatus::ExternalDeleted`, the same existing status an already-open
       document gets for the identical disk state — no fourth state invented for this slice.
-- [ ] The offer says recovered buffers come back **without undo history** (D3, §3 row 10). The
-      Fluent line (`recovery-offer-no-undo-notice`) is written and wired into the modal's own view
-      (`recovery_offer_modal_view`); left unticked here because nothing yet proves it is *shown*
-      rather than just present in the catalog — the i18n enforcement suite only proves the key
-      resolves to real text, not that this view places it. Confirmed by the live capture below, or
-      a dedicated test first if the live capture is deferred.
+- [x] The offer says recovered buffers come back **without undo history** (D3, §3 row 10).
+      `recovery_offer_header_lines` factors the modal's own two header lines out of
+      `recovery_offer_modal_view` (the same split `external_change_dialog_body`/`paste_preview`
+      already use), so `recovery_offer_header_includes_the_no_undo_history_notice` (`shell::tests`)
+      proves the real, shipped `en.ftl` notice is placed where the view renders it — not only that
+      the i18n enforcement suite's own fixture args make the key resolve. Ablated
+      (`review-491-notice-renders`): fails without the real notice text.
 - [x] **Amendment 1** (supersedes this row's original wording, "recovery data with no marker is
       reported as a cleanup bug, not consumed as a crash" — directly contradicted by the amendment,
       confirmed against the real binary at review 489: a clean window close removes the marker and

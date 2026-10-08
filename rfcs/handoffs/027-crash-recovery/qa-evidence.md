@@ -725,3 +725,34 @@ without it (`Saved`, not an error), confirming the test is load-bearing, not acc
   (`/dev/shm/t27r490g{1,2,3}`): `750 + 16 + 1117`, 0 failed, 0 fixture entries left each time.
 - Not yet done, exactly as review 490's own remaining required items say: the "no undo history"
   notice's own visibility proof, and the live capture (held off at the owner's instruction).
+
+## Review 491: the last required item before the live capture -- proving the notice renders
+
+Required item 2 (review 490's own numbering carried forward; review 491 named it unchanged). The
+i18n enforcement suite proves `recovery-offer-no-undo-notice` resolves to real text against the
+real `en.ftl`; it never proves any view call site actually places that resolved text where the
+user sees it, the same gap `qa-evidence.md` itself already disclosed rather than assumed closed.
+
+Fixed the same way `external_change_dialog_body`/`paste_preview` already let their own dialogs be
+tested: `recovery_offer_header_lines(catalog, project_display_name) -> [String; 2]` is factored out
+of `recovery_offer_modal_view`, returning the exact two header lines the view pushes, in the same
+order, with no condition between computing them and pushing them. A test resolves a **real**
+`Catalog` against the shipped `en.ftl` (not a fixture string) and asserts the second line mentions
+undo -- `recovery_offer_header_includes_the_no_undo_history_notice` (`shell::tests`).
+
+**Ablated**: replacing the real catalog lookup with unrelated text (`review-491-notice-renders`)
+fails the test. The first ablation attempt accidentally proved nothing -- the replacement text
+("no mention of undo here") still contained the substring `"undo"`, so the test's own `contains`
+check passed anyway; retried with text that genuinely has no occurrence of the word, which failed
+as expected. Recorded here because it is exactly the kind of accidentally-green ablation
+`ablation-summary-grep-must-include-errors`'s own lesson warns about, just one level up (a
+substring match standing in for a compile error).
+
+### Gate, review 491's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/t27r492g{1,2,3}`): `751 + 16 + 1117`, 0 failed, 0 fixture entries left each time.
+- The only item left for PR-027-C to close: **the live capture**, held off at the owner's own
+  instruction about the shared desktop.
