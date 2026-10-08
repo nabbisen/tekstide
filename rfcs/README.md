@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 066 | [A Refused Close Must Not Have Already Terminated](./proposed/066-a-refused-close-must-not-have-already-terminated.md) | **Proposed 2026-10-08.** `0.32.0`, M13. A confirmed close with an unsaved file kills the project's terminals and then refuses, silently — live in `0.30.0` |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 066 | [A Refused Close Must Not Have Already Terminated](./accepted/066-a-refused-close-must-not-have-already-terminated.md) | **Accepted 2026-10-08.** `0.32.0`, M13. D1–D5 as written; D3 decided: the modal refuses up front. Repairs a defect live in `0.30.0` |
 | 027 | [Crash Recovery and Unsaved Buffer Persistence](./accepted/027-crash-recovery-and-unsaved-buffer-persistence.md) | **Accepted 2026-10-08.** `0.31.0`, M13. D1–D11 as written plus D12–D15. Handoff pack: [`027-crash-recovery/`](./handoffs/027-crash-recovery/README.md) |
 | — | *(none: nothing is currently accepted and unbuilt)* | |
 

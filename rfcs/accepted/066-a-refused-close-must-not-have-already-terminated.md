@@ -1,6 +1,6 @@
 # RFC-066: A Refused Close Must Not Have Already Terminated
 
-Status: **Proposed 2026-10-08.** `0.32.0`, M13. Repairs a defect live in `0.30.0`. Found at review
+Status: **Accepted by the human owner 2026-10-08.** D1–D5 as written; **D3 decided: refuse up front** — see *Decided on acceptance*. Proposed 2026-10-08. `0.32.0`, M13. Repairs a defect live in `0.30.0`. Found at review
 485 (the dev team, the refusal) and traced at review 489 (the reviewer, the termination). No
 requirement names this; it is a defect in what `REQ-PROJ-004`'s own close path already promises.
 
@@ -74,3 +74,25 @@ A defect this serious that nobody has seen happen might not be the defect we thi
 confirm — or it keeps the confirm and the refusal becomes a message. **My recommendation: refuse up
 front.** A dialog whose button sometimes does nothing teaches a user not to trust it, and the
 assessment is already known before the modal is drawn.
+
+## Decided on acceptance (2026-10-08)
+
+**D1, D2, D4 and D5 as written. D3 is decided, and deciding it removes work rather than adding it.**
+
+**D3 — the modal refuses up front.** When the assessment already blocks a close, the modal states
+the blocking reasons and offers **no confirm button**. It does not present a confirmation that then
+fails, and there is therefore no "refused afterwards" message to design, because there is no
+afterwards.
+
+The reasoning is the owner's own standing criterion: **a user must not be able to misunderstand the
+interface.** A button that sometimes does nothing teaches a user that confirmations in this product
+are unreliable, and that lesson is not confined to this dialog. The assessment is already known
+before the modal is drawn, so nothing is gained by asking a question whose answer is already no.
+
+**What this removes:** PR-066-B no longer needs a refusal message, a notice surface, or a decision
+about where a post-hoc refusal would appear. It needs the modal to render reasons it already has.
+
+**What it does not change:** D1 still stands on its own. Even with the modal refusing up front, the
+ordering defect must be fixed — `terminate_project_live_work` must not run ahead of an assessment
+that can still refuse. A modal is a surface; the ordering is the product. **A fix that only changed
+the modal would leave every other caller of this path able to destroy live work.**
