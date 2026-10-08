@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 067 | [The Sidebar Is Not A Mode](./proposed/067-the-sidebar-is-not-a-mode.md) | **Proposed 2026-10-08.** `0.33.0`, M13. Switching to terminals takes the file tree away and leaves *“Files are listed here in Content mode.”* in its place |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*

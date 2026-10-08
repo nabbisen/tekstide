@@ -1,0 +1,84 @@
+# RFC-067: The Sidebar Is Not A Mode
+
+Status: **Proposed 2026-10-08.** `0.33.0`, M13. From the owner's question of 2026-10-08: can a
+project tab show the file tree, a document and several terminals at once, while staying clean? No
+requirement names this; it is a UX defect in what the project tab already offers.
+
+## Summary
+
+A project tab has one toggle, and it governs everything. Switching to terminals does not only change
+the main area — **it takes the file tree away**, because `sidebar_view` matches on the mode and
+renders the explorer only in Content mode.
+
+What stands in its place is not another panel. It is a sentence:
+
+> **Files are listed here in Content mode.**
+
+The product already tells the user the file tree belongs there and asks them to leave their
+terminals to get it. **The sidebar is also still focusable in that state** — `Tab` reaches a zone
+whose entire content is an apology for being empty.
+
+This RFC does not add a layout. It stops one panel from being two things.
+
+## What already exists, and is not the problem
+
+Terminal mode is better equipped than the toggle suggests: up to **six** terminals per project, a
+session bar numbering them with their status, and **two visible at once** (`VisibleSlot::Primary`
+and `Secondary`, only `Primary` taking keystrokes). *"Operate several terminals"* is largely built
+and reachable. Nothing here changes it.
+
+## Decisions
+
+**D1 — The mode governs the main area, not the tab.** The explorer renders in both modes; the
+sidebar stops matching on `ProjectMode`. `sidebar-placeholder-title` is deleted, not reworded — a
+string whose only job is to explain an absence has no job once the absence is gone.
+
+**D2 — This removes interface rather than adding it, and the slice must show that.** Nothing is
+displaced: today's terminal-mode sidebar is one line of text. *Measurement 1: a live capture of
+terminal mode with the file tree beside it, against the same throwaway fixture the current
+placeholder appears in.*
+
+**D3 — No new focus zone, and the `Tab` cycle keeps its order.** The `Sidebar` zone already exists
+in both modes and is already reachable in terminal mode. This gives it something to hold; it must
+not add a fourth zone, reorder the cycle, or change what `Tab` does.
+
+**D4 — The cost of switching is measured, not assumed.** Switching is already lossless by
+construction — the toggle sets a flag, documents keep text, cursor and viewport, terminals keep
+running — but nobody has measured what the switch *costs to draw*. Reuse the paired-control harness
+RFC-026 built and RFC-065 and RFC-027 reused. *Measurement 2: the render cost of a mode switch, with
+the control carried inside the same run.*
+
+**D5 — Whether anything more is needed is decided by that measurement, and "nothing" is a valid
+answer.** The owner's own framing was "at a time **or a near real-time**". If the switch is below
+perception, the remaining gap is only *watching* a terminal while editing, which is far narrower
+than three surfaces at once. **A third slice that builds nothing, and records the number that made
+it unnecessary, is a success.** Deciding this by taste is what this decision exists to prevent.
+
+**D6 — No pane or slot vocabulary reaches the user in this RFC.** `Primary`/`Secondary` stay
+internal. A user should not have to learn what a slot is to read their own screen.
+
+## Non-goals
+
+- **No splits, panes, or a third mode.** If D5's measurement says simultaneity is still wanted, that
+  is a separate RFC with its own design, not a slice bolted onto this one.
+- **No change to the terminal session bar or the six-terminal bound.**
+- **No new `REQ-`.**
+
+## Slices
+
+- **PR-067-A — the sidebar persists.** D1, D2, D3, with the live capture.
+- **PR-067-B — measure the switch.** D4.
+- **PR-067-C — the decision.** D5. May build nothing; must record the number either way.
+
+## Open question for the owner, to decide on acceptance
+
+**In terminal mode, what happens when a file is activated in the now-visible tree?** Three shapes:
+
+1. **It switches to Content mode and shows the file.** Predictable, conventional — but the
+   sidebar's main action always ejects you from the terminals you were watching.
+2. **It is refused in terminal mode.** A visible tree you cannot use is worse than no tree.
+3. **It joins the open set without switching.** The active document changes where you cannot see it.
+
+**My recommendation: 1.** Option 3 is a click whose effect is invisible, which is exactly the thing
+this project's own standard forbids; option 2 puts a control on screen and then ignores it. Being
+moved somewhere is a result a user can see and undo.
