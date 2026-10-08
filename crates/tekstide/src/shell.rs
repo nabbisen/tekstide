@@ -10362,15 +10362,12 @@ fn recovery_offer_modal_view<'a>(
     state: &'a State,
     modal: &'a RecoveryOfferModal,
 ) -> Element<'a, Message> {
-    let project = tekstide_core::text_safety::quote_untrusted(&modal.project_display_name);
-    let title = state.catalog.get_with_args(
-        "recovery-offer-title",
-        &CatalogArgs::new().untrusted("project", &project),
-    );
+    let [title, no_undo_notice] =
+        recovery_offer_header_lines(&state.catalog, &modal.project_display_name);
 
     let mut lines = column![
         text(title).size(state.theme.font_size_heading()),
-        text(state.catalog.get("recovery-offer-no-undo-notice")).size(state.theme.font_size_body()),
+        text(no_undo_notice).size(state.theme.font_size_body()),
     ]
     .spacing(6);
 
@@ -10398,6 +10395,25 @@ fn recovery_offer_modal_view<'a>(
     .spacing(MODAL_SECTION_SPACING_PX);
 
     modal_dialog_box(state, lines.into(), footer.into())
+}
+
+/// RFC-027 PR-027-C, D3/§3 row 10: the modal's own two header lines, factored out for the
+/// identical testability reason [`recovery_offer_row_text`] already is -- review 491's
+/// own remaining required item ("prove the notice renders, not only that the catalog key
+/// resolves") is what this split exists to let a test answer directly: the i18n
+/// enforcement suite already proves `recovery-offer-no-undo-notice` resolves to real
+/// text; this function is what proves `recovery_offer_modal_view` actually places that
+/// resolved text where the user sees it, rather than only being wired as dead code no
+/// render call reaches. `[String; 2]` rather than a tuple: both lines are the same type,
+/// always exactly two, always in this order.
+fn recovery_offer_header_lines(catalog: &Catalog, project_display_name: &str) -> [String; 2] {
+    let project = tekstide_core::text_safety::quote_untrusted(project_display_name);
+    let title = catalog.get_with_args(
+        "recovery-offer-title",
+        &CatalogArgs::new().untrusted("project", &project),
+    );
+    let no_undo_notice = catalog.get("recovery-offer-no-undo-notice");
+    [title, no_undo_notice]
 }
 
 /// Factored out of [`recovery_offer_modal_view`] for the same testability reason

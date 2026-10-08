@@ -21482,3 +21482,30 @@ fn dismissing_the_offer_leaves_every_record_on_disk_untouched() {
         "declining must leave the file on disk exactly as it was"
     );
 }
+
+/// RFC-027 PR-027-C, review 491's own remaining required item: proves the "no undo
+/// history" notice is actually placed where `recovery_offer_modal_view` renders it, not
+/// only that `recovery-offer-no-undo-notice` resolves to real text (already proven by
+/// `i18n::enforcement::every_source_locale_key_resolves_in_every_shipped_locale`, which
+/// never inspects whether any view call site includes the resolved string at all).
+/// `recovery_offer_header_lines` is the exact two lines the view pushes, in order, with
+/// no condition between computing them and pushing them -- a real `Catalog` resolved
+/// against the shipped `en.ftl`, not a fixture string, so this fails if the real catalog
+/// entry's own wording ever stops saying "without" or "undo", the same drift
+/// `trusted_ui_state`'s own doc elsewhere in this file already guards other notices
+/// against.
+#[test]
+fn recovery_offer_header_includes_the_no_undo_history_notice() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+
+    let [title, no_undo_notice] = super::recovery_offer_header_lines(&catalog, "demo-project");
+
+    assert!(
+        title.contains("demo-project"),
+        "the title must name the real project, got: {title}"
+    );
+    assert!(
+        no_undo_notice.to_lowercase().contains("undo"),
+        "the second header line must be the no-undo-history notice, got: {no_undo_notice}"
+    );
+}
