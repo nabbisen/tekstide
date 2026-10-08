@@ -450,14 +450,17 @@ const RUN_RECORD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(
 /// `editor_baseline.rs`'s own `editor_typing_latency_under_a_recovery_persist_tick`
 /// measures ten *and* twenty dirty 3.3 MiB documents (the largest realistic size, twenty
 /// being the open set's own bound, D4, measured directly rather than only extrapolated to
-/// -- review 486): ~1.23 ms/document at both points, consistently, extrapolating to ~24.6
-/// ms/tick at the bound -- a real cost, but only in the worst case of many large documents
-/// dirty at once. **One document's own delta is below this harness's own resolution**
-/// (review 485: its spread straddles zero in every run), so the per-document rate is
-/// confirmed between ten and twenty, not from one. 2 seconds keeps the measured worst case
-/// rare rather than per-keystroke-adjacent, well above `RUN_RECORD_INTERVAL`'s own 1 s for
-/// a much cheaper write. See `qa-evidence.md`'s own measurement section for the full
-/// numbers.
+/// -- review 486): ~1.2 ms/document at both points, consistently within any one run,
+/// confirming the rate is linear between ten and twenty. **The absolute cost moves with
+/// the machine's own load, up to 1.7x between runs taken over this measurement's own
+/// campaign** (review 487): twenty documents cost **24 to 41 ms/tick** across the runs
+/// actually taken, not a single number -- a real cost, but only in the worst case of many
+/// large documents dirty at once. **One document's own delta is below this harness's own
+/// resolution** (review 485: its spread straddles zero in every run), so the per-document
+/// rate is confirmed between ten and twenty, not from one. 2 seconds keeps the *range* of
+/// measured worst cases rare rather than per-keystroke-adjacent, well above
+/// `RUN_RECORD_INTERVAL`'s own 1 s for a much cheaper write. See `qa-evidence.md`'s own
+/// measurement section for the full numbers.
 const RECOVERY_PERSIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// RFC-022 PR-022-E ("the arrival model"), response 227: how long a

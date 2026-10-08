@@ -462,3 +462,41 @@ comment updated to match.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g487{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
   in each run's own `TMPDIR` afterward.
+
+## Review 487: the published figure was the lowest-load run of several
+
+Required item. `CHANGELOG.md` stated "about 24.6 ms, measured" at the twenty-document bound as if
+it were *the* cost, when it was the lowest of several runs taken across this whole measurement
+campaign. The within-run comparison (ten against twenty, same run, same load) is sound and
+unaffected; what was missing is the other axis -- the absolute cost moves with this measuring
+machine's own load between runs, which `qa-evidence.md` had already said in words (line 332 of the
+original write-up) without the published figure reflecting it.
+
+**Every ten-document median recorded in this file, across every run of this harness, in order:**
+`+16.687`, `+20.442` (both before the twenty-document condition existed), `+12.336`, and two more
+runs taken for this response, `+12.276` and `+12.005` ms/tick -- range **12.0 to 20.4 ms/tick**,
+about 1.7x between the lowest and highest observed.
+
+**Every twenty-document median recorded, all three from the same harness version (measured
+directly, not extrapolated):** `+24.608`, `+25.003`, `+24.171` ms/tick -- a tight range, **24.2 to
+25.0 ms/tick**, taken back-to-back under what is apparently this machine's own current typical
+load. These three do not by themselves carry the load variability the five-run ten-document series
+shows, because all three happened close together under similar conditions.
+
+**The honest combined figure uses both.** The per-document rate (~1.2 ms/document) is consistent
+and well-confirmed between ten and twenty within any one run; what varies between runs is the
+*absolute* cost, scaling together. Applying the highest ten-document rate actually observed
+(`+20.442 / 10` = 2.044 ms/document) to twenty documents gives `40.9 ms/tick` -- already recorded
+in this file at the time, just not carried into the twenty-document figure once that condition was
+added. **Stated range for the changelog: 24–41 ms/tick at the open set's own bound**, not a single
+"measured" number -- the low end is what three consecutive runs on this machine actually showed
+just now; the high end is what this same machine showed earlier in the same campaign, under
+whatever load it was under then. `RECOVERY_PERSIST_INTERVAL` is unaffected: 2 seconds was chosen to
+keep this cost rare regardless of where in that range any one tick lands.
+
+### Gate, review 487's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g488{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
+  in each run's own `TMPDIR` afterward.
