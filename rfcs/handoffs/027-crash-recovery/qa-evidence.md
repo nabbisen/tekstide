@@ -105,3 +105,38 @@ only under `TEKSTIDE_*` measurement env vars, never in ordinary use.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g481{1,2,3}`): `739 + 16 + 1095` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
   in each run's own `TMPDIR` afterward.
+
+## Review 481: an unvalidated pid cast two ways to always read as "alive"
+
+Verified live against the real binary, not only in the test suite -- the review planted three
+marker filenames and ran `target/debug/tekstide` against them: `999999999` was detected and
+removed correctly; `0` and `4294967295` both survived the scan, because `libc::kill` treats `0` as
+"my own process group" (always answers "alive") and a `u32` cast of anything past `i32::MAX` wraps
+to a negative `pid_t`, where `-1` means "every process I may signal" (also always "alive"). Neither
+could ever be cleaned.
+
+**Not harmful today** -- `InstanceMarker::create` only ever writes a real `std::process::id()`, so
+this is defense against a malformed or adversarial filename, not a case this module's own writer
+produces, and the two stray files it leaves behind are empty and inert. **The reason it matters
+regardless**: PR-027-B ties real user content (a dirty buffer's own record) to a marker's own
+lifecycle, and a marker that is *wrongly* readable as "a live instance" forever would let a record
+outlive its reason the same way -- §2 row 7 of the risk document, in the slice whose whole job is
+not doing that.
+
+**Fixed**: the pid parsed from a marker filename is range-checked (`1..=i32::MAX as u32`) before it
+ever reaches `pid_is_alive`'s own cast -- rejected at parse time, the same bucket a non-numeric
+filename already falls into (ignored, not deleted, not reported). `0` and `u32::MAX` are now never
+classified as a live sibling and never classified as a crash; they are simply not a pid this module
+recognises.
+
+`an_out_of_range_marker_filename_is_neither_a_crash_nor_a_live_sibling`
+(`crates/tekstide-core/src/recovery/tests.rs`) reproduces the review's own three-row table
+directly: `999999999` still detected and removed; `0` and `u32::MAX` both left on disk, neither
+reported.
+
+### Gate, review 481's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g482{1,2,3}`): `739 + 16 + 1096` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
+  in each run's own `TMPDIR` afterward.

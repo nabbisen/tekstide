@@ -144,3 +144,48 @@ fn a_concurrent_sibling_instance_is_not_reported_as_a_crash() {
 
     cleanup_root(root);
 }
+
+/// Review 481: a marker filename of `0` or anything past `i32::MAX` must never reach
+/// `pid_is_alive`'s own `libc::kill` cast -- `kill(0, 0)` probes the caller's own process
+/// group (always "alive") and a `u32` past `i32::MAX` wraps to a negative `pid_t`, where
+/// `-1` means "every process I may signal" (also always "alive"). Both read as a live
+/// sibling before this fix, so neither could ever be cleaned. Reproduces the review's own
+/// three-row table: a genuinely too-large-but-valid pid is still detected and removed
+/// correctly, while `0` and `u32::MAX` are rejected at parse time -- left alone, the same
+/// as any other filename this module does not recognise, never misreported as a live
+/// sibling and never misreported as a crash either.
+#[test]
+fn an_out_of_range_marker_filename_is_neither_a_crash_nor_a_live_sibling() {
+    let root = test_root("recovery-out-of-range-pid");
+    std::fs::create_dir_all(instances_dir(&root)).expect("instances dir should be creatable");
+
+    let too_large_but_valid = instances_dir(&root).join("999999999");
+    std::fs::write(&too_large_but_valid, b"").expect("the marker should be writable");
+    let zero = instances_dir(&root).join("0");
+    std::fs::write(&zero, b"").expect("the marker should be writable");
+    let overflow = instances_dir(&root).join(u32::MAX.to_string());
+    std::fs::write(&overflow, b"").expect("the marker should be writable");
+
+    let startup = start_instance(&root).expect("starting an instance should succeed");
+
+    assert_eq!(
+        startup.detected_crashes,
+        vec![crate::recovery::DetectedCrash { pid: 999_999_999 }],
+        "a genuinely too-large-but-valid pid (within i32::MAX) must still be detected and \
+         removed; 0 and u32::MAX must not be reported at all"
+    );
+    assert!(
+        !too_large_but_valid.exists(),
+        "the valid, dead pid's own marker must be removed"
+    );
+    assert!(
+        zero.exists(),
+        "pid 0 must be left alone, not misread as alive forever"
+    );
+    assert!(
+        overflow.exists(),
+        "u32::MAX must be left alone, not misread as alive forever"
+    );
+
+    cleanup_root(root);
+}

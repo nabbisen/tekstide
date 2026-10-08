@@ -103,11 +103,21 @@ fn scan_and_clean_stale_markers(instances_dir: &Path) -> io::Result<Vec<Detected
     for entry in entries {
         let entry = entry?;
         // Not a filename this code ever wrote -- ignore rather than delete something this
-        // module does not recognise.
+        // module does not recognise. Review 481: `0` and anything past `i32::MAX` are
+        // rejected here too, not only non-numeric names -- `libc::kill` treats pid `0` as
+        // "my own process group" and a `u32` cast of anything past `i32::MAX` wraps to a
+        // negative `pid_t`, where `-1` means "every process I may signal." Both read as
+        // "alive" to `pid_is_alive` regardless of whether the real process the filename
+        // once named still exists, so an unvalidated pid in that range could never be
+        // cleaned. `InstanceMarker::create` only ever writes a real `std::process::id()`,
+        // which is never `0` and never exceeds `i32::MAX` on Linux -- this is defense
+        // against a malformed or adversarial filename, not a case this module's own writer
+        // produces.
         let Some(pid) = entry
             .file_name()
             .to_str()
             .and_then(|name| name.parse::<u32>().ok())
+            .filter(|pid| (1..=i32::MAX as u32).contains(pid))
         else {
             continue;
         };
