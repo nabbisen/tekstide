@@ -51,6 +51,35 @@ are what I ran:
   three remaining mentions in product source are doc comments.
 - Gate reproduces: `739 + 16 + 1095`, 0 failures, 0 fixture entries left.
 
+### Required at review 482
+
+The fix itself is right: the range check sits at the parse, so no filename-derived value reaches
+`libc::kill`'s cast. The gate reproduces (`739 + 16 + 1096`, 0 failures, 0 fixture entries). One
+required item, and one correction to what I asked for at review 481.
+
+- [ ] **The new test passes with the fix removed, so it is not evidence for it.** I ablated the
+  `.filter(|pid| (1..=i32::MAX as u32).contains(pid))` line and ran
+  `an_out_of_range_marker_filename_is_neither_a_crash_nor_a_live_sibling`: **it still passes.** It
+  cannot do otherwise — `InstanceStartup` carries only `detected_crashes`, and `0` and `u32::MAX`
+  produce no detected crash either way (pre-fix `kill` answers "alive"; post-fix the filter rejects
+  them), leaving the file on disk in both cases. The observable outcome is identical, so no test
+  over `detected_crashes` can distinguish the two. **Test the property the fix actually
+  establishes**: lift the filename→pid step into its own named function and assert it directly —
+  `"0"` and `"4294967295"` yield nothing, `"999999999"` yields `999999999`. That test fails when the
+  filter goes.
+
+**My correction, from review 481.** I justified the item with "so a marker is always either live or
+removable". That was wrong, and this fix is right not to deliver it: `0` and `u32::MAX` stay on disk
+forever, and they should. `local-data-and-privacy.md:112` already states the product's rule — **"a
+file Tekstide did not write is never deleted"** — and a filename this module does not recognise is,
+by definition, not a file we wrote. Leaving it untouched is the existing policy, not a gap in the
+fix. I should have cited that line at 481 instead of inventing a property that contradicts it.
+
+- [ ] **Carry the real constraint into PR-027-B instead.** What actually matters once records exist
+  is narrower than what I wrote: **a recovery record's own cleanup must never depend on a marker
+  filename the module does not recognise.** An ignored marker is fine; an ignored marker that strands
+  a record of user content is §2 row 7. Prove it when records land.
+
 ## PR-027-B — the record, with its purge
 
 - [ ] A **dirty** document gets a record; a **clean** one does not (D2, §3 row 12). Proved by what
