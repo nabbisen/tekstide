@@ -214,6 +214,31 @@ ratio was the finding. That is the same family as this project's filtered-gate r
 that removes the diagnostic in the one case it matters. You found it yourself; it is recorded here so
 the next harness does not reinvent it.
 
+### Required at review 487
+
+The changelog is written and well caveated, and the twenty-document measurement is a genuine
+improvement over the extrapolation it replaces: two independently measured points agreeing to 0.3%
+on the per-document rate is a real confirmation of linearity, not an assumption. The
+spread-straddles-zero trigger is the right signal, and *"not claimed to hold below ten"* is exactly
+the sentence that number needed. One required item.
+
+- [ ] **The changelog publishes one run of a visibly load-sensitive measurement as though it were
+  the cost.** Your own `qa-evidence.md` records the same ten-document condition three times:
+  **+20.442**, **+16.687** and **+12.336 ms/tick** — a **1.66×** between-run spread, and line 332
+  already says the figure moves with "this measuring machine's own load". Line 326 even records a
+  **40.9 ms** figure at the twenty-document bound. The changelog states **24.6 ms** at that bound,
+  which is the lowest-load run of the three, with no mention that the same quantity has measured
+  nearly twice that.
+
+  **The within-run comparison is sound and should stay** — ten against twenty, same run, same load,
+  is exactly the right way to establish the rate. What is missing is the other axis: the rate itself
+  moves between runs. Give the changelog the range, or the worst observed, the same way it already
+  gives the one-document caveat. A reader takes "about 24.6 ms, measured" as *the* number; on a busy
+  machine it is closer to 41.
+
+**Not required.** The status line is right to say the release cannot ship without PR-027-C, and
+right to say why — that is Amendment 1's consequence stated where a user would meet it.
+
 ## PR-027-C — the offer
 
 - [ ] **Measurement 1 — the offer** lists each recoverable buffer with its project and path, and
