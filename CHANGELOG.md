@@ -30,17 +30,19 @@ persist_unsaved_buffers = true` is the setting, on by default and forward-only (
 does not delete what already exists) — a protection a user has to find and enable first does not
 prevent the loss this feature exists to prevent.
 
-**What this costs, measured at both ends of the open set's own range, across several runs rather
-than one.** Ten dirty documents, each at the largest realistic size, and twenty — the open set's
-own bound, measured directly rather than extrapolated to — agree on a per-document rate to within
-0.3% within any one run (about **1.2 ms per document** either way), confirming the rate is linear
-between ten and twenty rather than assuming it. **The absolute cost moves with the machine's own
-load, by as much as 1.7x between runs taken over the course of this measurement**: twenty documents
-cost **24 to 41 ms** of delivery work per persist pass across the runs actually taken, not a single
-"measured" number — the low end is three consecutive low-load runs; the high end is what the same
-machine showed earlier in the same campaign. **This range, not its low end, is what the write
-cadence (every 2 seconds) is chosen against**, to keep it rare regardless of where in the range any
-one tick lands. **One document's own cost could not be measured** in any run: its own signal sat
+**What this costs, measured directly at ten and twenty documents, across several runs rather than
+one.** Ten dirty documents, each at the largest realistic size, and twenty — the open set's own
+bound — agree on a per-document rate to within 0.3% within any one run (about **1.2 ms per
+document** either way), confirming the rate is linear between ten and twenty rather than assuming
+it. **The absolute cost moves with the machine's own load, by as much as 1.7x between runs taken
+over the course of this measurement**: three runs measured twenty documents directly, back to back
+under this machine's own low-load state, at **24 to 25 ms** of delivery work per persist pass.
+**41 ms is not a fourth measurement of twenty documents** — no run produced it — **it is the
+confirmed per-document rate applied to the worst ten-document rate this same campaign actually
+observed** (`20.4 ms` for ten, carried to twenty at the same ~1.2 ms/document). **24 to 41 ms is
+therefore the range this write cadence (every 2 seconds) is chosen against**, to keep it rare
+regardless of where in that range any one tick lands — not a claim that 41 ms was itself measured
+at twenty documents. **One document's own cost could not be measured** in any run: its own signal sat
 inside the harness's own round-to-round noise, straddling zero, rather than landing on a stable
 number — the confirmed rate is between ten and twenty documents, not from one, and is not claimed
 to hold below ten.

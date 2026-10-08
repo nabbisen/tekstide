@@ -500,3 +500,21 @@ keep this cost rare regardless of where in that range any one tick lands.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g488{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
   in each run's own `TMPDIR` afterward.
+
+## Review 488: the changelog's own heading claimed both ends of the range were measured
+
+Required item, a wording fix only -- the range itself (`24-41 ms/tick`) was already right, and no
+code or number changed. `CHANGELOG.md`'s own paragraph opened "measured at both ends," which a
+reader combines with "24 to 41 ms" into "both 24 and 41 were measured at twenty documents" -- false:
+only `24.608`/`25.003`/`24.171` were ever measured at twenty. `41` is `20.4` (the worst *ten*-document
+rate this campaign observed) carried to twenty at the confirmed ~1.2 ms/document rate, the same
+derivation `qa-evidence.md` itself already stated in words. Reworded to say so explicitly, the same
+"extrapolates to roughly X ms" clause `0.30.0`'s own changelog entry already uses for the identical
+shape of claim.
+
+### Gate, review 488's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g489{1,2,3}`): `744 + 16 + 1107` (+ `0+1+1` doctests), 0 failed, 0 fixture entries left
+  in each run's own `TMPDIR` afterward.
