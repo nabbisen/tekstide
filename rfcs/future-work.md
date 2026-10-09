@@ -1193,3 +1193,32 @@ entries belong to the agent that created them — *"you must ask dev team, the o
 first"* — which is the same principle as the product's own *"a file Tekstide did not write is never
 deleted."* Recorded here so RFC-036's decision can be revisited with its cost known, not so anyone
 tidies a list behind its author's back.
+
+## An audit write can be rejected by SQLite and silently dropped — found 2026-10-09 (review 503)
+
+**The instance is fixed. The class is not, and it is invisible by construction.**
+
+RFC-066 PR-066-B added a `SafeCloseDecision::Blocked` write, plumbed correctly at the Rust level
+with `valid_safe_close` updated to accept it — and it produced **zero** audit records. The
+`safe_close_decision` family's own SQL `CHECK` constraint, baked into the table DDL, had no branch
+admitting `outcome = 'blocked'`. SQLite rejected the insert, and **`append_observation`'s
+best-effort design swallowed the error exactly as it would in production.** The Rust validator
+agreeing was necessary and not sufficient.
+
+**Why this is a class.** There are **52 `CHECK` constraints** in `audit/schema.rs` and **no test
+anywhere asserts that a given family and outcome actually lands in the store** — checked, not
+assumed. Any future producer whose outcome string the DDL does not admit fails the same way: it
+passes review, passes the Rust validator, writes nothing, and says nothing. For a product whose
+audit store is a documented promise in `local-data-and-privacy.md`, a write that silently does not
+happen is the worst shape of failure available.
+
+**It was found only because a checklist demanded a test for this one case** ("nothing pins the
+refused case's record today", review 499 planning). Nothing systemic would have caught it.
+
+**The shape of the fix is already in this codebase.** `enumeration_confirms_only_the_closed_list_reads_full_file_content`
+(`project/diff/tests.rs`) is the pattern: enumerate the thing, assert the property over all of it.
+Here that means every family-and-outcome the Rust side can produce, written to a real store, each
+asserted to land. `record.rs` already holds the enumeration — 69 family-to-string arms.
+
+**Not scheduled against a release yet.** Raised to the owner at review 503 as a pre-1.0 item: the
+audit store's honesty is a 1.0 promise, and right now nothing checks that it can keep it.
