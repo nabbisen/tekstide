@@ -2,7 +2,7 @@
 title: "RFC-065: The Multi-Document Model — implementation handoff"
 rfc: "RFC-065"
 rfc_file: "../../done/065-the-multi-document-model.md"
-source_rfc_status: "Implemented and closed 2026-10-08 — 0.30.0 candidate, not yet published"
+source_rfc_status: "Implemented and closed 2026-10-08 — released as 0.30.0 2026-10-08"
 target_milestone: "M13"
 created: "2026-10-07"
 ---

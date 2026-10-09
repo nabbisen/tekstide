@@ -25,7 +25,7 @@
 //! reported, never silent — an invariant that quietly passes because its
 //! input is missing is the failure mode these were written against.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
@@ -974,9 +974,14 @@ fn rfcs_named_by_released_sections(changelog: &str) -> Vec<(String, String)> {
     let mut heading = String::new();
     let mut body = String::new();
     let flush = |heading: &str, body: &str, found: &mut Vec<(String, String)>| {
+        // Not `.contains("released on")` -- review 511's own candidate cut wrote
+        // `0.31.0`'s and `0.32.0`'s own `Status:` lines as `"released 2026-10-09."`,
+        // dropping the "on" every earlier release used, and a substring match that
+        // only recognised the older wording would silently stop seeing the two
+        // newest releases as released at all.
         let released = body
             .lines()
-            .any(|line| line.starts_with("Status:") && line.to_lowercase().contains("released on"));
+            .any(|line| line.starts_with("Status:") && line.to_lowercase().contains("released"));
         if !released {
             return;
         }
@@ -1157,6 +1162,205 @@ RFC-052 and RFC-053.
         released_rfcs_still_in_flight(&planted, &done)
             .iter()
             .all(|message| !message.contains("RFC-055"))
+    );
+}
+
+// --- Review 511: rfcs/README.md's rows are a fourth status place --------------
+//
+// `claims_unfinished` and the three checks above police an RFC's *lifecycle*
+// state (Proposed / Accepted / Done) against its folder. A released RFC's own
+// *publish* state -- "candidate, not yet published" vs. "released as `X.Y.Z`"
+// -- is a second, independent claim, written in up to four places once an RFC
+// closes: the RFC's own `Status:` line, the handoff pack's status field, the
+// delivery-plan register row, and `rfcs/README.md`'s own Handoffs and
+// Implemented rows. Three of those four already agree with each other because
+// a release's own closing commit updates them together (see `8adba87`, which
+// updated exactly those three for `0.31.0`). Nothing reads the fourth back
+// against the changelog, which is the one place that actually knows whether a
+// version shipped -- so `rfcs/README.md`'s own two rows for RFC-066 went stale
+// for `0.32.0` (caught at review 511) after the identical miss already
+// happened once for `0.30.0`. Building the check surfaced a second live
+// instance while writing it, not only the one already reported: RFC-027's own
+// two rows here still said "candidate, not yet published" for `0.31.0` days
+// after `8adba87` released it everywhere else, and `CHANGELOG.md`'s own
+// `0.30.0` section had never said "released" at all -- it said "scoped",
+// which named a real decision (the requirements-gap disclosure) but never the
+// release itself, so reading it quoted `rfcs_named_by_released_sections`
+// could not have told the two apart until the wording also said so. Both
+// found by running this check against the repository as it stood, not by
+// rereading the four places and trusting they agreed.
+
+/// Pipe-table rows under a given `## heading` in `source`, up to the next
+/// `## ` heading or EOF -- `(number, full_row_text)` for every row whose first
+/// cell, trimmed, is exactly three ASCII digits. The same lenient match
+/// `every_delivery_plan_row_agrees_with_its_rfc_folder` already uses: a header
+/// row, a separator row, or an amendment row written `011 A2` is not three
+/// plain digits and is silently skipped, matching every other row that is not
+/// this table at all.
+fn readme_rows_under(source: &str, heading: &str) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    let mut in_section = false;
+    for line in source.lines() {
+        if let Some(name) = line.strip_prefix("## ") {
+            in_section = name.trim() == heading;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let Some(rest) = line.trim().strip_prefix('|') else {
+            continue;
+        };
+        let Some(number) = rest.split('|').next().map(str::trim) else {
+            continue;
+        };
+        if number.len() != 3 || !number.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        rows.push((number.to_owned(), line.to_owned()));
+    }
+    rows
+}
+
+/// The violations: a `rfcs/README.md` row whose publish-state claim disagrees
+/// with whether `CHANGELOG.md` has a released section naming that RFC. Pure,
+/// so a test can plant one -- review 499's own argument for the sibling check
+/// on `delivery-plan.md`'s register row, repeated here because these two rows
+/// are markdown table cells in exactly the same shape.
+fn readme_release_state_disagreements(readme: &str, released: &HashSet<String>) -> Vec<String> {
+    let mut disagreements = Vec::new();
+    for heading in ["Handoffs", "Implemented"] {
+        for (number, row) in readme_rows_under(readme, heading) {
+            let is_released = released.contains(&number);
+            let claims_candidate = row.contains("candidate, not yet published");
+            let claims_released = row.contains("released as `") || row.contains("released on");
+            if is_released && claims_candidate {
+                disagreements.push(format!(
+                    "  `## {heading}` row for RFC-{number} still says \"candidate, not yet \
+                     published\" but a CHANGELOG.md released section already names it"
+                ));
+            }
+            if !is_released && claims_released {
+                disagreements.push(format!(
+                    "  `## {heading}` row for RFC-{number} claims a release no CHANGELOG.md \
+                     released section names yet"
+                ));
+            }
+        }
+    }
+    disagreements
+}
+
+/// Review 511: `rfcs/README.md`'s own two rows for RFC-066 said `0.32.0` was
+/// still a candidate after `CHANGELOG.md` already reported it released -- the
+/// architect's own publish miss, the second time (the first was `0.30.0`,
+/// during RFC-027's own planning). This reads the two rows back against the
+/// changelog so a third occurrence is a red test, not a reviewer's own memory.
+#[test]
+fn every_readme_row_agrees_with_the_changelogs_release_state() {
+    let Some(rfcs) = rfcs_dir() else {
+        eprintln!("skipped: rfcs/ is not packaged with the published crate");
+        return;
+    };
+    let Ok(readme) = std::fs::read_to_string(rfcs.join("README.md")) else {
+        eprintln!("skipped: rfcs/README.md is not packaged with the published crate");
+        return;
+    };
+    let Ok(changelog) = std::fs::read_to_string(repo_root().join("CHANGELOG.md")) else {
+        eprintln!("skipped: CHANGELOG.md is not packaged with the published crate");
+        return;
+    };
+
+    let released: HashSet<String> = rfcs_named_by_released_sections(&changelog)
+        .into_iter()
+        .map(|(_, id)| id)
+        .collect();
+    assert!(
+        released.len() > 15,
+        "the check must actually read the released sections it guards"
+    );
+
+    let disagreements = readme_release_state_disagreements(&readme, &released);
+    assert!(
+        disagreements.is_empty(),
+        "an RFC's publish state in rfcs/README.md disagrees with CHANGELOG.md, and the \
+         changelog wins (RFC-000):\n{}\nThis is the check that would have caught RFC-066's own \
+         two rows still saying \"0.32.0 candidate, not yet published\" after 0.32.0 actually \
+         released -- caught by hand at review 511, the second occurrence of the identical miss \
+         (the first was `0.30.0`, during RFC-027's own planning).",
+        disagreements.join("\n")
+    );
+}
+
+/// The check fails against a planted violation, in both directions, and
+/// passes without one.
+#[test]
+fn the_readme_release_state_check_catches_a_planted_violation_and_nothing_else() {
+    let readme = "\
+## Handoffs
+
+| RFC | Handoff Pack |
+| --- | --- |
+| 066 | [A Refused Close](./handoffs/066-refused-close/README.md) — **implemented and closed; \
+`0.32.0` candidate, not yet published** |
+| 067 | [The Sidebar](./handoffs/067-sidebar-not-a-mode/README.md) — **implemented and closed; \
+`0.33.0` candidate, not yet published** |
+
+## Implemented
+
+| RFC | Title | Status |
+| --- | --- | --- |
+| 066 | [A Refused Close](./done/066-a-refused-close.md) | **Implemented and closed; `0.32.0` \
+candidate, not yet published.** |
+";
+    let released: HashSet<String> = ["066".to_owned()].into_iter().collect();
+
+    // Nothing planted against this `released` set: RFC-067 is not released, and
+    // correctly still claims "candidate". RFC-066 is released, but every row
+    // above still says "candidate" -- both are already-planted violations, not
+    // something this test plants itself, so they are the baseline this test
+    // starts from.
+    let found = readme_release_state_disagreements(readme, &released);
+    assert_eq!(found.len(), 2, "{found:#?}");
+    assert!(found.iter().all(|message| message.contains("RFC-066")));
+    assert!(found.iter().any(|message| message.contains("Handoffs")));
+    assert!(found.iter().any(|message| message.contains("Implemented")));
+
+    // Fix both of RFC-066's rows the way the real fix (`ebb3564`) did: say released.
+    let fixed = "\
+## Handoffs
+
+| RFC | Handoff Pack |
+| --- | --- |
+| 066 | [A Refused Close](./handoffs/066-refused-close/README.md) — **implemented and closed; \
+released as `0.32.0`** |
+| 067 | [The Sidebar](./handoffs/067-sidebar-not-a-mode/README.md) — **implemented and closed; \
+`0.33.0` candidate, not yet published** |
+
+## Implemented
+
+| RFC | Title | Status |
+| --- | --- | --- |
+| 066 | [A Refused Close](./done/066-a-refused-close.md) | **Implemented and closed; released as \
+`0.32.0`.** |
+";
+    assert!(readme_release_state_disagreements(fixed, &released).is_empty());
+
+    // The symmetric direction: claiming a release the changelog does not report.
+    let premature = "\
+## Handoffs
+
+| RFC | Handoff Pack |
+| --- | --- |
+| 067 | [The Sidebar](./handoffs/067-sidebar-not-a-mode/README.md) — **implemented and closed; \
+released as `0.33.0`** |
+";
+    let found = readme_release_state_disagreements(premature, &released);
+    assert!(
+        found
+            .iter()
+            .any(|message| message.contains("RFC-067") && message.contains("Handoffs")),
+        "{found:#?}"
     );
 }
 
