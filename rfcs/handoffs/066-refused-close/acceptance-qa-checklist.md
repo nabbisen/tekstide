@@ -200,8 +200,15 @@ rows also make the case for the disposition pass already riding alongside this r
       edit (see above — its one close-dialog claim already generalizes correctly). The page that
       actually walks through close behaviour in the detail this item asks for is
       `working-with-projects.md`'s own "Closing a project" section, updated above.
-- [ ] The core pin bumps with the version. *(Release-cut item.)*
-- [ ] Commits are pushed once the gate is green.
+- [x] The core pin bumps with the version. *(Release-cut item.)*
+      `[workspace.package] version` and the `tekstide-core` pin both bumped `0.31.0 -> 0.32.0`;
+      `the_workspace_pins_tekstide_core_to_its_own_version` passes.
+- [x] Commits are pushed once the gate is green.
+      Three consecutive full-workspace runs clean on the first attempt (`758 + 17 + 1119`, 0
+      failed, 0 fixture entries left); RFC-066 moved `rfcs/accepted/` -> `rfcs/done/` with a new
+      `## Closed (2026-10-09)` section, `rfcs/README.md`'s three tables and `rfcs/delivery-plan.md`'s
+      own register row updated to match, `CHANGELOG.md`'s status line promoted to "candidate, not
+      yet published." Pushed.
 
 ## Final Acceptance Decision
 

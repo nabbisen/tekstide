@@ -325,3 +325,66 @@ Recorded in `future-work.md` as a pre-1.0 item by the reviewer; not PR-066-B's o
   immediately in isolation; disclosed with a new dated row per this register's own convention. The
   second and third attempts were clean on the first try: `758 + 17 + 1119`, 0 failed, 0 fixture
   entries left.
+
+## Whole-RFC
+
+**Scans.** `shell::tests::no_raw_color_construction_anywhere_in_the_crate`, `i18n::enforcement::
+no_catalog_string_names_an_internal_identifier`, `i18n::enforcement::every_source_locale_key_
+resolves_in_every_shipped_locale` -- each run directly in isolation, all three pass.
+
+**Book, swept in both directions.** Every existing mention of project-closing behaviour in
+`docs/src/users/*.md` checked against what RFC-066's two slices actually shipped. One real gap:
+`working-with-projects.md`'s own "Closing a project" section described only the offered-confirm
+case; added a new paragraph for the blocked-up-front case, naming the real catalog strings
+("This project can't be closed yet," "Blocked by:," `Dismiss`). `what-works-today.md:218`'s own
+dialog-affordance claim ("every choice also has a real clickable button") still holds for the
+blocked modal's single `Dismiss` -- checked, not assumed, and left unchanged. The checklist's own
+item names `what-works-today.md` specifically; the substance it asks for lives in
+`working-with-projects.md` instead -- noted rather than silently redirected.
+
+**Changelog, re-read against the finished set.** Added the lead paragraph review 504 asked for
+("this started as one defect... and turned out to be three"), tying the three repairs (terminals,
+silence, audit record) to one underlying claim -- a reader of the title alone would not otherwise
+connect them.
+
+**`future-work.md`, swept for stale claims this RFC would falsify.** Found one: the original
+defect description that became this RFC ("Confirming a project close with an unsaved file kills
+its terminals and does not close it") was still standing as an open, unscheduled item recommending
+"its own small RFC" -- which this RFC now is, closed. Marked resolved in place, pointing at this
+RFC's own `Closed` section, rather than deleted (the entry is the historical record of the original
+finding).
+
+**Found during this pass, not this RFC's own scope, disclosed rather than fixed.** While live-
+capturing PR-066-B's own evidence, `Ctrl+Alt+N` ("switch to the next open project") did nothing --
+confirmed in the code: `NavigationAction::SwitchActiveProject` has no production caller anywhere in
+the crate; only the tab strip's own click/keyboard-focus route reaches `switch_to_project_tab`.
+`working-with-projects.md` still claims the chord works. Not fixed here -- no commit in this RFC
+touches tab-switching -- but recorded in this RFC's own `Closed` section so it is not rediscovered
+as new.
+
+### Gate, Whole-RFC
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `rfc_docs_invariants` (17/17, including `every_delivery_plan_row_agrees_with_its_rfc_folder` once
+  the register row was updated to match the RFC's move to `rfcs/done/`): clean.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**: first
+  attempt failed run 2 on `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_
+  real_close`, an *already-registered* row (`0.16.0` release gate, 2026-08-28, PTY read timing),
+  passed immediately in isolation; no new row needed, gate redone per this register's own
+  convention. Second attempt clean on the first try: `758 + 17 + 1119`, 0 failed, 0 fixture entries
+  left.
+
+### Candidate cut
+
+`[workspace.package] version` and the `tekstide-core` pin both bumped `0.31.0 -> 0.32.0`;
+`cargo check --workspace --all-targets` confirms the regenerated `Cargo.lock` still builds. RFC-066
+moved `rfcs/accepted/` -> `rfcs/done/` with a new `## Closed (2026-10-09)` section; the handoff
+pack's own frontmatter (`status`, `rfc_file`) updated to match. `rfcs/README.md`'s Accepted-table
+row removed, Handoffs-table row and a new Implemented-table row added. `rfcs/delivery-plan.md`'s
+own register row updated from "Accepted" to "Implemented and closed... candidate, not yet
+published," the same shape RFC-065's and RFC-027's own rows already set --
+`every_delivery_plan_row_agrees_with_its_rfc_folder` (added during RFC-027's own closeout) caught
+the stale row immediately. `CHANGELOG.md`'s status line promoted from "in progress" to "candidate,
+not yet published." Gate reproduces clean on the first attempt: `758 + 17 + 1119`, 0 failed, 0
+fixture entries left. Pushed.
