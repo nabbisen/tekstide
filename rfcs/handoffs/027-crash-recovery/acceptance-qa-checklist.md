@@ -586,6 +586,35 @@ a slice on a known, scheduled problem.
 and it is the first candidate since that disposition, so it should expect to redo its own gate
 roughly half the time. That is budgeted, not a fault.
 
+### Required at review 499 — the candidate
+
+The candidate is otherwise sound and I verified it end to end: version, pin and `Cargo.lock` all at
+`0.31.0`; `cargo package --workspace` builds and verifies both crates and **the packaged app
+archive's own `Cargo.lock` names `tekstide-core 0.31.0`**; `cargo audit` matches the register's
+three rows exactly; `cargo tree | grep accesskit` is empty so RFC-014 R2 stays closed; the gate
+reproduces (`751 + 16 + 1117`, 0 fixture entries) and was clean on your first attempt; the changelog
+says *candidate, not yet published*; and my own sweep finds nothing user-facing denying what ships.
+Finding and disclosing the stale *"(none: nothing is currently accepted and unbuilt)"* placeholder
+rather than fixing it silently was right.
+
+- [ ] **RFC-027's register row still says it is accepted.** `rfcs/delivery-plan.md:553` opens
+  *"**Accepted 2026-10-08; D1–D11 as written, plus D12–D15.**"* while the RFC itself is in
+  `rfcs/done/`. The lifecycle move is *done/ + README tables + the delivery-plan row, in one
+  commit*; commit `0ba0857` carries the first two and not the third. RFC-065's row is the form to
+  match.
+
+- [ ] **Add the invariant that would have caught it.** `claims_unfinished()` already exists in
+  `rfc_docs_invariants.rs` and is applied to **the RFC's own status line** and **the handoff pack's
+  `status` field**. The delivery-plan register row is the *third* place the same claim is written
+  and **the only one unchecked** — `every_accepted_or_done_rfc_has_a_delivery_plan_row` checks that
+  a row exists, never what it says.
+
+  **Both of the last two releases left this field stale, by different people**: RFC-027's here, and
+  RFC-065's still read *"`0.30.0` candidate, not yet published"* until I corrected it at `830013e`
+  — **my own miss at the `0.30.0` publish, found only because this candidate made me look at the
+  same field.** Two people, two consecutive releases, one field. That is a mechanical check, not a
+  discipline problem, and the machinery for it is already in the file.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
