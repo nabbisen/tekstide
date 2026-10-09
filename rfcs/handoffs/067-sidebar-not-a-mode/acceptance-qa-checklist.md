@@ -205,6 +205,40 @@ rather than a threshold this operation is held to.
       `rfcs/delivery-plan.md`'s own register row updated to match, `CHANGELOG.md`'s status line
       promoted to "candidate, not yet published." Pushed.
 
+### Required at review 511 — the fourth place an RFC's status is written
+
+The candidate is verified: version, pin and `Cargo.lock` at `0.33.0`; the lifecycle move —
+`done/`, the README tables, **the delivery-plan row** and the changelog — all in `6987d15`;
+`cargo package --workspace` verifying both crates with the packaged archive naming
+`tekstide-core 0.33.0`; audit matching the register's three rows; no accesskit; gate
+`758 + 17 + 1118`, 0 fixture entries.
+
+**PR-067-C's number is in the changelog, as required at review 510** — *"on the order of 20
+microseconds… Terminal mode, under 5"*, with the yardstick named as a criterion for "a user would
+notice" rather than this operation's own threshold, and the decline stated explicitly. That is the
+whole standard met: a slice that measured and correctly built nothing, saying so with the number.
+
+- [ ] **Extend the status-agreement invariant to `rfcs/README.md`'s rows.** Four places state an
+  RFC's status: its own `Status:` line, the handoff pack's `status` field, the delivery-plan
+  register row, and **two rows in `rfcs/README.md`** (Handoffs and Implemented). Three are checked.
+  The README's two are not.
+
+  **They are also the two I keep missing.** I corrected them for `0.30.0` during RFC-027's planning,
+  and the dev team found them stale again for `0.32.0` at this review — my publish both times. Fixed
+  at `ebb3564`. The argument is exactly the one I made at review 499 for the delivery-plan row,
+  which had gone stale twice by two people: **a field that depends on someone remembering is not
+  checked.** `claims_unfinished` and `rfc_folder_by_number` already exist; these rows are markdown
+  table cells with a linked path naming the folder, same as the ones already covered.
+
+**Your judgement to flag rather than fix was right.** Touching RFC-066's own closed documentation
+inside an RFC-067 commit would have blurred which release corrected what — and the correction
+belonged to whoever published `0.32.0`, which was me.
+
+**Noted, no action:** my gate run hit `bind_recovers_from_a_stale_socket_file`, which your own
+disposition pass verdicted **Accept**. That is the verdict working — an accepted row recurring is
+expected, and logging each occurrence would rebuild the tax the pass just removed. No new register
+row.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
