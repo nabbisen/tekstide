@@ -391,12 +391,21 @@ fn every_delivery_plan_row_agrees_with_its_rfc_folder() {
             continue;
         };
         // The Status column is the table's last cell (`| RFC | Title | Milestone |
-        // Depends on | Headless | Status |`) -- the remaining cells after the first,
-        // rejoined, since a status cell's own prose can itself contain `|`-adjacent
-        // punctuation inside inline code or a link that `split('|')` would otherwise
-        // have already cut on.
-        let status_cell = cells.collect::<Vec<_>>().join("|");
-        let status_cell = status_cell.trim();
+        // Depends on | Headless | Status |`). The row's own trailing `|` (every row
+        // here ends with one, closing the Status cell) means `split('|')`'s own last
+        // piece is empty, not the status text -- drop it before taking what is now
+        // the real last piece. (A first version of this check rejoined every
+        // remaining cell with `|` instead, which does not isolate Status at all --
+        // it silently read Title's own text as the claim and never matched
+        // `claims_unfinished`, so it could not have caught anything. Found by
+        // ablating this check itself before trusting it, not by reasoning about it.)
+        let mut remaining: Vec<&str> = cells.collect();
+        if remaining.last().is_some_and(|cell| cell.trim().is_empty()) {
+            remaining.pop();
+        }
+        let Some(status_cell) = remaining.last().map(|cell| cell.trim()) else {
+            continue;
+        };
         if status_cell.is_empty() {
             continue;
         }

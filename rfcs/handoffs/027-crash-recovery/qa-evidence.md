@@ -1052,9 +1052,19 @@ narration after it" is decided. Row-matching reuses `every_accepted_or_done_rfc_
 own rule (first cell, trimmed, exactly three ASCII digits) so a row this check does not recognise
 as the RFC Queue table is silently skipped, never misread as a false pass.
 
-**Ablated**: reverting RFC-027's own row to its pre-fix "Accepted" text on a clean tree
-(`ablate.sh`) fails `every_delivery_plan_row_agrees_with_its_rfc_folder` -- load-bearing, not
-accidentally green, and specifically catches the exact row this response's own miss left behind.
+**Ablated, and the first version of the check itself did not survive the ablation.** Reverting
+RFC-027's own row to its pre-fix "Accepted" text on a clean tree (`ablate.sh`) **passed** against
+the new test's own first draft -- the exact "accidentally green" failure mode this project's own
+ablation discipline exists to catch. The bug: Markdown table rows in `delivery-plan.md` end with a
+trailing `|`, so `rest.split('|')` produces one more piece than there are cells, the last one
+empty. The first draft rejoined *every* remaining cell (Title, Milestone, Depends on, Headless,
+*and* Status) with `|` back into one string instead of isolating Status alone -- the resulting
+"claim" began with the Title text, never started with "Accepted" or contained "Proposed" no matter
+what the Status cell itself said, so the check could not have caught anything, including the exact
+row it was written for. Found by actually running the ablation rather than trusting a test that
+merely compiled and passed once. Fixed to collect the remaining cells, drop the trailing empty one
+from the row's own closing `|`, and take what is now the real last cell. Re-ablated: fails
+correctly this time.
 
 ### Gate, review 499's fix
 
