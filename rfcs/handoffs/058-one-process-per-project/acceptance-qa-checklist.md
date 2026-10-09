@@ -83,6 +83,28 @@ says *"the reproduction becomes the regression test, and it is what PR-058-B is 
 without ever saying the two processes must overlap. D2 asked for a reproduction; it did not say
 concurrent, and the word was doing all the work.
 
+### PR-058-A closed at review 514
+
+The overlap is proven, not assumed, and **better than I asked for**: I said the first probe must
+still hold the project when the second starts; `assert_still_holding()` runs on **both** sides of
+the second probe, so the first is shown alive across the whole window — each a real
+`process_is_alive` → `libc::kill(pid, 0)`, not an inference from "spawned without waiting". Reading
+the id line back before starting the second is an ordering guarantee rather than a sleep. Five
+consecutive runs clean on my machine, ten on theirs. Gate: `758 + 19 + 1119`, 0 fixture entries.
+
+**The allowlist judgement is the part worth keeping.** A first attempt at the blocking read tripped
+`enumeration_confirms_only_the_closed_list_reads_full_file_content`, and the easy fix was to add
+this file to `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`. They refused: the file reads neither a
+project file nor a record, so the entry would have *misstated what the code does* in order to
+satisfy a scan whose question never applied to it. Changing the drain to a `read_line` loop — with a
+comment saying why, so nobody "simplifies" it back — answers it honestly instead. **An allowlist
+that accumulates entries which do not belong stops being a statement about anything**, and that is
+the one this project relies on to know where full-content reads live.
+
+The `bind_recovers_from_a_stale_socket_file` occurrence was correctly not re-registered — **Accept**
+is its standing verdict — and noting it only so it is not mistaken for something this slice
+introduced is the right amount.
+
 ## PR-058-B — the mechanism
 
 - [ ] Process-visible, under the state directory, project-scoped. **Not in-memory** (§row 4).
