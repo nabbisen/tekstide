@@ -129,6 +129,23 @@ a scan; the read runs on a worker thread, already bounded by its own existing te
 is when already-bounded asynchronous work is requested, not its cost or where it runs.** That is the
 right shape of answer to a cost question: find out whether there is a new cost before measuring one.
 
+### PR-067-B closed at review 510
+
+The quantization is gone, and the numbers prove it themselves: `23.2` and `3.9` are not multiples
+of 4. 200 builds inside the timed region, divided as `f64` nanoseconds.
+
+**The part worth keeping is the trap they avoided without being told about it**: dividing a
+`Duration` by the count and *then* calling `as_micros()` would have reintroduced the identical
+integer truncation one step later. The fix names that in its own comment. Understanding the cause
+rather than pattern-matching the remedy is the difference between a fix and a coincidence.
+
+I checked the loop could not be elided — it builds and `drop`s an owning `Element`, and 200 builds
+at 3.9–23.2 us is 0.8–4.6 ms of real work per sample, which a release build did not optimise away.
+Gate: `758 + 17 + 1118`, 0 fixture entries.
+
+The `NFR-PERF-003` wording is taken too: named as the nearest existing order-of-magnitude yardstick
+rather than a threshold this operation is held to.
+
 ## PR-067-C — the decision
 
 - [ ] The number is read against *"at a time or a near real-time"*, and the decision is stated.
