@@ -85,3 +85,30 @@ accurate.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g11a1r{1,2,3}`): `752 + 17 + 1117`, 0 failed, 0 fixture entries left each time -- clean
   on the first attempt.
+
+## Review 501: a false value kept safe only by code the next slice is about to rewrite
+
+Required item, one character. The refused branch's own `terminal_session_confirmed_empty: true` was
+inert today only because `&& closed` at the write site forces the recorded value to `false`
+regardless -- but `true` is itself wrong (nothing was terminated, so nothing was confirmed empty),
+where `false` is correct on its own terms, not merely equally masked. **D10 is PR-066-B's own job to
+rewrite that exact write site**, and a value that is wrong but currently hidden by an assumption
+held somewhere else is the identical shape that produced review 490's own data-loss defect at
+RFC-027 (`content_hash: None` documented safe "whenever the file is within the policy's editable
+bound," until a file was not).
+
+Fixed: `(false, false)` instead of `(true, false)`, with the reasoning -- and the explicit pointer
+to why it matters for the slice about to touch this exact site -- recorded in the code's own
+comment, not only here.
+
+### Gate, review 501's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive`,
+  `confirming_the_close_terminates_the_real_process_and_removes_the_project`: both pass unchanged
+  (neither asserts on this field's own value directly, so the fix is observationally silent today,
+  exactly as the review's own framing said it would be).
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g12a1r{1,2,3}`): `752 + 17 + 1117`, 0 failed, 0 fixture entries left each time -- clean
+  on the first attempt.

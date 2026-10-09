@@ -5396,10 +5396,15 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
     let pre_assessment = state.app_shell.state().assess_project_close(&project_id);
     let (terminal_session_confirmed_empty, closed) =
         if close_assessment_blocked_by_more_than_running_processes(&pre_assessment) {
-            // D11: nothing was terminated, so there is nothing for this field to confirm
-            // -- `&& closed` below makes the recorded value `false` either way, since
-            // `closed` is `false` on this branch.
-            (true, false)
+            // D11 (review 501): `false`, not a hopeful `true` -- nothing was terminated,
+            // so nothing was confirmed empty, the same "never a hopeful default" rule
+            // `terminated_outcome_and_session_confirmation`'s own doc already states for
+            // this identical field. `&& closed` below makes the two choices equally inert
+            // *today* (`closed` is `false` on this branch either way), but `false` is also
+            // correct on its own, where `true` is not -- PR-066-B's own D10 is about to
+            // rewrite this write site, and a value that is wrong but currently masked is
+            // exactly the shape that produced review 490's own data-loss defect.
+            (false, false)
         } else {
             let terminal_session_confirmed_empty =
                 terminate_project_live_work(state, &project_id, &mut audit_store);
