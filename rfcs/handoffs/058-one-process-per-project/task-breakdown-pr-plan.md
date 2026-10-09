@@ -10,6 +10,12 @@ file edited differently in each, the record file read afterwards.
 - Show the clobber: one instance's buffer in the record, the other's gone, nothing said.
 - **If it does not reproduce, stop and report that.** It outranks the rest of the RFC.
 
+**The two processes must overlap** (corrected at review 513): the first still holding the
+project when the second starts, spawned rather than waited on. A sequential pair reproduces a
+clobber the product would mediate through its own recovery offer, and **a correct lock — which
+D4 requires to release when its holder dies — would permit the second process and appear to
+fail the test.**
+
 The reproduction becomes the regression test, and it is what PR-058-B is checked against.
 
 ## PR-058-B — the mechanism

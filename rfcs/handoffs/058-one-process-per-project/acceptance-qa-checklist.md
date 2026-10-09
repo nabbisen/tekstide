@@ -32,6 +32,38 @@ Tick a box only when the thing it names has been **run**.
       (`crates/tekstide-core/src/bin/project_process_probe.rs`). No file under `src/` outside
       `tests.rs`/`bin/` touched.
 
+### Required at review 513 — the two processes never overlap
+
+**The root mechanism is proven and that is the valuable half**: two real processes opening the same
+canonical root get the **same project id**, therefore the same `records_dir`/`record_file_name`, and
+one record survives. The probe calls production functions rather than reimplementing them
+(`load_or_recover`, `add_project_from_path`, `save`, `write_recovery_record`) — I checked. So is the
+negative control: different roots give different ids, so the assertion is not a tautology. No
+product code touched. Gate reproduces `758 + 19 + 1119`, 0 fixture entries.
+
+- [ ] **Make the two probes concurrent.** `run_project_process_probe` uses `Command::…output()`,
+  which **waits for the process to exit**. The first probe is gone before the second starts, so what
+  was reproduced is two *sequential* sessions, not two instances holding one project. That matters
+  twice:
+
+  1. **It is not the hazard.** Sequentially, the product itself mediates: the second instance's own
+     recovery offer fires on open, because records exist, and the user is shown the first session's
+     unsaved text. The probe never reads existing records (checked: zero references to
+     `read_project_recovery_records`), so the clobber it demonstrates is one the real application
+     would have surfaced rather than silently taken.
+  2. **It cannot be PR-058-B's regression test.** D4 requires the lock to be released when its
+     holder dies. The first probe has exited, so a **correct** implementation releases the lock, lets
+     the second open, and the record is overwritten again — the test still sees a clobber and
+     PR-058-B looks like it failed. A regression test a correct fix cannot pass is worse than none.
+
+  The first probe must still hold the project when the second starts — spawned rather than waited
+  on, held open until the test releases it.
+
+**This is partly my fault and I should have caught it when I wrote the pack.** The task breakdown
+says *"the reproduction becomes the regression test, and it is what PR-058-B is checked against"*
+without ever saying the two processes must overlap. D2 asked for a reproduction; it did not say
+concurrent, and the word was doing all the work.
+
 ## PR-058-B — the mechanism
 
 - [ ] Process-visible, under the state directory, project-scoped. **Not in-memory** (§row 4).
