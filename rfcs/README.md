@@ -74,6 +74,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 
 | RFC | Handoff Pack |
 | --- | --- |
+| — | [Test flake disposition pass](./handoffs/test-flake-disposition.md) — no RFC; test-only, scheduled 2026-10-09 after `0.32.0`. Every live row gets **fix, quarantine or accept with a reason** — the pass is done when each has a verdict, not when each is fixed |
 | 067 | [The Sidebar Is Not A Mode](./handoffs/067-sidebar-not-a-mode/README.md) — **M13**; accepted 2026-10-08, `0.33.0`; the third slice may correctly build nothing |
 | 066 | [A Refused Close Must Not Have Already Terminated](./handoffs/066-refused-close/README.md) — **M13**; **implemented and closed 2026-10-09; `0.32.0` candidate, not yet published** |
 | 027 | [Crash Recovery and Unsaved Buffer Persistence](./handoffs/027-crash-recovery/README.md) — **M13**; **implemented and closed 2026-10-09; `0.31.0` candidate, not yet published** |
