@@ -569,6 +569,21 @@ were fixed because somebody decided about them, and nothing has been decided abo
 up at **Disposition, 2026-10-09** in `test-process-leak.md`. **Not before the release** — that would
 trade a release for tidiness.
 
+### Closed at review 498 — the Whole-RFC section is accepted
+
+Three consecutive green on the first attempt (`751 + 16 + 1117`, 0 fixture entries), and the
+`qa-evidence.md` correction was written **beside** the claim it corrects rather than replacing it,
+which is what keeps a record worth reading.
+
+**I ran one confirming full gate, not three** — same counts, clean. The three-consecutive obligation
+is the implementer's and it was met; re-rolling until a failure appeared would have demonstrated
+only the ~18% rate already recorded at **Disposition, 2026-10-09**, and would have read as blocking
+a slice on a known, scheduled problem.
+
+**RFC-027's three slices and its Whole-RFC section are all closed. The `0.31.0` candidate is next**,
+and it is the first candidate since that disposition, so it should expect to redo its own gate
+roughly half the time. That is budgeted, not a fault.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
