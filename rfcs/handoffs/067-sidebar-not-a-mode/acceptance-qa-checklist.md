@@ -67,9 +67,21 @@ slice is the right place to say so rather than let it pass unremarked.
 
 ## PR-067-B — measure the switch
 
-- [ ] Render cost **per switch**, paired, with the control inside the same run and the **spread
+- [x] Render cost **per switch**, paired, with the control inside the same run and the **spread
       published beside the median**.
-- [ ] No rate derived by dividing one condition's figure by another condition's count.
+      `mode_switch_render_cost_measurement` (`shell/tests.rs`), the `editor_typing_latency_under_
+      a_recovery_persist_tick` shape (five rounds, alternating order, median + spread). One
+      project (representative tree, a real running terminal with real output, a real 300-line
+      open document) so nothing but the mode differs between conditions. Measured in release with
+      `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`: Content mode 16.0 us (spread 16.0 .. 40.0),
+      Terminal mode 4.0 us (spread 4.0 .. 8.0). Worst case 0.016 ms against `NFR-PERF-003`'s own
+      p95 <= 16 ms -- roughly three orders of magnitude of margin, not a close call. Also
+      disclosed: a new, asynchronous, worker-thread-only scan cost PR-067-A's own D1 fix
+      introduced for terminal-mode-first projects, checked against this project's own existing
+      bounded-scan tests rather than newly measured. Full account in `qa-evidence.md`.
+- [x] No rate derived by dividing one condition's figure by another condition's count.
+      Both figures reported are each condition's own absolute cost; nothing is divided by a
+      count from the other condition.
 
 ## PR-067-C — the decision
 

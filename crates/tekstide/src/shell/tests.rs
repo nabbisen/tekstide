@@ -17704,6 +17704,190 @@ fn change_review_content_view_build_cost_by_line_count_measurement() {
     }
 }
 
+/// RFC-067 D4: a project with a representative explorer tree, a real running terminal with
+/// real output, and a real open document with representative text -- so a mode switch's own
+/// view-build cost is measured against something each mode's own view actually has to draw,
+/// not an empty scaffold. One project, used for both conditions below: the terminal keeps
+/// running and the document keeps its text regardless of which mode is active, matching D4's
+/// own premise that switching itself is "already lossless by construction" -- this fixture
+/// exists to measure what *drawing* the result costs, not to construct two different
+/// projects.
+fn state_for_mode_switch_measurement(label: &str) -> (State, tekstide_core::project::ProjectId) {
+    let dir = fresh_project_dir(label);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/lib.rs"), b"pub fn f() {}\n").unwrap();
+    std::fs::write(dir.join("README.md"), b"# readme\n").unwrap();
+    std::fs::write(dir.join("file.txt"), editor_baseline::fixture_prefix(300)).unwrap();
+
+    let mut app_shell = ApplicationShell::new();
+    let project_id = app_shell
+        .add_project_from_path(&dir)
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+
+    let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id.clone(),
+        "mode-switch-measurement pane",
+        fresh_project_dir(&format!("{label}-pane")),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for the mode-switch measurement");
+    app_shell
+        .state_mut()
+        .attach_terminal_session(session)
+        .expect("registering a session on its own project must succeed");
+    app_shell
+        .open_active_project_text_document("file.txt")
+        .expect("the fixture file must open");
+
+    let mut state = state_with(app_shell);
+    state.terminal_panes = vec![pane];
+    super::ensure_explorer_scanned(&mut state);
+    finish_explorer_scans(&mut state);
+    // Real output, not an empty "+ New Terminal" scaffold -- Terminal mode's own view has
+    // something real to draw, the session bar included.
+    state.terminal_panes[0].write_input(b"printf 'mode-switch-measurement-ready\\n'\n");
+    assert!(
+        poll_demo_pane_until(&mut state, "mode-switch-measurement-ready"),
+        "fixture precondition: the real terminal must have produced real output"
+    );
+    (state, project_id)
+}
+
+/// RFC-067 D4: "the cost of switching is measured, not assumed... nobody has measured what
+/// the switch costs *to draw*." Switching the mode itself is a field write
+/// (`ProjectSession::set_mode`); what a user actually waits on is rebuilding the `Element`
+/// tree for whichever mode they land in, the same "view-build cost" this crate's own
+/// `change_review_content_view_build_cost_by_line_count_measurement` already measures for a
+/// different surface -- `active_project_workspace_view(state)` timed directly, no layout or
+/// paint (the same disclosed lower bound that measurement carries).
+///
+/// **Paired, control inside the same run** (D4's own words): Content and Terminal mode's own
+/// view-build cost measured back to back, in alternating order across five rounds -- the same
+/// shape `editor_typing_latency_under_a_recovery_persist_tick` already uses -- so an ambient
+/// load spike lands on both conditions almost equally rather than only one. There is no
+/// separate "idle control" the way that measurement has: the two conditions here *are* each
+/// other's control, and "the cost of switching" is simply the other mode's own absolute cost,
+/// since the switch itself has none.
+///
+/// Read against the owner's own framing (D5, "at a time or a near real-time") using this
+/// project's own existing latency criterion, `NFR-PERF-003` (p95 <= 16 ms, p99 <= 33 ms) --
+/// the established number for "a user would notice," not a new threshold invented for this
+/// one measurement.
+#[test]
+#[ignore = "a measurement, not a check: release build, see editor_baseline's own module doc"]
+fn mode_switch_render_cost_measurement() {
+    let (mut state, project_id) = state_for_mode_switch_measurement("mode-switch-render-cost");
+
+    #[derive(Clone, Copy, Debug)]
+    enum Condition {
+        Content,
+        Terminal,
+    }
+    use Condition::{Content as C, Terminal as T};
+    let base = [C, T];
+    let orders: [[Condition; 2]; 5] = std::array::from_fn(|round| {
+        std::array::from_fn(|position| base[(position + round) % base.len()])
+    });
+    let index = |condition: Condition| match condition {
+        Condition::Content => 0,
+        Condition::Terminal => 1,
+    };
+
+    println!("NFR-PERF-003 budget: p95 <= 16 ms, p99 <= 33 ms (per-frame user-visible latency)");
+
+    let mut build_us = [[0.0f64; 2]; 5];
+    for (round, order) in orders.iter().enumerate() {
+        for &condition in order {
+            let target_mode = match condition {
+                Condition::Content => tekstide_core::project::ProjectMode::Content,
+                Condition::Terminal => tekstide_core::project::ProjectMode::TerminalImmersion,
+            };
+            state
+                .app_shell
+                .state_mut()
+                .project_mut(&project_id)
+                .expect("fixture project must still be active")
+                .set_mode(target_mode);
+
+            let started = std::time::Instant::now();
+            let view = super::active_project_workspace_view(&state);
+            let elapsed = started.elapsed();
+            drop(view);
+
+            let at = index(condition);
+            build_us[round][at] = elapsed.as_micros() as f64;
+            println!(
+                "round {} {:<8} view-build {:>8.1} us",
+                round + 1,
+                format!("{condition:?}"),
+                build_us[round][at],
+            );
+        }
+    }
+
+    let median = |values: &[f64]| {
+        let mut sorted = values.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mid = sorted.len() / 2;
+        if sorted.len().is_multiple_of(2) {
+            (sorted[mid - 1] + sorted[mid]) / 2.0
+        } else {
+            sorted[mid]
+        }
+    };
+    let spread = |values: &[f64]| {
+        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (min, max)
+    };
+
+    let content_costs: Vec<f64> = build_us.iter().map(|row| row[0]).collect();
+    let terminal_costs: Vec<f64> = build_us.iter().map(|row| row[1]).collect();
+    let content_median = median(&content_costs);
+    let terminal_median = median(&terminal_costs);
+    let (content_min, content_max) = spread(&content_costs);
+    let (terminal_min, terminal_max) = spread(&terminal_costs);
+
+    println!(
+        "\nmedian Content-mode view-build cost over five rounds: {content_median:.1} us \
+         (spread {content_min:.1} .. {content_max:.1})"
+    );
+    println!(
+        "median Terminal-mode view-build cost over five rounds: {terminal_median:.1} us \
+         (spread {terminal_min:.1} .. {terminal_max:.1})"
+    );
+
+    let switch_to_content_ms = content_median / 1000.0;
+    let switch_to_terminal_ms = terminal_median / 1000.0;
+    println!(
+        "\ncost of a switch landing in Content mode: {switch_to_content_ms:.3} ms \
+         (median view-build cost of the mode switched to)"
+    );
+    println!(
+        "cost of a switch landing in Terminal mode: {switch_to_terminal_ms:.3} ms \
+         (median view-build cost of the mode switched to)"
+    );
+
+    let worst_ms = switch_to_content_ms.max(switch_to_terminal_ms);
+    println!(
+        "\nworst of the two: {worst_ms:.3} ms, against NFR-PERF-003's p95 <= 16 ms / p99 <= \
+         33 ms -- {}",
+        if worst_ms < 16.0 {
+            "below the p95 budget: a mode switch's own view-build cost is not something a \
+             user would perceive. This measures the view-build stage only (no layout, no \
+             paint, the same disclosed lower bound `change_review_content_view_build_cost_...` \
+             already carries) -- real wall-clock cost is higher, but not by anything close to \
+             the margin between this number and the budget."
+        } else {
+            "at or above the p95 budget on the view-build stage alone, before layout or paint \
+             are even counted -- this is evidence a mode switch is perceptible, not a \
+             conclusion by itself."
+        }
+    );
+}
+
 /// RFC-034's own required measurement: the pack README warns that
 /// `pinned_middle` already clips at short window heights before this
 /// slice adds anything, and asks for the added cost to be measured

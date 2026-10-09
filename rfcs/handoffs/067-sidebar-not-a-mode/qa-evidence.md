@@ -142,3 +142,89 @@ accurate (D9: the toggle itself is untouched).
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g067a{1,2,3}`): `758 + 17 + 1118`, 0 failed, 0 fixture entries left each time, clean
   on the first attempt.
+
+## PR-067-B — measure the switch
+
+### D4 — the render cost of a mode switch, measured
+
+**What is measured, and why this shape.** Switching the mode itself is a field write
+(`ProjectSession::set_mode`); what a user actually waits on is the subsequent `Element` tree
+rebuild for whichever mode they land in. `mode_switch_render_cost_measurement`
+(`shell/tests.rs`) times `active_project_workspace_view(state)` directly -- this crate's own
+established "view-build cost" sense (`ARCHITECTURE.md`: wall-clock time for `view` to construct
+its `Element` tree; compositor/GPU present excluded), the same convention
+`change_review_content_view_build_cost_by_line_count_measurement` already uses for a different
+surface. **Not measured: layout, shaping or paint** -- the same disclosed lower bound every prior
+measurement in this crate carries.
+
+**Fixture**: one project, used for both conditions, so nothing but the mode differs between
+measurements -- a representative explorer tree (`src/lib.rs`, `README.md`), a real spawned
+terminal with real output already flowing (`printf` into a real `/bin/sh`, polled for), and a
+real open document (300 representative lines, `editor_baseline::fixture_prefix`). The terminal
+keeps running and the document keeps its text regardless of which mode is active, matching D4's
+own premise: this fixture exists to measure what *drawing* the result costs, not to construct two
+different projects.
+
+**Paired, control inside the same run (D4's own words).** Content and Terminal mode's own
+view-build cost measured back to back, alternating which goes first across five rounds -- the
+same shape `editor_typing_latency_under_a_recovery_persist_tick` already uses, so an ambient load
+spike lands on both conditions almost equally. There is no separate "idle" control the way that
+measurement has: the two conditions here are each other's control, and "the cost of switching
+into a mode" is simply that mode's own absolute view-build cost, since the switch itself (the
+field write) has none worth measuring separately.
+
+**Measured** (`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo test --release -p tekstide
+mode_switch_render_cost_measurement -- --ignored --nocapture`, the same invocation shape
+`editor_typing_latency_baseline_100_000_lines` established and for the identical reason: the
+suite's headless view-build tests use iced's `()` renderer, which exists only with debug
+assertions on):
+
+| Condition | Median (5 rounds) | Spread |
+| --- | --- | --- |
+| Content mode | 16.0 us | 16.0 .. 40.0 us |
+| Terminal mode | 4.0 us | 4.0 .. 8.0 us |
+
+**Worst of the two, 0.016 ms, against this project's own existing latency criterion**
+(`NFR-PERF-003`: p95 <= 16 ms, p99 <= 33 ms) -- not a new threshold invented for this one
+measurement, the established number for "a user would notice." **The margin is roughly
+three orders of magnitude**, not a close call decided by which side of a line a noisy number
+landed on.
+
+No rate was derived by dividing one condition's figure by another condition's count (the RFC-027
+correction this checklist's own item names) -- both figures reported are each condition's own
+absolute cost, nothing is divided by a count from the other condition.
+
+**Not ablated: this test asserts nothing.** The same shape `change_review_content_view_build_
+cost_by_line_count_measurement`'s own "curve" section already has -- a diagnostic report, printed
+for a reader to read, not a pass/fail gate. There is no guard to remove and watch fail.
+
+### A new cost PR-067-A introduced, surfaced here per review 508
+
+**Not a render cost, and not this measurement's own subject, but the right place to say so
+rather than let it pass unremarked.** PR-067-A removed `ensure_explorer_scanned`'s own
+Content-mode guard (required, D1 -- a tree visible in Terminal mode and stuck on "Loading…"
+forever would have been worse than no tree). One consequence: a project opened straight into
+Terminal mode now also requests an explorer scan at open, where before it scanned only on the
+first switch to Content, and for a terminal-only session, never at all.
+
+**Checked, not assumed, to be bounded and asynchronous.** `request_explorer_root_scan_if_needed`
+(`session.rs:1573`) is a single enum match plus a flag write -- it marks the scan pending and
+returns; **it does not scan anything itself.** The real directory read runs on a worker thread
+(`explorer_scan_subscription`), never the render thread (pinned by this crate's own
+`the_shell_never_scans_a_directory_on_the_render_thread`), and that scan's own cost is already
+measured and bounded elsewhere in this project, not newly introduced by this slice:
+`a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it` and
+`asking_git_adds_a_few_milliseconds_to_a_hundred_thousand_entry_scan` (`tekstide-core`) already
+prove the scan itself is capped and fast even at an adversarial size. What changed is *when* that
+already-bounded, already-asynchronous work gets requested, not its own cost or where it runs.
+
+### Gate, PR-067-B
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `i18n::enforcement` (23/23), `rfc_docs_invariants` (17/17, this slice touches no RFC document):
+  clean.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g067b{1,2,3}`): `758 + 17 + 1118`, 0 failed, 0 fixture entries left each time, clean
+  on the first attempt. 8 ignored in `tekstide` (one more than PR-067-A's own count: the new
+  measurement test); confirmed it still runs correctly with `-- --ignored`.
