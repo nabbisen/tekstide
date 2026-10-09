@@ -13,6 +13,25 @@
 - Live capture: terminal mode with the file tree beside it, against the same throwaway fixture the
   placeholder appears in today (D2).
 
+### `0.33.0` planning (2026-10-09): the three call sites D8 governs, named
+
+Checked after `0.31.0` and `0.32.0` shipped, because this RFC was written before either. **Its
+premises still hold**: `sidebar_view` still matches on `ProjectMode`, and
+`sidebar-placeholder-title` still reads *"Files are listed here in Content mode."*
+
+**D8 named three things that must not switch the mode — "an open performed on the user's behalf, a
+refresh, a recovery restore" — and the code has exactly those three, no more:**
+
+| Path | Site | Under D7/D8 |
+| --- | --- | --- |
+| The explorer's own activation | `shell.rs:4667`, `Action::Open(path)` | **This is the one that switches** (D7). It is also the call site whose behaviour this RFC changes, since the tree becomes reachable in terminal mode for the first time. |
+| The recovery offer accepting a record | `shell.rs:11700` / `:11714` (RFC-027) | **Must not switch.** Shipped in `0.31.0`, after this RFC was written. |
+| The watch notice / background refresh | `record_project_watch_notice`, `shell.rs:7606`+ | **Must not switch.** Opens nothing new; touches documents already in the set. |
+
+So D8's list is complete and implementable as written — **drive the test through the recovery offer
+specifically**, since it is the only one of the three that both opens a document and is reachable
+while a terminal is on screen.
+
 ## PR-067-B — measure the switch
 
 - Render cost of a mode switch, paired, control inside the same run, spread published beside the
