@@ -263,6 +263,27 @@ disposition pass verdicted **Accept**. That is the verdict working — an accept
 expected, and logging each occurrence would rebuild the tax the pass just removed. No new register
 row.
 
+### Closed at review 512 — the `0.33.0` candidate is accepted
+
+**The check is better than what I asked for.** I said "extend the status-agreement family"; they
+established the family's own predicate could not do the job — `claims_unfinished` sees only
+"Proposed"/"Accepted", and *"candidate, not yet published"* versus *"released"* contains neither —
+so the right instrument reads `rfcs/README.md`'s rows against `CHANGELOG.md`'s released sections
+instead. My own planted violation fails it with the row named and the stale claim quoted.
+
+**Running it found two more, one of which matters more than the rows did.** `CHANGELOG.md`'s
+`0.30.0` Status said *"scoped"* and **never said released at all** — set by the candidate commit
+`e3f7f0f` and never corrected at publish, which was mine. It survived two further releases because
+`0.31.0`'s own section happens to mention RFC-065 in passing, putting it in the released set by
+accident. **An existing invariant was passing by luck**, and nothing would have told us.
+
+I verified the one risky part myself: widening `rfcs_named_by_released_sections` from `"released
+on"` to `"released"` is safe today — of every `Status:` line in the changelog, only the current
+candidate's lacks the word entirely. *(Not required: the match is a bare substring, so a future
+line reading "not yet released" would be read as released. Cheap to harden if it ever matters.)*
+
+Gate: `758 + **19** + 1118`, 0 fixture entries. **`0.33.0` is recommended to the owner.**
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
