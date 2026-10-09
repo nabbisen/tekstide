@@ -615,6 +615,26 @@ rather than fixing it silently was right.
   same field.** Two people, two consecutive releases, one field. That is a mechanical check, not a
   discipline problem, and the machinery for it is already in the file.
 
+### Closed at review 500 — the candidate is accepted
+
+Both items done, and the second one was done properly: **the check does not survive its own
+ablation, and they ablated it before trusting it.** I ablated it independently — reverting RFC-027's
+row to its stale `Accepted` text fails
+`every_delivery_plan_row_agrees_with_its_rfc_folder` with a message that names the row, quotes the
+claim and says what the check is for. Tree restored clean. Gate: `751 + **17** + 1117`, 0 failures,
+0 fixture entries.
+
+**The first draft of that check could not have caught the row it was written for** — it rejoined
+every cell instead of isolating Status, so the claim it tested began with the row's own Title. The
+dev team found that by ablating it, not by reading it, and recorded the bug in the check's own
+comment. That is the lesson of reviews 482 and 492 applied without being asked.
+
+The invariant family is now complete: the RFC's own status line, the handoff pack's `status`, and
+the delivery-plan register row all check against the folder. The field that went stale at two
+consecutive releases, by two different people, is now mechanically held.
+
+**`0.31.0` is recommended to the owner.**
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
