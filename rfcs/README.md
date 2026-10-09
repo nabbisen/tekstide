@@ -74,6 +74,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 
 | RFC | Handoff Pack |
 | --- | --- |
+| 058 | [A Project Held By One Process](./handoffs/058-one-process-per-project/README.md) — **M13**; accepted 2026-10-10, `0.34.0`; reproduce before building, and a Wayland client cannot raise itself |
 | — | [Test flake disposition pass](./handoffs/test-flake-disposition.md) — no RFC; test-only, scheduled 2026-10-09 after `0.32.0`. Every live row gets **fix, quarantine or accept with a reason** — the pass is done when each has a verdict, not when each is fixed |
 | 067 | [The Sidebar Is Not A Mode](./handoffs/067-sidebar-not-a-mode/README.md) — **M13**; **implemented and closed 2026-10-09; released as `0.33.0` 2026-10-10** |
 | 066 | [A Refused Close Must Not Have Already Terminated](./handoffs/066-refused-close/README.md) — **M13**; **implemented and closed 2026-10-09; released as `0.32.0` 2026-10-09** |
