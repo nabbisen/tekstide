@@ -110,6 +110,40 @@ load-bearing. Nothing outstanding.
       shape exactly), not a workaround. Full account, including the ablation that reproduces the
       original rejection, in `qa-evidence.md`.
 
+### Required at review 503
+
+Substantial and well-evidenced. The schema migration is the right call over a workaround, follows
+RFC-013 Amendment 1's own established shape, and `v2_fixture_with_existing_rows_migrates_to_v3_preserving_sequence`
+proves the part that matters — an existing database survives it. Two guards, each ablated
+separately, is the right way to show defense-in-depth is actually two things. The capture is clean:
+isolated `/dev/shm` state, one throwaway project, *"This project can't be closed yet"* as a statement
+rather than a question with a withheld yes, one `Dismiss`, no `Close` anywhere. Audit suite 130/130;
+gate reproduces `757 + 17 + 1119`, 0 fixture entries.
+
+- [ ] **The reasons line still uses the confirm modal's own prefix.** `project-close-dialog-live-work-prefix`
+  = *"This will end:"* is shared, so the blocked modal reads:
+
+  > This project can't be closed yet
+  > `/dev/shm/tsd066b-proj`
+  > **This will end: 1 unsaved file**
+
+  Nothing will end. The close is not happening — that unsaved file is the **reason** it cannot, not
+  a consequence of it proceeding. On the confirm modal the string is correct; on this one it asserts
+  the opposite of the title two lines above it.
+
+  **This is the RFC's own defect in miniature**: the refusal is right and something downstream still
+  speaks as though the close is going ahead. You gave the blocked modal its own title, its own
+  dismiss control and its own hint — this is the fourth string that needed the same treatment.
+
+**Not required here, raised to the owner instead.** Your `Blocked` write passing `valid_safe_close`
+and still producing **zero** records — rejected by a SQL `CHECK` the Rust validator only mirrored,
+and swallowed by best-effort — is an instance of a class: **52 `CHECK` constraints in
+`audit/schema.rs`, and nothing anywhere asserts that a given family and outcome actually lands.** I
+checked. Any future producer fails the same way: silently. Recorded in `future-work.md` as a pre-1.0
+item, with `enumeration_confirms_only_the_closed_list_reads_full_file_content` named as the shape
+and `record.rs`'s 69 family arms as the enumeration. **You found it only because the checklist
+demanded a test for this one case** — nothing systemic would have.
+
 ## Whole-RFC
 
 - [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
