@@ -368,11 +368,22 @@ impl ProjectCloseButton {
 /// display name alone is not enough to identify *which* project is about
 /// to be destroyed, unlike switching, where a wrong belief has no wrong
 /// action.
+///
+/// **RFC-066 D3 (decided on acceptance): `can_close` is captured alongside the reasons,
+/// from the identical `close_assessment_blocked_by_more_than_running_processes` check
+/// `apply_project_close_confirmation` itself now gates on** -- the owner's own "a user must
+/// not be able to misunderstand the interface" criterion means this is not a *disabled*
+/// `Close` button when `false`: [`project_close_dialog_view`] renders no `Close` control at
+/// all, and neither [`Message::ModalFocusNext`]/[`Message::ModalFocusPrevious`] nor
+/// [`activate_current_modal`] can ever land this modal's own focus on
+/// [`ProjectCloseButton::Close`] while it holds. A button that sometimes does nothing is
+/// exactly what D3 exists to remove, not relocate into a disabled-but-visible state.
 #[derive(Debug)]
 pub(crate) struct ProjectCloseModal {
     project_id: tekstide_core::project::ProjectId,
     reasons: Vec<tekstide_core::close::CloseReason>,
     canonical_path: std::path::PathBuf,
+    can_close: bool,
     focus: ProjectCloseButton,
 }
 
@@ -2208,11 +2219,20 @@ fn activate_current_modal(state: &mut State) {
         // `ProjectCloseModal` has no "closes without
         // consequence" reading at all -- `Cancel` is a real
         // decision too, `safe_close_decision`'s own `Cancelled`
-        // outcome, not a silent drop. This guarded arm handles
-        // `Close`; the unguarded `ProjectClose` arm a few lines
-        // below catches `Cancel` (the guard having failed falls
-        // through to the next matching pattern, the same
-        // mechanism every other guarded arm here relies on).
+        // outcome, not a silent drop.
+        //
+        // RFC-066 D3/D10: a modal that opened `can_close: false` has no `Close` to
+        // activate at all (`modal.focus` can never reach `ProjectCloseButton::Close` while
+        // it holds -- see `ModalFocusNext`/`ModalFocusPrevious` above), so this guard is
+        // checked first and unconditionally records `Blocked`, never `Cancelled`: nothing
+        // was ever offered here for the user to decline. The two arms below are unchanged
+        // from before this RFC, reached only when `can_close` is `true`: the guarded one
+        // handles `Close`; the unguarded `ProjectClose` arm a few lines below catches
+        // `Cancel` (the guard having failed falls through to the next matching pattern,
+        // the same mechanism every other guarded arm here relies on).
+        Some(ModalContent::ProjectClose(modal)) if !modal.can_close => {
+            record_project_close_blocked_up_front(state, &modal.project_id);
+        }
         Some(ModalContent::ProjectClose(modal)) if modal.focus == ProjectCloseButton::Close => {
             apply_project_close_confirmation(state, &modal);
         }
@@ -2690,7 +2710,13 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.next(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.next(),
-            Some(ModalContent::ProjectClose(modal)) => modal.focus = modal.focus.next(),
+            // RFC-066 D3: a modal that opened `can_close: false` has no `Close` to
+            // cycle to -- focus stays put (there is only `Cancel` to be on, and it
+            // already is).
+            Some(ModalContent::ProjectClose(modal)) if modal.can_close => {
+                modal.focus = modal.focus.next()
+            }
+            Some(ModalContent::ProjectClose(_)) => {}
             Some(ModalContent::ConfiguredProfileFirstUse(modal)) => {
                 modal.focus = modal.focus.next()
             }
@@ -2724,7 +2750,12 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.previous(),
-            Some(ModalContent::ProjectClose(modal)) => modal.focus = modal.focus.previous(),
+            // RFC-066 D3: same reasoning as `ModalFocusNext` above -- no `Close` to
+            // cycle to while `can_close` is `false`.
+            Some(ModalContent::ProjectClose(modal)) if modal.can_close => {
+                modal.focus = modal.focus.previous()
+            }
+            Some(ModalContent::ProjectClose(_)) => {}
             Some(ModalContent::ConfiguredProfileFirstUse(modal)) => {
                 modal.focus = modal.focus.previous()
             }
@@ -2852,8 +2883,17 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             // inspect what was open, not blindly discard it the way the
             // plain `= None` below still correctly does for every other
             // variant.
+            //
+            // RFC-066 D10: when the modal opened `can_close: false`, nothing was ever
+            // offered for the user to decline -- the assessment already blocked the
+            // close before this dialog existed. Escape on that modal records `Blocked`,
+            // not `Cancelled`.
             if let Some(ModalContent::ProjectClose(modal)) = state.modal.take() {
-                record_project_close_cancelled(state, &modal.project_id);
+                if modal.can_close {
+                    record_project_close_cancelled(state, &modal.project_id);
+                } else {
+                    record_project_close_blocked_up_front(state, &modal.project_id);
+                }
             }
             // RFC-022 PR-022-E, response 227: re-evaluate on every modal
             // close, not only this dialog's own -- dismissing the paste
@@ -5298,7 +5338,13 @@ fn attempt_close_project_tab(state: &mut State, project_id: tekstide_core::proje
     let Some(project) = state.app_shell.state().project(&project_id) else {
         return;
     };
-    match state.app_shell.state().assess_project_close(&project_id) {
+    let assessment = state.app_shell.state().assess_project_close(&project_id);
+    // RFC-066 D3: the identical check `apply_project_close_confirmation` itself gates
+    // termination on -- a project blocked by anything other than its own running
+    // processes cannot be made closeable by confirming, so the dialog this opens must not
+    // offer a `Close` that would then silently fail.
+    let can_close = !close_assessment_blocked_by_more_than_running_processes(&assessment);
+    match assessment {
         tekstide_core::close::CloseAssessment::SafeToClose => {
             let closed = matches!(
                 state.app_shell.state_mut().close_project(&project_id),
@@ -5316,6 +5362,7 @@ fn attempt_close_project_tab(state: &mut State, project_id: tekstide_core::proje
                 project_id,
                 reasons,
                 canonical_path,
+                can_close,
                 // §4a: closing is destructive and irreversible; the safe
                 // default is not closing, the same "Cancel by default"
                 // reasoning `open_transcript_purge_dialog` already
@@ -5351,6 +5398,28 @@ fn record_project_close_cancelled(
             .record_safe_close_decision(
                 project_id.clone(),
                 tekstide_core::audit::SafeCloseDecision::Cancelled,
+            );
+    }
+}
+
+/// RFC-066 D10: the sibling of [`record_project_close_cancelled`] above, for a modal that
+/// opened `can_close: false`. `assess_close` already blocked the close before this dialog
+/// ever existed, so nothing was offered for the user to decline -- `Cancelled` would claim a
+/// choice that was never on the table. Reachable from both `activate_current_modal` (any
+/// focus -- `can_close: false` keeps focus off `Close` structurally, so every activation here
+/// is this case) and `ModalDismiss` (Escape). Single-phase, same reasoning as `Cancelled`: no
+/// operation ever began for this decision to be a phase of.
+fn record_project_close_blocked_up_front(
+    state: &mut State,
+    project_id: &tekstide_core::project::ProjectId,
+) {
+    if let Some(mut audit_store) =
+        open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+    {
+        tekstide_core::audit::AuditCoordinator::new(&mut audit_store, &mut state.audit_health)
+            .record_safe_close_decision(
+                project_id.clone(),
+                tekstide_core::audit::SafeCloseDecision::Blocked,
             );
     }
 }
@@ -14442,8 +14511,16 @@ fn project_close_dialog_view<'a>(
         .on_press(on_press)
     };
 
+    // RFC-066 D3: a modal that opened `can_close: false` asks nothing -- `assess_close`
+    // already refused before this dialog existed, so its title says that plainly rather
+    // than posing "Close this project?" with no way to answer yes.
+    let title_key = if modal.can_close {
+        "project-close-dialog-title"
+    } else {
+        "project-close-dialog-blocked-title"
+    };
     let mut lines: Vec<Element<'_, Message>> = vec![
-        text(state.catalog.get("project-close-dialog-title"))
+        text(state.catalog.get(title_key))
             .size(state.theme.font_size_heading())
             .into(),
         text(project_close_dialog_body(&state.catalog, modal))
@@ -14468,25 +14545,53 @@ fn project_close_dialog_view<'a>(
             .into(),
         );
     }
-    lines.extend([
-        button_line(
-            ProjectCloseButton::Close,
-            "project-close-dialog-close",
-            Message::ProjectCloseClosePressed,
-        )
-        .into(),
-        button_line(
-            ProjectCloseButton::Cancel,
-            "project-close-dialog-cancel",
-            Message::ModalDismiss,
-        )
-        .into(),
-        text(state.catalog.get("project-close-dialog-hint"))
-            .size(state.theme.font_size_status())
-            .into(),
-    ]);
 
-    modal_dialog_box_split(state, lines, 3)
+    // RFC-066 D3: no `Close` control at all while blocked, not a disabled one -- see
+    // `ProjectCloseModal::can_close`'s own doc for why. The single remaining control
+    // dispatches `ModalDismiss` directly, the same message Escape already sends, which is
+    // what makes its own `Blocked` audit record identical by click or by key.
+    let mut footer: Vec<Element<'_, Message>> = Vec::new();
+    if modal.can_close {
+        footer.push(
+            button_line(
+                ProjectCloseButton::Close,
+                "project-close-dialog-close",
+                Message::ProjectCloseClosePressed,
+            )
+            .into(),
+        );
+        footer.push(
+            button_line(
+                ProjectCloseButton::Cancel,
+                "project-close-dialog-cancel",
+                Message::ModalDismiss,
+            )
+            .into(),
+        );
+        footer.push(
+            text(state.catalog.get("project-close-dialog-hint"))
+                .size(state.theme.font_size_status())
+                .into(),
+        );
+    } else {
+        footer.push(
+            button_line(
+                ProjectCloseButton::Cancel,
+                "project-close-dialog-dismiss",
+                Message::ModalDismiss,
+            )
+            .into(),
+        );
+        footer.push(
+            text(state.catalog.get("project-close-dialog-blocked-hint"))
+                .size(state.theme.font_size_status())
+                .into(),
+        );
+    }
+    let footer_len = footer.len();
+    lines.extend(footer);
+
+    modal_dialog_box_split(state, lines, footer_len)
 }
 
 fn external_change_modal_view<'a>(

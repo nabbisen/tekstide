@@ -478,6 +478,10 @@ impl DurableAuditRecordV1 {
                 self.operation_id.is_some()
             }
             AuditOutcome::Cancelled => self.operation_id.is_none(),
+            // RFC-066 D10: the assessment blocked the close before any operation began --
+            // the same "no operation_id" shape `Cancelled` already has, for the identical
+            // reason (no live-work operation was ever authorized).
+            AuditOutcome::Blocked => self.operation_id.is_none(),
             _ => false,
         }
     }

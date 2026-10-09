@@ -13513,6 +13513,10 @@ fn project_close_modal_fixture(
         project_id: tekstide_core::project::ProjectId::new_uuid(),
         reasons,
         canonical_path: PathBuf::from(canonical_path),
+        // These fixtures exercise path/body/reasons rendering, not RFC-066's
+        // blocked-up-front shape -- `true` matches every one of their own
+        // existing assertions, none of which is about `can_close`.
+        can_close: true,
         focus: ProjectCloseButton::Cancel,
     }
 }
@@ -13796,6 +13800,13 @@ fn state_with_a_real_terminal_and_a_dirty_document(
 /// could proceed at all. **Now proves the fix**: refused for the identical reason, with the
 /// terminal still alive, because nothing is terminated until the assessment says nothing
 /// *other than* a live process is blocking.
+///
+/// **PR-066-B update (D3): no longer drives `ModalFocusNext` to reach `Close` first.**
+/// That is exactly the affordance D3 removes for this shape of close -- a dirty file blocks
+/// it, so the modal opens with no `Close` to focus at all (proved separately by
+/// `a_close_blocked_by_a_dirty_file_opens_with_no_close_to_focus` below). Activating straight
+/// from the default focus (`Cancel`) is this dialog's only reachable path now, and is
+/// exactly what D1's own fix must still get right regardless.
 #[test]
 fn a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive() {
     let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-ordering-repro"));
@@ -13807,13 +13818,6 @@ fn a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive() {
         Message::CloseProjectTabPressed(project_id.clone()),
     );
     assert!(state.modal.is_some(), "test precondition: modal opened");
-    let _ = super::update(&mut state, Message::ModalFocusNext);
-    match &state.modal {
-        Some(ModalContent::ProjectClose(modal)) => {
-            assert_eq!(modal.focus, ProjectCloseButton::Close);
-        }
-        other => panic!("expected the confirmation still open, got {other:?}"),
-    }
     let _ = super::update(&mut state, Message::ModalActivate);
 
     assert!(
@@ -13829,6 +13833,217 @@ fn a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive() {
         "the fix: the real terminal's pane must still be present -- a dirty file blocking \
          the close is known before anything live is touched, not after"
     );
+}
+
+/// RFC-066 D3: the modal's own promise ("no button at all, never a disabled one") proved
+/// against a real blocked close -- a dirty file, the same fixture the ordering regression
+/// test above uses. `ModalFocusNext` must be a no-op against it: there is no `Close` to
+/// reach, so focus stays on `Cancel` regardless of how many times it is sent.
+#[test]
+fn a_close_blocked_by_a_dirty_file_opens_with_no_close_to_focus() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-no-confirm"));
+    let (mut state, project_id, _terminal_id) =
+        state_with_a_real_terminal_and_a_dirty_document("close-no-confirm");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert!(
+                !modal.can_close,
+                "a dirty file is a reason other than a running process -- this must be blocked"
+            );
+            assert_eq!(modal.focus, ProjectCloseButton::Cancel);
+        }
+        other => panic!("expected the confirmation open, got {other:?}"),
+    }
+
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert_eq!(
+                modal.focus,
+                ProjectCloseButton::Cancel,
+                "ModalFocusNext must never land this modal's own focus on Close while \
+                 can_close is false"
+            );
+        }
+        other => panic!("expected the confirmation still open, got {other:?}"),
+    }
+
+    let _ = super::update(&mut state, Message::ModalFocusPrevious);
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert_eq!(modal.focus, ProjectCloseButton::Cancel);
+        }
+        other => panic!("expected the confirmation still open, got {other:?}"),
+    }
+}
+
+/// RFC-066 D10: **the refused case's own record, proved by a test -- nothing pinned it
+/// before this slice, which is why the gap went unnoticed.** Activating a blocked-up-front
+/// modal (Enter, default focus) must record `Blocked`, never `Cancelled` (that already means
+/// a close *was* offered and the user declined it -- nothing was offered here) and never
+/// `Closed` (nothing closed).
+#[test]
+fn activating_a_blocked_close_records_blocked_not_cancelled_or_closed() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-blocked-activate"));
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_and_a_dirty_document("close-blocked-activate");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    assert!(state.modal.is_some(), "test precondition: modal opened");
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(state.modal.is_none(), "the dialog must close");
+    assert!(state.app_shell.state().project(&project_id).is_some());
+    assert!(
+        state
+            .terminal_panes
+            .iter()
+            .any(|pane| pane.terminal_id() == &terminal_id)
+    );
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let records: Vec<_> = audit_store
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|sequenced| sequenced.record)
+        .collect();
+    assert_eq!(
+        records.len(),
+        1,
+        "a blocked-up-front close is single-phase, same as Cancelled: {records:?}"
+    );
+    assert_eq!(
+        records[0].outcome,
+        tekstide_core::audit::AuditOutcome::Blocked,
+        "must be Blocked -- neither Cancelled (nothing was offered to decline) nor Closed \
+         (nothing closed)"
+    );
+    assert!(records[0].operation_id.is_none());
+}
+
+/// RFC-066 D10: Escape is the same decision as activating -- the same shape
+/// `escaping_the_close_confirmation_also_records_a_cancelled_decision` already proves for
+/// the offered case.
+#[test]
+fn escaping_a_blocked_close_also_records_blocked_not_cancelled() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-blocked-escape"));
+    let (mut state, project_id, _terminal_id) =
+        state_with_a_real_terminal_and_a_dirty_document("close-blocked-escape");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    let _ = super::update(&mut state, Message::ModalDismiss);
+
+    assert!(state.modal.is_none());
+    assert!(state.app_shell.state().project(&project_id).is_some());
+
+    let audit_store =
+        open_real_audit_store(&state.app_shell).expect("the real audit store must open");
+    let blocked = !audit_store
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            outcome: Some(tekstide_core::audit::AuditOutcome::Blocked),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .unwrap()
+        .records
+        .is_empty();
+    assert!(
+        blocked,
+        "Escape on a blocked-up-front modal must record Blocked"
+    );
+
+    let cancelled = !audit_store
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            family: Some(tekstide_core::audit::AuditEventFamily::SafeCloseDecision),
+            outcome: Some(tekstide_core::audit::AuditOutcome::Cancelled),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .unwrap()
+        .records
+        .is_empty();
+    assert!(
+        !cancelled,
+        "must never record Cancelled -- nothing was offered here for the user to decline"
+    );
+}
+
+/// RFC-066 D4: the reasons shown are read from `assess_close`'s own result, never
+/// re-derived -- proved by comparing the modal's own `reasons` against a direct,
+/// independent call to `assess_project_close` made after the modal opened (the project's
+/// state has not changed in between, so the two must agree exactly, in the same order).
+#[test]
+fn the_blocked_modals_reasons_are_assess_closes_own_result_not_a_second_opinion() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-reasons-source"));
+    let (mut state, project_id, _terminal_id) =
+        state_with_a_real_terminal_and_a_dirty_document("close-reasons-source");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+
+    let independent = state.app_shell.state().assess_project_close(&project_id);
+    let independent_reasons = match independent {
+        tekstide_core::close::CloseAssessment::NeedsConfirmation { reasons } => reasons,
+        other => panic!("expected the dirty file to still block the close, got {other:?}"),
+    };
+
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert_eq!(&modal.reasons, &independent_reasons);
+        }
+        other => panic!("expected the confirmation open, got {other:?}"),
+    }
+}
+
+/// RFC-066 D1/regression: a close blocked **only** by a live process still offers the
+/// normal confirm flow -- D1's fix must not cost the working path any more than PR-066-A's
+/// own regression tests already prove at the ordering layer.
+/// `confirming_the_close_terminates_the_real_process_and_removes_the_project` already drives
+/// this exact fixture through `ModalFocusNext` to `Close` and a confirmed `ModalActivate`;
+/// this test adds the one assertion that test does not make: `can_close` is `true` while the
+/// modal is open, for the identical reason D3 names.
+#[test]
+fn a_close_blocked_only_by_a_running_process_still_offers_the_confirm_button() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("close-process-only-can-close"));
+    let (mut state, project_id, _terminal_id) =
+        state_with_a_real_terminal_on_its_own_project("close-process-only-can-close");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert!(
+                modal.can_close,
+                "a running process alone is the one reason termination itself resolves"
+            );
+        }
+        other => panic!("expected the confirmation open, got {other:?}"),
+    }
 }
 
 /// RFC-030 PR-030-B, review 411 R-a: `record_terminal_exit`'s

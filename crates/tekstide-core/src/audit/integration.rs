@@ -246,6 +246,14 @@ pub enum SafeCloseDecision {
         terminal_session_confirmed_empty: bool,
     },
     Cancelled,
+    /// RFC-066 D10/Amendment 1: the assessment already blocked the close -- a dirty file, a
+    /// pending approval, a review-ready change -- before any confirmation was ever offered.
+    /// Distinct from both siblings: `Cancelled` means the user actively declined a close
+    /// that *was* offered, and `Closed`'s own `Failed` outcome implies a close was
+    /// attempted and did not finish. Neither is true here. No `operation_id`, for the
+    /// identical reason `Cancelled` carries none: no live-work operation ever began for
+    /// this decision to be a phase of.
+    Blocked,
 }
 
 /// RFC-046 PR-046-B, D2: no longer `Clone`/`Eq`/`PartialEq` -- forced by
@@ -1252,6 +1260,10 @@ fn safe_close_decision_record(
             Some(operation_id),
         ),
         SafeCloseDecision::Cancelled => (AuditOutcome::Cancelled, None),
+        // RFC-066 D10: the existing, dedicated outcome for "the described action did not
+        // proceed" (`AuditOutcome::Blocked`'s own doc) -- not `Failed`, which implies an
+        // attempt, and not `Cancelled`, which implies an offer the user declined.
+        SafeCloseDecision::Blocked => (AuditOutcome::Blocked, None),
     };
     let mut record = DurableAuditRecordV1::new(
         AuditEventFamily::SafeCloseDecision,

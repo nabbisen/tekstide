@@ -4,7 +4,8 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 
 use super::schema::{
-    AUDIT_APPLICATION_ID, AUDIT_SCHEMA_VERSION, CREATE_SCHEMA_V2, audit_events_v2_table_ddl,
+    AUDIT_APPLICATION_ID, AUDIT_SCHEMA_VERSION, CREATE_SCHEMA_V3, audit_events_v2_table_ddl,
+    audit_events_v3_table_ddl,
 };
 use super::store::{AuditStoreError, AuditStoreErrorReason};
 
@@ -57,21 +58,77 @@ const OLDEST_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 /// The carry is captured into a throwaway table before anything else
 /// runs and restored (via `MAX`, so it can only move forward, never
 /// backward) after the rename and indexes are in place.
-pub(crate) const MIGRATIONS: &[MigrationStep] = &[MigrationStep {
-    from_version: 1,
-    to_version: 2,
+pub(crate) const MIGRATIONS: &[MigrationStep] = &[
+    MigrationStep {
+        from_version: 1,
+        to_version: 2,
+        statements: &[
+            // Captured first, before the source table (and its
+            // `sqlite_sequence` row) is touched at all. If `audit_events`
+            // was never written to, it has no `sqlite_sequence` row yet
+            // (SQLite creates that row lazily on first insert, not at
+            // `CREATE TABLE` time) -- this then produces an empty carry
+            // table, which the restore step below treats as "no floor to
+            // enforce" via `COALESCE(MAX(seq), 0)`.
+            "CREATE TABLE audit_events_seq_carry AS \
+         SELECT seq FROM sqlite_sequence WHERE name = 'audit_events'",
+            audit_events_v2_table_ddl!("audit_events_v2_rebuild"),
+            "INSERT INTO audit_events_v2_rebuild (\
+            sequence, event_id, schema_version, project_id, family, outcome, \
+            operation_id, terminal_id, agent_run_id, approval_id, subject_kind, \
+            subject_ref, action_kind, risk_level, actor_kind, action_source, \
+            adapter_profile_ref, reason_code, created_at\
+        ) SELECT \
+            sequence, event_id, schema_version, project_id, family, outcome, \
+            operation_id, terminal_id, agent_run_id, approval_id, subject_kind, \
+            subject_ref, action_kind, risk_level, actor_kind, action_source, \
+            adapter_profile_ref, reason_code, created_at \
+        FROM audit_events",
+            "DROP TABLE audit_events",
+            "ALTER TABLE audit_events_v2_rebuild RENAME TO audit_events",
+            // Each index statement's text is byte-identical to the
+            // corresponding one in `CREATE_SCHEMA_V2` (real embedded
+            // newline + 4-space indent, not a backslash line-continuation
+            // collapsed to a single space) -- SQLite stores an index's
+            // `CREATE INDEX` text in `sqlite_master.sql` verbatim as given,
+            // unlike a table's, which gets rewritten on rename. A fresh
+            // install and this migration must produce identical index text
+            // too, or the convergence test's whole point is defeated by the
+            // one part of it that ISN'T covered by the table-DDL macro.
+            "CREATE INDEX audit_events_project_sequence\n    ON audit_events(project_id, sequence DESC)",
+            "CREATE INDEX audit_events_operation_sequence\n    ON audit_events(operation_id, sequence ASC)",
+            "CREATE UNIQUE INDEX audit_events_one_authorization_per_operation\n    ON audit_events(operation_id) WHERE outcome = 'authorized'",
+            "CREATE INDEX audit_events_family_outcome_sequence\n    ON audit_events(family, outcome, sequence DESC)",
+            // Restore the high-water mark -- `MAX` so this can only move the
+            // mark forward (matching whatever the rebuild's own inserts
+            // already advanced it to), never backward. Only reachable if the
+            // rebuild table actually has a `sqlite_sequence` row itself
+            // (true whenever it received at least one row; see the carry
+            // step's own comment for the symmetric zero-row case).
+            "UPDATE sqlite_sequence SET seq = MAX(seq, \
+            (SELECT COALESCE(MAX(seq), 0) FROM audit_events_seq_carry)) \
+         WHERE name = 'audit_events'",
+            "DROP TABLE audit_events_seq_carry",
+        ],
+    },
+    RFC_066_SAFE_CLOSE_BLOCKED_MIGRATION,
+];
+
+/// RFC-066 D10/Amendment 1's `2 -> 3` step: the `safe_close_decision` family's own row
+/// `CHECK` gains the `outcome = 'blocked' AND operation_id IS NULL` branch -- the same
+/// table-rebuild pattern the `1 -> 2` step above uses and documents in full (identical
+/// `sqlite_sequence` high-water-mark carry, identical column list -- no column is added or
+/// removed here, only the `CHECK` constraint changes, so the `INSERT ... SELECT` column list
+/// is unchanged from the `1 -> 2` step's own). Built from [`audit_events_v3_table_ddl`], the
+/// same macro expansion [`CREATE_SCHEMA_V3`] uses for a fresh install.
+const RFC_066_SAFE_CLOSE_BLOCKED_MIGRATION: MigrationStep = MigrationStep {
+    from_version: 2,
+    to_version: 3,
     statements: &[
-        // Captured first, before the source table (and its
-        // `sqlite_sequence` row) is touched at all. If `audit_events`
-        // was never written to, it has no `sqlite_sequence` row yet
-        // (SQLite creates that row lazily on first insert, not at
-        // `CREATE TABLE` time) -- this then produces an empty carry
-        // table, which the restore step below treats as "no floor to
-        // enforce" via `COALESCE(MAX(seq), 0)`.
         "CREATE TABLE audit_events_seq_carry AS \
          SELECT seq FROM sqlite_sequence WHERE name = 'audit_events'",
-        audit_events_v2_table_ddl!("audit_events_v2_rebuild"),
-        "INSERT INTO audit_events_v2_rebuild (\
+        audit_events_v3_table_ddl!("audit_events_v3_rebuild"),
+        "INSERT INTO audit_events_v3_rebuild (\
             sequence, event_id, schema_version, project_id, family, outcome, \
             operation_id, terminal_id, agent_run_id, approval_id, subject_kind, \
             subject_ref, action_kind, risk_level, actor_kind, action_source, \
@@ -83,32 +140,17 @@ pub(crate) const MIGRATIONS: &[MigrationStep] = &[MigrationStep {
             adapter_profile_ref, reason_code, created_at \
         FROM audit_events",
         "DROP TABLE audit_events",
-        "ALTER TABLE audit_events_v2_rebuild RENAME TO audit_events",
-        // Each index statement's text is byte-identical to the
-        // corresponding one in `CREATE_SCHEMA_V2` (real embedded
-        // newline + 4-space indent, not a backslash line-continuation
-        // collapsed to a single space) -- SQLite stores an index's
-        // `CREATE INDEX` text in `sqlite_master.sql` verbatim as given,
-        // unlike a table's, which gets rewritten on rename. A fresh
-        // install and this migration must produce identical index text
-        // too, or the convergence test's whole point is defeated by the
-        // one part of it that ISN'T covered by the table-DDL macro.
+        "ALTER TABLE audit_events_v3_rebuild RENAME TO audit_events",
         "CREATE INDEX audit_events_project_sequence\n    ON audit_events(project_id, sequence DESC)",
         "CREATE INDEX audit_events_operation_sequence\n    ON audit_events(operation_id, sequence ASC)",
         "CREATE UNIQUE INDEX audit_events_one_authorization_per_operation\n    ON audit_events(operation_id) WHERE outcome = 'authorized'",
         "CREATE INDEX audit_events_family_outcome_sequence\n    ON audit_events(family, outcome, sequence DESC)",
-        // Restore the high-water mark -- `MAX` so this can only move the
-        // mark forward (matching whatever the rebuild's own inserts
-        // already advanced it to), never backward. Only reachable if the
-        // rebuild table actually has a `sqlite_sequence` row itself
-        // (true whenever it received at least one row; see the carry
-        // step's own comment for the symmetric zero-row case).
         "UPDATE sqlite_sequence SET seq = MAX(seq, \
             (SELECT COALESCE(MAX(seq), 0) FROM audit_events_seq_carry)) \
          WHERE name = 'audit_events'",
         "DROP TABLE audit_events_seq_carry",
     ],
-}];
+};
 
 pub(super) fn probe_existing_store(database_file: &Path) -> Result<i64, AuditStoreError> {
     let connection = Connection::open_with_flags(
@@ -152,7 +194,7 @@ pub(super) fn create_current_schema(connection: &mut Connection) -> Result<(), A
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(AuditStoreError::sqlite)?;
     transaction
-        .execute_batch(CREATE_SCHEMA_V2)
+        .execute_batch(CREATE_SCHEMA_V3)
         .map_err(AuditStoreError::sqlite)?;
     transaction
         .pragma_update(None, "application_id", AUDIT_APPLICATION_ID)

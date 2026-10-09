@@ -1365,6 +1365,17 @@ project-close-dialog-running-process-detail = Anything started from these termin
 project-close-dialog-close = Close
 project-close-dialog-cancel = Cancel
 project-close-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.
+# RFC-066 D3: shown instead of `project-close-dialog-title` when the close is already
+# blocked for a reason other than a running process -- not a question with a withheld
+# "yes," since this dialog never offers one.
+project-close-dialog-blocked-title = This project can't be closed yet
+# RFC-066 D3: the sole control on a blocked-up-front dialog -- "Cancel" would imply a
+# close was on offer to decline; nothing was.
+project-close-dialog-dismiss = Dismiss
+# RFC-066 D3: there is exactly one control here, so neither Tab/Shift+Tab nor "activates"
+# describes anything real -- unlike `project-close-dialog-hint` above, which still does for
+# the two-button dialog it belongs to.
+project-close-dialog-blocked-hint = Escape dismisses.
 
 
 # 0.12.1: descriptions for `keyboard_help::keyboard_help_lines`, one per

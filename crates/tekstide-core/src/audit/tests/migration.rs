@@ -4,7 +4,7 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::audit::migration::{MIGRATIONS, MigrationStep, migrate_sequentially};
-use crate::audit::schema::{CREATE_SCHEMA_V1, CREATE_SCHEMA_V2};
+use crate::audit::schema::{CREATE_SCHEMA_V1, CREATE_SCHEMA_V2, CREATE_SCHEMA_V3};
 use crate::audit::{
     AuditActionKind, AuditActionSource, AuditActorKind, AuditEventFamily, AuditOutcome, AuditQuery,
     AuditRiskLevel, AuditStore, AuditStoreErrorReason, DurableAuditRecordV1,
@@ -31,6 +31,7 @@ use super::support::TestAuditDirs;
 
 const V1_FIXTURE: &str = include_str!("fixtures/audit-v1.sql");
 const V2_FIXTURE: &str = include_str!("fixtures/audit-v2.sql");
+const V3_FIXTURE: &str = include_str!("fixtures/audit-v3.sql");
 
 /// RFC-013 Amendment 1, item 5: `CREATE_SCHEMA_V1` must never be hand-
 /// edited to match a later version -- its only value is that it now
@@ -63,6 +64,18 @@ fn create_schema_v2_constant_matches_the_expected_fixture_exactly() {
     assert_eq!(CREATE_SCHEMA_V2.trim(), fixture_ddl.trim());
 }
 
+/// Companion to the v2 test above, for v3 (RFC-066 D10/Amendment 1): a fresh install's DDL
+/// must match the expected post-`2 -> 3`-migration fixture too.
+#[test]
+fn create_schema_v3_constant_matches_the_expected_fixture_exactly() {
+    let fixture_ddl = V3_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with("PRAGMA"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(CREATE_SCHEMA_V3.trim(), fixture_ddl.trim());
+}
+
 /// RFC-013 Amendment 1, item 5: converted from `canonical_v1_fixture_
 /// opens_and_remains_current`, which only proved a v1 fixture *opened*
 /// -- exactly the test that kept passing while `CREATE_SCHEMA_V1` and
@@ -72,11 +85,16 @@ fn create_schema_v2_constant_matches_the_expected_fixture_exactly() {
 /// schema was wrong" note). This version proves the actual migration:
 /// pre-existing rows (inserted directly, bypassing `AuditStore`, so
 /// their `sequence` values are assigned the way a real prior installation
-/// would have them) survive with their original `sequence`, the database
-/// ends at `user_version = 2`, and -- the end-to-end proof the original
-/// defect is closed -- a `command_cwd_mismatch` anomaly write, which used
+/// would have them) survive with their original `sequence`, and -- the end-to-end proof the
+/// original defect is closed -- a `command_cwd_mismatch` anomaly write, which used
 /// to silently degrade on this exact fixture (response 117's probe),
 /// now persists.
+///
+/// **RFC-066 D10/Amendment 1: the database now ends at `user_version = 3`, not `2`** --
+/// `AuditStore::open` always migrates to the current schema, and a real `1 -> 2` upgrade
+/// runs straight through to `3` the same way a real `1 -> 2` upgrade always did to `2` when
+/// `2` was current. The property this test proves (the `1 -> 2` step's own anomaly fix
+/// persists, and `sequence` survives) is unaffected by which version is current.
 #[test]
 fn v1_fixture_with_existing_rows_migrates_to_v2_preserving_sequence_and_accepts_the_new_anomaly() {
     let dirs = TestAuditDirs::new("migration-v1-to-v2");
@@ -173,7 +191,7 @@ fn v1_fixture_with_existing_rows_migrates_to_v2_preserving_sequence_and_accepts_
 
     let connection = Connection::open(dirs.storage_path.database_file()).unwrap();
     assert_eq!(pragma(&connection, "application_id"), 0x544B_4155);
-    assert_eq!(pragma(&connection, "user_version"), 2);
+    assert_eq!(pragma(&connection, "user_version"), 3);
 }
 
 /// Response 119 Required: a store that was **purged** (all rows deleted,
@@ -253,16 +271,122 @@ fn a_purged_then_migrated_store_does_not_reuse_a_retired_sequence_number() {
     );
 }
 
-/// A v2 fixture (no migration needed) must also open and stay current --
-/// the companion to the v1 fixture test, proving `audit-v2.sql` itself is
-/// a valid, openable v2 database, not just text that happens to match
-/// `CREATE_SCHEMA_V2`.
+/// RFC-066 D10/Amendment 1: **converted from `canonical_v2_fixture_opens_and_remains_
+/// current`**, which only proved a v2 fixture *opened* -- and would have kept passing right
+/// through the defect this RFC found, the same "schema identity compares only
+/// `application_id`/`user_version`, never the DDL" gap `v1_fixture_with_existing_rows_
+/// migrates_to_v2_...` already documents for the `1 -> 2` step. This version proves the real
+/// `2 -> 3` migration: pre-existing rows (inserted directly against the raw v2 schema, the
+/// same way a real prior installation would have them) survive with their original
+/// `sequence`, the database ends at `user_version = 3`, and -- the end-to-end proof the
+/// defect this slice found is closed -- a `SafeCloseDecision::Blocked` write, which used to
+/// be silently rejected by the v2 `CHECK` constraint on this exact fixture, now persists.
 #[test]
-fn canonical_v2_fixture_opens_and_remains_current() {
-    let dirs = TestAuditDirs::new("migration-v2-fixture");
+fn v2_fixture_with_existing_rows_migrates_to_v3_preserving_sequence_and_accepts_the_new_blocked_outcome()
+ {
+    let dirs = TestAuditDirs::new("migration-v2-to-v3");
     fs::create_dir_all(dirs.storage_path.audit_dir()).unwrap();
     let connection = Connection::open(dirs.storage_path.database_file()).unwrap();
     connection.execute_batch(V2_FIXTURE).unwrap();
+    // Two genuinely pre-existing rows, inserted directly against the raw
+    // v2 schema -- not through any Rust-level API, since the whole point
+    // is to simulate rows a real prior installation already wrote.
+    connection
+        .execute(
+            "INSERT INTO audit_events \
+                (event_id, schema_version, project_id, family, outcome, \
+                 action_kind, actor_kind, action_source, created_at) \
+             VALUES \
+                (?1, 1, ?2, 'project_added', 'applied', 'project_add', 'user', \
+                 'trusted_ui', '2026-01-01T00:00:00Z')",
+            rusqlite::params![fixture_event_id(1), fixture_project_id(1)],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO audit_events \
+                (event_id, schema_version, project_id, family, outcome, \
+                 action_kind, actor_kind, action_source, created_at) \
+             VALUES \
+                (?1, 1, ?2, 'project_added', 'applied', 'project_add', 'user', \
+                 'trusted_ui', '2026-01-02T00:00:00Z')",
+            rusqlite::params![fixture_event_id(2), fixture_project_id(2)],
+        )
+        .unwrap();
+    let original_rows: Vec<(i64, String)> = connection
+        .prepare("SELECT sequence, event_id FROM audit_events ORDER BY sequence")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        original_rows.len(),
+        2,
+        "test precondition: two pre-existing rows"
+    );
+    drop(connection);
+
+    // Opening via the real `AuditStore::open` is what actually runs the
+    // `2 -> 3` migration (`prepare_existing_store` -> `migrate_
+    // sequentially`), exactly the path a real upgrade takes.
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+
+    // A `SafeCloseDecision::Blocked` write -- silently rejected before this amendment (the
+    // v2 `CHECK` constraint had no branch admitting `outcome = 'blocked'` for this family) --
+    // now persists, on a database that started life as v2.
+    let mut record = DurableAuditRecordV1::new(
+        AuditEventFamily::SafeCloseDecision,
+        AuditOutcome::Blocked,
+        AuditActionKind::SafeCloseTerminate,
+        AuditActorKind::User,
+        AuditActionSource::TrustedUi,
+    );
+    record.project_id = Some(ProjectId::for_test(3));
+    let append_result = store.append(&record);
+    assert!(
+        append_result.is_ok(),
+        "a Blocked safe-close decision must persist on a migrated database: {append_result:?}"
+    );
+
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    let blocked = records
+        .iter()
+        .find(|sequenced| sequenced.record.outcome == AuditOutcome::Blocked)
+        .expect("the Blocked record must be queryable back");
+    assert_eq!(blocked.record.family, AuditEventFamily::SafeCloseDecision);
+    assert!(blocked.record.operation_id.is_none());
+
+    // Every pre-existing row is still present, with its ORIGINAL sequence
+    // -- not renumbered by the rebuild's `AUTOINCREMENT`.
+    for (sequence, event_id) in &original_rows {
+        let found = records
+            .iter()
+            .find(|sequenced| sequenced.record.event_id.as_str() == event_id);
+        let found = found
+            .unwrap_or_else(|| panic!("pre-existing row {event_id} must survive the migration"));
+        assert_eq!(
+            found.sequence, *sequence,
+            "row {event_id}'s sequence must be preserved exactly by the rebuild"
+        );
+    }
+    drop(store);
+
+    let connection = Connection::open(dirs.storage_path.database_file()).unwrap();
+    assert_eq!(pragma(&connection, "application_id"), 0x544B_4155);
+    assert_eq!(pragma(&connection, "user_version"), 3);
+}
+
+/// A v3 fixture (no migration needed) must also open and stay current --
+/// the companion to the v1/v2 fixture migration tests, proving `audit-v3.sql` itself is
+/// a valid, openable v3 database, not just text that happens to match
+/// `CREATE_SCHEMA_V3`.
+#[test]
+fn canonical_v3_fixture_opens_and_remains_current() {
+    let dirs = TestAuditDirs::new("migration-v3-fixture");
+    fs::create_dir_all(dirs.storage_path.audit_dir()).unwrap();
+    let connection = Connection::open(dirs.storage_path.database_file()).unwrap();
+    connection.execute_batch(V3_FIXTURE).unwrap();
     drop(connection);
 
     let store = AuditStore::open(dirs.storage_path.clone()).unwrap();
@@ -277,20 +401,27 @@ fn canonical_v2_fixture_opens_and_remains_current() {
 
     let connection = Connection::open(dirs.storage_path.database_file()).unwrap();
     assert_eq!(pragma(&connection, "application_id"), 0x544B_4155);
-    assert_eq!(pragma(&connection, "user_version"), 2);
+    assert_eq!(pragma(&connection, "user_version"), 3);
 }
 
-/// RFC-013 Amendment 1, item 4 -- the convergence test: a fresh v2
-/// install and a v1-fixture-then-migrated database must produce
+/// RFC-013 Amendment 1, item 4 -- the convergence test: a fresh install
+/// and a v1-fixture-then-migrated database must produce
 /// **identical** `sqlite_master` entries for `audit_events` (the table
 /// itself and every index). This is the test that would have caught
 /// `CREATE_SCHEMA_V1`/`audit-v1.sql` silently diverging, and it is the
-/// only test in this file that would catch the migration's rebuilt table
+/// only test in this file that would catch a migration's rebuilt table
 /// drifting from a fresh install's -- comparing `application_id`/
 /// `user_version` alone (what the old canonical-fixture test did) cannot
 /// see a DDL difference at all.
+///
+/// **RFC-066 D10/Amendment 1: both sides now land at v3, not v2** (a fresh install via
+/// `create_current_schema`'s own `CREATE_SCHEMA_V3`; the v1 fixture via the full `1 -> 2 ->
+/// 3` sequential migration) -- the property this test proves (a fresh install and an upgrade
+/// chain converge on byte-identical DDL) is unchanged by that, and still the only thing in
+/// this file that would catch the `2 -> 3` step's own rebuilt table drifting from
+/// `CREATE_SCHEMA_V3`.
 #[test]
-fn fresh_v2_install_and_migrated_v1_fixture_produce_identical_schema() {
+fn fresh_install_and_migrated_v1_fixture_produce_identical_schema() {
     let fresh_dirs = TestAuditDirs::new("migration-convergence-fresh");
     let fresh_store = AuditStore::open(fresh_dirs.storage_path.clone()).unwrap();
     drop(fresh_store);
@@ -484,11 +615,11 @@ fn concurrent_migration_holds_one_immediate_transaction_for_the_whole_step() {
 
 #[test]
 fn future_schema_and_foreign_application_are_rejected_without_writes() {
-    // RFC-013 Amendment 1 bumped AUDIT_SCHEMA_VERSION to 2, so `2` is no
-    // longer future -- `3` is the genuinely-out-of-range probe now.
+    // RFC-066 D10/Amendment 1 bumped AUDIT_SCHEMA_VERSION to 3, so `3` is no
+    // longer future -- `4` is the genuinely-out-of-range probe now.
     assert_identity_rejected_without_writes(
         "migration-future",
-        "PRAGMA user_version = 3",
+        "PRAGMA user_version = 4",
         AuditStoreErrorReason::UnsupportedSchema,
     );
     assert_identity_rejected_without_writes(
@@ -508,8 +639,8 @@ fn missing_store_initializes_current_identity() {
 
     let connection = Connection::open(dirs.storage_path.database_file()).unwrap();
     assert_eq!(pragma(&connection, "application_id"), 0x544B_4155);
-    // RFC-013 Amendment 1: a fresh install now starts at v2 directly.
-    assert_eq!(pragma(&connection, "user_version"), 2);
+    // RFC-066 D10/Amendment 1: a fresh install now starts at v3 directly.
+    assert_eq!(pragma(&connection, "user_version"), 3);
 }
 
 #[test]
