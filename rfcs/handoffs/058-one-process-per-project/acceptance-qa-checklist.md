@@ -4,12 +4,33 @@ Tick a box only when the thing it names has been **run**.
 
 ## PR-058-A — reproduce, and nothing else
 
-- [ ] Two **real** processes, one real project root, the same file edited differently in each.
-- [ ] The two instances are shown to hold the **same project id**, and therefore the same record
-      path — the mechanism, not just the symptom.
-- [ ] **The clobber is observed**: one buffer in the record, the other gone, nothing said.
-- [ ] **If it did not reproduce, that is reported instead of a fix** (§row 6).
-- [ ] No product change in this slice.
+- [x] Two **real** processes, one real project root, the same file edited differently in each.
+      A new test-only `[[bin]]`, `project_process_probe` (`tekstide-core/src/bin/`, the same
+      shape as `reference_adapter`), runs the exact production sequence a real boot already
+      runs — `RecentProjectStore::load_or_recover`, `ApplicationShell::add_project_from_path`,
+      `RecentProjectStore::save`, `tekstide_core::recovery::write_recovery_record` — never a
+      reimplementation of any of them. Spawned twice as real OS processes
+      (`app::tests::two_real_processes_opening_the_same_root_get_the_same_project_id_and_clobber_the_record`),
+      sharing one real state root and one real project root, writing `"instance A's edit"` then
+      `"instance B's edit"` for the same `doc.txt`.
+- [x] The two instances are shown to hold the **same project id**, and therefore the same record
+      path — the mechanism, not just the symptom. Asserted directly (`assert_eq!(first_id,
+      second_id, ...)`), and confirmed the mechanism is the cause, not a coincidence, by running
+      the identical probe against two *different* project roots by hand first and observing two
+      *different* ids (`9d779765-...` vs. `76ad7a16-...`) — the harness can tell the two cases
+      apart, so "same id" below is not a tautology.
+- [x] **The clobber is observed**: one buffer in the record, the other gone, nothing said.
+      `records_dir(&state_root, &first_id)` has exactly one file; its content is `"instance B's
+      edit"`; `"instance A's edit"` is not present anywhere in it, and nothing on either process's
+      stdout/stderr or in the record itself says a first edit ever existed.
+- [ ] **If it did not reproduce, that is reported instead of a fix** (§row 6). *(Not applicable —
+      it reproduced on the first attempt. Left unticked rather than ticked for an event that did
+      not happen: this box names what to do if reproduction fails, and nothing was done because
+      nothing failed.)*
+- [x] No product change in this slice. `git status` for this slice: one new test file
+      (`crates/tekstide-core/src/app/tests.rs`, additions only) and one new test-only binary
+      (`crates/tekstide-core/src/bin/project_process_probe.rs`). No file under `src/` outside
+      `tests.rs`/`bin/` touched.
 
 ## PR-058-B — the mechanism
 

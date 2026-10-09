@@ -11,8 +11,10 @@ use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
 use crate::project::root::{ProjectRootValidationError, SymlinkPolicy};
 use crate::project::{ProjectId, ProjectProviderState, ProjectRuntimeSummary};
 use crate::runtime::terminal::TerminationOutcome;
+use crate::test_support::RealProcessLimiter;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -1039,4 +1041,124 @@ fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+// --- RFC-058 PR-058-A: reproduce the clobber with two real processes ----------
+//
+// `REQ-PROJ-009`'s own hazard, watched happen rather than read from the code
+// (D2, the RFC-066 D5 lesson applied before the fact): two real
+// `project_process_probe` processes, sharing a real state root and a real
+// project root on disk, each run the exact production sequence a boot
+// already runs (`RecentProjectStore::load_or_recover`, `ApplicationShell::
+// add_project_from_path`, `RecentProjectStore::save`,
+// `tekstide_core::recovery::write_recovery_record`). **No product code is
+// touched by this slice** -- the probe binary calls only functions that
+// already existed before PR-058-A, and the test below asserts the clobber
+// happens; it does not yet guard against it.
+
+/// `CARGO_BIN_EXE_<name>` is only guaranteed for genuine integration test
+/// targets (`tests/*.rs`), not for a lib's own `#[cfg(test)]` unit tests like
+/// this module -- the same gap `reference_adapter_binary_path`
+/// (`approval::tests::reference_adapter`) already documents and works
+/// around. Same fallback: Cargo places every crate's test binary at
+/// `target/<profile>/deps/<crate>-<hash>` and every `[[bin]]` target
+/// (including `project_process_probe`) as a sibling of `deps/` itself, at
+/// `target/<profile>/<bin-name>`.
+fn project_process_probe_binary_path() -> PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_project_process_probe") {
+        return PathBuf::from(path);
+    }
+    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
+    let profile_dir = test_exe
+        .parent() // .../target/<profile>/deps
+        .and_then(Path::parent) // .../target/<profile>
+        .expect("test binary should live under target/<profile>/deps");
+    let candidate = profile_dir.join("project_process_probe");
+    assert!(
+        candidate.is_file(),
+        "expected the project_process_probe binary at {}; the [[bin]] target may not have built",
+        candidate.display()
+    );
+    candidate
+}
+
+/// Spawns a real `project_process_probe` process, waits for it to exit, and
+/// returns the project id it printed. Panics with the child's own stderr on
+/// a non-zero exit, so a failure here never silently reads as "same id" --
+/// `unwrap_or_default` on a missing/garbled stdout line would make a crashed
+/// probe look identical to a probe that printed nothing, by accident, which
+/// is exactly the quiet-corruption shape this RFC exists to stop appearing
+/// in Tekstide's own code and must not be allowed to reappear in the harness
+/// proving it.
+fn run_project_process_probe(
+    state_root: &Path,
+    project_root: &Path,
+    relative_path: &str,
+    text: &str,
+) -> String {
+    let _real_process_slot = RealProcessLimiter::acquire();
+    let output = Command::new(project_process_probe_binary_path())
+        .arg(state_root)
+        .arg(project_root)
+        .arg(relative_path)
+        .arg(text)
+        .output()
+        .expect("spawn a real project_process_probe process");
+    assert!(
+        output.status.success(),
+        "project_process_probe exited with {:?}: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("probe stdout must be valid UTF-8")
+        .trim()
+        .to_owned()
+}
+
+/// RFC-058 PR-058-A, D2: the reproduction itself. Two real processes open the
+/// **same real project root**, one after the other (not concurrently -- the
+/// collision this RFC is about is in the paths both compute, not in a race
+/// between two writes landing at the same instant), each dirtying the same
+/// document with different text.
+#[test]
+fn two_real_processes_opening_the_same_root_get_the_same_project_id_and_clobber_the_record() {
+    let sandbox = TestSandbox::new("rfc058-reproduce");
+    let state_root = sandbox.create_dir("state");
+    let project_root = sandbox.create_dir("project");
+    sandbox.create_file("project/doc.txt");
+
+    let first_id =
+        run_project_process_probe(&state_root, &project_root, "doc.txt", "instance A's edit");
+    let second_id =
+        run_project_process_probe(&state_root, &project_root, "doc.txt", "instance B's edit");
+
+    assert_eq!(
+        first_id, second_id,
+        "two real processes opening the same canonical root must get the same project id -- \
+         the mechanism `recent_project_id_by_canonical_root` reuses, not just a symptom of it"
+    );
+
+    let records_dir = crate::recovery::records_dir(&state_root, &first_id);
+    let entries: Vec<_> = std::fs::read_dir(&records_dir)
+        .expect("both processes computing the same project id must produce one shared records dir")
+        .map(|entry| entry.expect("a readable directory entry").path())
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "both processes must write the same record file, not two: {entries:?}"
+    );
+
+    let record_json =
+        std::fs::read_to_string(&entries[0]).expect("the clobbered record must be readable");
+    assert!(
+        record_json.contains("instance B's edit"),
+        "the second writer's text must be in the surviving record: {record_json}"
+    );
+    assert!(
+        !record_json.contains("instance A's edit"),
+        "the clobber is real: instance A's own edit must be gone, not merged or appended -- \
+         last tick wins, silently, which is the defect this RFC exists to stop: {record_json}"
+    );
 }
