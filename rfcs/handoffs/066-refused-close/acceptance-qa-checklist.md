@@ -49,7 +49,14 @@ the code had done for two releases — was worth finding. My own ablation agrees
 the old branch fails `a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive`. Gate
 reproduces: `752 + 17 + 1117`, 0 fixture entries.
 
-- [ ] **`terminal_session_confirmed_empty: true` on the refused branch is a false value kept safe by
+- [x] **`terminal_session_confirmed_empty: true` on the refused branch** — **fixed at review 502**,
+  and anchored better than I argued it. I reasoned from review 490's masked-sentinel shape; the dev
+  team found that **this codebase had already decided it explicitly for this identical field**:
+  `terminated_outcome_and_session_confirmation`'s own doc says *"`confirmed` defaults to `false`,
+  never a hopeful `true` … (D3's own honesty rule)"*, three lines away. The rule was already there;
+  `true` broke it. Gate reproduces: `752 + 17 + 1117`, 0 fixture entries.
+
+  ~~Original finding:~~ **`terminal_session_confirmed_empty: true` on the refused branch is a false value kept safe by
   code the next slice is about to rewrite.** Nothing was terminated, so nothing was confirmed empty
   — **`false` is equally inert and also true.** `true` is only harmless because `&& closed` at the
   write site forces it, and **D10 is PR-066-B's job to change that exact write site.** A value that
@@ -58,6 +65,12 @@ reproduces: `752 + 17 + 1117`, 0 fixture entries.
   bound"*, and then one was not.
 
   One character, and it removes a trap laid directly in the path of the next slice.
+
+### PR-066-A closed at review 502
+
+Reproduced against real processes before repairing, ordering fixed, the guard correct for
+combinations, D11 decided and D12 checked, both my ablation and theirs showing the regression test
+load-bearing. Nothing outstanding.
 
 ## PR-066-B — refuse up front
 
