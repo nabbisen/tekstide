@@ -2,16 +2,43 @@
 
 ## PR-067-A — the sidebar persists
 
-- [ ] The explorer renders in **both** modes; `sidebar_view` no longer matches on `ProjectMode`.
-- [ ] `sidebar-placeholder-title` is **deleted**, not reworded (§row 3), and nothing still composes it.
-- [ ] Activating a file in terminal mode switches to Content mode and shows it (D7).
-- [ ] **A document opened by any path that is not the user's own activation does not change the
+- [x] The explorer renders in **both** modes; `sidebar_view` no longer matches on `ProjectMode`.
+      `sidebar_view` no longer takes a `mode` parameter at all. A second, non-obvious gate also
+      had to be found and removed: `handle_explorer_key` and `ensure_explorer_scanned` both
+      independently no-op'd outside Content mode -- without removing those too, the tree would
+      have been visible but inert (or stuck on "Loading…") in Terminal mode. Ablated: restoring
+      either guard fails the D1/D7 test below. Full account in `qa-evidence.md`.
+- [x] `sidebar-placeholder-title` is **deleted**, not reworded (§row 3), and nothing still composes it.
+      `sidebar_label` (its only caller) deleted too. `i18n::enforcement` confirms nothing still
+      references the key.
+- [x] Activating a file in terminal mode switches to Content mode and shows it (D7).
+      **Found a real, pre-existing bug while implementing this**: `ProjectSession::open_text_
+      document` unconditionally forced Content mode for *every* caller, including RFC-027's
+      recovery offer -- harmless before this RFC (the explorer was the only reachable caller),
+      a live D8 violation once the sidebar became reachable from a second one. Fixed at the root
+      (removed from the shared function), not patched at the symptom: a new, explicit
+      `open_active_project_content_workspace()` call lives only at the explorer's own call site.
+      Ablated and live-captured; see `qa-evidence.md`.
+- [x] **A document opened by any path that is not the user's own activation does not change the
       mode** (D8, §row 1) — proven by a test that opens one while in terminal mode and asserts the
       mode held. This is the row that protects RFC-027's recovery offer, which ships first.
-- [ ] `Tab` cycles the same zones in the same order; **no zone added** (D3, §row 2).
-- [ ] **Live capture**: terminal mode with the file tree beside it, same throwaway fixture the
+      `accepting_a_recovery_offer_in_terminal_mode_does_not_switch_the_mode`, driven through a
+      real recovery offer per the task breakdown's own instruction. The third D8 path (the
+      background watch notice) checked by direct inspection: it never calls the open path at all.
+      Ablated at two independent seams (core and GUI); both fail with the exact symptom removed.
+- [x] `Tab` cycles the same zones in the same order; **no zone added** (D3, §row 2).
+      `FocusZone` untouched by this slice -- no variant added, `next()`/`previous()` unchanged.
+      Every existing focus-cycling test passes unchanged, which is the proof.
+- [x] **Live capture**: terminal mode with the file tree beside it, same throwaway fixture the
       placeholder appears in today.
-- [ ] The six-terminal bound, the session bar and the two visible slots are untouched (D9).
+      `evidence/pr-067-a/terminal-mode-with-the-file-tree.png` (the direct D2 replacement for the
+      deleted placeholder), `.../terminal-mode-running-terminal-and-tree.png` (a real running
+      terminal beside the tree), `.../activating-a-file-switches-to-content-mode.png` (D7's own
+      proof). Isolated `XDG_STATE_HOME` under `/dev/shm`, never a path under `$HOME`.
+- [x] The six-terminal bound, the session bar and the two visible slots are untouched (D9).
+      No terminal-workspace code touched by this slice. The live capture itself shows a real
+      session-bar entry and status-bar `1 running` alongside the now-persistent tree, unchanged
+      in shape.
 
 ## PR-067-B — measure the switch
 
