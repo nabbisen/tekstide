@@ -1170,3 +1170,26 @@ So for every line function in this codebase:
 The risk document's §3 row 10 (*the offer must say recovered buffers come back without undo
 history*) is the first requirement in this project whose proof rests entirely on that gap, which is
 what makes it worth naming here rather than leaving as a general unease.
+
+## A user cannot remove a recent project, so the list only grows — found 2026-10-09
+
+`remove_recent_project` exists in `core/src/app.rs` and its own doc says *"Nothing calls this today,
+and no control is added for it (RFC-036)."* RFC-036 (*Dormant Capability Closure*, closed
+2026-08-28) decided each orphan once, and this one was decided **keep, do not surface**. The
+consequence was not visible then and is now: **the recent-projects list can only grow, and nothing
+inside the product can prune it.**
+
+Found because the owner's own real list had accumulated **17 dead throwaway projects out of 19**,
+every one of them written by an agent launching the real application for a live capture without an
+isolated `XDG_STATE_HOME`. Two carried U+202E right-to-left-override names from past untrusted-text
+work, which render deceptively wherever the list is drawn.
+
+**The capture half is already fixed** — captures now use a throwaway state directory, and the rule
+is recorded. **The product half is not**: a user who opens a folder once still has it in their
+Project Board forever, with no way to say otherwise.
+
+**Not scheduled, and the residue is not ours to clean.** The owner ruled on 2026-10-09 that those
+entries belong to the agent that created them — *"you must ask dev team, the owner of the lines,
+first"* — which is the same principle as the product's own *"a file Tekstide did not write is never
+deleted."* Recorded here so RFC-036's decision can be revisited with its cost known, not so anyone
+tidies a list behind its author's back.
