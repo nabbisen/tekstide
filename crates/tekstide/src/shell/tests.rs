@@ -17795,7 +17795,21 @@ fn mode_switch_render_cost_measurement() {
         Condition::Terminal => 1,
     };
 
-    println!("NFR-PERF-003 budget: p95 <= 16 ms, p99 <= 33 ms (per-frame user-visible latency)");
+    // Review 509's required fix: a single `Instant::elapsed()` around one view-build call
+    // sits on the timer's own resolution floor for a quantity this small (every one of the
+    // first version's figures was an exact multiple of 4us, and each median equalled its own
+    // minimum -- the RFC-027 reviews 485/486 defect from the other side, the floor showing up
+    // in the medians rather than announcing itself in the spread's sign). Repeating the build
+    // inside the timed region and dividing is the fix offered and taken; `BUILDS_PER_SAMPLE`
+    // is large enough that the total timed region is itself comfortably above the timer's own
+    // resolution, so the per-build figure below is real, not a tick count.
+    const BUILDS_PER_SAMPLE: u32 = 200;
+
+    println!(
+        "NFR-PERF-003 (typing latency in a 100k-line file, not a view-build criterion) used \
+         below only as the nearest existing order-of-magnitude yardstick: p95 <= 16 ms, \
+         p99 <= 33 ms"
+    );
 
     let mut build_us = [[0.0f64; 2]; 5];
     for (round, order) in orders.iter().enumerate() {
@@ -17812,12 +17826,17 @@ fn mode_switch_render_cost_measurement() {
                 .set_mode(target_mode);
 
             let started = std::time::Instant::now();
-            let view = super::active_project_workspace_view(&state);
+            for _ in 0..BUILDS_PER_SAMPLE {
+                let view = super::active_project_workspace_view(&state);
+                drop(view);
+            }
             let elapsed = started.elapsed();
-            drop(view);
 
             let at = index(condition);
-            build_us[round][at] = elapsed.as_micros() as f64;
+            // Nanoseconds first, then divided as `f64`, not `Duration::as_micros()` on an
+            // already-divided `Duration` -- `as_micros()` truncates to a whole integer, which
+            // would reintroduce exactly the quantization this fix exists to remove.
+            build_us[round][at] = elapsed.as_nanos() as f64 / 1000.0 / BUILDS_PER_SAMPLE as f64;
             println!(
                 "round {} {:<8} view-build {:>8.1} us",
                 round + 1,
@@ -17872,16 +17891,18 @@ fn mode_switch_render_cost_measurement() {
 
     let worst_ms = switch_to_content_ms.max(switch_to_terminal_ms);
     println!(
-        "\nworst of the two: {worst_ms:.3} ms, against NFR-PERF-003's p95 <= 16 ms / p99 <= \
-         33 ms -- {}",
+        "\nworst of the two: {worst_ms:.3} ms, against NFR-PERF-003's own p95 <= 16 ms / p99 \
+         <= 33 ms used here only as the nearest existing order-of-magnitude yardstick (that \
+         budget is typing latency in a 100k-line file, not a view-build criterion this \
+         operation is actually held to) -- {}",
         if worst_ms < 16.0 {
-            "below the p95 budget: a mode switch's own view-build cost is not something a \
-             user would perceive. This measures the view-build stage only (no layout, no \
-             paint, the same disclosed lower bound `change_review_content_view_build_cost_...` \
-             already carries) -- real wall-clock cost is higher, but not by anything close to \
-             the margin between this number and the budget."
+            "well under it: a mode switch's own view-build cost is not something a user would \
+             perceive. This measures the view-build stage only (no layout, no paint, the same \
+             disclosed lower bound `change_review_content_view_build_cost_...` already \
+             carries) -- real wall-clock cost is higher, but not by anything close to the \
+             margin between this number and the yardstick."
         } else {
-            "at or above the p95 budget on the view-build stage alone, before layout or paint \
+            "at or above that yardstick on the view-build stage alone, before layout or paint \
              are even counted -- this is evidence a mode switch is perceptible, not a \
              conclusion by itself."
         }

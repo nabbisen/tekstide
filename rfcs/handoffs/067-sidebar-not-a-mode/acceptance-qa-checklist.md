@@ -72,13 +72,18 @@ slice is the right place to say so rather than let it pass unremarked.
       `mode_switch_render_cost_measurement` (`shell/tests.rs`), the `editor_typing_latency_under_
       a_recovery_persist_tick` shape (five rounds, alternating order, median + spread). One
       project (representative tree, a real running terminal with real output, a real 300-line
-      open document) so nothing but the mode differs between conditions. Measured in release with
-      `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`: Content mode 16.0 us (spread 16.0 .. 40.0),
-      Terminal mode 4.0 us (spread 4.0 .. 8.0). Worst case 0.016 ms against `NFR-PERF-003`'s own
-      p95 <= 16 ms -- roughly three orders of magnitude of margin, not a close call. Also
-      disclosed: a new, asynchronous, worker-thread-only scan cost PR-067-A's own D1 fix
-      introduced for terminal-mode-first projects, checked against this project's own existing
-      bounded-scan tests rather than newly measured. Full account in `qa-evidence.md`.
+      open document) so nothing but the mode differs between conditions. **Required at review
+      509**: the first version's single-build timing sat on the timer's own resolution floor
+      (every figure an exact multiple of 4us); fixed by repeating the build 200x inside the
+      timed region and dividing as `f64` nanoseconds. Measured in release with
+      `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`, two runs: Content mode 18.0-23.2 us,
+      Terminal mode 3.9-5.0 us, neither quantized. Worst case 0.023 ms against `NFR-PERF-003`'s
+      own p95 <= 16 ms, used as the nearest order-of-magnitude yardstick rather than the
+      threshold this operation is actually held to (review 509's smaller note) -- still roughly
+      three orders of magnitude of margin, unchanged by the fix. Also disclosed: a new,
+      asynchronous, worker-thread-only scan cost PR-067-A's own D1 fix introduced for
+      terminal-mode-first projects, checked against this project's own existing bounded-scan
+      tests rather than newly measured. Full account in `qa-evidence.md`.
 - [x] No rate derived by dividing one condition's figure by another condition's count.
       Both figures reported are each condition's own absolute cost; nothing is divided by a
       count from the other condition.

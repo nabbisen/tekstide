@@ -173,22 +173,35 @@ measurement has: the two conditions here are each other's control, and "the cost
 into a mode" is simply that mode's own absolute view-build cost, since the switch itself (the
 field write) has none worth measuring separately.
 
+**Required at review 509: the first version's figures sat on the timer's own resolution floor.**
+One `Instant::elapsed()` around a single view-build call, for a quantity of 4-16 us -- every
+figure was an exact multiple of 4 us, and each median equalled its own minimum, the RFC-027
+reviews 485/486 defect from the other side: there the floor showed up in the spread's sign
+(straddling zero), here it showed up in the medians themselves without announcing itself.
+**Fixed**: the build now repeats 200 times inside the timed region (`BUILDS_PER_SAMPLE`), divided
+back down as `f64` nanoseconds (never through `Duration::as_micros()`'s own integer truncation,
+which would have reintroduced the identical quantization one step later). The total timed region
+is now comfortably above the timer's own resolution, and the per-build figure below is real, not
+a tick count.
+
 **Measured** (`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo test --release -p tekstide
 mode_switch_render_cost_measurement -- --ignored --nocapture`, the same invocation shape
 `editor_typing_latency_baseline_100_000_lines` established and for the identical reason: the
 suite's headless view-build tests use iced's `()` renderer, which exists only with debug
-assertions on):
+assertions on). Two independent runs, both reproduced after the fix, numbers varying run to run
+(ordinary machine conditions) while staying the same order of magnitude and no longer quantized:
 
-| Condition | Median (5 rounds) | Spread |
-| --- | --- | --- |
-| Content mode | 16.0 us | 16.0 .. 40.0 us |
-| Terminal mode | 4.0 us | 4.0 .. 8.0 us |
+| Condition | Median (5 rounds), run 1 | Spread, run 1 | Median, run 2 | Spread, run 2 |
+| --- | --- | --- | --- | --- |
+| Content mode | 18.0 us | 18.0 .. 19.5 us | 23.2 us | 22.8 .. 24.7 us |
+| Terminal mode | 3.9 us | 3.9 .. 4.0 us | 5.0 us | 5.0 .. 5.1 us |
 
-**Worst of the two, 0.016 ms, against this project's own existing latency criterion**
-(`NFR-PERF-003`: p95 <= 16 ms, p99 <= 33 ms) -- not a new threshold invented for this one
-measurement, the established number for "a user would notice." **The margin is roughly
-three orders of magnitude**, not a close call decided by which side of a line a noisy number
-landed on.
+**Worst of the two across both runs, 0.023 ms, against this project's own existing latency
+criterion used as the nearest order-of-magnitude yardstick, not the threshold this operation is
+actually held to** (`NFR-PERF-003`: typing latency in a 100k-line file, p95 <= 16 ms, p99 <= 33
+ms; review 509's own smaller note, taken) -- **the margin is still roughly three orders of
+magnitude**, unchanged by the fix above: the conclusion never depended on the exact figure, only
+on whether it was real, which it now is.
 
 No rate was derived by dividing one condition's figure by another condition's count (the RFC-027
 correction this checklist's own item names) -- both figures reported are each condition's own
