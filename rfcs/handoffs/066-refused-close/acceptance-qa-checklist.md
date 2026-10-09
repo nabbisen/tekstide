@@ -37,6 +37,28 @@ Tick a box only when the thing it names has been **run**.
       Unchanged — still inside `if closed`, termination now sits in the branch that leads there,
       not restructured relative to it.
 
+### Required at review 501
+
+The slice is right. **Reproducing first, against a real `/bin/sh` and a real unsaved edit, and
+watching the terminal die while the project stayed open** — rather than trusting the chain I traced
+in code at review 489 — is exactly what D5 asked for, and it is the half of this RFC I could not do
+myself. The guard handles combinations correctly (`any(|r| r.code != RunningProcess)`, so
+`{RunningProcess, DirtyFile}` refuses without touching anything), `UnsupportedOrUnknown` is
+conservative, and the stale *"never the reverse"* doc comment — which described the opposite of what
+the code had done for two releases — was worth finding. My own ablation agrees with yours: forcing
+the old branch fails `a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive`. Gate
+reproduces: `752 + 17 + 1117`, 0 fixture entries.
+
+- [ ] **`terminal_session_confirmed_empty: true` on the refused branch is a false value kept safe by
+  code the next slice is about to rewrite.** Nothing was terminated, so nothing was confirmed empty
+  — **`false` is equally inert and also true.** `true` is only harmless because `&& closed` at the
+  write site forces it, and **D10 is PR-066-B's job to change that exact write site.** A value that
+  is wrong but masked by an assumption held elsewhere is the shape that produced review 490's
+  data-loss defect: `content_hash: None` was safe *"whenever the file is within the editable
+  bound"*, and then one was not.
+
+  One character, and it removes a trap laid directly in the path of the next slice.
+
 ## PR-066-B — refuse up front
 
 - [ ] A close the assessment blocks shows the reasons and **offers no confirm button** (D3).
