@@ -25,7 +25,6 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 058 | [A Project Held By One Process](./proposed/058-a-project-held-by-one-process.md) | **Proposed 2026-10-10.** `0.34.0`, M13. `REQ-PROJ-009`, a **must**. Two instances share a project id, so they share recovery-record files — the hazard `0.31.0` created |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -38,6 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 058 | [A Project Held By One Process](./accepted/058-a-project-held-by-one-process.md) | **Accepted 2026-10-10.** `0.34.0`, M13. D1–D7 as written, plus D8–D10: a second attempt sends you to the holder rather than opening a duplicate — **but a Wayland client cannot raise itself**, so nothing may claim it did |
 
 *(Empty — nothing is accepted and not yet closed. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
 

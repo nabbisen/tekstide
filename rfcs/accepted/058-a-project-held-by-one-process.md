@@ -1,6 +1,6 @@
 # RFC-058: A Project Held By One Process
 
-Status: **Proposed 2026-10-10.** `0.34.0`, M13. `REQ-PROJ-009`, moved out of the Project-lifecycle
+Status: **Accepted by the human owner 2026-10-10.** D1–D7 as written; **the open question answered with a third option the owner proposed** — see *Decided on acceptance*. Proposed 2026-10-10. `0.34.0`, M13. `REQ-PROJ-009`, moved out of the Project-lifecycle
 coverage row on 2026-09-23 because no such mechanism existed. **It is a `must`, and the hazard it
 names got worse in `0.31.0`.**
 
@@ -102,3 +102,45 @@ technical one:
 **My recommendation: 1.** The hazard is silent corruption of state, not two people editing — and
 `REQ-PROJ-009` asks for conflict *prevention*, which option 1 delivers without taking away a
 working editor. Option 2 trades a rare silent failure for a frequent visible obstruction.
+
+## Decided on acceptance (2026-10-10)
+
+**The owner proposed a third option, better than either I offered: *"activate the existing window
+instead of opening another tab."*** It resolves the conflict by making it impossible rather than by
+degrading protection, and it matches what a user actually means by opening a project they already
+have open. It is adopted — **with one constraint, established by reading the substrate rather than
+assuming it.**
+
+**D8 — A second attempt sends the user to the holder; it does not open a duplicate.** The project
+is held by one process. A second instance asked for the same root does not open it, names the
+instance that holds it, and asks that window for attention.
+
+**D9 — Raising the window is not possible on this platform, and nothing may promise it.** Checked
+in the dependency tree actually in use:
+
+- `iced 0.14` exposes **both** `window::gain_focus` and `window::request_user_attention`, so the
+  API is reachable.
+- `gain_focus` reaches winit's `focus_window`, whose own documentation reads: **"iOS / Android /
+  **Wayland** / Orbital: Unsupported."** A Wayland client cannot raise itself — the compositor
+  decides. That is a deliberate anti-focus-stealing property of Wayland, not a gap in winit, and
+  this product runs on Wayland.
+- `request_user_attention` **does** work there, via `xdg_activation_v1`: it marks the window as
+  wanting attention, and the compositor surfaces that however it chooses. **The user still moves;
+  the window does not come to them.**
+
+**So D8 is implemented as: refuse the duplicate, name the holder, request attention best-effort —
+and say nothing that claims a raise happened.** `0.23.0` was called *What The Window Says Is True*;
+a message reading "switched you to the existing window" when the compositor did not switch anything
+would be that defect returning. On platforms where `gain_focus` is supported (X11, macOS, Windows),
+it may additionally be called — which makes this a **capability that degrades by platform**, and
+therefore RFC-028's business at M14, not something to be designed around now.
+
+**D10 — This needs the instances to talk, and that is new.** Instance B must reach instance A at
+all. The prior art is the approval adapter's own `AF_UNIX` channel, including its socket-path-length
+constraint — the `SocketPathTooLong` lesson this project has met more than once. **The lock and the
+channel are the same problem seen twice**: the holder must be discoverable by another process, and
+whatever makes it discoverable must not outlive it (D4).
+
+**What this removes:** my option 1 is gone. No instance opens a project it does not own, so there is
+no "opened but unprotected" state to explain, and D6's obligation to disclose a downgrade has
+nothing left to disclose — a better outcome than the one I recommended.
