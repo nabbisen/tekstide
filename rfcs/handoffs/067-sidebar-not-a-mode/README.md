@@ -1,6 +1,6 @@
 ---
 title: "RFC-067 handoff: the sidebar is not a mode"
-status: "**Implemented and closed 2026-10-09** — `0.33.0` candidate, not yet published. All three slices and the Whole-RFC checklist closed."
+status: "**Implemented and closed 2026-10-09** — released as `0.33.0` 2026-10-10. All three slices and the Whole-RFC checklist closed."
 rfc_file: "../../done/067-the-sidebar-is-not-a-mode.md"
 target_milestone: "M13"
 created: "2026-10-08"

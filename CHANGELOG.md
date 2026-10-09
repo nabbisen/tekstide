@@ -2,7 +2,7 @@
 
 ## 0.33.0 - The Sidebar Stops Being Two Things
 
-Status: **candidate, not yet published.** RFC-067's three slices and its Whole-RFC checklist are
+Status: **released 2026-10-10.** RFC-067's three slices and its Whole-RFC checklist are
 all implemented, gated and closed. This entry was written incrementally as slices closed, then
 re-read against the finished set at the candidate; see `rfcs/handoffs/067-sidebar-not-a-mode/` for
 the full handoff pack.

@@ -1,6 +1,6 @@
 # RFC-067: The Sidebar Is Not A Mode
 
-Status: **Implemented and closed 2026-10-09; `0.33.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-09; released as `0.33.0` 2026-10-10.** See the
 *Closed* section. **Accepted by the human owner 2026-10-08.** D1–D6 as written; **the open question decided: activating a file switches to Content mode** — see *Decided on acceptance*. Proposed 2026-10-08. `0.33.0`, M13. From the owner's question of 2026-10-08: can a
 project tab show the file tree, a document and several terminals at once, while staying clean? No
 requirement names this; it is a UX defect in what the project tab already offers.
@@ -124,7 +124,7 @@ this slice does not design it, and does not need to.
 
 ## Closed (2026-10-09)
 
-All three slices and the Whole-RFC checklist are done. **`0.33.0` candidate, not yet published** —
+All three slices and the Whole-RFC checklist are done. **released as `0.33.0` 2026-10-10** —
 see `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
 
 **PR-067-A (the sidebar persists)** stopped `sidebar_view` from matching on `ProjectMode` at all:
