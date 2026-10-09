@@ -38,6 +38,11 @@ prove the fix rather than the defect: the project still refuses (a dirty file st
 the real terminal's own pane is still present -- proven against a real spawned session, not a
 synthetic list.
 
+**Ablated**: forcing the old always-terminate branch (`ablate.sh`, the `if
+close_assessment_blocked_by_more_than_running_processes(&pre_assessment)` guard replaced with `if
+false`) fails this exact test, naming the real assertion that would have let the old ordering
+through -- load-bearing, not accidentally green.
+
 ### A close that is permitted still terminates and still closes
 
 The repair must not cost the working path. Both existing real-process tests pass unchanged:
