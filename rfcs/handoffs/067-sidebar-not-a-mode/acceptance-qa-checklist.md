@@ -195,8 +195,15 @@ rather than a threshold this operation is held to.
       explorer section stating the tree is now in both modes and naming D7/D8's own boundary --
       not merely fixing a false claim this time, but documenting a real capability the book had
       not yet described at all.
-- [ ] The core pin bumps with the version. *(Release-cut item.)*
-- [ ] Commits are pushed once the gate is green.
+- [x] The core pin bumps with the version. *(Release-cut item.)*
+      `[workspace.package] version` and the `tekstide-core` pin both bumped `0.32.0 -> 0.33.0`;
+      `the_workspace_pins_tekstide_core_to_its_own_version` passes.
+- [x] Commits are pushed once the gate is green.
+      Three consecutive full-workspace runs clean on the first attempt (`758 + 17 + 1118`, 0
+      failed, 0 fixture entries left each time); RFC-067 moved `rfcs/accepted/` -> `rfcs/done/`
+      with a new `## Closed (2026-10-09)` section, `rfcs/README.md`'s three tables and
+      `rfcs/delivery-plan.md`'s own register row updated to match, `CHANGELOG.md`'s status line
+      promoted to "candidate, not yet published." Pushed.
 
 ## Final Acceptance Decision
 

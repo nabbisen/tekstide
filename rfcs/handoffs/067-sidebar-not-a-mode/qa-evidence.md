@@ -258,7 +258,7 @@ terminal while editing, as distinct from operating one — is real and this slic
 it, but it is narrower than "three surfaces visible at once" was, and nothing measured says it
 needs closing by this RFC.
 
-**Decision: build nothing.** Recorded in the RFC's own document (`rfcs/accepted/067-the-sidebar-
+**Decision: build nothing.** Recorded in the RFC's own document (`rfcs/done/067-the-sidebar-
 is-not-a-mode.md`, new `## D5 answered, PR-067-C` section) and in `CHANGELOG.md`'s own `0.33.0`
 entry, not only here — per the checklist's own explicit requirement that the number which made
 further work unnecessary be recorded in the changelog, not left in the evidence alone.
@@ -268,3 +268,25 @@ further work unnecessary be recorded in the changelog, not left in the evidence 
 Nothing to gate beyond what PR-067-A/B already gated clean. This slice is the decision itself,
 read from PR-067-B's own measurement — the RFC's own words, *"a third slice that builds nothing,
 and records the number that made it unnecessary, is a success,"* taken as written.
+
+### Gate, Whole-RFC
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `rfc_docs_invariants` (17/17, including `every_delivery_plan_row_agrees_with_its_rfc_folder` once
+  the register row was updated to match the RFC's move to `rfcs/done/`): clean.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**: all
+  three clean on the first attempt: `758 + 17 + 1118`, 0 failed, 0 fixture entries left each time.
+
+### Candidate cut
+
+`[workspace.package] version` and the `tekstide-core` pin both bumped `0.32.0 -> 0.33.0`;
+`cargo check --workspace --all-targets` confirms the regenerated `Cargo.lock` still builds. RFC-067
+moved `rfcs/accepted/` -> `rfcs/done/` with a new `## Closed (2026-10-09)` section; the handoff
+pack's own frontmatter (`status`, `rfc_file`) updated to match. `rfcs/README.md`'s Accepted-table
+row removed, Handoffs-table row and a new Implemented-table row added. `rfcs/delivery-plan.md`'s
+own register row updated from "Accepted" to "Implemented and closed... candidate, not yet
+published," the same shape RFC-066's own row set one entry earlier —
+`every_delivery_plan_row_agrees_with_its_rfc_folder` passes against the new row. `CHANGELOG.md`'s
+status line promoted from "in progress" to "candidate, not yet published." Gate reproduces clean
+on the first attempt: `758 + 17 + 1118`, 0 failed, 0 fixture entries left. Pushed.
