@@ -1509,3 +1509,36 @@ that might fail must include `panicked at`.
 **Owner: the dev team**, with the rows above. Not a blocker for `0.31.0`: it recurs rarely and
 passes on rerun, and the candidate's own three-run gate is where it would have to be redone if it
 appears again.
+
+## Disposition, 2026-10-09 — review 497: the register now costs release attempts, and that is the finding
+
+**Not a new row. A statement about all of them, written because the cost has become measurable.**
+
+At review 497 the dev team's three-run gate failed its first run on the review-478 PTY pair, and
+**my own three runs, taken immediately after on the same tree, failed run 1 on a different
+registered row** — `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`,
+on file since the `0.16.0` gate. Two independent three-run gates, two different registered
+intermittents, same afternoon.
+
+**The rate, from runs I watched across reviews 494–497 rather than from memory:** about **3
+failures in 17 full-workspace runs** (~18%), across both the dev team's machine and mine. The gate
+rule is *three consecutive green*. At that rate a three-run gate passes first attempt roughly
+**half** the time.
+
+**So the register has stopped being a record and become a tax.** `0.31.0`'s candidate will likely
+need its gate redone at least once, and every redo is a full three-run cycle. Nineteen rows are on
+file; rows 2 and 5 were fixed at review 476 because somebody decided about them, and nothing has
+been decided about the rest.
+
+**What I am not asking for:** fixing nineteen tests before `0.31.0`. That would trade a release for
+tidiness.
+
+**What I am scheduling:** a disposition pass over the register **after `0.31.0` ships**, on the
+same terms as the rows 2/5 ruling — for each row, fix, quarantine, or accept with a reason, rather
+than carry it. The cause is the same in most of them and already diagnosed twice in this file: *the
+wait is weaker than the condition it is waiting for.* The rows 2/5 fix is the worked example, and
+review 480's addendum adds the second half: the fixture must clean itself on unwinding, or a
+failing run fails the gate twice.
+
+**Owner: the dev team**, after the release. Named here because the rows 2/5 disposition had to
+learn at review 475 that a decision without a name against it does not happen.
