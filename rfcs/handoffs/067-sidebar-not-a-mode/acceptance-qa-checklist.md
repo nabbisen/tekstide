@@ -218,7 +218,7 @@ microseconds… Terminal mode, under 5"*, with the yardstick named as a criterio
 notice" rather than this operation's own threshold, and the decline stated explicitly. That is the
 whole standard met: a slice that measured and correctly built nothing, saying so with the number.
 
-- [ ] **Extend the status-agreement invariant to `rfcs/README.md`'s rows.** Four places state an
+- [x] **Extend the status-agreement invariant to `rfcs/README.md`'s rows.** Four places state an
   RFC's status: its own `Status:` line, the handoff pack's `status` field, the delivery-plan
   register row, and **two rows in `rfcs/README.md`** (Handoffs and Implemented). Three are checked.
   The README's two are not.
@@ -229,6 +229,30 @@ whole standard met: a slice that measured and correctly built nothing, saying so
   which had gone stale twice by two people: **a field that depends on someone remembering is not
   checked.** `claims_unfinished` and `rfc_folder_by_number` already exist; these rows are markdown
   table cells with a linked path naming the folder, same as the ones already covered.
+
+  **Done at `7e988e3`**, as a release-state check rather than a lifecycle one — `claims_unfinished`
+  itself only polices Proposed/Accepted vs. folder, and "candidate, not yet published" vs.
+  "released" never contains either word, so it could not have been the predicate that caught this.
+  `every_readme_row_agrees_with_the_changelogs_release_state` reads both README tables' rows back
+  against `CHANGELOG.md`'s own released sections instead (`rfcs_named_by_released_sections`,
+  already written for `an_rfc_a_release_names_lives_in_done`), with a planted-violation ablation
+  in both directions (`the_readme_release_state_check_catches_a_planted_violation_and_nothing_else`).
+
+  **Two more live instances surfaced by running it, not by rereading the four places**:
+  `rfcs/README.md`'s own two rows for RFC-027 still said "`0.31.0` candidate, not yet published"
+  days after `8adba87` released it everywhere else; `CHANGELOG.md`'s own `0.30.0` Status line said
+  "scoped" and never "released" at all (it survived only because `0.31.0`'s own released section
+  happens to mention RFC-065 in passing, which is luck, not the check working). Both fixed. Also
+  corrected the matching staleness in RFC-065's and RFC-027's own handoff-pack `status` fields
+  while reading them, though the new check does not cover that field and nothing requires it be
+  correct for the check to pass — flagging, not claiming it as closed by this check.
+
+  **Required, and disclosed, not silently generalized**: `rfcs_named_by_released_sections`'s own
+  match had to widen from `"released on"` to `"released"` — `0.31.0` and `0.32.0`'s own `Status:`
+  lines dropped the "on" every earlier release used, which the narrower substring would have
+  missed for exactly the two newest releases. Verified no false positive: every `Status:` line in
+  the changelog that is not actually released (`candidate, not yet published`, `scoped` before its
+  own fix above) contains neither "released" nor "release" at all.
 
 **Your judgement to flag rather than fix was right.** Touching RFC-066's own closed documentation
 inside an RFC-067 commit would have blurred which release corrected what — and the correction
