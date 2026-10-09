@@ -96,3 +96,37 @@ about where a post-hoc refusal would appear. It needs the modal to render reason
 ordering defect must be fixed — `terminate_project_live_work` must not run ahead of an assessment
 that can still refuse. A modal is a surface; the ordering is the product. **A fix that only changed
 the modal would leave every other caller of this path able to destroy live work.**
+
+## Amendment 1 (2026-10-09, `0.32.0` planning): the audit says it closed, too
+
+**Found while planning the release, by re-reading the function after RFC-027 landed in it.** The
+defect has a third face, and it is the same one: everything downstream of the refusal behaves as
+though the close succeeded.
+
+**D10 — A refused close must not be audited as having closed.** In
+`apply_project_close_confirmation`, `record_safe_close_decision(..., SafeCloseDecision::Closed {
+… })` runs **unconditionally**, outside the `if closed` branch. Only the
+`terminal_session_confirmed_empty` field is corrected, by `&& closed`. So a project that is still
+open is recorded in the audit store as **`Closed`**.
+
+`SafeCloseDecision::Cancelled` is not the right value either — that is recorded elsewhere, when the
+user dismisses the modal, and means something different. **The decision has two states and needs a
+third.** Nothing tests the refused case's record today, which is why it has gone unnoticed.
+
+This matters more than a wrong field: the audit store is this product's record of what happened,
+and `local-data-and-privacy.md` documents its honesty carefully. **A false "Closed" is worse than
+the silence D2 already fixes**, because silence is merely unhelpful while this is wrong on disk.
+
+**D11 — The ordering fix moves the value the audit depends on.**
+`terminal_session_confirmed_empty` is `terminate_project_live_work`'s own return value, read
+*before* the decision is recorded. Once D1 moves the termination onto the close-succeeding path,
+that value no longer exists where the record is written. **Decide where the record goes as part of
+D1, rather than discovering it mid-slice** — it is the reason D1 is not a two-line move.
+
+**D12 — RFC-027's interaction, checked rather than assumed.**
+`remove_project_recovery_records_best_effort` already sits correctly inside `if closed`, so D1 moves
+the termination *into* that region beside it; nothing about recovery records needs to change.
+And D3's refuse-up-front means a project holding a dirty document never reaches a confirmation at
+all, so RFC-027 D11's own "close" trigger for recovery records stays unreachable for the dirty case
+— as the dev team observed at review 485. **Recorded so that nobody later reads that as a bug and
+"fixes" it.**

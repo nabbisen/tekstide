@@ -13,6 +13,10 @@ Tick a box only when the thing it names has been **run**.
 - [ ] A close that *is* permitted still terminates and still closes — the repair must not cost the
       working path.
 - [ ] The reproduction is kept as the regression test.
+- [ ] **Where the audit record is written is decided, not inherited** (D11):
+      `terminal_session_confirmed_empty` comes from the termination, which D1 moves.
+- [ ] RFC-027's `remove_project_recovery_records_best_effort` still runs only on the closing path,
+      and the termination now sits beside it (D12).
 
 ## PR-066-B — refuse up front
 
@@ -20,6 +24,9 @@ Tick a box only when the thing it names has been **run**.
 - [ ] The reasons are read from `assess_close`'s own result, not re-derived (D4, §row 4).
 - [ ] **No forced close exists anywhere in the change** (§row 3).
 - [ ] Live capture of a refused close, with the blocking reason named on screen.
+- [ ] **A refused close is not recorded as `Closed` in the audit store** (D10), and not as
+      `Cancelled` either — that already means the user dismissed the modal. **Proved by a test;
+      nothing pins the refused case's record today**, which is why it went unnoticed.
 
 ## Whole-RFC
 

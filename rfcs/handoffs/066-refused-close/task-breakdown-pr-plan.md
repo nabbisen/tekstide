@@ -11,6 +11,15 @@
 
 **Proves:** a confirmed close refused for an unsaved file leaves every running terminal alive.
 
+**And decide where the audit record goes (D11).** `terminal_session_confirmed_empty` is
+`terminate_project_live_work`'s own return value, read before `record_safe_close_decision` writes
+it. Moving the termination onto the close-succeeding path moves that value out from under the
+record. **This is why D1 is not a two-line move** — settle it here, not mid-slice.
+
+**RFC-027 landed in this function since the RFC was written (D12).**
+`remove_project_recovery_records_best_effort` already sits correctly inside `if closed`; the
+termination moves *beside* it. Nothing about recovery records changes.
+
 ## PR-066-B — the modal refuses up front
 
 - When the assessment already blocks, the modal states the blocking reasons and offers **no confirm
@@ -19,7 +28,13 @@
   `CloseReasonCode` values rather than new text.
 - Live capture of a close that is refused up front, showing the reason named.
 
-**Proves:** the dialog never offers an action the assessment will refuse.
+- **A refused close is not audited as `Closed` (D10).** `record_safe_close_decision(...,
+  SafeCloseDecision::Closed { … })` runs unconditionally today, outside `if closed`, so a project
+  still open is recorded as closed. `Cancelled` is not the answer — it already means the user
+  dismissed the modal. The decision needs a third state.
+
+**Proves:** the dialog never offers an action the assessment will refuse, **and the audit store
+never claims a close that did not happen.**
 
 ## Not in scope
 
