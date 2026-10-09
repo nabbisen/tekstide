@@ -185,6 +185,24 @@ impl ScratchPane {
         false
     }
 
+    /// `test-process-leak.md` review 478's own diagnosis, the same shape fixed for the two
+    /// backgrounded-job tests in `tekstide-core`'s `runtime::terminal::tests`: polling for a
+    /// *substring*, then parsing in a separate step afterward, can return as soon as the
+    /// marker's own echoed, unsubstituted command line appears (`printf '...:%s\n'
+    /// "$(stty size)"` itself contains the literal marker text) -- before the real, numeric
+    /// output line exists to parse. This polls the *parse* itself, so it keeps rendering more
+    /// frames until a real value is extractable or the deadline passes.
+    fn poll_until_parsed<T>(&mut self, mut parse: impl FnMut(&str) -> Option<T>) -> Option<T> {
+        for _ in 0..200 {
+            self.pane.poll();
+            if let Some(value) = parse(&self.rendered_text()) {
+                return Some(value);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        None
+    }
+
     /// Terminal resize handoff: each row's own text, *not* flattened
     /// across rows the way [`Self::rendered_text`] is -- needed to check
     /// where a real line actually wrapped, which
@@ -364,13 +382,12 @@ fn resize_makes_the_pty_the_emulator_and_the_render_path_agree() {
     scratch
         .pane
         .write_input(b"printf 'RESIZE_CHECK_017E:%s\\n' \"$(stty size)\"\n");
-    assert!(
-        scratch.poll_until("RESIZE_CHECK_017E:"),
-        "the real child must be able to observe and report its own resized PTY"
-    );
-    let (pty_rows, pty_cols) =
-        parse_stty_size_after(&scratch.rendered_text(), "RESIZE_CHECK_017E:")
-            .expect("stty size output must parse as two whitespace-separated numbers");
+    let (pty_rows, pty_cols) = scratch
+        .poll_until_parsed(|rendered| parse_stty_size_after(rendered, "RESIZE_CHECK_017E:"))
+        .expect(
+            "the real child must observe and report its own resized PTY, as two \
+             whitespace-separated numbers",
+        );
     assert_eq!(
         (pty_rows, pty_cols),
         (30, 55),

@@ -535,9 +535,9 @@ fn linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup() {
 /// own acceptance claim asks for directly.
 #[test]
 fn a_real_backgrounded_job_is_dead_after_a_real_close() {
-    let root = test_root("terminate-real-backgrounded-job");
+    let root = CleanupOnDrop(test_root("terminate-real-backgrounded-job"));
     let project = project_session(ProjectId::for_test(1), &root);
-    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &*root, "/bin/sh");
     let mut runtime = LinuxTerminalRuntime::new();
 
     let (terminal, _) = runtime
@@ -548,8 +548,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     runtime
         .write_input(&handle, b"sleep 300 & echo BGPID=$!\n")
         .expect("backgrounded sleep command should write to PTY");
-    let output = read_until_contains(&mut runtime, &handle, b"BGPID=");
-    let background_pid = parse_bgpid(&output)
+    let background_pid = read_until_parsed(&mut runtime, &handle, parse_bgpid)
         .expect("real backgrounded job's own pid should be parseable from PTY output");
     assert!(
         crate::test_support::process_is_alive(background_pid),
@@ -581,7 +580,6 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         "an OS-level kill(pid, 0) on the real backgrounded job's own pid, after a real close, \
          must find it gone -- not inferred from the returned events"
     );
-    cleanup_root(root);
 }
 
 /// RFC-043 D2's own opt-out, asserted on purpose rather than merely
@@ -593,9 +591,9 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
 /// load-bearing, not a nicety."
 #[test]
 fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
-    let root = test_root("terminate-setsid-survives");
+    let root = CleanupOnDrop(test_root("terminate-setsid-survives"));
     let project = project_session(ProjectId::for_test(1), &root);
-    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &*root, "/bin/sh");
     let mut runtime = LinuxTerminalRuntime::new();
 
     let (terminal, _) = runtime
@@ -622,9 +620,10 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
             b"setsid --fork sh -c 'echo DETACHEDPID=$$; exec sleep 300' &\n",
         )
         .expect("setsid-detached command should write to PTY");
-    let output = read_until_contains(&mut runtime, &handle, b"DETACHEDPID=");
-    let detached_pid = parse_pid_after(&output, "DETACHEDPID=")
-        .expect("real setsid-detached job's own pid should be parseable from PTY output");
+    let detached_pid = read_until_parsed(&mut runtime, &handle, |output| {
+        parse_pid_after(output, "DETACHEDPID=")
+    })
+    .expect("real setsid-detached job's own pid should be parseable from PTY output");
     assert!(
         crate::test_support::process_is_alive(detached_pid),
         "test precondition: the real detached job must be alive before the close"
@@ -671,7 +670,6 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
     unsafe {
         libc::kill(detached_pid as libc::pid_t, libc::SIGKILL);
     }
-    cleanup_root(root);
 }
 
 /// RFC-043 security document §1's own required property: "the session
@@ -822,6 +820,29 @@ fn cleanup_root(root: PathBuf) {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// `test-process-leak.md` review 480's own addendum: a failing test in this family fails the
+/// gate twice -- once on its assertion, once on the fixture it leaves behind -- because
+/// `cleanup_root` is an ordinary call at the end of the test body, skipped by any panic before
+/// it. Used by the two tests this same disposition pass fixed the marker-wait race in, since
+/// those are exactly the ones a flaky assertion above used to be able to skip past. `Deref`
+/// to `Path` so a `&CleanupOnDrop` passes anywhere `&root: PathBuf` already did, with no call
+/// site needing its own type to change.
+struct CleanupOnDrop(PathBuf);
+
+impl std::ops::Deref for CleanupOnDrop {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for CleanupOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 fn read_until_contains(
     runtime: &mut LinuxTerminalRuntime,
     handle: &TerminalRuntimeHandle,
@@ -848,6 +869,34 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
         && haystack
             .windows(needle.len())
             .any(|window| window == needle)
+}
+
+/// `test-process-leak.md` review 478's own diagnosis, fixed: `read_until_contains` plus a
+/// separate, later `parse_*` call is two steps where the first can succeed on the shell's own
+/// echo of the *unexpanded* command (`echo BGPID=$!` itself contains the literal marker text,
+/// with no digits after it yet) before the real, digit-bearing line has arrived -- the wait is
+/// weaker than the condition the caller actually needs. This polls the *parse* itself, not a
+/// substring, so it keeps reading until a real value is extractable or the deadline passes,
+/// never returning on a marker that is merely present.
+fn read_until_parsed<T>(
+    runtime: &mut LinuxTerminalRuntime,
+    handle: &TerminalRuntimeHandle,
+    mut parse: impl FnMut(&[u8]) -> Option<T>,
+) -> Option<T> {
+    let started = Instant::now();
+    let mut output = Vec::new();
+
+    while started.elapsed() < Duration::from_secs(5) {
+        let (chunk, _) = runtime
+            .read_available_bounded_for(handle, Duration::from_millis(50), 16 * 1024)
+            .expect("PTY read should succeed");
+        output.extend_from_slice(&chunk);
+        if let Some(value) = parse(&output) {
+            return Some(value);
+        }
+    }
+
+    None
 }
 
 /// Parses the real pid a shell's own `$!` reported, out of raw PTY

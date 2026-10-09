@@ -1679,6 +1679,28 @@ fn poll_demo_pane_until(state: &mut State, needle: &str) -> bool {
     false
 }
 
+/// `test-process-leak.md` review 478's own diagnosis (row 8), the same shape already fixed for
+/// the backgrounded-job tests in `tekstide-core` and for the resize test in
+/// `surface::terminal::tests`: polling for a *substring*, then parsing in a separate step
+/// afterward, can return as soon as the marker's own echoed, unsubstituted command line
+/// appears -- before the real, digit-bearing line exists to parse ("the marker must be
+/// followed by a real, parseable PID" was exactly this). This polls the *parse* itself.
+fn poll_demo_pane_until_parsed<T>(
+    state: &mut State,
+    mut parse: impl FnMut(&str) -> Option<T>,
+) -> Option<T> {
+    for _ in 0..200 {
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        if let Some(value) = parse(&rendered_demo_pane_text(state)) {
+            return Some(value);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    None
+}
+
 /// `active_terminal_focus` is `Some` only when both halves of its own
 /// stated condition hold (`FocusZone::MainArea` *and* `TerminalImmersion`
 /// mode) -- proven against all four combinations with one real pane,
@@ -3088,7 +3110,20 @@ fn sentinel_pasted_content_never_reaches_the_durable_audit_store() {
 /// guard -- this is a diagnostic report, not `NFR-PERF-004`'s
 /// acceptance test, and asserting a tight bound here would make this
 /// flaky against ordinary machine noise.
+///
+/// **`#[ignore]`d by the test-flake-disposition pass (`rfcs/handoffs/test-process-leak.md`,
+/// 2026-10-09): Quarantine, not Fix.** Even a "generous" absolute latency ceiling on a single
+/// `poll()` call is, by construction, a wall-clock budget -- it has no reference workload to
+/// take a load-invariant *ratio* against the way `change_review_content_view_build_cost_by_
+/// line_count_measurement`'s own fix does (that property is "does cost scale linearly," which a
+/// ratio answers; this property is "does one call blow an absolute ceiling," which a ratio
+/// cannot reformulate because there is nothing to divide by). Recorded as failing twice in this
+/// same register under real, independently-confirmed desktop load (not this benchmark's own
+/// fault) before this disposition pass. Run deliberately with `cargo test ... -- --ignored`
+/// when its own number is wanted; it no longer blocks the three-run correctness gate.
 #[test]
+#[ignore = "wall-clock latency ceiling, not a correctness property -- quarantined by the \
+            test-flake-disposition pass; run with `-- --ignored` for its own number"]
 fn terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark() {
     let project_id = tekstide_core::project::ProjectId::new_uuid();
     let (mut pane, _session) = crate::surface::terminal::TerminalPane::launch(
@@ -3135,9 +3170,11 @@ fn terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark(
 
     assert!(
         max_micros < 50_000,
-        "a single wake-driven poll() cost blew past a sane bound: max={max_micros}us -- this \
-         is a real regression, not measurement noise, since 50ms is already generous headroom \
-         over the tens-of-microsecond costs a real read plus VTE advance should take"
+        "a single wake-driven poll() cost blew past a sane bound: max={max_micros}us, against a \
+         50ms ceiling meant to be generous headroom over the tens-of-microsecond costs a real \
+         read plus VTE advance should take -- could be a real regression, or could be this \
+         machine under load while this ran (this test is quarantined from the default gate for \
+         exactly that reason; check the machine's own load before treating this as one)"
     );
 }
 
@@ -14408,10 +14445,6 @@ fn closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_clos
     state.terminal_panes[0].write_input(
         b"(trap '' TERM; while :; do sleep 1; done) & echo \"descendant-pid:$!\"; wait\n",
     );
-    assert!(
-        poll_demo_pane_until(&mut state, "descendant-pid:"),
-        "the backgrounded descendant must report its own PID before the close attempt begins"
-    );
     // `rendered_text()` is a fixed-width terminal grid, each row padded
     // with spaces to the pane's column width -- not newline-delimited
     // prose. Find the marker as a substring and take the digits
@@ -14422,18 +14455,18 @@ fn closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_clos
     // shell ever substitutes and prints the real value, so the first
     // occurrence in the rendered pane is not the one with real digits
     // after it -- the last one is.
-    let rendered = rendered_demo_pane_text(&state);
-    let after_marker = rendered
-        .rsplit_once("descendant-pid:")
-        .map(|(_, rest)| rest)
-        .unwrap_or_else(|| panic!("the marker must appear in the rendered pane: {rendered:?}"));
-    let digits: String = after_marker
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    let descendant_pid: u32 = digits.parse().unwrap_or_else(|_| {
-        panic!("the marker must be followed by a real, parseable PID: {rendered:?}")
-    });
+    let descendant_pid: u32 = poll_demo_pane_until_parsed(&mut state, |rendered| {
+        let after_marker = rendered.rsplit_once("descendant-pid:")?.1;
+        let digits: String = after_marker
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        digits.parse().ok()
+    })
+    .expect(
+        "the backgrounded descendant must report its own, real, parseable PID before the \
+         close attempt begins",
+    );
 
     let _ = super::update(
         &mut state,

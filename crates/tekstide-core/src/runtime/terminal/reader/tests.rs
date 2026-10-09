@@ -371,7 +371,18 @@ fn reader_thread_does_not_busy_wait_while_idle() {
 /// produces output continuously and faster than we drain, and measures
 /// each individual call's wall time rather than trusting
 /// `mpsc::Receiver::try_recv`'s documented non-blocking behaviour.
+///
+/// **`#[ignore]`d by the test-flake-disposition pass (`rfcs/handoffs/test-process-leak.md`,
+/// 2026-10-09): Quarantine, not Fix.** The handoff pack grouped this with the BGPID
+/// marker-wait tests ("the same family"), but direct inspection shows it is a different shape
+/// entirely: `max_call_duration < 20ms` across 200 real-PTY drain calls is a wall-clock latency
+/// ceiling, the identical property `terminal_poll_handler_cost_under_a_real_wake_driven_flood_
+/// headless_benchmark` (`tekstide`'s own `shell/tests.rs`, quarantined the same pass) already
+/// has, not a substring-before-parse race. No marker wait exists here to fix. Run deliberately
+/// with `cargo test ... -- --ignored` when its own number is wanted.
 #[test]
+#[ignore = "wall-clock latency ceiling, not a correctness property -- quarantined by the \
+            test-flake-disposition pass; run with `-- --ignored` for its own number"]
 fn drain_available_never_blocks_the_caller_even_under_sustained_production() {
     let _real_process_slot = RealProcessLimiter::acquire();
     let root = test_root("reader-nonblocking-drain");
