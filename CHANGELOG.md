@@ -2,9 +2,9 @@
 
 ## 0.33.0 - The Sidebar Stops Being Two Things
 
-Status: **in progress.** RFC-067's three slices and its Whole-RFC checklist are all implemented
-and gated; what remains before the candidate is the core pin bump at the release cut itself. This
-entry is written incrementally as slices close; see `rfcs/handoffs/067-sidebar-not-a-mode/` for
+Status: **candidate, not yet published.** RFC-067's three slices and its Whole-RFC checklist are
+all implemented, gated and closed. This entry was written incrementally as slices closed, then
+re-read against the finished set at the candidate; see `rfcs/handoffs/067-sidebar-not-a-mode/` for
 the full handoff pack.
 
 **A project tab had one toggle, and it governed everything.** Switching to Terminal mode to run a

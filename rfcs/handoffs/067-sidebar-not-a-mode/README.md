@@ -1,7 +1,7 @@
 ---
 title: "RFC-067 handoff: the sidebar is not a mode"
-status: "**Accepted 2026-10-08**, D1–D6 as written, plus D7–D9. `0.33.0`, M13. Three slices; the third may correctly build nothing."
-rfc_file: "../../accepted/067-the-sidebar-is-not-a-mode.md"
+status: "**Implemented and closed 2026-10-09** — `0.33.0` candidate, not yet published. All three slices and the Whole-RFC checklist closed."
+rfc_file: "../../done/067-the-sidebar-is-not-a-mode.md"
 target_milestone: "M13"
 created: "2026-10-08"
 ---

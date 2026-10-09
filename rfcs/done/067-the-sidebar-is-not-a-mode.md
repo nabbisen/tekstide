@@ -1,6 +1,7 @@
 # RFC-067: The Sidebar Is Not A Mode
 
-Status: **Accepted by the human owner 2026-10-08.** D1–D6 as written; **the open question decided: activating a file switches to Content mode** — see *Decided on acceptance*. Proposed 2026-10-08. `0.33.0`, M13. From the owner's question of 2026-10-08: can a
+Status: **Implemented and closed 2026-10-09; `0.33.0` candidate, not yet published.** See the
+*Closed* section. **Accepted by the human owner 2026-10-08.** D1–D6 as written; **the open question decided: activating a file switches to Content mode** — see *Decided on acceptance*. Proposed 2026-10-08. `0.33.0`, M13. From the owner's question of 2026-10-08: can a
 project tab show the file tree, a document and several terminals at once, while staying clean? No
 requirement names this; it is a UX defect in what the project tab already offers.
 
@@ -120,3 +121,45 @@ terminal while editing, not operating one — is real and unclosed, but it is a 
 **D5's own answer: build nothing.** No splits, no panes, no third mode. If that gap is ever worth
 closing, it is a separate RFC with its own design, exactly as D5 and the non-goals already said —
 this slice does not design it, and does not need to.
+
+## Closed (2026-10-09)
+
+All three slices and the Whole-RFC checklist are done. **`0.33.0` candidate, not yet published** —
+see `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
+
+**PR-067-A (the sidebar persists)** stopped `sidebar_view` from matching on `ProjectMode` at all:
+it now renders the explorer whenever a project is active, in either mode. `sidebar_label` and the
+placeholder string it composed (`sidebar-placeholder-title`) were deleted outright, not reworded —
+a string whose only job was explaining an absence has no job once the absence is gone. Two further
+Content-mode guards neither named by the handoff pack — in `handle_explorer_key` and
+`ensure_explorer_scanned` — were found by reading the functions the task breakdown pointed at and
+removed; without them the tree would have been visible but keyboard-inert, or stuck on "Loading…"
+forever, in a project opened straight into Terminal mode.
+
+**A real, pre-existing production bug was found while building the test D7/D8 required, not by
+reading.** `ProjectSession::open_text_document` unconditionally forced Content mode for every
+caller — harmless before this RFC, since the explorer was the only caller, but a live D8 violation
+the instant RFC-027's recovery offer became a second caller of the same shared function. Fixed at
+the root: the shared function no longer touches mode at all; a new, explicit
+`AppState::open_active_project_content_workspace()` is called only from the explorer's own
+`Action::Open` arm. D1, D7, and D8 were each independently ablated through `rfcs/handoffs/ablate.sh`
+on a clean tree, not inferred from one passing test covering for another.
+
+**PR-067-B (measure the switch)** reused RFC-026's own paired-control harness, each mode acting as
+the other's control in the same run. The first version sat on the timing call's own resolution
+floor — every figure an exact multiple of 4µs, medians equal to their own minimums — found at
+review 509 and fixed by looping 200 view-builds inside the timed region and dividing in `f64`
+nanosecond math, deliberately not `Duration::as_micros()` on an already-divided `Duration`, which
+would have reintroduced the identical defect one step later. Final measured figures, release
+build, two independent runs: Content mode ~18–23µs, Terminal mode ~4–5µs — roughly three orders of
+magnitude of headroom against the ~16ms "a user would notice" yardstick this project already uses
+for typing latency.
+
+**PR-067-C (the decision)** answered D5 from that measurement, not from taste: build nothing. No
+splits, panes, or third mode. See *D5 answered* above for the full reasoning against the owner's
+own "at a time or a near real-time" framing.
+
+**Live-captured** against a real project with both a running terminal and real output flowing,
+isolated `XDG_STATE_HOME` under `/dev/shm`: `rfcs/handoffs/067-sidebar-not-a-mode/evidence/
+pr-067-a/`. The book was swept for both a stale claim (`keyboard-reference.md`) and a real
+capability it had never described at all (`what-works-today.md`'s own explorer section).
