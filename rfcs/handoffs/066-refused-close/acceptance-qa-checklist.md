@@ -210,6 +210,42 @@ rows also make the case for the disposition pass already riding alongside this r
       own register row updated to match, `CHANGELOG.md`'s status line promoted to "candidate, not
       yet published." Pushed.
 
+### Required at review 505 — a false defect is about to be immortalised
+
+The candidate itself is sound: version, pin and `Cargo.lock` at `0.32.0`; the lifecycle move —
+`done/`, the README tables **and the delivery-plan row** — all in `63b7288`; `cargo package
+--workspace` verifying both crates with the packaged archive naming `tekstide-core 0.32.0`; audit
+matching the register's three rows; no accesskit; gate `758 + 17 + 1119`, 0 fixture entries. **The
+check I required at review 499 caught the stale register row for you** — that is the first time it
+has earned itself.
+
+- [ ] **`Ctrl+Alt+N` is not broken, and RFC-066's own `Closed` section now says it is.** Lines
+  185–191 claim *"`NavigationAction::SwitchActiveProject` has no production caller in the crate at
+  all"* and that `working-with-projects.md` is wrong to say the chord works. **Both are false, and
+  the RFC is already in `done/`.**
+
+  - `shell.rs:2479` dispatches it: `if action == NavigationAction::SwitchActiveProject {
+    cycle_to_next_active_project(state); }`.
+  - `cycle_to_next_active_project` (`shell.rs:5229`) **returns early when `project_count < 2`** —
+    a deliberate no-op, the same design as `Ctrl+Alt+F`, which has its own
+    `is_a_no_op_with_fewer_than_two_documents_open` test.
+  - `ctrl_alt_n_cycles_to_the_next_open_project_wrapping` passes. I ran it.
+  - **Your live capture had one project** — "1 project" in its own status bar. So `Ctrl+Alt+N` did
+    exactly what it is specified to do.
+
+  **Where the misreading came from**, because it is an easy one: `shell.rs:10955`'s comment says
+  *"`AppState::switch_active_project` has no production caller anywhere in this crate;
+  `NavigationAction::SwitchActiveProject` itself maps to no `AppCommand`."* Both halves are true and
+  neither means the chord is unwired — the action is handled directly in the shell's own arm rather
+  than through `AppCommand`, which is what that comment is explaining.
+
+  Remove the claim. **The book is correct and must not be "fixed" to match a defect that does not
+  exist** — that would turn a false finding into a real one.
+
+**Worth keeping from the same passage:** the *"did nothing"* observation was real and worth chasing.
+The error was confirming it against a comment instead of against the dispatch; one `grep` for the
+action in a non-test file would have shown line 2479.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
