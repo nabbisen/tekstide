@@ -1,6 +1,6 @@
 ---
-title: "The leaked-child test flake — cause known since 2026-08-16, still unfixed"
-status: "Leak fixed at the two approval call sites 2026-08-20 (request 282). **The second cause — runtime/terminal/launch.rs — FIXED 2026-08-25** (RunningTerminal now has a Drop impl); measured 3,899 leaked shells before, near-zero (the pre-existing baseline) after, across three clean full-suite runs. **A third, distinct cause found while verifying the second fix**: a backgrounded job inside a terminal gets its own process group that neither this Drop nor the production request_terminate path's process-group signal reaches — request_terminate reports Terminated/KilledAfterTimeout while the job survives, orphaned. Confirmed against both paths directly. **The job-escapes-termination defect itself — FIXED 2026-08-26, RFC-043 PR-043-B** (rfcs/handoffs/043-terminal-process-containment/): request_terminate and RunningTerminal::drop now SIGHUP the session leader first, then enumerate and SIGKILL whatever remains in the session (not the process group); measured 0 leaked processes after the 28-pane benchmark that used to leak 28, every time. **The close-confirmation dialog's wording and the audit field's own rename/rewiring — FIXED, RFC-043 PR-043-C**: the dialog now says, before the `Close` click, that anything a terminal started (including a backgrounded job) ends too; `terminal_process_groups_confirmed_empty` is renamed `terminal_session_confirmed_empty` and now reads `SessionConfirmedEmpty`'s own real, session-wide `confirmed` field directly, rather than inferring it from which `TerminationOutcome` variant the leader itself produced — a backgrounded job surviving inside the session (this document's own third cause) is exactly what that inference could not see and this rewiring now can. **What made it pool exhaustion anyway — FIXED 2026-08-26** (rfcs/handoffs/pty-master-fd-inheritance.md): every PTY master was inherited by every child this process ever spawned, so a leaked shell's blocked write into a PTY another process still held open never got EIO and never exited; masters now close on exec, so the same transient orphan now self-terminates within its own script's deadline instead of surviving indefinitely, and /dev/pts occupancy no longer rises across a run at all. This was also a production security defect (RFC-009's terminal boundary crossed by any process able to read/write another project's terminal via the inherited descriptor), not only a test-harness one. The socket flake is separate and also unfixed. **The shared-audit-store cause — FIXED 2026-08-26** (`rfcs/handoffs/audit-store-test-isolation.md`): every test now opens its own store automatically, so the one-shared-SQLite-database contention this document traced row 3 to (and confirmed rows 4 and 6 also transitively reach) can no longer occur in any test in this binary; five consecutive clean full-workspace parallel runs against a fresh `XDG_STATE_HOME`, plus a serial run, confirmed after. A related, separate, and still-open gap found while verifying this: with `XDG_STATE_HOME` unset, the suite's `transcripts/` (and `approval/`) subtrees under the developer's real state root still receive real writes during a run — the audit subtree itself is confirmed untouched, but the same class of defect exists one directory over, out of the audit-store handoff's own scope"
+title: "The leaked-child test flake and flake register — every leak cause fixed; disposition pass complete 2026-10-09"
+status: "Leak fixed at the two approval call sites 2026-08-20 (request 282). **The second cause — runtime/terminal/launch.rs — FIXED 2026-08-25** (RunningTerminal now has a Drop impl); measured 3,899 leaked shells before, near-zero (the pre-existing baseline) after, across three clean full-suite runs. **A third, distinct cause found while verifying the second fix**: a backgrounded job inside a terminal gets its own process group that neither this Drop nor the production request_terminate path's process-group signal reaches — request_terminate reports Terminated/KilledAfterTimeout while the job survives, orphaned. Confirmed against both paths directly. **The job-escapes-termination defect itself — FIXED 2026-08-26, RFC-043 PR-043-B** (rfcs/handoffs/043-terminal-process-containment/): request_terminate and RunningTerminal::drop now SIGHUP the session leader first, then enumerate and SIGKILL whatever remains in the session (not the process group); measured 0 leaked processes after the 28-pane benchmark that used to leak 28, every time. **The close-confirmation dialog's wording and the audit field's own rename/rewiring — FIXED, RFC-043 PR-043-C**: the dialog now says, before the `Close` click, that anything a terminal started (including a backgrounded job) ends too; `terminal_process_groups_confirmed_empty` is renamed `terminal_session_confirmed_empty` and now reads `SessionConfirmedEmpty`'s own real, session-wide `confirmed` field directly, rather than inferring it from which `TerminationOutcome` variant the leader itself produced — a backgrounded job surviving inside the session (this document's own third cause) is exactly what that inference could not see and this rewiring now can. **What made it pool exhaustion anyway — FIXED 2026-08-26** (rfcs/handoffs/pty-master-fd-inheritance.md): every PTY master was inherited by every child this process ever spawned, so a leaked shell's blocked write into a PTY another process still held open never got EIO and never exited; masters now close on exec, so the same transient orphan now self-terminates within its own script's deadline instead of surviving indefinitely, and /dev/pts occupancy no longer rises across a run at all. This was also a production security defect (RFC-009's terminal boundary crossed by any process able to read/write another project's terminal via the inherited descriptor), not only a test-harness one. The socket flake is separate and also unfixed. **The shared-audit-store cause — FIXED 2026-08-26** (`rfcs/handoffs/audit-store-test-isolation.md`): every test now opens its own store automatically, so the one-shared-SQLite-database contention this document traced row 3 to (and confirmed rows 4 and 6 also transitively reach) can no longer occur in any test in this binary; five consecutive clean full-workspace parallel runs against a fresh `XDG_STATE_HOME`, plus a serial run, confirmed after. A related, separate, and still-open gap found while verifying this: with `XDG_STATE_HOME` unset, the suite's `transcripts/` (and `approval/`) subtrees under the developer's real state root still receive real writes during a run — the audit subtree itself is confirmed untouched, but the same class of defect exists one directory over, out of the audit-store handoff's own scope. **Test-flake-disposition pass COMPLETE 2026-10-09** (`rfcs/handoffs/test-flake-disposition.md`): eleven already-fixed rows confirmed and retired in place, eight genuinely live rows each given exactly one verdict (4 Fix, 2 Quarantine, 2 Accept), measured rate re-taken at 0 failures in 13 full-workspace runs against a ~18% baseline. See the dated disposition entry at the end of this document."
 rfc_file: "none — a test-harness defect, not product behaviour"
 target_milestone: "M12"
 created: "2026-08-19"
@@ -20,19 +20,19 @@ resulting pressure, each disclosed separately and each moved past:
 
 | test | first reported |
 | --- | --- |
-| `approval::tests::channel::bind_recovers_from_a_stale_socket_file` | the original, response 213 |
+| `approval::tests::channel::bind_recovers_from_a_stale_socket_file` | the original, response 213 — **row 1. Verdict, test-flake-disposition pass (2026-10-09): Accept. See the dated disposition entry.** |
 | `approval::tests::coordinator::agent_run_queue_limit_is_enforced_and_only_counts_live_entries` | request 260 — **row 2. Same cause as row 5 (a real kernel scheduling gap between `drop(peer)` and the coordinator's own end observing the close), confirmed at the disposition 2026-10-07. Fixed: polls `is_still_answerable` to `false` against a bounded deadline before relying on the freed budget slot, rather than attempting the next receive on the very next line. See the dated disposition entry; retired from active tracking.** |
-| `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` | request 276 |
-| `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) |
+| `command_approval_family_produces_real_durable_audit_records_through_the_pipeline` | request 276 — **row 3. Closed by the shared-SQLite-audit-store fix (2026-08-26) -- directly observed transitively reaching `open_real_audit_store`, per the "ROOT CAUSE, CONFIRMED" section below. Confirmed by the test-flake-disposition pass (2026-10-09): no recurrence anywhere in this document in the six weeks since the fix, and the test passes in isolation. Retired from active tracking.** |
+| `shell::tests::a_real_low_risk_proposal_is_received_mirrored_and_stays_queued_without_promoting` | request 296 (2026-08-24) — **row 4. Same closure as row 3: closed 2026-08-26, confirmed by the disposition pass (2026-10-09), no recurrence since. Retired from active tracking.** |
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) — **row 5. `drop(peer)` closes the socket locally; the coordinator's own end observes it on the kernel's own schedule, not instantly — a defect in the test's single post-drop assertion, not in the product. Fixed, disposition 2026-10-07: replaced with a bounded poll for `is_still_answerable` to become `false` (seconds, not milliseconds). Retired from active tracking; the recurrence sections below stay as history.** |
-| `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **candidate, not confirmed** |
-| `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below. Fixed, `0.29.0`: rewritten as a paired ratio against a reference workload timed in the same run, so load no longer decides it; see the dated entry.** |
-| `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **PTY read timing, not process leak or audit store.** Once in three runs. The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. A read that outran the shell's own output, not a failure of the termination behaviour the test covers. Distinct from every row above: no socket, no audit store, no PTY exhaustion — `/dev/pts` was well below its limit throughout. |
-| `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry.** |
-| `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed.** |
-| `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. |
-| `audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active` | RFC-030 PR-030-B's wiring-layer gate, run 3 of 3 (2026-09-22) — failed once under the third of three consecutive full-workspace runs; passed immediately in isolation (`cargo test -p tekstide-core audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active`, 1 passed, 0 failed). The name names its own contention (a WAL reader held open while purge runs); not investigated further this session — flagged as a candidate for the same class of SQLite-under-parallel-load timing sensitivity this document's other rows already describe, not confirmed as the same root cause. |
-| `runtime::git::tests::every_failure_to_answer_is_unknown_and_never_none_ignored` | RFC-055 PR-055-C, one ablation run (2026-09-25) — **suspected `ETXTBSY` on a stand-in `git` script; not reproduced; mitigated in the test, see the dated section at the end** |
+| `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **row 6. Candidate confirmed closed by the test-flake-disposition pass (2026-10-09): the same shared-SQLite-audit-store fix (2026-08-26) directly observed reaching it, per the "ROOT CAUSE, CONFIRMED" section's own reachability audit; no recurrence anywhere in this document since. Retired from active tracking.** |
+| `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below. Fixed, `0.29.0`: rewritten as a paired ratio against a reference workload timed in the same run, so load no longer decides it; see the dated entry. Re-confirmed closed by the test-flake-disposition pass (2026-10-09): still passes, no recurrence since the fix.** |
+| `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **row 8, PTY read timing, not process leak or audit store.** The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. **Fixed by the test-flake-disposition pass (2026-10-09), the same shape as review 478's two backgrounded-job tests: polls the parse itself (`poll_demo_pane_until_parsed`) instead of a substring followed by a separate parse. See the dated disposition entry.** |
+| `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry. Confirmed by the test-flake-disposition pass (2026-10-09): still passes. Retired from active tracking.** |
+| `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed. Confirmed by the test-flake-disposition pass (2026-10-09): both still pass, no test mutex anywhere in the file. Retired from active tracking.** |
+| `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. **Confirmed by the test-flake-disposition pass (2026-10-09): still passes. Retired from active tracking.** |
+| `audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active` | RFC-030 PR-030-B's wiring-layer gate, run 3 of 3 (2026-09-22) — failed once under the third of three consecutive full-workspace runs; passed immediately in isolation (`cargo test -p tekstide-core audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active`, 1 passed, 0 failed). The name names its own contention (a WAL reader held open while purge runs); not investigated further this session — flagged as a candidate for the same class of SQLite-under-parallel-load timing sensitivity this document's other rows already describe, not confirmed as the same root cause. **Verdict, test-flake-disposition pass (2026-10-09): Accept. See the dated disposition entry.** |
+| `runtime::git::tests::every_failure_to_answer_is_unknown_and_never_none_ignored` | RFC-055 PR-055-C, one ablation run (2026-09-25) — **suspected `ETXTBSY` on a stand-in `git` script; not reproduced; mitigated in the test, see the dated section at the end.** `wait_until_executable` already retries on `errno 26` before handing out the stand-in script. **Confirmed by the test-flake-disposition pass (2026-10-09): mitigation still in place, no recurrence since. Retired from active tracking.** |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
@@ -1566,3 +1566,191 @@ to let a reader tell the two apart, which is exactly what happened here: a failu
 asserted as not noise. Not fixed in this response (out of this slice's own scope), but worth
 pairing with row 7's own fix as a second instance of the identical wording defect if the dev team's
 scheduled disposition pass reaches wall-clock-budget benchmarks generally.
+
+## Disposition pass, 2026-10-09 — `rfcs/handoffs/test-flake-disposition.md`
+
+**The pass this document scheduled, executed.** Every row in the register was read in full,
+against the actual current test code, not only against this document's own account of it —
+several already-fixed rows were only ever documented as "fixed," never explicitly retired, and
+three more turned out to already be closed by the 2026-08-26 audit-store fix without anyone having
+confirmed it. Both are corrected below.
+
+### Scope count
+
+**Nineteen distinct test names appear in this register.** Eleven were already fixed and are now
+retired in the top table above (confirmed, not assumed, against the real current code for every
+one). **Eight were genuinely live** and each now carries exactly one verdict:
+
+| Test | Verdict |
+| --- | --- |
+| `bind_recovers_from_a_stale_socket_file` | Accept |
+| `every_failure_to_answer_is_unknown_and_never_none_ignored` | Accept (already mitigated; retired above) |
+| `purge_reports_deferred_cleanup_while_wal_reader_is_active` | Accept |
+| `a_real_backgrounded_job_is_dead_after_a_real_close` | Fix |
+| `a_job_that_leaves_the_session_via_setsid_survives_a_real_close` | Fix |
+| `resize_makes_the_pty_the_emulator_and_the_render_path_agree` | Fix |
+| `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | Fix (retired above) |
+| `terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark` | Quarantine |
+| `drain_available_never_blocks_the_caller_even_under_sustained_production` | Quarantine |
+
+(`every_failure_to_answer_is_unknown_and_never_none_ignored` is listed here because the handoff
+pack named it as live; direct inspection found its mitigation already shipped, so it moved
+straight to retired in the top table rather than needing new work.)
+
+### Fix — one shared defect behind four tests, not two separate causes
+
+**The handoff pack's own grouping treated "wait weaker than condition" (its Group A) and "PTY read
+timing" (its Group B) as different causes. Direct inspection of all four tests' current code found
+they are the identical defect**, the one review 478 already diagnosed for the first two: a wait
+that returns as soon as a *marker substring* appears, with the actual parse attempted as a
+*separate step afterward* — so a read that lands on the shell's own echo of the still-unexpanded
+command (which contains the marker text with no real value after it yet) satisfies the wait and
+fails the parse a moment later.
+
+- `runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close` (`BGPID=`)
+- `runtime::terminal::tests::a_job_that_leaves_the_session_via_setsid_survives_a_real_close`
+  (`DETACHEDPID=`)
+- `surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_render_path_agree`
+  (`RESIZE_CHECK_017E:`) — this document's own row 787 and its four prior occurrences never named
+  this cause; it was treated as a separate, undiagnosed "PTY timing" class until this pass read the
+  actual code
+- `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
+  (`descendant-pid:`, row 8) — same shape, same fix
+
+**Fix, identical in all four**: poll the *parse* itself against the existing deadline, not a
+substring. `read_until_parsed`/`poll_until_parsed`/`poll_demo_pane_until_parsed` (one per call
+site's own existing helper family, not a shared crate-spanning function, since
+`tekstide-core`/`tekstide` are separate crates and each site's own polling helper already existed
+locally) loop the real read, re-attempt the caller's own parse function against the growing buffer
+each iteration, and return only once the parse actually succeeds or the deadline passes. The
+existing `rsplit`/`rsplit_once`-last-occurrence logic (already correct — it is *why* the parse
+fails cleanly on the echo instead of silently matching it) is unchanged, just no longer reachable
+only after the wait has already ended.
+
+**Ablation attempted, and it did not reproduce — recorded in full, the same honesty rows 2/5's own
+disposition (2026-10-07) required of itself.** The resize test has four prior real occurrences, the
+most of any row in this family, so it was chosen as the representative case: `git checkout` back to
+a staged pre-fix version, 16 `yes` spinners (load ~9), 25 runs, 0 failures; 40 more spinners (load
+~18), 20 more runs, 0 failures. **45 runs at the pre-fix code, under real contention, produced
+zero reproductions.** This matches rows 2/5's own finding exactly: "CPU contention alone does not
+reproduce it... whatever the trigger is, it is not simply a loaded scheduler." All four historical
+real occurrences (this row's own four, plus row 8's own two) happened on gate runs under ordinary,
+not deliberately synthetic, load.
+
+**So the fix is accepted on reasoning, the same standard rows 2/5 were held to, not on a forced
+reproduction.** It is strictly *stronger* than what it replaces, not merely different: the new wait
+demands everything the old one did (the marker must appear) *plus* the one thing missing (it must
+parse), so there is no condition under which the new code returns earlier than the old one did —
+it can only wait longer for the identical final correctness property. A wait that only ever waits
+*at least as long* cannot be the cause of a *new* failure; it can only remove the old one. Whether
+it does is the evidence to watch for across coming gates, exactly as rows 2/5's own disposition
+said of itself: **if any of these four recurs, this disposition reopens.**
+
+### Fix — fixture cleanup moved to a drop guard, ablated directly (not probabilistically)
+
+Unlike the marker-wait race, this half **is** mechanically forceable, and was forced. Review 480's
+own addendum: a failing test in this family fails the gate twice, once on its assertion and once on
+the fixture it leaves behind, because `cleanup_root(root)` is an ordinary call at the end of the
+test body, skipped by any panic above it.
+
+Applied to the two `tekstide-core` tests whose own `root` previously relied on that ordinary call
+(`a_real_backgrounded_job_is_dead_after_a_real_close`,
+`a_job_that_leaves_the_session_via_setsid_survives_a_real_close`): `CleanupOnDrop`, a `PathBuf`
+newtype with `Deref<Target = Path>` (so it passes anywhere `&root: PathBuf` already did, no other
+call site needing its own type to change) and a `Drop` impl that removes the directory
+unconditionally. The two `tekstide`-crate tests in this same family
+(`resize_makes_the_pty_the_emulator_and_the_render_path_agree`,
+`closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`) needed no
+equivalent change: the first already cleans up via `ScratchPane`'s own existing `Drop` impl, and
+the second uses shared fixture state with its own cleanup elsewhere in `shell::tests`, not a
+per-test temp directory.
+
+**Ablated directly, both directions, on the real filesystem**: a forced `panic!()` inserted
+immediately after constructing `root`, first with `CleanupOnDrop` in place — the directory was
+gone immediately after the panicking run, confirmed by checking the exact path the test itself
+printed. Reverted to the pre-fix bare `PathBuf` with the identical forced panic — the directory
+**survived**, reproducing the leak directly rather than by inference. Restored; the real test
+(no forced panic) passes.
+
+### Quarantine — two wall-clock latency ceilings, not correctness properties
+
+`terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark`
+(`tekstide::shell::tests`) and `drain_available_never_blocks_the_caller_even_under_sustained_
+production` (`tekstide-core::runtime::terminal::reader::tests`) both assert a single real-PTY
+call's own wall-clock duration stays under an absolute ceiling (50ms, 20ms) across many samples
+under sustained production. Both `#[ignore]`d, with a reason string and a doc comment naming this
+pass, rather than deleted or left flaky; both still compile and run on demand with `-- --ignored`.
+
+**The handoff pack grouped the second of these with the BGPID family ("the same family"). Direct
+inspection shows it is not** — there is no marker/substring race anywhere in it, only a latency
+budget under real flood pressure, the identical shape `terminal_poll_handler_cost...` already has.
+Recorded as a correction to the handoff's own grouping, not silently reclassified.
+
+**Why quarantine rather than the ratio-based fix `change_review_content_view_build_cost_by_line_
+count_measurement` already established, and whose own doc comment explicitly argues against
+`#[ignore]`** ("a budget that cannot be crossed by load at all is the better fix, which this is"):
+that fix works because its property is *relative* — cost must scale linearly with line count, so a
+paired reference measurement in the same run cancels out ambient load on both sides of a ratio.
+Both of these tests assert something structurally different — a *single call's own absolute
+latency ceiling* — which has no natural reference workload to divide by; there is nothing for a
+ratio to be *of*. This is a considered departure from that precedent, not an oversight: the
+precedent's own reasoning does not transfer to this property's shape, and quarantining a benchmark
+that cannot be made load-invariant is exactly what the handoff pack itself asks this pass to decide
+honestly rather than attempt to re-stabilise again.
+
+`terminal_poll_handler_cost...`'s own failure message (already found overconfident at RFC-066
+PR-066-B review 503 — *"this is a real regression, not measurement noise"*, stated unconditionally)
+is softened in the same change: it now says the ceiling could be a real regression or could be
+this machine under load, and names that this test is quarantined from the gate for exactly that
+reason, rather than asserting which one it is.
+
+### Accept — three rows, three different reasons, none of them scheduling
+
+- **`bind_recovers_from_a_stale_socket_file`.** A single, synchronous bind attempt against a staged
+  stale-socket condition — there is no wait loop anywhere in the test to strengthen the way the Fix
+  rows above had. Historically ~2% across dozens of recurrences over two months, stable, never
+  isolated to a more specific cause despite sustained attention from both the dev team and the
+  reviewer. Accepted: the shape offers no actionable fix, and the rate has not moved.
+- **`purge_reports_deferred_cleanup_while_wal_reader_is_active`.** One occurrence ever, in a run
+  whose own third pass showed SQLite-under-parallel-load contention — the same class this register
+  already documents extensively elsewhere (the shared-audit-store cause, fixed 2026-08-26, was
+  exactly this shape before isolation). Never re-investigated past that single occurrence. Accepted
+  at its current, very low rate rather than opening a fresh investigation into one data point.
+- **`every_failure_to_answer_is_unknown_and_never_none_ignored`.** Already carries a bounded retry
+  on `ETXTBSY` (`wait_until_executable`, `runtime/git/tests.rs`), confirmed in place and confirmed
+  passing. Functionally already a Fix, by a prior response; recorded here as Accept-the-existing-
+  mitigation and retired in the top table rather than redone.
+
+### The measured rate, re-taken on the same basis
+
+**Before**, from this document's own repeated sampling: ~3 failures in 17 full-workspace runs
+(~18%), the figure reviews 494–497 converged on.
+
+**After, 13 full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run: 0 failures.**
+
+**One honestly-disclosed mistake inside this same measurement, corrected before the number was
+trusted.** The first attempt at this re-measurement used a long `TMPDIR` path
+(`/dev/shm/gflake-remeasure/runN`) and produced 7 of 7 runs "failing" — but every failure was
+`Runtime(AdapterApproval(Bind(SocketPathTooLong)))`, a Unix-domain-socket path-length limit this
+project's own established convention already exists to avoid (short literal `TMPDIR`s, the lesson
+this register itself and several RFC handoffs already carry). Not a flake, not a regression: a
+harness mistake in the measurement itself, caught by actually reading the panic message rather than
+trusting the "FAILED" count — recorded here, not discarded, as a second instance of the exact
+"count what actually happened, do not infer it" discipline rows 5/6's own captured-message lessons
+already established for this file. Re-run correctly (short `TMPDIR`, e.g. `/dev/shm/gfrN`): clean
+every time.
+
+**13 is a smaller sample than the original 17**, stated plainly rather than rounded up to sound
+more conclusive than it is. 0/13 against a ~18% baseline is still a strong result, and the honest
+comparison is the same one every fix in this document has had to make do with: a post-fix count,
+not a controlled before/after on the identical tree.
+
+### Gate
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `rfc_docs_invariants`: unaffected (this pass touches no RFC document).
+- `cargo test --doc --workspace`: clean.
+- Three consecutive full-workspace runs, part of the fix commit's own required gate, then 10 more
+  as the re-measurement above: 13 total, 0 failures, 0 fixture entries left each time, fresh short
+  `TMPDIR` every run.
+- 2 tests now `#[ignore]`d (quarantined); both confirmed to still pass when run with `-- --ignored`.
