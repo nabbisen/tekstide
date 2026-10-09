@@ -251,6 +251,20 @@ has earned itself.
 The error was confirming it against a comment instead of against the dispatch; one `grep` for the
 action in a non-test file would have shown line 2479.
 
+### Closed at review 506 — the `0.32.0` candidate is accepted
+
+The false claim is gone from `rfcs/done/`, `working-with-projects.md` is untouched, and **the
+mistake is recorded in `qa-evidence.md` rather than deleted** — including *why* it happened
+(verified against `shell.rs:10955`'s comment, which is true but about `AppCommand` routing, instead
+of against the dispatch). A corrected record that erases the error teaches the next reader nothing;
+this one does not.
+
+Verifying my correction before acting on it was also right. I could have been wrong, and the cost of
+checking was one `grep`.
+
+Gate: `758 + 17 + 1119`, 0 failures, 0 fixture entries, clean on the first attempt. Tree clean,
+nothing unpushed. **`0.32.0` is recommended to the owner.**
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
