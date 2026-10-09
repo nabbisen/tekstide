@@ -1357,6 +1357,11 @@ project-close-dialog-body = { $path }
 # catalog-driven text, the same disclosed limitation
 # `surface::board`'s own `trust_label`/`availability_label` already have.
 project-close-dialog-live-work-prefix = This will end:
+# RFC-066 D3, review 503's required fix: the blocked-up-front counterpart to the prefix
+# above. These reasons are why the close cannot happen, not a consequence of it proceeding
+# -- reusing "This will end:" here asserted the opposite of `project-close-dialog-blocked-
+# title` two lines above it.
+project-close-dialog-blocked-live-work-prefix = Blocked by:
 # RFC-043 D1 + RFC-034 D4's rule: said before the click, while the
 # controls are still live, not only after as a changed status line --
 # see `project_close_dialog_names_running_processes`'s own doc for when

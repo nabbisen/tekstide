@@ -1542,3 +1542,27 @@ failing run fails the gate twice.
 
 **Owner: the dev team**, after the release. Named here because the rows 2/5 disposition had to
 learn at review 475 that a decision without a name against it does not happen.
+
+## New row, 2026-10-09 — RFC-066 PR-066-B, review 503's required fix: a shared desktop under real load
+
+| Test | First seen | Register row |
+| --- | --- | --- |
+| `surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_render_path_agree` | once | row 787's entry, now a fourth occurrence |
+| `shell::tests::terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark` | once | **new here** |
+
+Both failed in the same run (run 1 of 3), otherwise clean (`756 + 17 + 1119`, 2 failed, 0 entries
+left); both passed immediately on an isolated rerun. This session's own desktop was independently
+confirmed busy at the time — a live GUI capture taken earlier the same session (for this slice's
+own D3 evidence) found Chromium playing video and several other agents' terminals already running
+on the same real desktop — so this is exactly the load-sensitive PTY-timing shape row 787 and its
+siblings already describe, not a regression from this response's own work (nothing here touches
+`surface::terminal` or the poll loop).
+
+**The new one's own assertion message claims more than it can support**, the same overconfidence
+row 7 (`change_review_content_view_build_cost_by_line_count_measurement`) used to have before its
+fix: `"a single wake-driven poll() cost blew past a sane bound: max={max_micros}us -- this is a
+real regression, not measurement noise"` — stated unconditionally, with no load figure alongside it
+to let a reader tell the two apart, which is exactly what happened here: a failure that was noise,
+asserted as not noise. Not fixed in this response (out of this slice's own scope), but worth
+pairing with row 7's own fix as a second instance of the identical wording defect if the dev team's
+scheduled disposition pass reaches wall-clock-budget benchmarks generally.

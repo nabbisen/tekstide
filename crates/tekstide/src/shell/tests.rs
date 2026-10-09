@@ -13596,6 +13596,33 @@ fn project_close_dialog_reasons_line_states_the_real_counts() {
     );
 }
 
+/// RFC-066 D3, review 503's required fix: the blocked-up-front prefix must not claim the
+/// close is going ahead ("This will end:") when it is not -- these reasons are why it
+/// cannot happen, not a consequence of it proceeding.
+#[test]
+fn project_close_dialog_reasons_line_uses_the_blocked_prefix_when_blocked() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let mut modal = project_close_modal_fixture(
+        vec![tekstide_core::close::CloseReason {
+            code: tekstide_core::close::CloseReasonCode::DirtyFile,
+            message: "1 unsaved file".to_owned(),
+        }],
+        "/home/user/work/project",
+    );
+    modal.can_close = false;
+
+    let line = project_close_dialog_reasons_line(&catalog, &modal);
+
+    assert!(
+        line.starts_with("Blocked by:"),
+        "expected the blocked prefix, got {line:?}"
+    );
+    assert!(
+        !line.contains("This will end:"),
+        "must never claim the close is going ahead while it is refused: {line:?}"
+    );
+}
+
 /// RFC-043 D1 + RFC-034 D4's rule: a close that names a running process
 /// as a reason to confirm must also say, before the click, that
 /// anything that process started ends too.

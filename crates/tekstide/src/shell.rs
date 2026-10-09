@@ -14465,6 +14465,12 @@ fn project_close_dialog_body(catalog: &Catalog, modal: &ProjectCloseModal) -> St
 /// filesystem text, not a `&'static str` literal) -- the same disclosed
 /// limitation `surface::board`'s own `trust_label`/`availability_label`
 /// already carry.
+///
+/// **RFC-066 D3, review 503's required fix**: the prefix depends on `can_close`, same as
+/// the title/footer below it. `project-close-dialog-live-work-prefix` ("This will end:")
+/// is only ever true when the close is actually going ahead -- on the blocked path these are
+/// the reason nothing is going ahead, not a consequence of something that is, so the reused
+/// prefix asserted the opposite of the blocked title two lines above it.
 fn project_close_dialog_reasons_line(catalog: &Catalog, modal: &ProjectCloseModal) -> String {
     let joined = modal
         .reasons
@@ -14472,10 +14478,12 @@ fn project_close_dialog_reasons_line(catalog: &Catalog, modal: &ProjectCloseModa
         .map(|reason| reason.message.as_str())
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "{} {joined}",
-        catalog.get("project-close-dialog-live-work-prefix")
-    )
+    let prefix_key = if modal.can_close {
+        "project-close-dialog-live-work-prefix"
+    } else {
+        "project-close-dialog-blocked-live-work-prefix"
+    };
+    format!("{} {joined}", catalog.get(prefix_key))
 }
 
 /// RFC-043 D1 + RFC-034 D4's rule ("say it before the click, while the
