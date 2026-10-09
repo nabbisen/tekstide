@@ -74,13 +74,41 @@ load-bearing. Nothing outstanding.
 
 ## PR-066-B — refuse up front
 
-- [ ] A close the assessment blocks shows the reasons and **offers no confirm button** (D3).
-- [ ] The reasons are read from `assess_close`'s own result, not re-derived (D4, §row 4).
-- [ ] **No forced close exists anywhere in the change** (§row 3).
-- [ ] Live capture of a refused close, with the blocking reason named on screen.
-- [ ] **A refused close is not recorded as `Closed` in the audit store** (D10), and not as
+- [x] A close the assessment blocks shows the reasons and **offers no confirm button** (D3).
+      `ProjectCloseModal.can_close`; `project_close_dialog_view` builds its footer from a `Vec`
+      that only ever pushes `Close` when `can_close` is `true` -- not disabled, absent. Proved by
+      `a_close_blocked_by_a_dirty_file_opens_with_no_close_to_focus` (focus can never reach
+      `Close`) and live capture (`blocked-modal-no-confirm-button.png`: a single `Dismiss`
+      control, no `Close` anywhere in the dialog).
+- [x] The reasons are read from `assess_close`'s own result, not re-derived (D4, §row 4).
+      `the_blocked_modals_reasons_are_assess_closes_own_result_not_a_second_opinion`: a second,
+      independent `assess_project_close` call after the modal opens agrees with `modal.reasons`
+      field-for-field, because `attempt_close_project_tab` destructures `reasons` directly out of
+      the same match arm the modal is built from -- no second predicate exists.
+- [x] **No forced close exists anywhere in the change** (§row 3).
+      `Message::ProjectCloseClosePressed`'s one dispatch site is gone from the view when blocked;
+      `activate_current_modal`'s new `!modal.can_close` guard sits before the `focus == Close`
+      guard in the same match as defense in depth, so even a stray `Close`-focused activation
+      would still record `Blocked`, never reach `apply_project_close_confirmation`. Full reasoning
+      in `qa-evidence.md`.
+- [x] Live capture of a refused close, with the blocking reason named on screen.
+      `rfcs/handoffs/066-refused-close/evidence/pr-066-b/blocked-modal-no-confirm-button.png`: a
+      real dirty file blocking a real close attempt (`Delete` on the project's own tab), "This
+      project can't be closed yet", the real path, "This will end: 1 unsaved file", one `Dismiss`
+      control. Confirmed against the live, isolated `XDG_STATE_HOME` under `/dev/shm`, never a
+      path under `$HOME`. The real audit write confirmed independently with `sqlite3` against the
+      live store, not only through the unit tests.
+- [x] **A refused close is not recorded as `Closed` in the audit store** (D10), and not as
       `Cancelled` either — that already means the user dismissed the modal. **Proved by a test;
       nothing pins the refused case's record today**, which is why it went unnoticed.
+      `activating_a_blocked_close_records_blocked_not_cancelled_or_closed`,
+      `escaping_a_blocked_close_also_records_blocked_not_cancelled`. Writing these found a real,
+      independent bug beyond the Rust-level plumbing: the `safe_close_decision` family's own SQL
+      `CHECK` constraint had no branch admitting `outcome = 'blocked'`, so every such write was
+      silently rejected at the SQLite layer -- fixed with a real schema migration (`AUDIT_SCHEMA_
+      VERSION` `2 -> 3`, a new `MigrationStep`, following RFC-013 Amendment 1's own established
+      shape exactly), not a workaround. Full account, including the ablation that reproduces the
+      original rejection, in `qa-evidence.md`.
 
 ## Whole-RFC
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.32.0 - A Refused Close Means Nothing Happened
+
+Status: **in progress.** RFC-066's two slices (the ordering fix, the refuse-up-front interface and
+the audit trail) are both implemented and gated; what remains before the candidate is the
+Whole-RFC checklist's own scans, a book sweep in both directions, and the core pin bump at the
+release cut itself. This entry is written incrementally as slices close, not held back for the
+release; see `rfcs/handoffs/066-refused-close/` for the full handoff pack.
+
+**Confirming a close that gets refused anyway used to cost you your running terminals first.** A
+project with a dirty file (or a pending approval, or a review-ready change) and a live terminal
+both refused the close *and* killed every one of those terminals before refusing — real,
+unrecoverable process state destroyed by a confirmation that never went through. The assessment now
+runs, read-only, before anything live is touched; a project blocked by anything other than its own
+running processes has those processes left exactly as they were.
+
+**And now the dialog says so up front, instead of offering a button that sometimes does nothing.**
+Attempting to close a project the assessment already blocks shows why — the real reasons, the real
+counts — with no confirm button at all, not a disabled one: "This project can't be closed yet," one
+`Dismiss` control, nothing to press that would have silently refused anyway. A close blocked only by
+a live process still works the way it always did, since terminating that process is what resolves
+the one reason stopping it.
+
+**A refused close is no longer recorded as if it closed.** The audit trail had exactly one outcome
+for "did not close" before this slice: `Cancelled`, which already means a close was offered and a
+user actively declined it. A close the assessment blocked before any offer existed now gets its own
+outcome, `Blocked` — found, while proving it, to be rejected by the audit store's own schema at the
+SQLite level beneath the code that builds the record; fixed with a real schema migration, the same
+shape RFC-013 Amendment 1 already established for changing a shipped version's `CHECK` constraints
+without touching what a real installation already wrote.
+
 ## 0.31.0 - The Crash Is Detected, Not Guessed
 
 Status: **released 2026-10-09.** RFC-027's three slices (the marker, the record with its
