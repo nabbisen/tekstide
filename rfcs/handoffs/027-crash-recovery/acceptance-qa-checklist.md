@@ -472,6 +472,38 @@ and was right to explain: the buffer is still dirty, so D11's reason has not end
 - [ ] The core pin bumps with the version. *(Release-cut item; not a Whole-RFC item.)*
 - [x] Commits are pushed once the gate is green.
 
+### Required at review 495
+
+The Whole-RFC work is right and the self-findings are the good kind: the book never mentioned the
+offer at all (forward), and `local-data-and-privacy.md` still said *"when it **crashed**"* — true
+before Amendment 1, false after (reverse). Coverage rows carry the decided hedges rather than
+repeating them, and `REQ-RECOVER-002` never having been on the plan was disclosed rather than folded
+in. Gate reproduces: `751 + 16 + 1117`, 0 failures, 0 fixture entries.
+
+- [ ] **Three user-visible strings still say "against a crash", and the program is the one place the
+  reverse sweep did not reach.** `crates/tekstide/locales/en.ftl`:
+
+  - `editor-recovery-persist-refusal-too-large` — *"too large to protect against a crash"*
+  - `editor-recovery-persist-refusal-total-bound` — *"not protected against a crash"*
+  - `editor-recovery-persist-refusal-io` — *"could not be protected against a crash"*
+
+  All three render through `surface/editor.rs`, so they are on screen, and **the understatement runs
+  against the user**: after Amendment 1 a record protects unsaved work across an ordinary quit as
+  well, so a file that cannot be protected is unprotected in the *common* case too, not only the
+  rare one. A user told "not protected against a crash" is told less than is true about what they
+  stand to lose — the owner's own "must not misunderstand" criterion, in the direction that costs
+  work.
+
+  **This is the third time this shape has landed**, and `release-checklist.md` already names it from
+  RFC-065 review 473: *"Correcting a description without correcting the program's own words does not
+  half-fix the drift, it creates a new one."* The step exists and reads in both directions; what it
+  did not get pointed at this time was `en.ftl`. **A grep of `en.ftl` for the words whose meaning
+  the slice changed would have found these in one command** — worth making that the literal
+  instruction rather than "read it in the other direction too".
+
+**Accepted without change:** the `SocketPathTooLong` attempt was correctly called not-a-flake and
+correctly re-run under a short literal; the register documents that class and you used it.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
