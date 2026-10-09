@@ -511,6 +511,40 @@ in. Gate reproduces: `751 + 16 + 1117`, 0 failures, 0 fixture entries.
 **Accepted without change:** the `SocketPathTooLong` attempt was correctly called not-a-flake and
 correctly re-run under a short literal; the register documents that class and you used it.
 
+### Required at review 496 — the last one, and partly my fault
+
+The misleading cause is gone, my own sweep confirms nothing stale is left (`crash` now appears only
+where it is correct: *"not only after a crash"*, the detection mechanism itself, and *"a crash, or
+simply quitting without saving"*), and **finding the fourth instance by running the grep wider than
+I named it** is the instruction working better than I wrote it. Gate reproduces: `751 + 16 + 1117`,
+0 failures, 0 fixture entries.
+
+- [ ] **Two of the three lines now name no object, and they render with no heading above them.**
+  `recovery_persist_refusal_lines` pushes straight into the editor chrome, between the save-all
+  notice and the Save button — nothing says what the subject is. A user sees:
+
+  ```
+  notes.txt: could not be protected
+  ```
+
+  Protected from what, by what? The old wording at least named something, even if it understated.
+  **I asked for the misleading trigger to go and did not say to drop the object with it** — that
+  part is mine.
+
+  **Name the thing, not the trigger.** That satisfies both constraints at once: accurate about
+  scope, and comprehensible standing alone. Something of this shape, your wording:
+
+  - `{ $path }: too large to keep a recovery copy ({ $bytes } bytes, over the { $limit }-byte limit)`
+  - `{ $path }: no recovery copy kept — would put retained recovery data over its own { $limit }-byte limit`
+  - `{ $path }: could not keep a recovery copy`
+
+  The middle line already half-does this by mentioning "retained recovery data"; the other two
+  should not depend on it being on screen too.
+
+**Worth knowing, not required:** no test asserts this prose, as you noted — so nothing will catch a
+regression in it. That is the same gap review 492 recorded against RFC-063, and I am not asking you
+to close it here.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
