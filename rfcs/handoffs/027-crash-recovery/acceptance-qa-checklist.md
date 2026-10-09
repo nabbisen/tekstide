@@ -545,6 +545,30 @@ I named it** is the instruction working better than I wrote it. Gate reproduces:
 regression in it. That is the same gap review 492 recorded against RFC-063, and I am not asking you
 to close it here.
 
+### Required at review 497 — the gate, not the code
+
+The three strings are exactly right and the wording item closes. One item, and it is not about this
+change.
+
+- [ ] **Three consecutive green runs, not three attempts.** The gate rule is *"green three
+  consecutive times"* (`delivery-plan.md`); this response reported `751 + 16 + 1117` **in two of
+  three**, with run 1 failing on the review-478 PTY pair. Every prior response in this RFC redid it
+  — *"the gate was redone, not counted"* (reviews 478, 485, 495). Redo it.
+
+  **This is not a criticism of your machine.** I ran three immediately afterwards on the same tree
+  and **my run 1 failed too**, on a different registered row —
+  `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`, on file since
+  the `0.16.0` gate. Two independent three-run gates, two different registered intermittents, the
+  same afternoon.
+
+**Scheduled, not required here: a disposition pass over the whole register, after `0.31.0` ships.**
+Counting the runs I watched across reviews 494–497 rather than recalling them: about **3 failures in
+17 full-workspace runs**, both machines. At that rate a three-run gate passes first attempt roughly
+half the time, so the candidate should expect to redo it. Nineteen rows are on file; rows 2 and 5
+were fixed because somebody decided about them, and nothing has been decided about the rest. Written
+up at **Disposition, 2026-10-09** in `test-process-leak.md`. **Not before the release** — that would
+trade a release for tidiness.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
