@@ -157,18 +157,49 @@ rows also make the case for the disposition pass already riding alongside this r
 
 ## Whole-RFC
 
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass.
+      `shell::tests::no_raw_color_construction_anywhere_in_the_crate`,
+      `i18n::enforcement::no_catalog_string_names_an_internal_identifier`,
+      `i18n::enforcement::every_source_locale_key_resolves_in_every_shipped_locale` — each run
+      directly in isolation, all three pass.
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
       **after staging**, `rfc_docs_invariants`, `cargo test --doc --workspace`, **three consecutive
       full-workspace runs with `--no-fail-fast`**, **0 fixture entries left** in a fresh short fixed
       `TMPDIR` — a literal, not `mktemp`.
-- [ ] Every new intermittent has a dated row in `test-process-leak.md`.
-- [ ] The changelog is written **incrementally as each slice closes**, and re-read against the
+      `rfc_docs_invariants`: 17/17. Doctests: clean. Three consecutive runs (`/dev/shm/g066wrfc2`):
+      `758 + 17 + 1119`, 0 failed, 0 fixture entries left each time — the first attempt's own run 2
+      failed on `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`,
+      an *already-registered* row (`0.16.0` release gate, 2026-08-28 — PTY read timing), passed
+      immediately in isolation; the gate was redone, not counted, per this register's own
+      convention — no new row needed since this one already has one.
+- [x] Every new intermittent has a dated row in `test-process-leak.md`.
+      Both of review 503's own gate failures (row 787's fourth occurrence,
+      `terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark` new) already
+      recorded with a dated row in `qa-evidence.md`'s own PR-066-B section; nothing new surfaced in
+      this pass.
+- [x] The changelog is written **incrementally as each slice closes**, and re-read against the
       finished set at the candidate — not against the last slice's diff.
-- [ ] The book is read against the changelog **in both directions**, including any user-visible word
+      `## 0.32.0` section re-read against the finished two-slice set: added the lead paragraph
+      review 504 asked for ("this started as one defect... and turned out to be three"), tying the
+      three repairs (terminals, silence, audit record) to the one underlying claim rather than
+      leaving them as three separate, unconnected paragraphs a reader of the title would not
+      connect on their own.
+- [x] The book is read against the changelog **in both directions**, including any user-visible word
       this RFC's commits touch.
-- [ ] `what-works-today.md` says what a blocked close now does, since the behaviour a user meets
+      Swept `docs/src/users/*.md` for every existing mention of project-closing behaviour.
+      `what-works-today.md:218`'s "every choice also has a real clickable button" still holds for
+      the blocked modal's own single `Dismiss` — not stale, left unchanged.
+      `configuration.md:95-96`'s `open_safe_close_dialog` entry describes routing, not dialog
+      content — not stale. The one real gap: `working-with-projects.md`'s own "Closing a project"
+      section described only the offered-confirm case; added a new paragraph for the blocked-
+      up-front case (D3's own title, prefix and `Dismiss` wording, named exactly as the catalog
+      strings read).
+- [x] `what-works-today.md` says what a blocked close now does, since the behaviour a user meets
       changes.
+      **Named the wrong page; the substance is covered.** `what-works-today.md` itself needed no
+      edit (see above — its one close-dialog claim already generalizes correctly). The page that
+      actually walks through close behaviour in the detail this item asks for is
+      `working-with-projects.md`'s own "Closing a project" section, updated above.
 - [ ] The core pin bumps with the version. *(Release-cut item.)*
 - [ ] Commits are pushed once the gate is green.
 

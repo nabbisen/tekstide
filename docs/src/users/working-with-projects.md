@@ -34,6 +34,13 @@ dialog says so before you click. A process you deliberately detached with `nohup
 boundary this respects. That is the opt-out: use it if you want something to outlive the project
 you are closing.
 
+**An unsaved file, a pending approval or a review-ready change refuses the close outright — and
+says so, with no confirm button to press.** The dialog reads *"This project can't be closed yet,"*
+names what is blocking it (*"Blocked by: 1 unsaved file"*), and offers a single **Dismiss**. There
+is nothing to confirm here: a running terminal alone does not block a close (closing is what ends
+it), but anything else does, and this dialog never offers a button that would do nothing when
+pressed. Nothing live is touched, and nothing closes, until every one of those reasons is gone.
+
 ## Reviewing what an AI agent changed
 
 `Ctrl+Alt+D`, or the **Change Review** button on Trust Settings.

@@ -2,11 +2,18 @@
 
 ## 0.32.0 - A Refused Close Means Nothing Happened
 
-Status: **in progress.** RFC-066's two slices (the ordering fix, the refuse-up-front interface and
-the audit trail) are both implemented and gated; what remains before the candidate is the
-Whole-RFC checklist's own scans, a book sweep in both directions, and the core pin bump at the
-release cut itself. This entry is written incrementally as slices close, not held back for the
-release; see `rfcs/handoffs/066-refused-close/` for the full handoff pack.
+Status: **in progress.** RFC-066's two slices and its Whole-RFC checklist are all implemented,
+gated, and reviewed; what remains before the candidate is the core pin bump at the release cut
+itself. This entry is written incrementally as slices close, then re-read against the finished set
+at the candidate; see `rfcs/handoffs/066-refused-close/` for the full handoff pack.
+
+**This started as one defect — a dialog offering an action it then did not perform — and turned
+out to be three.** Confirming a close that then refused anyway killed real, running work before
+saying no; the dialog offered a button that sometimes silently did nothing; and the audit trail
+recorded neither of those failures, because it had no outcome for "refused" at all. All three are
+fixed, below, each the user-visible half of the same underlying claim: **a refused close now leaves
+behind no trace that it was ever attempted** — nothing terminated, nothing silently declined,
+nothing misrecorded.
 
 **Confirming a close that gets refused anyway used to cost you your running terminals first.** A
 project with a dirty file (or a pending approval, or a review-ready change) and a live terminal
