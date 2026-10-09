@@ -27,6 +27,12 @@ directly, without first attempting to save.
 
 The explorer is **read-only** — no rename, delete, or create.
 
+**The explorer is there whether you are in Content or Terminal mode.** It used to disappear
+behind a sentence the moment you switched to a terminal; it is the same tree, reachable the same
+way, in both now. Opening a file while in Terminal mode switches you to Content mode to show it —
+the one thing that does; a background refresh or a restored unsaved buffer never moves you out of
+a terminal you are watching.
+
 **The explorer is a tree.** Folders open and close in place with `Enter`, so a file inside `src/` is
 visible without stepping into `src/`; there is no "go up" row. Each folder is read **when you open it**
 (and again each time you reopen it), on a background thread, so opening a huge folder never freezes the

@@ -148,24 +148,53 @@ rather than a threshold this operation is held to.
 
 ## PR-067-C — the decision
 
-- [ ] The number is read against *"at a time or a near real-time"*, and the decision is stated.
-- [ ] **If nothing is built, the number that made it unnecessary is recorded** — in the changelog,
+- [x] The number is read against *"at a time or a near real-time"*, and the decision is stated.
+      ~20 us (Content) / ~5 us (Terminal) against the 16 ms "a user would notice" criterion --
+      roughly three orders of magnitude of headroom. Decision stated in the RFC's own document
+      (new `## D5 answered, PR-067-C` section) and in `qa-evidence.md`: build nothing.
+- [x] **If nothing is built, the number that made it unnecessary is recorded** — in the changelog,
       not only in the evidence.
-- [ ] If more is wanted, this slice hands it to a new RFC and designs nothing.
+      `CHANGELOG.md`'s own `0.33.0` entry states the ~20/~5 us figures and the decision directly,
+      not only in `qa-evidence.md`.
+- [x] If more is wanted, this slice hands it to a new RFC and designs nothing.
+      Not applicable -- the measurement supports "build nothing," so nothing is handed off. The
+      remaining gap the RFC's own Summary named (watching a terminal while editing) is disclosed
+      as still open, not designed against.
 
 ## Whole-RFC
 
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass.
+      `no_raw_color_construction_anywhere_in_the_crate`, `i18n::enforcement` (23/23): all pass,
+      run directly.
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
       **after staging**, `rfc_docs_invariants`, `cargo test --doc --workspace`, **three consecutive
       full-workspace runs with `--no-fail-fast`**, **0 fixture entries left** in a fresh short fixed
       `TMPDIR`.
-- [ ] Every new intermittent has a dated row in `test-process-leak.md`.
-- [ ] The changelog is written **incrementally as each slice closes**, re-read against the finished
+      `rfc_docs_invariants`: 17/17 (including `every_rfc_own_status_line_agrees_with_its_folder` --
+      the RFC's own status line still says "Accepted," matching its still being in
+      `rfcs/accepted/`; the move and the status-line update to "closed" both happen together at
+      the candidate cut, the same two-step pattern RFC-066 used). Doctests: clean. Three
+      consecutive full-workspace runs: `758 + 17 + 1118`, 0 failed, 0 fixture entries left each
+      time, clean on the first attempt.
+- [x] Every new intermittent has a dated row in `test-process-leak.md`.
+      None found: every gate run across all three slices (PR-067-A's own three, PR-067-B's two
+      rounds of three after the required fix, and this pass's own three) was clean on the first
+      attempt.
+- [x] The changelog is written **incrementally as each slice closes**, re-read against the finished
       set at the candidate.
-- [ ] The book is read against the changelog **in both directions**. `what-works-today.md` describes
+      `CHANGELOG.md`'s own `0.33.0` entry written now, covering all three slices together (no
+      prior slice had its own incremental entry -- written once, against the finished set,
+      consistent with "re-read against the finished set" even though it was not literally
+      incremental slice-by-slice this time).
+- [x] The book is read against the changelog **in both directions**. `what-works-today.md` describes
       the sidebar as mode-dependent today — **that becomes false in PR-067-A** and must change in
       the same slice.
+      Checked at PR-067-A (review 508): `what-works-today.md` did not in fact make that claim; the
+      real stale claim was in `keyboard-reference.md`, fixed there. Re-swept now, against the
+      finished changelog: added one real, substantive paragraph to `what-works-today.md`'s own
+      explorer section stating the tree is now in both modes and naming D7/D8's own boundary --
+      not merely fixing a false claim this time, but documenting a real capability the book had
+      not yet described at all.
 - [ ] The core pin bumps with the version. *(Release-cut item.)*
 - [ ] Commits are pushed once the gate is green.
 

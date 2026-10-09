@@ -102,3 +102,21 @@ the user's behalf, not a refresh, not a recovery restore.
 **D9 — Nothing is removed from terminal mode to make room.** The six-terminal bound, the session
 bar and the two visible slots are untouched. This RFC gives the sidebar back its contents; it does
 not renegotiate the main area.
+
+## D5 answered, PR-067-C (2026-10-09): build nothing
+
+**Measured, not assumed, per D4.** A mode switch's own view-build cost — Content mode on the
+order of 20 microseconds, Terminal mode under 5, paired against each other in the same run,
+`rfcs/handoffs/067-sidebar-not-a-mode/qa-evidence.md`'s own full account — against this project's
+existing latency criterion for "a user would notice" (16 ms): roughly three orders of magnitude
+of headroom, not a close call decided by which side of a line a noisy number landed on.
+
+**Read against the owner's own framing** ("at a time or a near real-time," the Summary's own
+question): a switch costing tens of microseconds to redraw is already near-real-time in every
+sense that framing asks about. The remaining gap this RFC's own Summary named — *watching* a
+terminal while editing, not operating one — is real and unclosed, but it is a narrower gap than
+"three surfaces at once" was, and nothing measured here says it needs to be closed by this RFC.
+
+**D5's own answer: build nothing.** No splits, no panes, no third mode. If that gap is ever worth
+closing, it is a separate RFC with its own design, exactly as D5 and the non-goals already said —
+this slice does not design it, and does not need to.

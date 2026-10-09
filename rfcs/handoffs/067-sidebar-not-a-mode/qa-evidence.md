@@ -241,3 +241,30 @@ already-bounded, already-asynchronous work gets requested, not its own cost or w
   (`/dev/shm/g067b{1,2,3}`): `758 + 17 + 1118`, 0 failed, 0 fixture entries left each time, clean
   on the first attempt. 8 ignored in `tekstide` (one more than PR-067-A's own count: the new
   measurement test); confirmed it still runs correctly with `-- --ignored`.
+
+## PR-067-C — the decision
+
+### D5 — read against the owner's own framing, and the decision stated
+
+**The number.** PR-067-B's own measurement, re-run clean after review 509's timer-resolution fix:
+Content mode's view-build cost on the order of 20 us, Terminal mode's under 5 us, both roughly
+three orders of magnitude under this project's own existing latency criterion for "a user would
+notice" (16 ms).
+
+**Read against *"at a time or a near real-time"*** (the Summary's own question, quoted in full in
+the RFC): a switch costing tens of microseconds to redraw is near-real-time in every sense that
+framing asks about. The remaining gap the RFC's own Summary named explicitly — *watching* a
+terminal while editing, as distinct from operating one — is real and this slice does not close
+it, but it is narrower than "three surfaces visible at once" was, and nothing measured says it
+needs closing by this RFC.
+
+**Decision: build nothing.** Recorded in the RFC's own document (`rfcs/accepted/067-the-sidebar-
+is-not-a-mode.md`, new `## D5 answered, PR-067-C` section) and in `CHANGELOG.md`'s own `0.33.0`
+entry, not only here — per the checklist's own explicit requirement that the number which made
+further work unnecessary be recorded in the changelog, not left in the evidence alone.
+
+### No code changed in this slice
+
+Nothing to gate beyond what PR-067-A/B already gated clean. This slice is the decision itself,
+read from PR-067-B's own measurement — the RFC's own words, *"a third slice that builds nothing,
+and records the number that made it unnecessary, is a success,"* taken as written.

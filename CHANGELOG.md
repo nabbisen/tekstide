@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.33.0 - The Sidebar Stops Being Two Things
+
+Status: **in progress.** RFC-067's three slices and its Whole-RFC checklist are all implemented
+and gated; what remains before the candidate is the core pin bump at the release cut itself. This
+entry is written incrementally as slices close; see `rfcs/handoffs/067-sidebar-not-a-mode/` for
+the full handoff pack.
+
+**A project tab had one toggle, and it governed everything.** Switching to Terminal mode to run a
+command took the file tree away with it — the sidebar fell back to one sentence, *"Files are
+listed here in Content mode,"* explaining an absence it then asked you to leave your terminals to
+fix. **The file tree is not a second thing the mode toggle owns any more.** It is there in both
+modes now, the same tree either way, reachable the same way either way: `Up`/`Down` moves the
+highlight, `Enter` opens a file or a folder, exactly as it already did in Content mode.
+
+**Activating a file from Terminal mode switches you to Content mode and shows it — and nothing
+else does.** That is the one new thing this slice adds, and it is deliberately narrow: the
+owner's own standing rule is that a result a user cannot see or undo is the wrong shape, and
+being moved somewhere you can see (and switch straight back from) is what being shown a file
+should do. Nothing else may move you there on your behalf — not a background file-change refresh,
+and not `0.31.0`'s own crash-recovery offer, which also opens documents and had to be checked
+explicitly rather than assumed safe. A real, pre-existing bug was found and fixed while proving
+that boundary: the function every document-open path shares had been forcing Content mode for
+*every* caller, harmless while the explorer was the only reachable one, a real violation the
+moment a second caller existed. It no longer does; only the explorer's own activation does.
+
+**The cost of switching was measured, not assumed — and it decided this RFC needed nothing
+further.** A mode switch is already free in the sense that matters: nothing is discarded, no
+terminal stops, no document loses its cursor or its undo history. What was never measured is what
+drawing the result afterward costs. Measured directly: switching into Content mode costs on the
+order of **20 microseconds** to redraw; Terminal mode, under **5**. Against this project's own
+existing latency criterion for "a user would notice" (16 ms), that is roughly three orders of
+magnitude of headroom — near-real-time already, in the owner's own words from the RFC itself.
+**Building anything further was considered and declined, with the number that made it
+unnecessary recorded here rather than only in the evidence**, per the RFC's own explicit
+standard: a slice that measures and correctly builds nothing is a success, not a shortfall.
+
 ## 0.32.0 - A Refused Close Means Nothing Happened
 
 Status: **released 2026-10-09.** RFC-066's two slices and its Whole-RFC checklist are all
