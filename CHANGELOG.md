@@ -2,14 +2,13 @@
 
 ## 0.31.0 - The Crash Is Detected, Not Guessed
 
-Status: **implemented and gated; not yet released.** RFC-027's three slices (the marker, the
-record with its purge, the offer) are all done, reviewed, and closed (PR-027-C accepted at review
-494). The Whole-RFC checklist (requirements coverage, scans, the gate, the changelog re-read this
-status line is itself part of) is what remains before the `0.31.0` candidate is cut. This entry was
-written incrementally as each slice closed, then re-read here against the finished set rather than
-left as it stood after the last slice's own diff — the lesson of RFC-065 review 479, named so it is
-not quietly skipped a second time. See `rfcs/handoffs/027-crash-recovery/` for the full handoff
-pack.
+Status: **candidate, not yet published.** RFC-027's three slices (the marker, the record with its
+purge, the offer) and the Whole-RFC checklist are all done, reviewed and closed — `REQ-RECOVER-002`
+and `REQ-RECOVER-005` met, with what their hedges were decided to mean in
+`rfcs/delivery-plan.md`'s own coverage row rather than restated here. This entry was written
+incrementally as each slice closed, then re-read against the finished set at the candidate rather
+than left as it stood after the last slice's own diff — the lesson of RFC-065 review 479. See
+`rfcs/handoffs/027-crash-recovery/` for the full handoff pack.
 
 **A crash is detected, not guessed.** Tekstide now writes a small marker at every launch and
 removes it at every clean exit, so a marker still there at the next launch means the previous one

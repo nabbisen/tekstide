@@ -1,7 +1,7 @@
 ---
 title: "RFC-027 handoff: crash recovery and unsaved buffer persistence"
-status: "**Accepted 2026-10-08**, D1–D11 as written plus D12–D15. `0.31.0`, M13. Three slices; A is a prerequisite for B and B for C."
-rfc_file: "../../accepted/027-crash-recovery-and-unsaved-buffer-persistence.md"
+status: "**Implemented and closed 2026-10-09** — `0.31.0` candidate, not yet published. All three slices and the Whole-RFC checklist closed."
+rfc_file: "../../done/027-crash-recovery-and-unsaved-buffer-persistence.md"
 target_milestone: "M13"
 created: "2026-10-08"
 ---

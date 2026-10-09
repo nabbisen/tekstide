@@ -1,9 +1,10 @@
 # RFC-027: Crash Recovery and Unsaved Buffer Persistence
 
-Status: **Accepted by the human owner 2026-10-08.** D1–D11 as written, plus D12–D15 — see
-*Decided on acceptance*. Proposed 2026-10-08. `0.31.0`, M13. Queued behind RFC-065 since the split of
-2026-10-07: you recover *buffers*, plural, so it always followed the document model. Requirements:
-`REQ-RECOVER-002`, `REQ-RECOVER-005`.
+Status: **Implemented and closed 2026-10-09; `0.31.0` candidate, not yet published.** See the
+*Closed* section. **Accepted by the human owner 2026-10-08.** D1–D11 as written, plus D12–D15 — see
+*Decided on acceptance*, plus Amendment 1. Proposed 2026-10-08. `0.31.0`, M13. Queued behind RFC-065
+since the split of 2026-10-07: you recover *buffers*, plural, so it always followed the document
+model. Requirements: `REQ-RECOVER-002`, `REQ-RECOVER-005`.
 
 ## Summary
 
@@ -199,3 +200,53 @@ says restore buffers "where safe", with no mention of how the last session ended
 user who quits with unsaved work leaves their content on disk with nothing offering it back and
 nothing removing it but a purge they must go and find. That is acceptable only because C is next.
 **This RFC must not reach a release with B in and C out.**
+
+## Closed (2026-10-09)
+
+All three slices, the Whole-RFC checklist and the release rule above are done. A `0.31.0`
+**candidate, not yet published** — see `CHANGELOG.md`'s own status line, which does not claim
+"released" ahead of the actual publish.
+
+**PR-027-A (the marker)** detects a crash without guessing: a per-instance marker, named by pid,
+written at launch and removed at clean exit. D12's own disclosed pid-reuse hole stands as written —
+not fixed, fails toward "not offered" rather than "falsely offered."
+
+**PR-027-B (the record, with its purge)** persists every dirty document's own text, cursor and
+viewport outside the project, bounded, counted and purged exactly like a transcript, default on
+from this release. Four review rounds (485–488) hardened the measurement methodology this RFC
+publishes — a within-run linear rate, an honest between-run range, a derived worst case labelled as
+derived — which the architect's own review 489 held up as the shape RFC-067's measurement slice is
+told to copy.
+
+**PR-027-C (the offer)** is driven by the record's own presence, never the marker (Amendment 1,
+verified live, not only in fixtures). D5's three-way disk comparison reuses the existing
+`Dirty`/`Conflict`/`ExternalDeleted` vocabulary, no new state minted. Live-captured against a real
+crash and a real external edit: `rfcs/handoffs/027-crash-recovery/evidence/pr-027-c/`.
+
+**A real data-loss defect was found and fixed during this slice's own review (490/491), not
+discovered after shipping.** A recovered document whose file was both changed and over
+`DEFAULT_MAX_EDITABLE_BYTES` could be saved directly over the real file it had never read, because
+the oversize encoding of "absent content hash" made two genuinely different snapshots compare
+equal. Fixed structurally — `save` and `refresh_external_state` now refuse unconditionally while
+`state` is `Conflict`, independent of how a snapshot encodes absence — and proven by an ablated
+test, not merely a passing one. Worth naming here because it is the kind of finding a changelog for
+a *shipped* defect would have had to carry; this RFC's own review cycle caught it first.
+
+**Left open, disclosed rather than silently deferred:**
+
+- The marker's own "may colour the offer's wording" role (Amendment 1) is not implemented — the
+  offer's copy does not distinguish a crash from an ordinary quit. Nothing in D4 or measurement 1
+  depends on it.
+- **A real gap in what this project's own tests can prove against an `iced` view tree**, found at
+  review 492: a line-function test can prove a string is computed correctly and still pass with the
+  view's own push of it removed. Recorded against **RFC-063** (`iced_selector`) in
+  `rfcs/future-work.md`, with this RFC's own §3 row 10 as the first requirement whose proof rests
+  entirely on a live capture because of it.
+- **Found, not fixed, by this RFC's own live-capture work**: a user cannot remove a recent project
+  from the Project Board — `remove_recent_project` exists and nothing calls it, a dormant capability
+  RFC-036 decided to keep without surfacing — so the list only grows. Recorded in
+  `rfcs/future-work.md`, 2026-10-09, not this RFC's own scope and not scheduled.
+
+See `rfcs/handoffs/027-crash-recovery/qa-evidence.md` for the full review history (reviews
+481–498) and `rfcs/handoffs/027-crash-recovery/acceptance-qa-checklist.md` for the closed
+checklist.

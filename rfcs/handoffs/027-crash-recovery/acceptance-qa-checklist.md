@@ -476,7 +476,9 @@ and was right to explain: the buffer is still dirty, so D11's reason has not end
       config comment in `configuration.md`, found by running `grep crash` one level further than the
       three strings named) said the same thing. All four fixed by dropping the scoping clause
       entirely, naming no cause. `qa-evidence.md`'s own "Review 495" section has the full account.
-- [ ] The core pin bumps with the version. *(Release-cut item; not a Whole-RFC item.)*
+- [x] The core pin bumps with the version. *(Release-cut item; not a Whole-RFC item.)* Done at the
+      candidate: workspace version and the `tekstide-core` pin both bumped to `0.31.0`,
+      `the_workspace_pins_tekstide_core_to_its_own_version` passes.
 - [x] Commits are pushed once the gate is green.
 
 ### Required at review 495
