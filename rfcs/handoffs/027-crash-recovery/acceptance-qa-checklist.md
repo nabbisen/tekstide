@@ -382,6 +382,40 @@ records for a project never reopened. Not implementing the marker's wording role
 Amendment 1 said *may* colour, and nothing depends on it. Gate reproduces: `750 + 16 + 1115`,
 0 failures, 0 fixture entries.
 
+### Required at review 493 — the captures disclose the owner's home layout
+
+The evidence proves what it set out to prove. `03` is exactly what review 490 asked for:
+`notes.txt (conflict)`, a real **Reload** button, holding the recovered text and not the file's own
+changed content. `01` puts *"Recovered documents come back without their undo history."* on screen,
+closing the gap review 492's ablation opened. The offer opened driven by the record alone.
+
+- [ ] **Retake `01` and `02` under an isolated `XDG_STATE_HOME`.** They were captured against the
+  **real** state directory, so both show the owner's real Project Board — twenty projects, including
+  `/tmp/claude-1000/-home-nabbisen-Desktop-tekstide-tekstide-git/<session-uuid>/scratchpad/...`.
+  *"No path in any image is under `$HOME`"* is literally true and misses the mechanism: those path
+  **names encode** `/home/nabbisen/Desktop/tekstide/tekstide-git`, which is the owner's home layout,
+  in a committed image in a public repository. `03` is clean and does not need retaking.
+
+  **The practice already exists and this response regressed from it**: PR-065-C and PR-065-D both
+  used a throwaway `XDG_STATE_HOME` under `/dev/shm`. Nothing about the recovery feature required
+  the real one — the state root is read from `XDG_STATE_HOME` like everything else.
+
+  Replace the two images in a new commit. **Do not rewrite published history for this**: the
+  account name is already public through the repository URL, so the marginal disclosure is the
+  directory layout and some session identifiers, which does not justify rewriting a pushed `main`.
+
+- [ ] **The real `recent-projects.json` carries 17 dead throwaway entries out of 19** — residue from
+  *earlier* capture sessions that used the real state directory, not from this one. This is why the
+  rule matters: the pollution is what made these two captures disclosing. **Two of the dead entries
+  are U+202E right-to-left-override fixtures** (`proj‮gpj.exe`, `safe-project‮gpj`) kept from past
+  untrusted-text work, which render deceptively wherever that list is drawn. **It is the owner's own
+  data, so it is their call, not mine to delete** — ask before clearing.
+
+**Verified by me, not taken from the report:** the real `recent-projects.json` is back to 19
+entries, and `recovery/records` and `recovery/instances` under the real state directory are both
+empty. The cleanup described was done and done correctly. The re-created record afterwards is right
+and was right to explain: the buffer is still dirty, so D11's reason has not ended.
+
 ## Whole-RFC
 
 - [ ] `REQ-RECOVER-002` and `REQ-RECOVER-005`'s coverage rows updated — and **the "where safe" and
