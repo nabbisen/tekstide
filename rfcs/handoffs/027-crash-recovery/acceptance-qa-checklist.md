@@ -389,7 +389,13 @@ The evidence proves what it set out to prove. `03` is exactly what review 490 as
 changed content. `01` puts *"Recovered documents come back without their undo history."* on screen,
 closing the gap review 492's ablation opened. The offer opened driven by the record alone.
 
-- [ ] **Retake `01` and `02` under an isolated `XDG_STATE_HOME`.** They were captured against the
+- [x] **Retake `01` and `02` under an isolated `XDG_STATE_HOME`.** **Done and verified at review
+  494**: both now show one project at `/dev/shm/tk027c-proj.pIVuVb` and *"1 project"* in the status
+  bar, with the no-undo notice and the conflict row text preserved. `03` untouched, history not
+  rewritten, and the real `recent-projects.json` is still at 19 entries with no `tk027c` in it — so
+  the retake itself used the isolation properly. **PR-027-C closes.**
+
+  ~~Original finding:~~ They were captured against the
   **real** state directory, so both show the owner's real Project Board — twenty projects, including
   `/tmp/claude-1000/-home-nabbisen-Desktop-tekstide-tekstide-git/<session-uuid>/scratchpad/...`.
   *"No path in any image is under `$HOME`"* is literally true and misses the mechanism: those path
