@@ -321,7 +321,12 @@ marker) and the release rule (**B must not reach a release without C**).
       from ordinary quit — disclosed as a deliberate scope cut, not an oversight: Amendment 1 says
       the marker "may colour the wording," not that it must, and D4/measurement 1 (list + decline)
       do not depend on it.
-- [ ] **Live capture**, including the changed-on-disk case, not only the easy one.
+- [x] **Live capture**, including the changed-on-disk case, not only the easy one.
+      `rfcs/handoffs/027-crash-recovery/evidence/pr-027-c/`: a real crash (`kill -9`), the file
+      changed externally while Tekstide was down, restart, offer, accept, and the real `Reload`
+      control on screen — the same scenario review 490 found missing, now visibly fixed. Also
+      carries review 492's own remaining proof: the no-undo-history notice, rendered, not only
+      resolved.
 
 ### Required at review 490 — a demonstrated data-loss defect in D5
 

@@ -756,3 +756,40 @@ substring match standing in for a compile error).
   (`/dev/shm/t27r492g{1,2,3}`): `751 + 16 + 1117`, 0 failed, 0 fixture entries left each time.
 - The only item left for PR-027-C to close: **the live capture**, held off at the owner's own
   instruction about the shared desktop.
+
+## The live capture: review 490's own last two required items, closed together
+
+Review 492's own finding sharpened what this capture had to prove: ablating the view's own push of
+the no-undo-history line (not the factored-out function) left `recovery_offer_header_includes_the_
+no_undo_history_notice` passing anyway, which is the gap every line-function test in this codebase
+has against an `iced` view tree. The live capture is the only thing that closes it -- and, per the
+task-breakdown's own requirement, had to be the changed-on-disk case, not the easy unchanged one.
+
+Taken on the owner's own go-ahead, against the real binary, with a real `kill -9` (not
+`simulate_crash()`) and a real external edit to the file while Tekstide was down -- full method and
+all three images in `evidence/pr-027-c/README.md`. In order: the offer opens on restart with the
+no-undo-history notice **on screen**, not only resolved in the catalog; accepting the row updates
+its own text to "recovered (the file on disk has since changed)"; switching into the project shows
+`notes.txt (conflict)` with a real **Reload** button in the chrome -- the exact control review 490
+found missing for this exact scenario, now visibly present, holding the recovered text rather than
+the file's own real, changed content.
+
+A confirming detail recorded in the evidence README rather than left unexplained: the recovery
+record for the recovered document was not gone afterward -- a *new* one existed, timestamped to the
+external edit, because the recovered buffer is itself still dirty and the ordinary persist tick
+protects it again, exactly as D11 says it should (a record is removed when *its own* reason ends,
+and "still unsaved" is a reason that has not ended).
+
+The real environment was left as found: the throwaway project's entry was removed from the real
+`recent-projects.json` by hand (backed up first, then restored to 19 entries from 20), its
+recovery record directory and both instance markers removed, and the fixture directory deleted.
+None of this -- the fixture path, or any other project's own path shown in the Project Board behind
+the modal -- is under `$HOME`; every path in every captured image reads `/tmp/...`.
+
+### Gate, the live capture
+
+No code changed for this response -- evidence only. The gate already reported above (review 491's
+fix) is the current one: `751 + 16 + 1117`, 0 failed, three consecutive runs, `cargo fmt --check`/
+`clippy --workspace --all-targets -D warnings`/`cargo test --doc --workspace` all clean.
+
+**With this, every item review 490 and 492 named is closed.**
