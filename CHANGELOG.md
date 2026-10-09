@@ -2,7 +2,7 @@
 
 ## 0.31.0 - The Crash Is Detected, Not Guessed
 
-Status: **candidate, not yet published.** RFC-027's three slices (the marker, the record with its
+Status: **released 2026-10-09.** RFC-027's three slices (the marker, the record with its
 purge, the offer) and the Whole-RFC checklist are all done, reviewed and closed — `REQ-RECOVER-002`
 and `REQ-RECOVER-005` met, with what their hedges were decided to mean in
 `rfcs/delivery-plan.md`'s own coverage row rather than restated here. This entry was written

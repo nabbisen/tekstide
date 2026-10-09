@@ -1,6 +1,6 @@
 # RFC-027: Crash Recovery and Unsaved Buffer Persistence
 
-Status: **Implemented and closed 2026-10-09; `0.31.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-09; released as `0.31.0` 2026-10-09.** See the
 *Closed* section. **Accepted by the human owner 2026-10-08.** D1–D11 as written, plus D12–D15 — see
 *Decided on acceptance*, plus Amendment 1. Proposed 2026-10-08. `0.31.0`, M13. Queued behind RFC-065
 since the split of 2026-10-07: you recover *buffers*, plural, so it always followed the document
@@ -203,9 +203,8 @@ nothing removing it but a purge they must go and find. That is acceptable only b
 
 ## Closed (2026-10-09)
 
-All three slices, the Whole-RFC checklist and the release rule above are done. A `0.31.0`
-**candidate, not yet published** — see `CHANGELOG.md`'s own status line, which does not claim
-"released" ahead of the actual publish.
+All three slices, the Whole-RFC checklist and the release rule above are done. **Released as
+`0.31.0` on 2026-10-09**, published core-first and tagged at the published commit.
 
 **PR-027-A (the marker)** detects a crash without guessing: a per-instance marker, named by pid,
 written at launch and removed at clean exit. D12's own disclosed pid-reuse hole stands as written —
