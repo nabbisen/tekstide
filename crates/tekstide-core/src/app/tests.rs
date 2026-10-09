@@ -1116,11 +1116,105 @@ fn run_project_process_probe(
         .to_owned()
 }
 
-/// RFC-058 PR-058-A, D2: the reproduction itself. Two real processes open the
-/// **same real project root**, one after the other (not concurrently -- the
-/// collision this RFC is about is in the paths both compute, not in a race
-/// between two writes landing at the same instant), each dirtying the same
-/// document with different text.
+/// A `project_process_probe --hold`, kept alive on purpose (review 513): a
+/// probe spawned and waited on with `.output()` has already exited before a
+/// second one starts, which reproduces two *sequential* sessions, not two
+/// instances holding one project at once -- the real hazard, and the one a
+/// correct PR-058-B fix must still be checked against. `spawn` returns only
+/// once this process's own `println!` of its project id has been read back,
+/// which cannot happen before its write has landed (the print follows the
+/// write in `main`), and before it blocks on stdin -- so by the time this
+/// returns, the process is known to be alive and holding, not merely
+/// probably still starting up.
+struct HeldProbe {
+    _slot: crate::test_support::RealProcessSlot,
+    child: crate::test_support::KillOnDropChild,
+    pid: u32,
+    stdin: Option<std::process::ChildStdin>,
+    project_id: String,
+}
+
+impl HeldProbe {
+    fn spawn(state_root: &Path, project_root: &Path, relative_path: &str, text: &str) -> Self {
+        use std::io::BufRead;
+        use std::process::Stdio;
+
+        let slot = RealProcessLimiter::acquire();
+        let mut child = Command::new(project_process_probe_binary_path())
+            .arg(state_root)
+            .arg(project_root)
+            .arg(relative_path)
+            .arg(text)
+            .arg("--hold")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn a real, held project_process_probe process");
+        let pid = child.id();
+        let stdin = child
+            .stdin
+            .take()
+            .expect("a piped child must have a stdin handle");
+        let stdout = child
+            .stdout
+            .take()
+            .expect("a piped child must have a stdout handle");
+
+        let mut project_id = String::new();
+        std::io::BufReader::new(stdout)
+            .read_line(&mut project_id)
+            .expect("read the held probe's own project-id line before it blocks on stdin");
+        let project_id = project_id.trim().to_owned();
+        assert!(
+            !project_id.is_empty(),
+            "a held probe must print its project id before blocking on stdin, pid {pid}"
+        );
+
+        Self {
+            _slot: slot,
+            child: crate::test_support::KillOnDropChild::new(child),
+            pid,
+            stdin: Some(stdin),
+            project_id,
+        }
+    }
+
+    /// Review 513's own required proof, not an assumption: this pid is still
+    /// in the process table right now, via the same `libc::kill(.., 0)`
+    /// liveness check `runtime::terminal::termination` uses in production.
+    fn assert_still_holding(&self) {
+        assert!(
+            crate::test_support::process_is_alive(self.pid),
+            "the held probe (pid {}) must still be running -- it must not have exited before \
+             the second process even started",
+            self.pid
+        );
+    }
+
+    /// Closes this process's stdin (its own signal to stop blocking) and
+    /// waits for a clean exit.
+    fn release(mut self) {
+        drop(self.stdin.take());
+        let status = self
+            .child
+            .wait()
+            .expect("wait for the held probe to exit after releasing it");
+        assert!(
+            status.success(),
+            "the held probe (pid {}) exited with {:?} after being released",
+            self.pid,
+            status.code()
+        );
+    }
+}
+
+/// RFC-058 PR-058-A, D2: the reproduction itself. Two real processes **hold
+/// the same real project root open at the same time** -- the first spawned
+/// with `--hold` and proven still alive before the second even starts
+/// (review 513: a sequential pair of sessions is not the hazard, and is not
+/// something a correct fix would still fail against) -- each dirtying the
+/// same document with different text.
 #[test]
 fn two_real_processes_opening_the_same_root_get_the_same_project_id_and_clobber_the_record() {
     let sandbox = TestSandbox::new("rfc058-reproduce");
@@ -1128,10 +1222,15 @@ fn two_real_processes_opening_the_same_root_get_the_same_project_id_and_clobber_
     let project_root = sandbox.create_dir("project");
     sandbox.create_file("project/doc.txt");
 
-    let first_id =
-        run_project_process_probe(&state_root, &project_root, "doc.txt", "instance A's edit");
+    let held = HeldProbe::spawn(&state_root, &project_root, "doc.txt", "instance A's edit");
+    held.assert_still_holding();
+
     let second_id =
         run_project_process_probe(&state_root, &project_root, "doc.txt", "instance B's edit");
+
+    held.assert_still_holding();
+    let first_id = held.project_id.clone();
+    held.release();
 
     assert_eq!(
         first_id, second_id,

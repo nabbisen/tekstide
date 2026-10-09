@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```text
-//! project_process_probe <state-root> <project-root> <relative-path> <text>
+//! project_process_probe <state-root> <project-root> <relative-path> <text> [--hold]
 //! ```
 //!
 //! `<state-root>` stands in for `AppStatePathProvider::linux_default()`'s own
@@ -25,10 +25,16 @@
 //! shape `tekstide/src/shell.rs`'s own `recovery_record_for` uses (cursor and
 //! viewport at the origin -- nothing here depends on either).
 //!
-//! Prints the project id this process ended up with, and nothing else, to
-//! stdout on success, so a harness spawning two of these can compare them
-//! directly. Exits non-zero with a message on stderr on any failure.
-
+//! Prints the project id this process ended up with to stdout as soon as its
+//! own write has landed, flushed immediately, then: without `--hold`, exits
+//! at once; with `--hold`, blocks reading stdin until it sees EOF before
+//! exiting. **`--hold` is what makes "two real processes" mean two
+//! *overlapping* ones** (review 513) -- a harness that reads this process's
+//! id line first knows the write already happened and this process has not
+//! exited, and can then start a second probe while this one is still alive,
+//! holding it open exactly as long as the test needs by not yet closing its
+//! stdin. Exits non-zero with a message on stderr on any failure.
+use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use tekstide_core::project::recent::{AppStatePathProvider, RecentProjectStore};
@@ -38,10 +44,16 @@ use tekstide_core::recovery::{
 use tekstide_core::shell::ApplicationShell;
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let hold = args
+        .iter()
+        .position(|arg| arg == "--hold")
+        .map(|index| args.remove(index))
+        .is_some();
     let [state_root, project_root, relative_path, text] = args.as_slice() else {
         eprintln!(
-            "usage: project_process_probe <state-root> <project-root> <relative-path> <text>"
+            "usage: project_process_probe <state-root> <project-root> <relative-path> <text> \
+             [--hold]"
         );
         std::process::exit(2);
     };
@@ -99,4 +111,23 @@ fn main() {
     }
 
     println!("{}", project_id.as_str());
+    let _ = std::io::stdout().flush();
+
+    if hold {
+        // Blocks until the harness closes (or drops) this process's stdin --
+        // the signal that it has seen this line and finished whatever it
+        // needed this process to still be alive for. A loop of `read_line`
+        // calls, each discarded, rather than one `read_to_end`: this is
+        // draining a pipe to its close, not reading a file's full content,
+        // and a raw-full-file-read scan
+        // (`project::diff::tests::enumeration_confirms_only_the_closed_list_reads_full_file_content`)
+        // cannot tell those two apart by the text of the call alone, so it
+        // is written in a shape that is not even a candidate for the
+        // question that scan asks.
+        let stdin = std::io::stdin();
+        let mut discard = String::new();
+        while stdin.lock().read_line(&mut discard).unwrap_or(0) > 0 {
+            discard.clear();
+        }
+    }
 }

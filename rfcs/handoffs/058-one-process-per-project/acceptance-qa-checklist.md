@@ -41,7 +41,7 @@ one record survives. The probe calls production functions rather than reimplemen
 negative control: different roots give different ids, so the assertion is not a tautology. No
 product code touched. Gate reproduces `758 + 19 + 1119`, 0 fixture entries.
 
-- [ ] **Make the two probes concurrent.** `run_project_process_probe` uses `Command::…output()`,
+- [x] **Make the two probes concurrent.** `run_project_process_probe` uses `Command::…output()`,
   which **waits for the process to exit**. The first probe is gone before the second starts, so what
   was reproduced is two *sequential* sessions, not two instances holding one project. That matters
   twice:
@@ -58,6 +58,25 @@ product code touched. Gate reproduces `758 + 19 + 1119`, 0 fixture entries.
 
   The first probe must still hold the project when the second starts — spawned rather than waited
   on, held open until the test releases it.
+
+  **Done.** `project_process_probe` takes a new `--hold` flag: after its own write lands, it prints
+  its project id, flushes, then blocks reading stdin until EOF. A new `HeldProbe` (`app/tests.rs`)
+  spawns it with piped stdin/stdout, reads that id line back (which cannot happen before the write
+  does, since the print follows it in `main`), and only then does the test start the second,
+  ordinary probe — with an explicit `assert_still_holding()` on either side of that call, via the
+  real `libc::kill(.., 0)` liveness check (`test_support::process_is_alive`), not an assumption that
+  spawning without waiting implies staying alive. `release()` closes the held probe's stdin and
+  waits for a clean exit.
+
+  **A second, unrelated gate failure found while fixing this**: the first version blocked with
+  `std::io::stdin().read_to_end(&mut discard)`, which tripped
+  `project::diff::tests::enumeration_confirms_only_the_closed_list_reads_full_file_content` — a scan
+  for raw full-file-content reads outside a reviewed allowlist, matching on the literal text
+  `read_to_end(` with no way to tell a stdin drain from a file read. Draining stdin is not what that
+  scan is asking about, so the fix was not to add this file to the allowlist (which would misstate
+  what it does) but to stop writing the pattern the scan matches on: a `read_line` loop until `Ok(0)`,
+  discarded each time, which blocks on EOF exactly the same way without going anywhere near the
+  question that check exists to answer.
 
 **This is partly my fault and I should have caught it when I wrote the pack.** The task breakdown
 says *"the reproduction becomes the regression test, and it is what PR-058-B is checked against"*
