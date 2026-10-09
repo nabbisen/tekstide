@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 058 | [A Project Held By One Process](./proposed/058-a-project-held-by-one-process.md) | **Proposed 2026-10-10.** `0.34.0`, M13. `REQ-PROJ-009`, a **must**. Two instances share a project id, so they share recovery-record files — the hazard `0.31.0` created |
 
 *(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
 folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
@@ -50,7 +51,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | --- | --- | --- |
 | 028 | Cross-Platform Support | M14 |
 | 029 | Documentation, CI, and Release Automation | M14 |
-| 058 | A Project Held By One Process | M13 tail |
 | 059 | Seeing The Audit, And Redacting It | pre-1.0 |
 | 060 | Command Approval A User Can Reach | pre-1.0, **1.0 blocker** |
 | 061 | A Bound On Combining Marks Per Cell | terminal boundary |
