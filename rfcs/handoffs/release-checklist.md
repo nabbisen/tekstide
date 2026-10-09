@@ -267,6 +267,13 @@ Two shapes, both found by the implementer rather than by the gate:
       and the surface modules name the words; the book and the module's own doc comment hold the
       sentences. A meaning that widened and a sentence that stayed singular is the same defect as a
       stale negative claim, and arrives with no changelog line to start from.
+- [ ] **Point that sweep at `locales/en.ftl` by name, as a grep, not as a reading step.** Added
+      2026-10-09 after the shape landed a third time: at RFC-065 review 473 the book's chord rows
+      were corrected while `en.ftl` kept "Save the open file"; at RFC-027 review 495 the book and the
+      privacy page dropped "only after a crash" while three on-screen refusal strings kept it. Both
+      times the instruction above was followed and both times it stopped at the documents. **Take
+      the words whose meaning the slice changed and `grep` them in `en.ftl`** — one command, and it
+      would have found every one of these.
 
 The mechanical version is scheduled: `what-works-today.md` carries **no** invariants while the
 configuration page carries three, and that asymmetry is why one drifted and the other did not.
