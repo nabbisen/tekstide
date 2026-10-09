@@ -2,7 +2,7 @@
 
 ## 0.32.0 - A Refused Close Means Nothing Happened
 
-Status: **candidate, not yet published.** RFC-066's two slices and its Whole-RFC checklist are all
+Status: **released 2026-10-09.** RFC-066's two slices and its Whole-RFC checklist are all
 done, reviewed and closed. This entry was written incrementally as each slice closed, then re-read
 against the finished set at the candidate rather than left as it stood after the last slice's own
 diff; see `rfcs/handoffs/066-refused-close/` for the full handoff pack.

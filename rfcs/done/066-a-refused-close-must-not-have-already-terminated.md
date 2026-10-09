@@ -1,6 +1,6 @@
 # RFC-066: A Refused Close Must Not Have Already Terminated
 
-Status: **Implemented and closed 2026-10-09; `0.32.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-09; released as `0.32.0` 2026-10-09.** See the
 *Closed* section. **Accepted by the human owner 2026-10-08.** D1–D5 as written; **D3 decided: refuse up front** — see *Decided on acceptance*. Proposed 2026-10-08. `0.32.0`, M13. Repairs a defect live in `0.30.0`. Found at review
 485 (the dev team, the refusal) and traced at review 489 (the reviewer, the termination). No
 requirement names this; it is a defect in what `REQ-PROJ-004`'s own close path already promises.
@@ -134,7 +134,7 @@ all, so RFC-027 D11's own "close" trigger for recovery records stays unreachable
 
 ## Closed (2026-10-09)
 
-Both slices and the Whole-RFC checklist are done. A `0.32.0` **candidate, not yet published** —
+Both slices and the Whole-RFC checklist are done. **Released as `0.32.0`** on 2026-10-09 —
 see `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
 
 **This RFC began as one defect — a dialog offering an action it then does not perform — and ended
