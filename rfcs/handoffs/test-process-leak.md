@@ -1754,3 +1754,27 @@ not a controlled before/after on the identical tree.
   as the re-measurement above: 13 total, 0 failures, 0 fixture entries left each time, fresh short
   `TMPDIR` every run.
 - 2 tests now `#[ignore]`d (quarantined); both confirmed to still pass when run with `-- --ignored`.
+
+## New row, 2026-10-09 — review 507: a second `runtime::git` script-execution failure, the disposition pass's own next run
+
+**Found in the reviewer's gate run taken immediately after the disposition pass reported 13 clean
+runs.** Not a criticism of that pass — it is the evidence that 13 runs could not settle the question
+it was asked to settle.
+
+| Test | First seen |
+| --- | --- |
+| `runtime::git::tests::a_second_call_with_the_same_verified_executable_does_not_respawn_version` (`tests.rs:1357`) | review 507 (2026-10-09) |
+
+Failed once in a full-workspace run; **5 of 5 clean in isolation** afterwards. The assertion is
+`check_git_available(...).is_ok()` on a stand-in `git` script the test has just written.
+
+**Almost certainly the `ETXTBSY` cause this document already describes** for its sibling
+`every_failure_to_answer_is_unknown_and_never_none_ignored` (the 2026-09-25 hypothesis above): the
+test writes a script and executes it immediately, tests in this binary run in parallel and fork, and
+a child forked by another thread while this one holds the script open for writing inherits that
+descriptor until it execs — `Text file busy` in the window between. Same module, same
+write-then-exec shape, same parallel binary.
+
+**Disposition: the same verdict as its sibling, whatever that turns out to be.** It belongs to that
+row's family and should be decided with it rather than separately; the disposition pass closed with
+`every_failure_to_answer_…` verdicted, so this one inherits the reasoning. **Owner: the dev team.**
