@@ -285,3 +285,43 @@ images copied into this RFC's own `evidence/pr-066-b/` directory.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g066b1`, `/dev/shm/g066b1` recreated each run): `757 + 17 + 1119`, 0 failed, 0 fixture
   entries left each time.
+
+## Review 503: the blocked reasons line must not claim the close is going ahead
+
+**Required, found in the live capture itself.** `project_close_dialog_reasons_line` reused
+`project-close-dialog-live-work-prefix` ("This will end:") on the blocked path too, so the
+captured dialog read "This project can't be closed yet" immediately followed by "This will end: 1
+unsaved file" -- the reasons line asserting the opposite of the title two lines above it. Nothing
+ends when the close is refused; the listed reasons are *why* it cannot happen, not a consequence of
+it proceeding. The same defect this RFC's own D3 work already fixed for the title, the footer
+control and the hint, missed on the one remaining string that reuses the confirm modal's own text
+rather than getting its own.
+
+Fixed: a new catalog key, `project-close-dialog-blocked-live-work-prefix` = "Blocked by:",
+`project_close_dialog_reasons_line` now chooses by `modal.can_close`, the same predicate every
+other can_close-dependent string in this view already branches on.
+
+**Ablated**: reverting to the single shared prefix (`ablate.sh`) fails
+`project_close_dialog_reasons_line_uses_the_blocked_prefix_when_blocked` with the exact defect's own
+symptom reproduced: `expected the blocked prefix, got "This will end: 1 unsaved file"` --
+load-bearing, not accidentally green.
+
+**Also raised by the reviewer, not this slice's own scope**: the bug the audit-schema-migration fix
+above turned out to be an instance of a class -- 52 `CHECK` constraints in `audit/schema.rs`, no
+mechanical check anywhere that a given family/outcome combination actually lands in the store.
+Recorded in `future-work.md` as a pre-1.0 item by the reviewer; not PR-066-B's own job.
+
+### Gate, review 503's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `i18n::enforcement` (23/23, one more catalog key, no new Fluent variable): clean.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g066b2`, `/dev/shm/g066b3`): `756/758/758 + 17 + 1119`, 2 failures total, both in run 1
+  of the first attempt (`surface::terminal::tests::resize_makes_the_pty_the_emulator_and_the_
+  render_path_agree`, a fourth occurrence of `test-process-leak.md`'s own row 787, and
+  `shell::tests::terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark`, new
+  there) -- both load-sensitive, neither touching anything this response changed, both passing
+  immediately in isolation; disclosed with a new dated row per this register's own convention. The
+  second and third attempts were clean on the first try: `758 + 17 + 1119`, 0 failed, 0 fixture
+  entries left.
