@@ -219,7 +219,7 @@ matching the register's three rows; no accesskit; gate `758 + 17 + 1119`, 0 fixt
 check I required at review 499 caught the stale register row for you** — that is the first time it
 has earned itself.
 
-- [ ] **`Ctrl+Alt+N` is not broken, and RFC-066's own `Closed` section now says it is.** Lines
+- [x] **`Ctrl+Alt+N` is not broken, and RFC-066's own `Closed` section now says it is.** Lines
   185–191 claim *"`NavigationAction::SwitchActiveProject` has no production caller in the crate at
   all"* and that `working-with-projects.md` is wrong to say the chord works. **Both are false, and
   the RFC is already in `done/`.**
@@ -241,6 +241,11 @@ has earned itself.
 
   Remove the claim. **The book is correct and must not be "fixed" to match a defect that does not
   exist** — that would turn a false finding into a real one.
+
+  **Fixed, same review.** The claim removed from the `Closed` section; `working-with-projects.md`
+  left untouched. The mistake, and the correct verification (`shell.rs:2479`,
+  `cycle_to_next_active_project`'s own no-op, `ctrl_alt_n_cycles_to_the_next_open_project_wrapping`),
+  recorded in `qa-evidence.md` rather than silently erased.
 
 **Worth keeping from the same passage:** the *"did nothing"* observation was real and worth chasing.
 The error was confirming it against a comment instead of against the dispatch; one `grep` for the
