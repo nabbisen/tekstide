@@ -1,6 +1,7 @@
 # RFC-066: A Refused Close Must Not Have Already Terminated
 
-Status: **Accepted by the human owner 2026-10-08.** D1–D5 as written; **D3 decided: refuse up front** — see *Decided on acceptance*. Proposed 2026-10-08. `0.32.0`, M13. Repairs a defect live in `0.30.0`. Found at review
+Status: **Implemented and closed 2026-10-09; `0.32.0` candidate, not yet published.** See the
+*Closed* section. **Accepted by the human owner 2026-10-08.** D1–D5 as written; **D3 decided: refuse up front** — see *Decided on acceptance*. Proposed 2026-10-08. `0.32.0`, M13. Repairs a defect live in `0.30.0`. Found at review
 485 (the dev team, the refusal) and traced at review 489 (the reviewer, the termination). No
 requirement names this; it is a defect in what `REQ-PROJ-004`'s own close path already promises.
 
@@ -130,3 +131,69 @@ And D3's refuse-up-front means a project holding a dirty document never reaches 
 all, so RFC-027 D11's own "close" trigger for recovery records stays unreachable for the dirty case
 — as the dev team observed at review 485. **Recorded so that nobody later reads that as a bug and
 "fixes" it.**
+
+## Closed (2026-10-09)
+
+Both slices and the Whole-RFC checklist are done. A `0.32.0` **candidate, not yet published** —
+see `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
+
+**This RFC began as one defect — a dialog offering an action it then does not perform — and ended
+up repairing three separate ways the product behaved as though a refused close had succeeded.**
+
+**PR-066-A (reproduce, then repair the ordering)** reproduced the defect first, against a real
+spawned terminal and a real unsaved edit, before any fix existed — watched happen, not read from
+the code. D1 fixed: `apply_project_close_confirmation` now runs the read-only assessment before
+anything live is touched, so a project blocked by anything other than its own running processes
+(a dirty file, a pending approval, a review-ready change) leaves every running terminal exactly as
+it was. A stale doc comment claiming the opposite ordering — true for the function's first two
+releases — was found and corrected in the same slice, not left for later.
+
+**PR-066-B (refuse up front)** built D3's own decided shape: a modal that opened `can_close: false`
+offers no confirm button at all, never a disabled one — `ModalFocusNext`/`ModalFocusPrevious` and
+`activate_current_modal` structurally cannot land its focus on `Close`, proven by two independently
+ablated guards, not one covering for the other. The title, the reasons' own prefix, the sole
+`Dismiss` control and its hint all read as a refusal, not a question with a withheld "yes" — the
+reasons-line prefix needed a second pass at review 503 after the capture itself showed it still
+read as though the close were going ahead.
+
+**D10's own audit fix uncovered a real, independent production bug, not only a missing Rust-level
+case.** `SafeCloseDecision::Blocked`, correctly plumbed and accepted by `valid_safe_close`, still
+produced zero audit records: the `safe_close_decision` family's own SQL `CHECK` constraint — not
+the Rust validator that mirrors it — had no branch admitting `outcome = 'blocked'` at all, so
+SQLite itself silently rejected every such write, the exact shape `append_observation`'s
+best-effort design would swallow in production too. Found only because the checklist demanded a
+test that queried the store back rather than trusting the validator's own agreement. Fixed with a
+real schema migration (`AUDIT_SCHEMA_VERSION` `2 -> 3`, a new `MigrationStep`, following RFC-013
+Amendment 1's own established shape exactly — SQLite cannot `ALTER` a `CHECK`), not a workaround;
+proven both by a test that migrates a real v2 database holding pre-existing rows and by an
+ablation that reproduces the original rejection (`AuditStoreError { reason: Io }`).
+
+**Live-captured against a real blocked close**, isolated `XDG_STATE_HOME` under `/dev/shm`, a real
+dirty file, a real `Delete` on the project's own tab: `rfcs/handoffs/066-refused-close/evidence/
+pr-066-b/`. The real audit write was confirmed independently with `sqlite3` against the live
+store, not only through the unit tests.
+
+**Left open, disclosed rather than silently deferred:**
+
+- **The bug class behind D10's own finding, not only the one instance.** 52 `CHECK` constraints in
+  `audit/schema.rs`, and nothing anywhere mechanically asserts that a given family/outcome
+  combination actually lands in the store — any future producer whose outcome string the DDL does
+  not admit fails identically: passes review, passes the Rust-level validator, writes nothing, says
+  nothing. Recorded in `future-work.md` as a pre-1.0 item,
+  `enumeration_confirms_only_the_closed_list_reads_full_file_content` named as the shape and
+  `record.rs`'s 69 family arms as the enumeration.
+- **`Ctrl+Alt+N`'s own doc claim, found but not this RFC's own scope.** While live-capturing this
+  slice's evidence, `Ctrl+Alt+N` ("switch to the next open project") did not switch anything —
+  `NavigationAction::SwitchActiveProject` has no production caller in the crate at all, only the
+  tab strip's own click/keyboard-focus route (`SwitchActiveProjectTabPressed`) reaches
+  `switch_to_project_tab`. `docs/src/users/working-with-projects.md` still claims the chord works
+  ("press `Ctrl+Alt+N` to cycle to the next with wraparound"). Not fixed here — this RFC's own
+  commits do not touch tab-switching — but worth naming so it is not rediscovered as new.
+- Two full-workspace gate runs during this RFC's own review cycle failed on already-load-sensitive,
+  already-registered tests (`test-process-leak.md` row 787's fourth and fifth occurrences, plus one
+  new row for `terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark`); the
+  dev team's own scheduled disposition pass over that register rides alongside this release.
+
+See `rfcs/handoffs/066-refused-close/qa-evidence.md` for the full review history (reviews
+485, 489, 501–504) and `rfcs/handoffs/066-refused-close/acceptance-qa-checklist.md` for the closed
+checklist.

@@ -1113,6 +1113,13 @@ It needs its own RFC when it is scheduled; no number is reserved yet.
 
 ## Confirming a project close with an unsaved file kills its terminals and does not close it
 
+**Fixed by RFC-066, implemented and closed 2026-10-09 (`0.32.0` candidate).** Kept below as the
+original finding, not rewritten to match the fix — see `rfcs/done/066-a-refused-close-must-not-
+have-already-terminated.md`'s own *Closed* section for what actually shipped: the ordering fixed
+(D1), the dialog refuses up front with no confirm button rather than a post-hoc message (D3,
+decided on acceptance), and a third face found during planning — the audit store recording a
+refused close as `Closed` — fixed too (Amendment 1, D10).
+
 **Found at review 485 by the dev team (the close half) and traced at review 489 by the reviewer (the
 terminal half). Live in `0.30.0`. Owed as "I will raise it separately"; this is that.**
 

@@ -1,7 +1,7 @@
 ---
 title: "RFC-066 handoff: a refused close must not have already terminated"
-status: "**Accepted 2026-10-08**, D1–D5 as written; D3 decided (the modal refuses up front). `0.32.0`, M13. Two slices, A before B."
-rfc_file: "../../accepted/066-a-refused-close-must-not-have-already-terminated.md"
+status: "**Implemented and closed 2026-10-09** — `0.32.0` candidate, not yet published. Both slices and the Whole-RFC checklist closed."
+rfc_file: "../../done/066-a-refused-close-must-not-have-already-terminated.md"
 target_milestone: "M13"
 created: "2026-10-08"
 ---

@@ -2,10 +2,10 @@
 
 ## 0.32.0 - A Refused Close Means Nothing Happened
 
-Status: **in progress.** RFC-066's two slices and its Whole-RFC checklist are all implemented,
-gated, and reviewed; what remains before the candidate is the core pin bump at the release cut
-itself. This entry is written incrementally as slices close, then re-read against the finished set
-at the candidate; see `rfcs/handoffs/066-refused-close/` for the full handoff pack.
+Status: **candidate, not yet published.** RFC-066's two slices and its Whole-RFC checklist are all
+done, reviewed and closed. This entry was written incrementally as each slice closed, then re-read
+against the finished set at the candidate rather than left as it stood after the last slice's own
+diff; see `rfcs/handoffs/066-refused-close/` for the full handoff pack.
 
 **This started as one defect — a dialog offering an action it then did not perform — and turned
 out to be three.** Confirming a close that then refused anyway killed real, running work before
