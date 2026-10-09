@@ -144,6 +144,17 @@ item, with `enumeration_confirms_only_the_closed_list_reads_full_file_content` n
 and `record.rs`'s 69 family arms as the enumeration. **You found it only because the checklist
 demanded a test for this one case** — nothing systemic would have.
 
+### PR-066-B closed at review 504
+
+*"Blocked by:"* is the right wording — it names the relationship (these are what prevent the close)
+rather than a consequence of one that is not happening. My own ablation reproduces the defect's
+exact symptom: `expected the blocked prefix, got "This will end: 1 unsaved file"`. Gate reproduces:
+`758 + 17 + 1119`, 0 fixture entries.
+
+Both intermittents from the failed first attempt have dated rows, and the gate was **redone rather
+than counted** — the discipline review 497 had to ask for is now being applied unprompted. Those two
+rows also make the case for the disposition pass already riding alongside this release.
+
 ## Whole-RFC
 
 - [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
