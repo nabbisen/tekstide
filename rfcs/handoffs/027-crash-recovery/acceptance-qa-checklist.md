@@ -469,6 +469,13 @@ and was right to explain: the buffer is still dirty, so D11's reason has not end
       step, not this one). Checked every `recovery-*`/`editor-recovery-*`/
       `trust-settings-retained-recovery-records` Fluent key's own wording against both pages; all
       others already agreed.
+      **Correction, review 495**: "all others already agreed" was wrong — the reverse sweep checked
+      the *book* against the catalog but never grepped the catalog itself for the word whose meaning
+      changed. `editor-recovery-persist-refusal-too-large`/`-total-bound`/`-io` all said "against a
+      crash", the identical understatement just fixed in the book, and a fourth instance (an example
+      config comment in `configuration.md`, found by running `grep crash` one level further than the
+      three strings named) said the same thing. All four fixed by dropping the scoping clause
+      entirely, naming no cause. `qa-evidence.md`'s own "Review 495" section has the full account.
 - [ ] The core pin bumps with the version. *(Release-cut item; not a Whole-RFC item.)*
 - [x] Commits are pushed once the gate is green.
 

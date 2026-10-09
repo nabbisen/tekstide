@@ -38,7 +38,7 @@ scrollback_lines = 5000             # lines of history a terminal keeps; at most
 show_ignored = false                # draw the entries Git says are ignored; default false
 
 [recovery]
-persist_unsaved_buffers = true      # protect dirty documents against a crash; default true
+persist_unsaved_buffers = true      # protect dirty documents from being lost; default true
 ```
 
 ## Keybindings

@@ -784,9 +784,13 @@ editor-save-all-outcome-row = { $path } -- not saved: { $reason ->
 # is not providing" row 4 forbids. `$path` is untrusted and escaped the same way
 # `editor-save-all-outcome-row`'s own is; `$bytes`/`$limit` have no plural machinery,
 # matching `trust-settings-retained-transcripts`'s own byte figures.
-editor-recovery-persist-refusal-too-large = { $path }: too large to protect against a crash ({ $bytes } bytes, over the { $limit }-byte limit)
-editor-recovery-persist-refusal-total-bound = { $path }: not protected against a crash -- would put retained recovery data over its own { $limit }-byte limit
-editor-recovery-persist-refusal-io = { $path }: could not be protected against a crash
+#
+# Review 495: none of the three say "against a crash" -- after Amendment 1 a record protects
+# unsaved work across an ordinary quit too, the common case, not only the rare one; scoping
+# the wording to "a crash" understated what a refusal actually costs.
+editor-recovery-persist-refusal-too-large = { $path }: too large to protect ({ $bytes } bytes, over the { $limit }-byte limit)
+editor-recovery-persist-refusal-total-bound = { $path }: not protected -- would put retained recovery data over its own { $limit }-byte limit
+editor-recovery-persist-refusal-io = { $path }: could not be protected
 
 # RFC-027 PR-027-C, Amendment 1: offered by the presence of recovery records, never by the
 # crash marker -- `$project` is the project's own display name, untrusted and escaped the

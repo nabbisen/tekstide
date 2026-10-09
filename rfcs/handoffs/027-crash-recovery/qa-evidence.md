@@ -863,3 +863,41 @@ green, the same as every prior one.
   `SocketPathTooLong` failures in `approval::tests::reference_adapter` -- the exact reason this
   project's own convention insists on a *short* fixed literal, not merely a fixed one. Re-run under
   a short literal, both pass; not a flake, not registered.)
+
+## Review 495: three user-visible strings still said "against a crash"
+
+Required item, found because the reverse book-vs-changelog read in the Whole-RFC response above
+stopped at the documents -- it corrected `local-data-and-privacy.md`'s own "when it crashed"
+framing but never ran the same check against `en.ftl`, the place a user actually reads the words.
+`editor-recovery-persist-refusal-too-large`/`-total-bound`/`-io` (`crates/tekstide/locales/en.ftl`,
+rendered through `surface/editor.rs`, so genuinely on screen) all scoped the refusal to "a crash".
+After Amendment 1 a record protects unsaved work across an ordinary quit too -- the common case,
+not the rare one -- so scoping the warning to "a crash" told the user less than was true about what
+a refusal costs them.
+
+Fixed by dropping the scoping clause rather than widening it to name every trigger: "too large to
+protect"/"not protected"/"could not be protected", none of them naming a cause, since the record's
+own job is to protect the edit regardless of *why* Tekstide stops.
+
+**A fourth instance, found by applying the reviewer's own concrete instruction** ("grep the words
+whose meaning changed in `en.ftl`") **one level further than asked** -- `grep "crash"` across the
+whole `docs/src/users/` tree, not only `en.ftl`: `configuration.md`'s own example config block had
+`persist_unsaved_buffers = true # protect dirty documents against a crash; default true`, the
+identical understatement, in a page already touched by this same response's own earlier edits and
+still missed on the first pass. Fixed the same way: "protect dirty documents from being lost",
+naming no cause.
+
+Nothing else matched `crash` as a live, user-reachable string after this pass: the remaining
+occurrences in `en.ftl` are comments, and every other hit in `CHANGELOG.md`/the book is either
+correctly scoped to the marker/detection mechanism specifically (which genuinely is crash-only by
+design, D1) or already names both triggers (`what-works-today.md`'s own new paragraph).
+
+### Gate, review 495's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `i18n::enforcement` (8/8), `rfc_docs_invariants` (16/16),
+  `surface::editor::tests::recovery_persist_refusal_lines_names_each_path_and_reason`: all pass --
+  none assert the refusal lines' exact prose, so the wording change needed no test change.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g5r{1,2,3}`): `751 + 16 + 1117`, 0 failed, 0 fixture entries left each time.
