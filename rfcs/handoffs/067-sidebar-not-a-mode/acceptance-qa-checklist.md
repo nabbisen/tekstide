@@ -83,6 +83,47 @@ slice is the right place to say so rather than let it pass unremarked.
       Both figures reported are each condition's own absolute cost; nothing is divided by a
       count from the other condition.
 
+### Required at review 509
+
+The measurement's **conclusion is robust and I am not disputing it** — ~1000x of margin survives any
+plausible error in the instrument. The design choices are right too: the two modes are each other's
+control, so there is no separate idle condition to carry; a diagnostic that asserts nothing is
+correctly not ablated, matching `change_review_content_view_build_cost…`'s own precedent; and no
+rate is derived by dividing one condition by another's count. My gate reproduces `758 + 17 + 1118`,
+0 fixture entries.
+
+- [ ] **The published figures are at the instrument's floor, and the write-up does not say so.**
+  One `elapsed.as_micros()` sample per condition per round, five rounds, **no repeat inside the
+  timed region**, for a quantity of 4–16 us. The symptom is visible in the numbers as reported:
+
+  ```
+  Content   16.0 us (spread 16.0 .. 40.0)
+  Terminal   4.0 us (spread  4.0 ..  8.0)
+  ```
+
+  Every value is a multiple of 4, and **each median is exactly its own minimum** — Terminal mode is
+  **one tick** of the reporting unit. A truncating integer clock cannot tell 0.1 us from 4 us.
+
+  **This is RFC-027 review 485/486 again, in the other direction**: there, a figure below the
+  harness's resolution was published as a cost until the spread showed it straddling zero. You
+  published the spread — the fix from that thread — but the floor is in the medians rather than in
+  the spread's sign, so it did not announce itself.
+
+  Either **repeat the build N times inside the timed region and divide**, which makes the number
+  real for one more line of code, or **state plainly that these are resolution-bound upper
+  bounds**, not measured costs. Either is fine; the conclusion does not depend on which.
+
+**A smaller note, not required.** `NFR-PERF-003` is *"typing latency in a 100k-line text file"*, not
+a view-build criterion. Saying so — *"the nearest existing budget, as an order-of-magnitude
+yardstick"* — is more accurate than letting it read as the threshold this operation is held to. At
+1000x it makes no difference to the verdict, which is exactly why it costs nothing to say.
+
+**Accepted as answered:** my review-508 scan note. Checking rather than re-measuring was right, and
+the answer is correct — `request_explorer_root_scan_if_needed` matches on root state and *requests*
+a scan; the read runs on a worker thread, already bounded by its own existing tests. **What changed
+is when already-bounded asynchronous work is requested, not its cost or where it runs.** That is the
+right shape of answer to a cost question: find out whether there is a new cost before measuring one.
+
 ## PR-067-C — the decision
 
 - [ ] The number is read against *"at a time or a near real-time"*, and the decision is stated.
