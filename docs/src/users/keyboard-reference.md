@@ -35,9 +35,11 @@ while the policy holds twenty.
 
 ## Within a surface
 
-With `Tab` focused on the sidebar in Content mode, `Up`/`Down` move the explorer highlight and
-`Enter` opens the highlighted file, or opens or closes the highlighted folder in place. The line under
-the tree always shows the highlighted row in full, because a narrow sidebar clips a long one.
+With `Tab` focused on the sidebar — in either mode, the file tree is there in both now —
+`Up`/`Down` move the explorer highlight and `Enter` opens the highlighted file, or opens or closes
+the highlighted folder in place. Opening a file while in Terminal mode switches to Content mode and
+shows it; nothing you asked for a file to do moves you anywhere by itself. The line under the tree
+always shows the highlighted row in full, because a narrow sidebar clips a long one.
 
 On the AgentRun Report (`Ctrl+Alt+R`), with focus on the main area, `1`–`6` classify the run (coding,
 review, documentation, testing, refactoring, release), `c` types a label of your own, `x` clears the

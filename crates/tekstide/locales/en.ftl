@@ -62,7 +62,11 @@ project-board-blocked-automation-names = blocked: { $names }
 # number, in the shipping product, as the first thing a user saw before
 # launching a terminal. Now each says what the area is and what to do.
 # `mod internal_identifiers` (i18n/enforcement.rs) refuses the pattern.
-sidebar-placeholder-title = Files are listed here in Content mode.
+#
+# RFC-067 D1: `sidebar-placeholder-title` (the first of the three above)
+# is deleted, not reworded -- the sidebar is no longer a second thing
+# the mode toggle governs, so there is no absence left for it to
+# explain. Two placeholders remain below, not three.
 main-area-content-mode-placeholder = Content mode. Open a project to see its files here.
 main-area-terminal-mode-placeholder = Terminal mode. Nothing is running in this project yet. Start a terminal with the button below.
 

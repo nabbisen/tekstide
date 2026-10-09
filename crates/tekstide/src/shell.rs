@@ -4457,9 +4457,9 @@ fn ensure_explorer_scanned(state: &mut State) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
     };
-    if project.mode() != ProjectMode::Content {
-        return;
-    }
+    // RFC-067 D1: the explorer renders in both modes now, not only Content, so scanning it
+    // must not stay gated to the one mode that used to show it -- a project opened straight
+    // into Terminal mode would otherwise show the always-visible tree stuck pending forever.
     let project_id = project.id().clone();
     // RFC-052 PR-052-B: **asks, does not scan.** The root's scan is marked
     // pending here and run on a worker thread by
@@ -4585,9 +4585,15 @@ fn settle_explorer_highlight(state: &mut State) {
 /// RFC-019 PR-019-B: the explorer tree's own keyboard navigation --
 /// Up/Down move the highlight among the rows [`crate::surface::explorer::view`]
 /// is currently rendering, Enter on a directory (or the synthetic parent
-/// row) re-scans into it. A no-op outside Content mode or without a
-/// scan yet -- there is nothing to navigate. Enter on a file row is
-/// PR-019-C's job (opening a document); nothing here does it.
+/// row) re-scans into it. A no-op without an active project or a scan
+/// yet -- there is nothing to navigate. Enter on a file row is PR-019-C's
+/// job (opening a document); nothing here does it.
+///
+/// **RFC-067 D1/D7: no longer a no-op outside Content mode.** The explorer
+/// is reachable in both modes now, so its own keyboard handling must be
+/// too -- Enter on a file row still opens it (`Action::Open`), and that
+/// arm is also the one and only place D7's mode switch lives (D8, §row 1:
+/// everywhere else a document opens, the mode must hold).
 ///
 /// Every borrow of `state.app_shell` ends before `action` is bound, so
 /// the mutations below (`state.explorer_highlight`, the real rescan
@@ -4606,9 +4612,6 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
     let Some(project) = state.app_shell.state().active_project() else {
         return;
     };
-    if project.mode() != ProjectMode::Content {
-        return;
-    }
     let project_id = project.id().clone();
     let tree = project.content_workspace().explorer_tree();
     let rows = tree.rows();
@@ -4667,6 +4670,13 @@ fn handle_explorer_key(state: &mut State, key: &input::KeyPress) {
                 .open_active_project_text_document(path)
                 .is_ok()
             {
+                // RFC-067 D7: activating a file switches to Content mode and shows it --
+                // the one call site D8 names as the exception to "no document open moves
+                // the user out of a terminal they are watching."
+                state
+                    .app_shell
+                    .state_mut()
+                    .open_active_project_content_workspace();
                 reconcile_project_watch(state, &project_id);
             }
         }
@@ -9694,7 +9704,7 @@ fn active_project_workspace_view(state: &State) -> Element<'_, Message> {
         .active_project()
         .map(tekstide_core::project::ProjectSession::mode);
 
-    row![sidebar_view(state, mode), main_area_view(state, mode)]
+    row![sidebar_view(state), main_area_view(state, mode)]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -9731,18 +9741,6 @@ fn focus_marker(focused: bool) -> &'static str {
     if focused { "> " } else { "  " }
 }
 
-/// Factored out from [`sidebar_view`] so the focus-marker/catalog-text
-/// combination is directly testable, the same shape as
-/// `status_bar_summary`/`surface::board::row_lines`.
-pub(crate) fn sidebar_label(state: &State) -> String {
-    let focused = state.focus == FocusZone::Sidebar;
-    format!(
-        "{}{}",
-        focus_marker(focused),
-        state.catalog.get("sidebar-placeholder-title")
-    )
-}
-
 /// The catalog key [`main_area_label`]/[`main_area_view`] select on for a
 /// given `mode` -- `None` (no active project) should not be reachable
 /// while routed to `ActiveProjectWorkspace` (core guards every
@@ -9767,52 +9765,48 @@ pub(crate) fn main_area_label(state: &State, mode: Option<ProjectMode>) -> Strin
     )
 }
 
-/// RFC-019 PR-019-B: `ProjectMode::Content` renders the real explorer
-/// tree, the same shape `main_area_view` already uses to substitute real
-/// content for `TerminalImmersion`'s placeholder. Every other mode (and
-/// no active project) keeps the plain placeholder -- there is no
-/// explorer to show without an active project, and `Content` is the only
-/// mode this slice's scope covers (RFC-019 does not touch
-/// `TerminalImmersion`).
+/// RFC-067 D1: the explorer renders whenever a project is active, in
+/// either mode -- the sidebar is no longer a second thing the mode
+/// toggle governs. The mode match this function used to open on is
+/// gone; what is left to decide is only whether a project is active at
+/// all, the same "nothing to show" case every other active-project
+/// accessor in this crate already has (`active_project()` returning
+/// `None` while routed to `ActiveProjectWorkspace` is not reachable in
+/// practice -- the route itself guards it -- so the empty fallback below
+/// exists for the type, not for a user ever to see it).
 /// The sidebar's width. Was 220; the explorer is monospaced (PR-052-C), which
 /// is wider per character, so it gets room for about thirty columns.
 const SIDEBAR_WIDTH: f32 = 300.0;
 
-fn sidebar_view(state: &State, mode: Option<ProjectMode>) -> Element<'_, Message> {
+fn sidebar_view(state: &State) -> Element<'_, Message> {
     let focused = state.focus == FocusZone::Sidebar;
-    let content: Element<'_, Message> = match mode {
-        Some(ProjectMode::Content) => {
-            let active_project = state.app_shell.state().active_project();
-            match active_project {
-                Some(project) => {
-                    // RFC-065 PR-065-B: every open document's own path, not just the
-                    // active one's -- see `RowContext::open_paths`'s own doc.
-                    let open_paths: Vec<std::path::PathBuf> = project
-                        .content_workspace()
-                        .open_documents()
-                        .map(|document| document.target().selected_relative_path.clone())
-                        .collect();
-                    crate::surface::explorer::view(
-                        project.content_workspace().explorer_tree(),
-                        project.content_workspace().explorer_status(),
-                        crate::surface::explorer::ExplorerCursor {
-                            highlight: state.explorer_highlight,
-                            top: state.explorer_top,
-                            capacity: explorer_window_capacity(state),
-                            watch_stopped: active_watch_stopped(state),
-                        },
-                        &state.catalog,
-                        &state.theme,
-                        crate::surface::explorer::RowContext {
-                            git_summary: Some(project.git_summary()),
-                            open_paths: &open_paths,
-                        },
-                    )
-                }
-                None => text(sidebar_label(state)).into(),
-            }
+    let content: Element<'_, Message> = match state.app_shell.state().active_project() {
+        Some(project) => {
+            // RFC-065 PR-065-B: every open document's own path, not just the
+            // active one's -- see `RowContext::open_paths`'s own doc.
+            let open_paths: Vec<std::path::PathBuf> = project
+                .content_workspace()
+                .open_documents()
+                .map(|document| document.target().selected_relative_path.clone())
+                .collect();
+            crate::surface::explorer::view(
+                project.content_workspace().explorer_tree(),
+                project.content_workspace().explorer_status(),
+                crate::surface::explorer::ExplorerCursor {
+                    highlight: state.explorer_highlight,
+                    top: state.explorer_top,
+                    capacity: explorer_window_capacity(state),
+                    watch_stopped: active_watch_stopped(state),
+                },
+                &state.catalog,
+                &state.theme,
+                crate::surface::explorer::RowContext {
+                    git_summary: Some(project.git_summary()),
+                    open_paths: &open_paths,
+                },
+            )
         }
-        _ => text(sidebar_label(state)).into(),
+        None => column![].into(),
     };
     // RFC-052 PR-052-B: the sidebar's own size is measured, not computed --
     // the window holds as many rows as the layout engine says fit.

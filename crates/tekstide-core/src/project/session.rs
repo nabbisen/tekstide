@@ -1464,6 +1464,19 @@ impl ProjectSession {
         self.record_activity();
     }
 
+    /// RFC-067 D8: **no longer switches `mode` to `Content`.** This is shared infrastructure
+    /// -- the explorer's own file activation, RFC-027's recovery offer, and any future
+    /// caller all open documents through this one function -- and only the first of those
+    /// is the user's own deliberate activation of a file. Before this RFC the explorer was
+    /// the only reachable caller, so forcing `Content` here was indistinguishable from
+    /// forcing it at the one call site that wanted it; RFC-067 made the sidebar (and this
+    /// function) reachable from more than one caller, so the two stopped being the same
+    /// decision. The mode switch moved to the explorer's own call site
+    /// (`open_active_project_content_workspace`, called explicitly, right after this
+    /// succeeds) rather than living here as a side effect every caller inherits whether it
+    /// wants it or not. `open_surface` still updates unconditionally -- that is "what Content
+    /// mode would show," not "move the user there," and is harmless for a caller that never
+    /// switches mode.
     pub fn open_text_document(
         &mut self,
         selected_relative_path: impl AsRef<std::path::Path>,
@@ -1477,7 +1490,6 @@ impl ProjectSession {
         );
         self.sync_file_state_from_content_workspace();
         self.set_open_surface(ProjectOpenSurface::TextEditor);
-        self.set_mode(ProjectMode::Content);
         result
     }
 
@@ -1486,17 +1498,18 @@ impl ProjectSession {
     /// it stands now (see [`ProjectContentWorkspace::recover_text_document`] and
     /// [`crate::content::TextDocument::recover`] for the three-way comparison itself).
     ///
-    /// Deliberately **does not** call [`Self::set_open_surface`]/[`Self::set_mode`] the
-    /// way [`Self::open_text_document`] does -- recovering a buffer is not the same act as
+    /// Deliberately **does not** call [`Self::set_open_surface`] the way
+    /// [`Self::open_text_document`] does -- recovering a buffer is not the same act as
     /// activating it on screen (RFC-065 D1/D2's own distinction between the open set and
     /// what is active already draws this line); a caller that wants the recovered buffer
     /// visible calls [`Self::open_text_document`] on the same path afterward, which the
-    /// existing dedup switch resolves with no further disk read, the exact same route and
-    /// mode change every other file-activation path already goes through. This is also
-    /// why this method does not duplicate `open_text_document`'s own mode-switching logic:
-    /// a future guard added there (RFC-067 D8: a file activation must never move a user
-    /// out of a terminal they are watching) is inherited automatically by every caller
-    /// that chains into it, this one included, rather than needing its own copy.
+    /// existing dedup switch resolves with no further disk read. **RFC-067 D8, now
+    /// answered rather than anticipated**: `open_text_document` no longer switches `mode`
+    /// at all (see its own doc), so this method inherits exactly nothing to guard against
+    /// here -- the recovery offer's own caller in `tekstide/src/shell.rs` can chain into
+    /// `open_text_document` freely without moving the user out of a terminal they are
+    /// watching, which is also what `accepting_a_recovery_offer_in_terminal_mode_does_not_
+    /// switch_the_mode` (`shell/tests.rs`) now proves directly against a real offer.
     pub fn recover_text_document(
         &mut self,
         selected_relative_path: impl AsRef<std::path::Path>,

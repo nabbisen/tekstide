@@ -20,8 +20,8 @@ use super::{
     path_field_error_text, poll_approval_channels, project_board_audit_lines,
     project_board_configuration_lines, project_close_dialog_body,
     project_close_dialog_names_running_processes, project_close_dialog_path,
-    project_close_dialog_reasons_line, sidebar_label, status_bar_summary,
-    terminal_paste_refusal_text, terminated_outcome_and_session_confirmation, test_audit_state_dir,
+    project_close_dialog_reasons_line, status_bar_summary, terminal_paste_refusal_text,
+    terminated_outcome_and_session_confirmation, test_audit_state_dir,
     transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
     verify_restored_trust_against, zone_style,
 };
@@ -647,24 +647,6 @@ fn focus_marker_differs_and_is_not_colour_dependent() {
     assert!(focus_marker(true).contains('>'));
 }
 
-/// RFC-015 PR-015-E: the sidebar's rendered label actually changes when
-/// `state.focus` moves onto it -- proven against the real `State`, not
-/// just the marker function in isolation, so a wiring mistake (e.g.
-/// `sidebar_view` reading the wrong `FocusZone` variant) would be caught.
-#[test]
-fn sidebar_label_reflects_focus() {
-    let mut state = state_with(ApplicationShell::new());
-    assert_eq!(state.focus, FocusZone::MainArea);
-    let unfocused_label = sidebar_label(&state);
-
-    state.focus = FocusZone::Sidebar;
-    let focused_label = sidebar_label(&state);
-
-    assert_ne!(unfocused_label, focused_label);
-    assert!(focused_label.starts_with(focus_marker(true)));
-    assert!(unfocused_label.starts_with(focus_marker(false)));
-}
-
 /// Same property for the main area, plus proving `main_area_key` selects
 /// distinct catalog keys per `ProjectMode` -- a regression here would
 /// mean Content and Terminal Mode render identical scaffolding text.
@@ -730,16 +712,13 @@ fn terminal_mode_empty_state_says_what_it_is_and_how_to_start_a_terminal() {
     assert!(!label.contains("RFC"), "{label:?}");
 }
 
-/// D1, the other two placeholders that named an RFC or only said
-/// "Sidebar" over an empty panel.
+/// D1: the content-mode placeholder (the one of the original "other two" that still
+/// exists -- RFC-067 D1 deleted the sidebar's own placeholder entirely, since the sidebar
+/// is no longer a second thing the mode toggle governs) names no RFC and says something
+/// true.
 #[test]
-fn the_sidebar_and_content_placeholders_name_no_rfc_and_say_something_true() {
+fn the_content_mode_placeholder_names_no_rfc_and_says_something_true() {
     let state = state_with(ApplicationShell::new());
-    let sidebar = sidebar_label(&state);
-    assert!(!sidebar.contains("RFC"), "{sidebar:?}");
-    assert_ne!(sidebar.trim(), "Sidebar", "the bare word says nothing");
-    assert!(sidebar.contains("Content mode"), "{sidebar:?}");
-
     let content = main_area_label(&state, Some(tekstide_core::project::ProjectMode::Content));
     assert!(!content.contains("RFC"), "{content:?}");
     assert!(content.contains("Open a project"), "{content:?}");
@@ -16623,8 +16602,8 @@ fn clicking_the_top_bar_help_button_opens_the_real_help_modal() {
 /// RFC-040 PR-040-C): "Trust Settings" is hidden with no active
 /// project, not shown-and-silently-refusing -- factored out of
 /// `top_bar_title_and_actions_row` for the same testability reason
-/// `main_area_label`/`sidebar_label` already are, since an `Element` is
-/// not directly inspectable.
+/// `main_area_label` already is, since an `Element` is not directly
+/// inspectable.
 #[test]
 fn the_top_bar_trust_settings_button_is_hidden_without_an_active_project_and_shown_with_one() {
     let empty_state = state_with(ApplicationShell::new());
@@ -19594,6 +19573,48 @@ fn enter_on_a_file_opens_it_and_on_an_information_row_does_nothing() {
     assert_eq!(explorer_texts(&state), before);
 }
 
+/// RFC-067 D1/D7: the explorer is not only visible in terminal mode now, it is reachable --
+/// the same real key sequence that opens a file in Content mode works here too
+/// (`handle_explorer_key` no longer no-ops outside Content mode), and activating a file
+/// switches to Content mode and shows it. This is the one call site D8 names as the
+/// exception to "no document open moves the user out of a terminal they are watching."
+#[test]
+fn activating_a_file_in_the_explorer_while_in_terminal_mode_switches_to_content_mode() {
+    let mut state = explorer_project_state();
+    finish_explorer_scans(&mut state);
+    state
+        .app_shell
+        .dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "test precondition: terminal mode"
+    );
+
+    let readme = explorer_texts(&state)
+        .iter()
+        .position(|row| row.contains("README.md"))
+        .unwrap();
+    state.explorer_highlight = readme;
+    send_sidebar_key(&mut state, iced::keyboard::key::Named::Enter);
+
+    let project = state.app_shell.state().active_project().unwrap();
+    assert!(
+        project.content_workspace().active_document().is_some(),
+        "D1: the explorer must be reachable, not just visible, in terminal mode -- Enter on \
+         a file row must open it the same as it does in Content mode"
+    );
+    assert_eq!(
+        project.mode(),
+        tekstide_core::project::ProjectMode::Content,
+        "D7: activating a file switches to Content mode and shows it"
+    );
+}
+
 #[test]
 fn the_window_follows_the_highlight_down_a_long_listing_and_never_leaves_the_last_row() {
     let mut state = explorer_project_state();
@@ -21714,6 +21735,67 @@ fn activating_a_recoverable_row_recovers_it_and_removes_its_record() {
         }
         other => panic!("the modal must stay open after one row is recovered, got {other:?}"),
     }
+}
+
+/// RFC-067 D8: the recovery offer is one of the three paths D8 names as an exception --
+/// accepting a recovered row opens a document the same way the explorer's own activation
+/// does, but it is not the user's own explicit activation in the tree, so it must not move
+/// them out of a terminal they are watching. Driven while the project is genuinely in
+/// terminal mode (set before the offer modal is ever constructed), not asserted against a
+/// mode nobody was actually in.
+#[test]
+fn accepting_a_recovery_offer_in_terminal_mode_does_not_switch_the_mode() {
+    let dir = fresh_project_dir("recovery-offer-accept-terminal-mode");
+    let file = dir.join("file.txt");
+    std::fs::write(&file, "saved\n").unwrap();
+    let mut app_shell = ApplicationShell::new();
+    let project_id = match app_shell.add_project_from_path(&dir).unwrap() {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {
+            panic!("fixture: a freshly created directory must be newly added")
+        }
+    };
+    app_shell.dispatch(tekstide_core::command::AppCommand::ToggleActiveProjectMode);
+    assert_eq!(
+        app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "test precondition: terminal mode, set before the offer is ever constructed"
+    );
+    let state_root = super::resolve_agent_run_state_dir().unwrap();
+    tekstide_core::recovery::write_recovery_record(
+        &state_root,
+        project_id.as_str(),
+        &recovery_record_for_fixture("file.txt", "unsaved edit\n", &file),
+        tekstide_core::recovery::RecoveryRetentionLimits::default_limits(),
+    )
+    .unwrap();
+
+    let mut state = state_with(app_shell);
+    assert!(
+        matches!(state.modal, Some(ModalContent::RecoveryOffer(_))),
+        "fixture precondition: the offer must be open before activating anything"
+    );
+
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert_eq!(
+        active_document_text(&state),
+        "unsaved edit\n",
+        "the recovered buffer must still become visible -- D8 says the mode must not move, \
+         not that nothing happens"
+    );
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .map(tekstide_core::project::ProjectSession::mode),
+        Some(tekstide_core::project::ProjectMode::TerminalImmersion),
+        "D8: a recovery restore must not move the user out of a terminal they are watching"
+    );
 }
 
 /// RFC-027 PR-027-C, D5 "changed": accepting a row whose file has since changed on disk

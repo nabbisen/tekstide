@@ -546,9 +546,18 @@ fn scan_active_project_explorer_directory_without_navigating_touches_nothing_but
     );
 }
 
+/// RFC-067 D8: **inverted from `opening_text_document_from_terminal_mode_forces_content_
+/// mode`**, which asserted the exact universal claim D8 exists to forbid -- that opening a
+/// text document through *any* path always forces Content mode. `open_active_project_text_
+/// document`/`ProjectSession::open_text_document` is shared infrastructure: the explorer's
+/// own file activation (`tekstide`'s `handle_explorer_key`), RFC-027's recovery offer, and
+/// any future caller all open documents through it. Only the explorer's own call site is
+/// the user's deliberate activation, so only it may switch mode -- and it does that with
+/// its own explicit, separate call (`open_active_project_content_workspace`), not as a side
+/// effect living inside the shared open path.
 #[test]
-fn opening_text_document_from_terminal_mode_forces_content_mode() {
-    let sandbox = TestSandbox::new("shell-content-forces-mode");
+fn opening_a_text_document_through_the_shared_path_does_not_force_content_mode() {
+    let sandbox = TestSandbox::new("shell-content-leaves-mode");
     let project_dir = sandbox.create_dir("project");
     sandbox.create_file_with_contents("project/file.txt", b"original\n");
     let mut shell = ApplicationShell::new();
@@ -571,13 +580,18 @@ fn opening_text_document_from_terminal_mode_forces_content_mode() {
 
     let project = shell.state().project(&project_id).unwrap();
     assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
-    assert_eq!(project.mode(), ProjectMode::Content);
-    assert_eq!(project.open_surface(), ProjectOpenSurface::TextEditor);
-    assert!(shell.render_text().contains("Content Mode"));
-    assert!(
-        !shell
-            .render_text()
-            .contains("Terminal / Agent Immersion Mode | surface: Text Editor")
+    assert_eq!(
+        project.mode(),
+        ProjectMode::TerminalImmersion,
+        "D8: the shared open path must not move the user out of a terminal they are \
+         watching -- only the explorer's own call site, which calls \
+         open_active_project_content_workspace explicitly, may do that"
+    );
+    assert_eq!(
+        project.open_surface(),
+        ProjectOpenSurface::TextEditor,
+        "the open surface still updates -- D8 is about mode, not about what Content mode \
+         would show if the user switched to it themselves"
     );
 }
 

@@ -255,6 +255,26 @@ impl AppState {
         true
     }
 
+    /// RFC-067 D7: sets the mode directly to `Content`, the same shape
+    /// [`Self::open_active_project_terminal_workspace`] already uses for the
+    /// symmetric case -- activating a file in the now-always-visible explorer
+    /// must land the user where the file is regardless of which mode they
+    /// were already in, not merely flip a toggle. **D8's own boundary: this
+    /// is reached from exactly one call site** (the explorer's own file
+    /// activation in `tekstide/src/shell.rs`), never from
+    /// `open_active_project_text_document` itself -- every other caller of
+    /// that function (RFC-027's recovery offer, a background watch refresh)
+    /// must not move a user out of a terminal they are watching, so the mode
+    /// switch is not folded into the shared open path.
+    pub fn open_active_project_content_workspace(&mut self) -> bool {
+        let Some(project) = self.active_project_mut() else {
+            return false;
+        };
+
+        project.set_mode(ProjectMode::Content);
+        true
+    }
+
     /// Terminal launch UX handoff: sets the mode directly to
     /// `TerminalImmersion`, unlike `toggle_active_project_mode` --
     /// launching a terminal must land the user in the terminal
