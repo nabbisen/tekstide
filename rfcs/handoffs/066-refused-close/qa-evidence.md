@@ -354,13 +354,21 @@ its terminals and does not close it") was still standing as an open, unscheduled
 RFC's own `Closed` section, rather than deleted (the entry is the historical record of the original
 finding).
 
-**Found during this pass, not this RFC's own scope, disclosed rather than fixed.** While live-
-capturing PR-066-B's own evidence, `Ctrl+Alt+N` ("switch to the next open project") did nothing --
-confirmed in the code: `NavigationAction::SwitchActiveProject` has no production caller anywhere in
-the crate; only the tab strip's own click/keyboard-focus route reaches `switch_to_project_tab`.
-`working-with-projects.md` still claims the chord works. Not fixed here -- no commit in this RFC
-touches tab-switching -- but recorded in this RFC's own `Closed` section so it is not rediscovered
-as new.
+**A mistake, found by the reviewer at review 505: `Ctrl+Alt+N` is not broken.** While
+live-capturing PR-066-B's own evidence, `Ctrl+Alt+N` did nothing against a one-project fixture, and
+I wrongly generalized that to "unwired" -- confirmed against the wrong evidence,
+`AppState::switch_active_project`'s own doc comment ("no production caller anywhere in this
+crate"), rather than against the actual dispatch. `shell.rs:2479` does handle
+`NavigationAction::SwitchActiveProject`, in the shell's own match arm rather than through
+`AppCommand` (which is exactly what that doc comment explains, correctly, and I misread as "the
+action is unhandled"); `cycle_to_next_active_project` returns early below two projects, the same
+deliberate no-op shape `Ctrl+Alt+F`'s own `is_a_no_op_with_fewer_than_two_documents_open` already
+has. `ctrl_alt_n_cycles_to_the_next_open_project_wrapping` already proves the chord works with two.
+The false claim was written into this RFC's own `Closed` section and `working-with-projects.md`
+was never touched to match it, which is the only reason nothing shipped wrong -- removed from the
+`Closed` section rather than left standing. Recorded here, not erased, because the instinct to
+chase "did nothing" was right; the verification against a comment instead of the call site was the
+actual mistake.
 
 ### Gate, Whole-RFC
 

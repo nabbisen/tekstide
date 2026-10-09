@@ -182,13 +182,6 @@ store, not only through the unit tests.
   nothing. Recorded in `future-work.md` as a pre-1.0 item,
   `enumeration_confirms_only_the_closed_list_reads_full_file_content` named as the shape and
   `record.rs`'s 69 family arms as the enumeration.
-- **`Ctrl+Alt+N`'s own doc claim, found but not this RFC's own scope.** While live-capturing this
-  slice's evidence, `Ctrl+Alt+N` ("switch to the next open project") did not switch anything —
-  `NavigationAction::SwitchActiveProject` has no production caller in the crate at all, only the
-  tab strip's own click/keyboard-focus route (`SwitchActiveProjectTabPressed`) reaches
-  `switch_to_project_tab`. `docs/src/users/working-with-projects.md` still claims the chord works
-  ("press `Ctrl+Alt+N` to cycle to the next with wraparound"). Not fixed here — this RFC's own
-  commits do not touch tab-switching — but worth naming so it is not rediscovered as new.
 - Two full-workspace gate runs during this RFC's own review cycle failed on already-load-sensitive,
   already-registered tests (`test-process-leak.md` row 787's fourth and fifth occurrences, plus one
   new row for `terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark`); the
