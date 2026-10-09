@@ -40,6 +40,31 @@
       session-bar entry and status-bar `1 running` alongside the now-persistent tree, unchanged
       in shape.
 
+### PR-067-A closed at review 508
+
+Nothing required. The capture shows a real running terminal (`Terminal 1 (Primary) — Running`,
+`1 running`) **beside the real tree** — which is the whole RFC. The placeholder key is gone from
+`en.ftl`, with only a comment recording that it was deleted and why; I checked, because a bare
+occurrence count would have read as "still there".
+
+**The root-cause find is the slice.** `ProjectSession::open_text_document` forced `mode = Content`
+for *every* caller — harmless while the explorer was the only one, a live D8 violation the moment
+RFC-027's recovery offer became a second. Fixing it by removing the side effect from shared
+infrastructure, rather than special-casing the new caller, is the right direction, and
+`open_active_project_content_workspace()` has exactly one production call site: the explorer's own
+`Action::Open` arm. Verified.
+
+Inverting `opening_text_document_from_terminal_mode_forces_content_mode` rather than deleting it
+keeps the record of what the behaviour used to be. Finding the two further Content-mode guards
+(`handle_explorer_key`, `ensure_explorer_scanned`) by reading the functions the pack pointed at —
+neither named by me — is what stopped this shipping a tree that was visible and inert.
+
+**One note for PR-067-B, not a defect.** Removing `ensure_explorer_scanned`'s guard means a project
+opened straight into Terminal mode now scans its tree at open, where it previously scanned only on
+the first switch to Content — and for a terminal-only user, never. The guard had to go (a visible
+tree stuck on *"Loading…"* is worse), so this is a consequence, not a mistake. But the measurement
+slice is the right place to say so rather than let it pass unremarked.
+
 ## PR-067-B — measure the switch
 
 - [ ] Render cost **per switch**, paired, with the control inside the same run and the **spread
