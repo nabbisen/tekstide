@@ -88,6 +88,24 @@ fn claims_unfinished(status: &str) -> bool {
     status.contains("Proposed") || status.starts_with("Accepted")
 }
 
+/// A status claim written as prose -- an RFC's own `Status:` line, or
+/// `delivery-plan.md`'s own queue-row Status cell -- leads with the
+/// current state, bolded, then often narrates history afterward
+/// (`"**Implemented and closed 2026-08-26.** Proposed and accepted
+/// 2026-08-25 …"`). Applying [`claims_unfinished`] to the whole string
+/// would flag that history narration for containing the word
+/// "Proposed"; reading only the bolded lead claim is what makes every
+/// call site the same predicate, not a laxer one wearing the same name.
+/// Shared rather than reimplemented per call site, so a second one
+/// cannot quietly drift from the first the way the two checks below
+/// already share [`claims_unfinished`] itself.
+fn lead_claim(status: &str) -> &str {
+    status
+        .strip_prefix("**")
+        .and_then(|after| after.split_once("**"))
+        .map_or(status, |(claim, _)| claim)
+}
+
 /// The folder is the source of truth for an RFC's state (RFC-000). A
 /// handoff pack's `source_rfc_status` is text asserting that same state,
 /// so the two cannot be allowed to disagree.
@@ -193,20 +211,10 @@ fn every_rfc_own_status_line_agrees_with_its_folder() {
             };
             // The RFC's own `Status:` line is prose, not a single short
             // claim the way a handoff pack's `source_rfc_status` field
-            // is -- it leads with the current state, bolded, then often
-            // narrates history afterward ("**Implemented and closed
-            // 2026-08-26.** Proposed and accepted 2026-08-25 …", the
-            // exact shape this slice's own instruction holds up as
-            // correct). Applying `claims_unfinished` to the *whole*
-            // line would flag that history narration for containing
-            // the word "Proposed" -- reading only the bolded lead
-            // claim is what makes this the same predicate as the
-            // sibling check's, not a laxer one wearing the same name.
+            // is -- see `lead_claim`'s own doc for why only its bolded
+            // lead is read, not the history narration after it.
             let rest = status_line.trim_start_matches("Status:").trim();
-            let lead_claim = rest
-                .strip_prefix("**")
-                .and_then(|after| after.split_once("**"))
-                .map_or(rest, |(claim, _)| claim);
+            let lead_claim = lead_claim(rest);
 
             let stale = match folder {
                 "done" => claims_unfinished(lead_claim),
@@ -333,6 +341,88 @@ fn every_accepted_or_done_rfc_has_a_delivery_plan_row() {
          into for a week -- found by a reviewer scoping something else, the third occurrence, \
          not the first.",
         missing.join("\n")
+    );
+}
+
+/// Review 499 at RFC-027: `claims_unfinished` was already applied to an RFC's own `Status:`
+/// line and to a handoff pack's `source_rfc_status` field -- **`delivery-plan.md`'s own queue
+/// row is a third place the same claim is written, and the only one left unchecked**. Both of
+/// the last two releases left this field stale, by different people: RFC-027's own row still
+/// read "Accepted" after the RFC closed, and RFC-065's row still read "`0.30.0` candidate, not
+/// yet published" after `0.30.0` actually published, found only because *this* RFC's closure
+/// made someone look at the same field. Two people, two consecutive releases, one field, and
+/// the sibling checks' own machinery already sat right next to the gap.
+///
+/// Reuses [`lead_claim`] and [`claims_unfinished`] unchanged -- the identical predicate the
+/// sibling checks already apply to the RFC's own `Status:` line and the handoff pack's own
+/// field, not a fourth, independently-worded one for this third site. Row-matching reuses
+/// [`every_accepted_or_done_rfc_has_a_delivery_plan_row`]'s own rule (first cell, trimmed,
+/// exactly three ASCII digits; anything else -- a header, a separator, an unrelated table's own
+/// first column -- is silently not this table and skipped), so a row this slice does not
+/// recognise as the RFC Queue table is never treated as resolved as a non-match.
+#[test]
+fn every_delivery_plan_row_agrees_with_its_rfc_folder() {
+    let Some(rfcs) = rfcs_dir() else {
+        eprintln!("skipped: rfcs/ is not packaged with the published crate");
+        return;
+    };
+
+    let plan_path = rfcs.join("delivery-plan.md");
+    let Ok(plan) = std::fs::read_to_string(&plan_path) else {
+        eprintln!("skipped: rfcs/delivery-plan.md is not packaged with the published crate");
+        return;
+    };
+
+    let located = rfc_folder_by_number(&rfcs);
+
+    let mut disagreements = Vec::new();
+    for line in plan.lines() {
+        let Some(rest) = line.trim().strip_prefix('|') else {
+            continue;
+        };
+        let mut cells = rest.split('|');
+        let Some(number) = cells.next().map(str::trim) else {
+            continue;
+        };
+        if number.len() != 3 || !number.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let Some(folder) = located.get(number) else {
+            continue;
+        };
+        // The Status column is the table's last cell (`| RFC | Title | Milestone |
+        // Depends on | Headless | Status |`) -- the remaining cells after the first,
+        // rejoined, since a status cell's own prose can itself contain `|`-adjacent
+        // punctuation inside inline code or a link that `split('|')` would otherwise
+        // have already cut on.
+        let status_cell = cells.collect::<Vec<_>>().join("|");
+        let status_cell = status_cell.trim();
+        if status_cell.is_empty() {
+            continue;
+        }
+        let claim = lead_claim(status_cell);
+
+        let stale = match folder.as_str() {
+            "done" => claims_unfinished(claim),
+            "accepted" => claim.contains("Proposed"),
+            _ => false,
+        };
+        if stale {
+            disagreements.push(format!(
+                "  RFC-{number} says {claim:?} in rfcs/delivery-plan.md but sits in rfcs/{folder}/"
+            ));
+        }
+    }
+
+    assert!(
+        disagreements.is_empty(),
+        "delivery-plan.md's own queue row asserts a state the RFC's folder contradicts, and the \
+         folder wins (RFC-000):\n{}\nThis is the check that would have caught RFC-027's own row \
+         still saying \"Accepted\" after the RFC closed, and RFC-065's own row still saying \
+         \"candidate, not yet published\" after 0.30.0 actually published -- the same drift the \
+         two sibling checks already catch in the RFC file and the handoff pack, now caught here \
+         too.",
+        disagreements.join("\n")
     );
 }
 

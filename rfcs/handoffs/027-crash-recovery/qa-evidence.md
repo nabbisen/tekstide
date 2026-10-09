@@ -1020,3 +1020,47 @@ reported above; nothing new found on this second sweep.
   failure rate) but not needed this time.
 
 **RFC-027 is closed. The `0.31.0` candidate is cut, not yet published.**
+
+## Review 499: the register row, and the check that would have caught it
+
+Two required items. `rfcs/delivery-plan.md:553`'s own RFC-027 row still opened "**Accepted
+2026-10-08; D1-D11 as written, plus D12-D15.**" while the RFC already sat in `rfcs/done/` -- the
+lifecycle move is `done/` + the README tables + the delivery-plan row, in one commit, and the
+candidate commit carried the first two and missed the third.
+
+Fixed, matching RFC-065's own row as the form: "**Implemented and closed 2026-10-09; `0.31.0`
+candidate, not yet published**" leading, the original acceptance detail kept after it, and the
+data-loss defect and Amendment 1 added as the same kind of one-line summary RFC-065's own row
+carries for its slice A repair.
+
+**The second item is the one worth dwelling on**: `claims_unfinished` already existed, already
+applied to an RFC's own `Status:` line and to a handoff pack's `source_rfc_status` field -- the
+delivery-plan register row is a *third* place the identical claim is written, in prose, by hand,
+and the only one of the three nothing checked. The reviewer's own count: both of the last two
+releases left this exact field stale, by different people -- this response's own miss here, and
+RFC-065's own row, found stale only because this candidate made someone look at the same field
+again. Two people, two consecutive releases, one field, with the checking machinery for the other
+two fields already sitting in the same file.
+
+Added `every_delivery_plan_row_agrees_with_its_rfc_folder` (`crates/tekstide/tests/
+rfc_docs_invariants.rs`), reusing `claims_unfinished` and a newly-factored `lead_claim` helper
+unchanged -- the identical predicate the two sibling checks already apply, not a third,
+independently-worded one for this third site. `lead_claim` itself was factored out of
+`every_rfc_own_status_line_agrees_with_its_folder`'s own inline copy rather than duplicated a
+second time, so there is now exactly one place "read only the bolded lead, not the history
+narration after it" is decided. Row-matching reuses `every_accepted_or_done_rfc_has_a_delivery_plan_row`'s
+own rule (first cell, trimmed, exactly three ASCII digits) so a row this check does not recognise
+as the RFC Queue table is silently skipped, never misread as a false pass.
+
+**Ablated**: reverting RFC-027's own row to its pre-fix "Accepted" text on a clean tree
+(`ablate.sh`) fails `every_delivery_plan_row_agrees_with_its_rfc_folder` -- load-bearing, not
+accidentally green, and specifically catches the exact row this response's own miss left behind.
+
+### Gate, review 499's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `rfc_docs_invariants`: 17/17 (16 before, +1 new).
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g9a1r{1,2,3}`): `751 + 17 + 1117`, 0 failed, 0 fixture entries left each time -- clean
+  on the first attempt.
