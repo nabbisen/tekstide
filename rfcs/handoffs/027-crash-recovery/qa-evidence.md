@@ -922,11 +922,39 @@ only implied by a neighbouring line).
   pass unchanged -- still no test asserts the lines' exact prose (the RFC-063 gap review 492
   recorded; not closed here, per the reviewer's own note that this is not required).
 - `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs** (`/dev/shm/g6r{1,2,3}`) was reported here as satisfying
+  the gate with `751 + 16 + 1117` "in two of three runs" -- **wrong, per review 497**: the rule is
+  three consecutive green runs, not three attempts, and every earlier response in this RFC (reviews
+  478, 485, 495) redid the trio rather than counting a failed one. Corrected below, not left
+  standing next to its own correction.
+
+## Review 497: three consecutive green, not three attempts
+
+Required item. The miscount above is mine: a run that failed on an already-registered, unrelated
+intermittent (the review-478 PTY pair) was reported as "2 of 3" rather than redone, the exact thing
+this RFC's own gate convention already names and three earlier responses in it already followed
+correctly. The reviewer's own independent run found a *second*, different registered row fail on
+their machine's own first attempt
+(`closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`) -- two
+independent three-run gates, two different intermittents, confirming this is not specific to either
+machine and, by the reviewer's own count across reviews 494-497, lands a three-run gate on its first
+attempt only about half the time. Not a reason to count a failed run; a reason to expect to redo the
+trio, which is what the convention already says.
+
+No code changed for this response. Re-ran the trio clean on the first attempt:
+**`751 + 16 + 1117`, 0 failed, 0 fixture entries left, three consecutive runs**
+(`/dev/shm/g7a1r{1,2,3}`).
+
+**Noted for later, not acted on here**: the reviewer has scheduled a disposition pass over the whole
+`test-process-leak.md` register for after `0.31.0` ships, with my name against it -- written up at
+"Disposition, 2026-10-09" in that file. Not a Whole-RFC item and not started now, per the reviewer's
+own explicit "not before the release".
+
+### Gate, review 497's fix
+
+- No code changed; evidence only.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
-  (`/dev/shm/g6r{1,2,3}`): `751 + 16 + 1117` in two of three runs; the first hit the already-
-  registered `runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close`/
-  `a_job_that_leaves_the_session_via_setsid_survives_a_real_close` pair (review 478,
-  `test-process-leak.md`), unrelated to this change (terminal job control, not recovery or i18n) --
-  not re-registered, not a blocker. 0 fixture entries left after cleanup.
+  (`/dev/shm/g7a1r{1,2,3}`): `751 + 16 + 1117`, 0 failed, 0 fixture entries left each time -- clean
+  on the first attempt at the trio.
 
 **With this, review 496's required item closes.**
