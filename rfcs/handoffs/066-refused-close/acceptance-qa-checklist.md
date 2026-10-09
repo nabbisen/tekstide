@@ -4,19 +4,38 @@ Tick a box only when the thing it names has been **run**.
 
 ## PR-066-A — reproduce, then repair
 
-- [ ] **Reproduced first, against real things** (D5): a real project, a real spawned terminal, a
+- [x] **Reproduced first, against real things** (D5): a real project, a real spawned terminal, a
       real unsaved edit, a real confirmed close — the terminal dies, the project stays open.
       **If it did not reproduce, that is reported instead of a fix.**
-- [ ] The assessment completes before anything live is terminated (D1, §row 1).
-- [ ] A confirmed close refused for an unsaved file **leaves every running terminal alive**, proven
+      Reproduced exactly as read: `a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive`
+      (`shell::tests`), run against the unmodified code with its assertions inverted from their
+      current form, passed — the real terminal's pane was gone and the project stayed open.
+- [x] The assessment completes before anything live is terminated (D1, §row 1).
+      `apply_project_close_confirmation` calls the read-only `assess_project_close` first;
+      `close_assessment_blocked_by_more_than_running_processes` (`shell.rs`) decides whether
+      anything live is touched at all.
+- [x] A confirmed close refused for an unsaved file **leaves every running terminal alive**, proven
       against real spawned sessions, not a synthetic list.
-- [ ] A close that *is* permitted still terminates and still closes — the repair must not cost the
+      `a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive` (`shell::tests`), same
+      test as above, assertions now proving the fix.
+- [x] A close that *is* permitted still terminates and still closes — the repair must not cost the
       working path.
-- [ ] The reproduction is kept as the regression test.
-- [ ] **Where the audit record is written is decided, not inherited** (D11):
+      `confirming_the_close_terminates_the_real_process_and_removes_the_project`,
+      `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
+      (`shell::tests`) both pass unchanged.
+- [x] The reproduction is kept as the regression test.
+      Same test, renamed and re-asserted rather than replaced — `qa-evidence.md` records both what
+      it proved before the fix and what it proves now.
+- [x] **Where the audit record is written is decided, not inherited** (D11):
       `terminal_session_confirmed_empty` comes from the termination, which D1 moves.
-- [ ] RFC-027's `remove_project_recovery_records_best_effort` still runs only on the closing path,
+      Decided: the refused branch never terminates, so the field is inert there (`&& closed`
+      already forces the recorded value to `false` whenever `closed` is, regardless of this
+      field) — same recorded outcome as today for the refused case, decided explicitly rather than
+      left to fall out of the refactor by accident. Full reasoning in `qa-evidence.md`.
+- [x] RFC-027's `remove_project_recovery_records_best_effort` still runs only on the closing path,
       and the termination now sits beside it (D12).
+      Unchanged — still inside `if closed`, termination now sits in the branch that leads there,
+      not restructured relative to it.
 
 ## PR-066-B — refuse up front
 

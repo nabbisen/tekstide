@@ -5355,20 +5355,27 @@ fn record_project_close_cancelled(
     }
 }
 
-/// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §6's
-/// confirmed sequence: `request_terminate` on each of the project's live
-/// terminals, wait for the runtime to observe the group gone (its first
-/// production caller -- treat it as new code, not plumbing), *then*
-/// `close_project`. Never the reverse, never bypassing
-/// `assess_project_close`. The `AuditStore` handle is opened once, here,
-/// before `close_project` can remove the project from
-/// `AppState::projects()` -- `open_real_audit_store` reads that list to
-/// build its own project-root allowlist, so opening it after removal
-/// would silently narrow what it allows. `record_safe_close_authorized`
-/// runs first (response 310's confirmed two-phase requirement:
-/// `AuditStore` rejects a bare `Applied`/`Failed` record with no
-/// matching `Authorized` for the same `operation_id`, the same
-/// discipline `ManagedProcessLifecycle` already follows), `record_safe_close_decision`
+/// RFC-039 PR-039-C, `what-closing-a-project-must-not-lose.md` §6's confirmed sequence:
+/// `request_terminate` on each of the project's live terminals, wait for the runtime to
+/// observe the group gone (its first production caller -- treat it as new code, not
+/// plumbing), *then* `close_project`. Never bypassing `assess_project_close`.
+///
+/// **RFC-066 D1, found at review 489 and reproduced at review 490 (`a_confirmed_close_
+/// blocked_by_a_dirty_file_kills_the_terminal_anyway`): this doc comment's own "never the
+/// reverse" was wrong for over two releases.** The code terminated every live terminal
+/// *before* ever asking whether the close could proceed at all, so a project blocked by a
+/// dirty file (or a pending approval, or a review-ready change) lost its running terminal
+/// sessions to a close that then refused -- real, unrecoverable process state destroyed by
+/// a confirmation that did not go through. Fixed: `assess_project_close` runs first,
+/// read-only, with every terminal still alive; only when nothing *other than* a live
+/// process blocks does anything get terminated at all, because a live process is the one
+/// reason termination itself resolves. The `AuditStore` handle is opened once, here, before
+/// `close_project` can remove the project from `AppState::projects()` -- `open_real_audit_store`
+/// reads that list to build its own project-root allowlist, so opening it after removal
+/// would silently narrow what it allows. `record_safe_close_authorized` runs first
+/// (response 310's confirmed two-phase requirement: `AuditStore` rejects a bare
+/// `Applied`/`Failed` record with no matching `Authorized` for the same `operation_id`, the
+/// same discipline `ManagedProcessLifecycle` already follows), `record_safe_close_decision`
 /// last.
 fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal) {
     let project_id = modal.project_id.clone();
@@ -5381,14 +5388,28 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
             .record_safe_close_authorized(project_id.clone(), operation_id.clone());
     }
 
-    let terminal_session_confirmed_empty =
-        terminate_project_live_work(state, &project_id, &mut audit_store);
-
-    let assessment = state.app_shell.state_mut().close_project(&project_id);
-    let closed = matches!(
-        assessment,
-        Ok(tekstide_core::close::CloseAssessment::SafeToClose)
-    );
+    // RFC-066 D1: nothing live is terminated until the close is known to be going ahead.
+    // A project blocked *only* by its own live processes (or not blocked at all) is the
+    // one case termination is what makes the close succeed -- any *other* reason already
+    // means refusal regardless of what happens to a terminal, so nothing is terminated to
+    // find that out.
+    let pre_assessment = state.app_shell.state().assess_project_close(&project_id);
+    let (terminal_session_confirmed_empty, closed) =
+        if close_assessment_blocked_by_more_than_running_processes(&pre_assessment) {
+            // D11: nothing was terminated, so there is nothing for this field to confirm
+            // -- `&& closed` below makes the recorded value `false` either way, since
+            // `closed` is `false` on this branch.
+            (true, false)
+        } else {
+            let terminal_session_confirmed_empty =
+                terminate_project_live_work(state, &project_id, &mut audit_store);
+            let assessment = state.app_shell.state_mut().close_project(&project_id);
+            let closed = matches!(
+                assessment,
+                Ok(tekstide_core::close::CloseAssessment::SafeToClose)
+            );
+            (terminal_session_confirmed_empty, closed)
+        };
 
     if let Some(store) = audit_store.as_mut() {
         tekstide_core::audit::AuditCoordinator::new(store, &mut state.audit_health)
@@ -5408,13 +5429,35 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
         remove_project_recovery_records_best_effort(&project_id);
         finish_project_close_navigation(state);
     }
-    // If `close_project` still refused (something other than terminals
-    // or an agent run is blocking -- dirty files, pending approvals),
-    // the project stays open. The modal is already closed
-    // (`Message::ModalActivate`'s own `state.modal.take()`), so this is
-    // a known, disclosed limitation -- the user sees the project still
-    // present, not a silently-eaten close -- rather than a forced bypass
-    // of the assessment, which §6 explicitly forbids.
+    // If the close is refused (a dirty file, a pending approval or a review-ready
+    // change), nothing live was ever touched (D1, directly above) and the project stays
+    // open. The modal is already closed (`Message::ModalActivate`'s own
+    // `state.modal.take()`), so this is a known, disclosed limitation -- the user sees
+    // the project still present, not a silently-eaten close -- rather than a forced
+    // bypass of the assessment, which §6 explicitly forbids. **RFC-066 Amendment 1
+    // (D10): the audit record above still unconditionally claims `Closed`, including on
+    // this refused path -- not fixed here, PR-066-B's own job.**
+}
+
+/// RFC-066 D1: whether `assessment` blocks for any reason other than a live process --
+/// the one reason `apply_project_close_confirmation`'s own termination step can resolve.
+/// A project blocked *only* by running processes (or not blocked at all) is the case it
+/// may still terminate something for; any other reason (a dirty file, a pending approval,
+/// a review-ready change, or a provider-state problem it cannot even enumerate) must
+/// refuse before touching anything live, since terminating would not change that answer.
+/// `UnsupportedOrUnknown` is treated as blocked, the same conservative reading
+/// `attempt_close_project_tab` already gives it (leaves the project untouched rather than
+/// guessing at reasons that were never computed).
+fn close_assessment_blocked_by_more_than_running_processes(
+    assessment: &tekstide_core::close::CloseAssessment,
+) -> bool {
+    match assessment {
+        tekstide_core::close::CloseAssessment::SafeToClose => false,
+        tekstide_core::close::CloseAssessment::NeedsConfirmation { reasons } => reasons
+            .iter()
+            .any(|reason| reason.code != tekstide_core::close::CloseReasonCode::RunningProcess),
+        tekstide_core::close::CloseAssessment::UnsupportedOrUnknown { .. } => true,
+    }
 }
 
 /// RFC-043 PR-043-C: the one place `terminate_project_live_work` reads

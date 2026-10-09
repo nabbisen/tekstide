@@ -13732,6 +13732,105 @@ fn state_with_a_real_terminal_on_its_own_project(
     (state, project_id, terminal_id)
 }
 
+/// RFC-066 D5: the exact combination the reproduction needs and
+/// [`state_with_a_real_terminal_on_its_own_project`] does not have -- a real spawned
+/// terminal **and** a real unsaved edit on the same project, so a confirmed close is blocked
+/// by the dirty file while a live terminal is also present to be destroyed before that
+/// refusal is known.
+fn state_with_a_real_terminal_and_a_dirty_document(
+    label: &str,
+) -> (
+    State,
+    tekstide_core::project::ProjectId,
+    tekstide_core::domain::TerminalId,
+) {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir(label);
+    std::fs::write(project_dir.join("file.txt"), "saved\n").unwrap();
+    let project_id = app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    {
+        let project = app_shell
+            .state_mut()
+            .project_mut(&project_id)
+            .expect("the project just added must be present");
+        project
+            .open_text_document("file.txt")
+            .expect("the fixture file must open");
+        project
+            .replace_active_text("unsaved edit\n")
+            .expect("the fixture edit must apply");
+    }
+
+    let (pane, session) = crate::surface::terminal::TerminalPane::launch(
+        project_id.clone(),
+        "close-test pane",
+        fresh_project_dir(&format!("{label}-pane")),
+        PathBuf::from("/bin/sh"),
+    )
+    .expect("launch a real shell for a project-close test");
+    let terminal_id = session.id.clone();
+    app_shell
+        .state_mut()
+        .attach_terminal_session(session)
+        .expect("registering a session on its own project must succeed");
+
+    let mut state = state_with(app_shell);
+    state.terminal_panes = vec![pane];
+    (state, project_id, terminal_id)
+}
+
+/// RFC-066 D5/D1: **reproduced first, against real things, before any repair -- and kept
+/// as the regression test afterward, per the RFC's own instruction, not discarded once the
+/// fix landed.** A real project, a real spawned terminal session, a real unsaved edit, a
+/// real confirmed close -- the exact chain the RFC's own Summary describes, read in the
+/// code at review 489 and not watched happen until this test first ran. Against the
+/// unmodified code this test's own assertions were the inverse of what they are now: the
+/// terminal died (a real `request_terminate` against a real shell, the same mechanism
+/// `confirming_the_close_terminates_the_real_process_and_removes_the_project` already
+/// proves kills a real process) even though the project stayed open, because
+/// `apply_project_close_confirmation` terminated before it ever asked whether the close
+/// could proceed at all. **Now proves the fix**: refused for the identical reason, with the
+/// terminal still alive, because nothing is terminated until the assessment says nothing
+/// *other than* a live process is blocking.
+#[test]
+fn a_confirmed_close_blocked_by_a_dirty_file_leaves_the_terminal_alive() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("close-ordering-repro"));
+    let (mut state, project_id, terminal_id) =
+        state_with_a_real_terminal_and_a_dirty_document("close-ordering-repro");
+
+    let _ = super::update(
+        &mut state,
+        Message::CloseProjectTabPressed(project_id.clone()),
+    );
+    assert!(state.modal.is_some(), "test precondition: modal opened");
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    match &state.modal {
+        Some(ModalContent::ProjectClose(modal)) => {
+            assert_eq!(modal.focus, ProjectCloseButton::Close);
+        }
+        other => panic!("expected the confirmation still open, got {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    assert!(
+        state.app_shell.state().project(&project_id).is_some(),
+        "the project must still be open -- a dirty file blocks the close, and the assessment \
+         must still say so"
+    );
+    assert!(
+        state
+            .terminal_panes
+            .iter()
+            .any(|pane| pane.terminal_id() == &terminal_id),
+        "the fix: the real terminal's pane must still be present -- a dirty file blocking \
+         the close is known before anything live is touched, not after"
+    );
+}
+
 /// RFC-030 PR-030-B, review 411 R-a: `record_terminal_exit`'s
 /// plain-terminal branch (a real shell, not an agent run's own terminal)
 /// must trigger a Git refresh the same way the agent-run branch already
