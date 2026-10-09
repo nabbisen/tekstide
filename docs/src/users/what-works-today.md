@@ -95,6 +95,18 @@ action, attempting every one regardless of an earlier document's own failure, an
 afterward how many succeeded and names each one that failed, with why. A document already clean
 is saved without being rewritten — the count is honest about that too.
 
+**Opening a project offers back anything it has unsaved records for.** If an earlier session left
+dirty documents behind — a crash, or simply quitting without saving — reopening that project lists
+each one by its own path and lets you accept or leave it, one document at a time; declining leaves
+every file and every record exactly as it was. A recovered document comes back with its text,
+cursor and viewport exactly as last written, but never its undo history. If the file on disk has
+not changed since, it comes back dirty, ready to save; if it has changed, or is gone, it comes back
+through the same *(conflict)*/*(deleted on disk, not reloaded)* states any other open document
+would reach, **Reload** button included — never a silent overwrite of a file it never read. See
+*Unsaved-buffer recovery data* in
+[Local data and privacy](./local-data-and-privacy.md#unsaved-buffer-recovery-data) for what gets
+written, where, and how to turn it off.
+
 File **names** in the explorer and the editor header are escaped, because they are untrusted,
 attacker-influenced text. File **contents** are deliberately not: the editor shows a file as it
 is, which means source containing a bidi-override character still *reads* differently from how it

@@ -793,3 +793,73 @@ fix) is the current one: `751 + 16 + 1117`, 0 failed, three consecutive runs, `c
 `clippy --workspace --all-targets -D warnings`/`cargo test --doc --workspace` all clean.
 
 **With this, every item review 490 and 492 named is closed.**
+
+## Whole-RFC
+
+**The two hedged requirements, and what their hedges were decided to mean.** `rfcs/delivery-plan.md`:
+the "Session recovery" row now carries `REQ-RECOVER-002`/`005` alongside `001`/`003`/`004`, with
+what each hedge was decided to mean rather than repeated back -- "where safe" (`002`) is D5's own
+three-way disk comparison, never assumed; "where technically feasible" (`005`) is D6's own real-kill
+proof, never `simulate_crash()`. The "Crash / unsaved buffer recovery" row (the "Not implemented"
+table) is annotated rather than left stale -- which also surfaced that this row never carried `002`
+at all since the plan was first written, a gap in the plan itself, disclosed rather than quietly
+folded in as if it had always been there.
+
+**The colour-alone, i18n completeness and internal-identifier scans.** RFC-027 adds no new
+colour-coded state -- the offer's own rows use a text `>` highlight marker and plain outcome text,
+never colour alone. The two concrete scans, `no_catalog_string_names_an_internal_identifier` and
+`every_source_locale_key_resolves_in_every_shipped_locale` (`crates/tekstide/src/i18n/
+enforcement.rs`), pass directly as part of the gate below, alongside the other six tests in that
+module -- no separate invocation exists for either, the same as every prior slice in this RFC.
+
+**The changelog, re-read against the finished set.** `## 0.31.0`'s own Status line still said the
+live capture and the notice-visibility proof were outstanding -- both closed by review 494 and
+review 492 respectively, before this re-read. Fixed, and reworded to say *why* the entry is written
+incrementally rather than only restate that it is -- the RFC-065 review 479 lesson, named so it is
+not quietly skipped the way this project's own history shows it can be. The four feature paragraphs
+(the marker, the record, the purge/setting, the cost measurement, the offer) were each re-checked
+against the fully finished behaviour, including the review-490 save-guard fix -- all four still read
+correctly; nothing needed changing beyond the Status line.
+
+**The book, read against the changelog in both directions.** Forward (changelog to book): a real
+gap, not merely a staleness -- `what-works-today.md`'s "Projects, files, and editing" section
+described every other document-state surface this RFC's own commits touch (external change,
+conflict, deleted-on-disk, multi-document) but never mentioned the recovery offer at all. Added, in
+the same place and the same voice as the surrounding paragraphs, cross-referencing the privacy page
+the way every other retained-content feature on that page already does. Reverse (book to changelog):
+a real staleness, the exact shape review 472 found at RFC-065 -- a capability's own meaning widened
+(there, `[open]` from one document to a set; here, the offer from crash-only to record-presence) and
+the sentence describing it kept the old meaning. `local-data-and-privacy.md` opened its own recovery
+section "Tekstide can detect that it did not exit cleanly, and offer back what was unsaved **when it
+crashed**" -- true when only PR-027-A existed, false since Amendment 1 (review 485): the offer is
+driven by the record's own presence, never by whether a crash was detected. Fixed, naming the
+amendment's own mechanism (a clean quit removes the marker and leaves the records) rather than just
+asserting the corrected claim. The same page's "RFC-027... under `rfcs/accepted/` while it is still
+being implemented" line was also stale (every slice is done; the RFC itself has not moved to
+`rfcs/done/`, which is the release-cut step, not this one) and corrected to say so precisely, not by
+claiming "closed" ahead of that step. Every other `recovery-*`/`editor-recovery-*`/
+`trust-settings-retained-recovery-records` Fluent key's own wording was checked against both pages
+and already agreed; none needed a change.
+
+**Flakes.** None from this response's own three runs. The one review 494 found in its own run
+(`runtime::terminal::reader::tests::drain_available_never_blocks_the_caller_even_under_sustained_
+production`) is already registered at "New row, 2026-10-09 -- review 494" in `test-process-leak.md`
+(`803dd0a`), not mine to add a second time.
+
+**Core pin and commits.** Not a release cut: `tekstide-core`'s own pin does not move until the
+candidate names a new version for it to move to -- a release-step item, explicitly left for that
+step by the checklist's own wording. This response's own commits are pushed once its own gate is
+green, the same as every prior one.
+
+## Gate, Whole-RFC
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `git diff --cached --check` after staging: clean.
+- `cargo test --test rfc_docs_invariants`: 16 passed, 0 failed.
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g4w{1,2,3}`): `751 + 16 + 1117`, 0 failed, 0 fixture entries left each time. (A first
+  attempt under a longer literal, `/dev/shm/t27wholerfc{1,2,3}`, hit two real, deterministic
+  `SocketPathTooLong` failures in `approval::tests::reference_adapter` -- the exact reason this
+  project's own convention insists on a *short* fixed literal, not merely a fixed one. Re-run under
+  a short literal, both pass; not a flake, not registered.)

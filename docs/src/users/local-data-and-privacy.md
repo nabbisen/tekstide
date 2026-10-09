@@ -167,11 +167,15 @@ are.
 
 ## Unsaved-buffer recovery data
 
-**Tekstide can detect that it did not exit cleanly, and offer back what was unsaved when it
-crashed.** Two parts: a per-instance marker, written at every launch and removed at every clean
-exit, so a marker left behind at the next launch means the previous one did not exit cleanly; and,
-for every **dirty** document, a small side record — its text, cursor and viewport, and the file it
-was opened against — written periodically while you type, so there is something to offer back.
+**Opening a project offers back whatever it has unsaved records for — not only after a crash.**
+Two parts: a per-instance marker, written at every launch and removed at every clean exit, so a
+marker left behind at the next launch means the previous one did not exit cleanly; and, for every
+**dirty** document, a small side record — its text, cursor and viewport, and the file it was opened
+against — written periodically while you type, so there is something to offer back. **The offer
+itself is driven by the record's presence alone, never by the marker**: quitting a window without
+saving removes the marker along with everything else a clean exit removes, but leaves the records
+behind, and that is the ordinary case this exists for — the marker only ever describes how the
+previous session ended, never whether anything is offered.
 
 **It never writes the file you are editing.** This is not autosave. The record lives entirely
 outside your project, at `$XDG_STATE_HOME/tekstide/recovery/` (`~/.local/state/tekstide/recovery/`
@@ -206,7 +210,7 @@ launch after that.
 
 The retention and purge policies, and the audit store's own retention rules, are specified in the
 RFCs that own them — RFC-011 for transcripts and RFC-013 for the audit store, both under
-`rfcs/done/` in the repository, and RFC-027 for crash detection and recovery data, under
-`rfcs/accepted/` while it is still being implemented. [Security
+`rfcs/done/` in the repository, and RFC-027 for crash detection, recovery data and the restart offer, under `rfcs/accepted/`
+until the release that ships it moves it to `rfcs/done/`. [Security
 decisions](../contributors/security-decisions.md) is the canonical home for the reasoning behind
 the behaviour described here.

@@ -424,21 +424,53 @@ and was right to explain: the buffer is still dirty, so D11's reason has not end
 
 ## Whole-RFC
 
-- [ ] `REQ-RECOVER-002` and `REQ-RECOVER-005`'s coverage rows updated — and **the "where safe" and
+- [x] `REQ-RECOVER-002` and `REQ-RECOVER-005`'s coverage rows updated — and **the "where safe" and
       "where technically feasible" hedges are reported as *decided*, naming what they were decided
       to mean**, not repeated back.
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
+      `rfcs/delivery-plan.md`: the "Session recovery" row now carries `002`/`005` with what each
+      hedge was decided to mean (D5: the disk file is re-snapshotted and compared, never assumed;
+      D6: durability proven against a real `SIGKILL`, never `simulate_crash()`), and the
+      "Crash / unsaved buffer recovery" row is annotated rather than left to read as still
+      outstanding — which also disclosed that row never carried `002` at all, a gap in the plan
+      itself, not something this RFC introduced.
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass.
+      RFC-027 adds no new colour-coded state — the recovery offer's own rows use a text `>` marker
+      for highlight and plain outcome text (`recovered`/`conflict`/refused), never colour alone.
+      `i18n::enforcement`'s all 8 tests pass directly (`no_catalog_string_names_an_internal_identifier`,
+      `every_source_locale_key_resolves_in_every_shipped_locale`, and the rest), part of the gate run
+      below.
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
       **after staging**, `rfc_docs_invariants`, `cargo test --doc --workspace`, **three consecutive
       full-workspace runs with `--no-fail-fast`**, **0 fixture entries left** in a fresh short fixed
-      `TMPDIR` — a literal, not `mktemp`.
-- [ ] Every new intermittent has a dated row in `test-process-leak.md`.
-- [ ] The changelog is written incrementally as slices close, **and re-read against the finished set
+      `TMPDIR` — a literal, not `mktemp`. All clean: `751 + 16 + 1117` (+ `0+1+1` doctests), every
+      run, `/dev/shm/g4w{1,2,3}`; `rfc_docs_invariants` 16/16.
+- [x] Every new intermittent has a dated row in `test-process-leak.md`. None from these three runs
+      (all clean); the one review 494 found in its own run is already registered there ("New row,
+      2026-10-09 — review 494"), not mine to add a second time.
+- [x] The changelog is written incrementally as slices close, **and re-read against the finished set
       at the candidate** — not against the last slice's diff (the lesson of RFC-065 review 479).
-- [ ] The book is read against the changelog **in both directions**, including for any user-visible
+      Re-read just now: the Status line still said the live capture and the notice-visibility proof
+      were outstanding — both closed since it was written. Fixed, and reworded to explain *why* it
+      was written incrementally rather than just restate that it was. The four feature paragraphs
+      were each checked against the finished behaviour (including the review-490 fix) and found
+      accurate as written — no change needed there.
+- [x] The book is read against the changelog **in both directions**, including for any user-visible
       word this RFC's commits touch (`release-checklist.md`, "A word quietly widening").
+      **Forward (changelog → book), a real gap**: `what-works-today.md`'s own "Projects, files, and
+      editing" section described every other document-state surface (external change, conflict,
+      deleted-on-disk, multi-document) but never the recovery offer at all — added, cross-referencing
+      the privacy page the way every other content-retention feature on that page already does.
+      **Reverse (book → changelog), a real staleness, the exact shape review 472 found**:
+      `local-data-and-privacy.md`'s own recovery section opened "Tekstide can detect that it did not
+      exit cleanly, and offer back what was unsaved **when it crashed**" — true when PR-027-A alone
+      existed, false since Amendment 1: the offer is driven by the record's presence, not a crash.
+      Fixed, and the same page's own "still being implemented" line for RFC-027 corrected (all three
+      slices are done; the RFC itself has not moved to `rfcs/done/` yet, which is the release-cut
+      step, not this one). Checked every `recovery-*`/`editor-recovery-*`/
+      `trust-settings-retained-recovery-records` Fluent key's own wording against both pages; all
+      others already agreed.
 - [ ] The core pin bumps with the version. *(Release-cut item; not a Whole-RFC item.)*
-- [ ] Commits are pushed once the gate is green.
+- [x] Commits are pushed once the gate is green.
 
 ## Final Acceptance Decision
 
