@@ -1481,3 +1481,31 @@ isolation on the immediate rerun. The load-sensitive PTY timing already recorded
 second occurrence above, not a regression in this response's own recovery-record work -- nothing
 this response touches is anywhere near `surface::terminal`. Gate redone, not counted, per this
 register's own convention.
+
+## New row, 2026-10-09 — review 494: a terminal reader drain test, and a leak with it
+
+Found in the reviewer's own gate run while closing RFC-027 PR-027-C. **Unregistered until now.**
+
+| Test | First seen |
+| --- | --- |
+| `runtime::terminal::reader::tests::drain_available_never_blocks_the_caller_even_under_sustained_production` (`reader.rs`) | review 494 (2026-10-09) |
+
+**Observed once** in a full-workspace run, then **5 of 5 clean in isolation and 2 of 2 clean in
+further full-workspace runs**. Load-sensitive, like the rows above it.
+
+**It leaks its fixture when it fails**, the same second symptom the review 478 rows have: the
+failing run's `TMPDIR` held
+`tekstide-reader-nonblocking-drain-1212031-1791505138300035978` afterwards, while every passing run
+left 0. Whatever fixes the wait should make the fixture clean itself on unwinding, as
+**Addendum, 2026-10-08 — review 480** already says for the other two.
+
+**The assertion message was not captured, and that is the reviewer's own fault.** My gate filter
+matched `^test .* FAILED` and `^test result:` but not `panicked at`, so the one run that could have
+explained it printed the name and discarded the reason. **This is the third time this session a
+filter has dropped the message it existed to find** — the ablation detector at review 476, the
+`error: test failed` misclassification in the same review, and now this. The filter for any gate run
+that might fail must include `panicked at`.
+
+**Owner: the dev team**, with the rows above. Not a blocker for `0.31.0`: it recurs rarely and
+passes on rerun, and the candidate's own three-run gate is where it would have to be redone if it
+appears again.
