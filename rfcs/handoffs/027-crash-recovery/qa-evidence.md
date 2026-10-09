@@ -901,3 +901,32 @@ design, D1) or already names both triggers (`what-works-today.md`'s own new para
 - `cargo test --doc --workspace`: clean.
 - **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
   (`/dev/shm/g5r{1,2,3}`): `751 + 16 + 1117`, 0 failed, 0 fixture entries left each time.
+
+## Review 496: dropping the trigger must not also drop the object
+
+Required item, and the reviewer's own share of it stated plainly: asking for "against a crash" to
+go without also asking the *object* to stay invited the overcorrection. `could not be protected`
+names no object at all -- a user reading it on its own, between the save-all notice and the Save
+button with nothing else establishing the subject, cannot tell what was not protected, by what, or
+from what.
+
+Fixed by naming the thing instead of the trigger -- "too large to **keep a recovery copy**", "no
+**recovery copy** kept", "could not **keep a recovery copy**" -- accurate about scope (no cause
+named, so no scope to misstate) and comprehensible alone (the object is in the sentence itself, not
+only implied by a neighbouring line).
+
+### Gate, review 496's fix
+
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `i18n::enforcement` (8/8), `rfc_docs_invariants` (16/16), and the editor refusal-line test: all
+  pass unchanged -- still no test asserts the lines' exact prose (the RFC-063 gap review 492
+  recorded; not closed here, per the reviewer's own note that this is not required).
+- `cargo test --doc --workspace`: clean.
+- **Three consecutive full-workspace runs, `--no-fail-fast`, fresh short `TMPDIR` each run**
+  (`/dev/shm/g6r{1,2,3}`): `751 + 16 + 1117` in two of three runs; the first hit the already-
+  registered `runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close`/
+  `a_job_that_leaves_the_session_via_setsid_survives_a_real_close` pair (review 478,
+  `test-process-leak.md`), unrelated to this change (terminal job control, not recovery or i18n) --
+  not re-registered, not a blocker. 0 fixture entries left after cleanup.
+
+**With this, review 496's required item closes.**

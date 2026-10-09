@@ -787,10 +787,12 @@ editor-save-all-outcome-row = { $path } -- not saved: { $reason ->
 #
 # Review 495: none of the three say "against a crash" -- after Amendment 1 a record protects
 # unsaved work across an ordinary quit too, the common case, not only the rare one; scoping
-# the wording to "a crash" understated what a refusal actually costs.
-editor-recovery-persist-refusal-too-large = { $path }: too large to protect ({ $bytes } bytes, over the { $limit }-byte limit)
-editor-recovery-persist-refusal-total-bound = { $path }: not protected -- would put retained recovery data over its own { $limit }-byte limit
-editor-recovery-persist-refusal-io = { $path }: could not be protected
+# the wording to "a crash" understated what a refusal actually costs. Review 496: dropping the
+# trigger must not also drop the object -- each line names what is missing (a recovery copy),
+# not only that something, unnamed, failed.
+editor-recovery-persist-refusal-too-large = { $path }: too large to keep a recovery copy ({ $bytes } bytes, over the { $limit }-byte limit)
+editor-recovery-persist-refusal-total-bound = { $path }: no recovery copy kept -- would put retained recovery data over its own { $limit }-byte limit
+editor-recovery-persist-refusal-io = { $path }: could not keep a recovery copy
 
 # RFC-027 PR-027-C, Amendment 1: offered by the presence of recovery records, never by the
 # crash marker -- `$project` is the project's own display name, untrusted and escaped the
