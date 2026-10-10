@@ -239,16 +239,47 @@ next person inherits the reason.** Gate: `758 + 19 + 1128`, 0 fixture entries.
 
 ## PR-058-C — saying it
 
-- [ ] A second attempt **names the holder and opens no duplicate** (D8).
-- [ ] **No wording claims the window was raised, switched to, or focused** (§row 2). Check the
+- [x] A second attempt **names the holder and opens no duplicate** (D8).
+      `AppState::add_project_from_path_protected` undoes the add (`remove_active_project_session`)
+      before returning `Blocked` -- no duplicate session ever reaches `self.projects`. Wired into
+      all three real GUI open call sites (`reopen_recent_project`,
+      `attempt_open_project_from_path_field`, `choose_current_browsed_directory`) and the CLI path.
+      Proven at the GUI level:
+      `a_second_attempt_at_a_locked_project_opens_no_duplicate_and_says_nothing_false` holds a real
+      lock, drives the real `Message::ReopenRecentProjectRowPressed`, and asserts
+      `state.app_shell.state().projects()` is empty. **Ablated**: reverting the
+      `remove_active_project_session` call in the `HeldByAnother` arm fails that test with a
+      duplicate session left in place; reverted.
+- [x] **No wording claims the window was raised, switched to, or focused** (§row 2). Check the
       rendered string, not the intent behind it.
-- [ ] The attention request is sent, and the message is true whether or not the compositor shows
+      `project-board-open-blocked` = "This project is already open in another Tekstide window. It
+      has been asked for your attention." The same GUI test asserts the rendered string contains
+      none of "raised"/"switched"/"focused"/"activated" (case-insensitive). **Ablated**: changing
+      the `.ftl` string to "...and has been switched to" fails that assertion by name; reverted.
+- [x] The attention request is sent, and the message is true whether or not the compositor shows
       anything.
-- [ ] The IPC reaching the holder works, and its socket path stays inside the limit this project has
+      `Message::ProjectAttentionRequested`'s own handler calls `iced::window::request_user_attention`
+      best-effort against `state.window_id` (learned from `iced::window::open_events()`); `None` is
+      a silent no-op, never an error. The sentence itself only claims this process's own action (the
+      knock sent), never the compositor's response -- true regardless of what, if anything, the
+      compositor renders.
+- [x] The IPC reaching the holder works, and its socket path stays inside the limit this project has
       already hit twice.
+      New `project_lock::attention` module: a real `AF_UNIX` listener at
+      `<state_root>/project-locks/<project_id>.attention.sock`, with its own `max_socket_path_len`
+      check (a second, independent three-line copy of `approval::channel`'s own computation, not a
+      shared dependency -- see the module's own doc for why). Proven end to end between two real
+      processes:
+      `app::tests::a_blocked_second_process_names_the_real_holder_and_its_knock_is_received` -- the
+      second process's own status line names the *real* holder pid (parsed back out of the rendered
+      line), and the held probe, released afterward, reports `ATTENTION_RECEIVED` on its own
+      listener, not merely that the knocker's `connect()` returned `Ok`.
 - [ ] **Live capture**: two real instances, the second's message on screen, under an isolated
-      `XDG_STATE_HOME` with a throwaway project.
-- [ ] `REQ-PROJ-009` returns to the Project-lifecycle coverage row, naming **what the mechanism is**.
+      `XDG_STATE_HOME` with a throwaway project. *(Pending -- see this turn's own review request for
+      why, rather than a capture rushed under time pressure or claimed without being taken.)*
+- [x] `REQ-PROJ-009` returns to the Project-lifecycle coverage row, naming **what the mechanism is**.
+      `rfcs/delivery-plan.md`'s own "Implemented" table, Project lifecycle row: names the real
+      `flock` and the real `AF_UNIX` knock, not "a lock exists now."
 
 ## Whole-RFC
 

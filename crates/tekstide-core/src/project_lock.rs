@@ -186,5 +186,7 @@ fn read_holder_pid(path: &Path) -> Option<u32> {
     content.trim().parse().ok()
 }
 
+pub mod attention;
+
 #[cfg(test)]
 mod tests;

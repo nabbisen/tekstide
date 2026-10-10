@@ -104,6 +104,22 @@ impl ApplicationShell {
         Ok(outcome)
     }
 
+    /// RFC-058: the same wrapper shape as [`Self::add_project_from_path`]
+    /// (the route always lands on the board, whether a project opened,
+    /// was already open, or was refused), over `AppState::
+    /// add_project_from_path_protected` rather than the unprotected call.
+    pub fn add_project_from_path_protected(
+        &mut self,
+        selected_path: impl AsRef<std::path::Path>,
+        state_root: &std::path::Path,
+    ) -> Result<crate::app::ProjectOpenOutcome, ProjectRootValidationError> {
+        let outcome = self
+            .state
+            .add_project_from_path_protected(selected_path, state_root)?;
+        self.route = AppRoute::ProjectBoard;
+        Ok(outcome)
+    }
+
     pub fn close_project(
         &mut self,
         project_id: &ProjectId,

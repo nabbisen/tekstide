@@ -844,6 +844,12 @@ pub struct State {
     theme: Theme,
     focus: FocusZone,
     modal: Option<ModalContent>,
+    /// RFC-058 D9: this process's own single window, learned from
+    /// `iced::window::open_events()` once it exists. `None` only in the
+    /// brief span before that first event arrives -- `request_user_attention`
+    /// needs an id, and there is nowhere else to get one from a message
+    /// handler that is not itself a window-lifecycle callback.
+    window_id: Option<iced::window::Id>,
     /// RFC-015 PR-015-F: `None` unless `TEKSTIDE_MEASURE_CRITERION` names
     /// a recognized criterion -- see `measurement`'s module doc.
     measurement: Option<Measurement>,
@@ -1109,6 +1115,17 @@ pub struct State {
     /// the one source `path_field_error_text` reads the (still-live,
     /// still-editable) typed value from when rendering this.
     path_field_notice: Option<PathFieldError>,
+    /// RFC-058 D8: the most recent `add_project_from_path_protected`
+    /// `Blocked` outcome, shared by all three real open call sites
+    /// (reopen from the recent list, the typed path field, the folder
+    /// browser) the same way `path_field_notice` already is -- cleared
+    /// at the start of every new attempt, never auto-expiring on its
+    /// own. `holder_pid` is kept for diagnostics even though the
+    /// rendered text never shows it (D9 row 2: a raw pid means nothing
+    /// to a user, and is not needed to satisfy "names the holder" --
+    /// the knock itself addresses the holder by its project id, not by
+    /// pid).
+    project_open_blocked_notice: Option<ProjectOpenBlockedNotice>,
     /// RFC-038 PR-038-B: set by `Ctrl+Alt+O`
     /// (`NavigationAction::OpenProjectEntryField`), cleared on a
     /// successful open or `Escape`. The empty board's field is always
@@ -1481,6 +1498,7 @@ impl State {
             theme: configuration.theme,
             focus: FocusZone::MainArea,
             modal,
+            window_id: None,
             measurement,
             typing_doc,
             terminal_panes,
@@ -1507,6 +1525,7 @@ impl State {
             change_review_selection: None,
             path_field: String::new(),
             path_field_notice: None,
+            project_open_blocked_notice: None,
             path_field_requested: false,
             run_report_field: None,
             run_report_notice: None,
@@ -1800,6 +1819,21 @@ pub enum Message {
     /// way the old tick's handler did; a pane not named by this message
     /// is not touched.
     TerminalWoke(tekstide_core::domain::TerminalId),
+    /// RFC-058 D9/D10: a real knock arrived on a project's own attention
+    /// listener (`attention_listener_subscription`, driven by
+    /// `AppState::try_clone_attention_listener`) -- this process holds
+    /// that project's lock, and another instance just connected to ask
+    /// for attention. Carries no `project_id`: there is one window, not
+    /// one per project, so which project was knocked at changes nothing
+    /// about what happens next -- `iced::window::request_user_attention`,
+    /// best-effort, never a claim that it was raised, switched to, or
+    /// focused (D9's own wording constraint).
+    ProjectAttentionRequested,
+    /// RFC-058 D9: this process's own single window exists and has this
+    /// id -- learned once, from `iced::window::open_events()`, since
+    /// `request_user_attention` needs an id this crate otherwise has no
+    /// way to obtain from inside a message handler.
+    WindowOpened(iced::window::Id),
     /// RFC-030 PR-030-B, review 410: a background Git evaluation
     /// (`tekstide_core::runtime::git::compute_summary`) has finished for
     /// one project, triggered by [`git_summary_subscription`]. Applied by
@@ -2148,7 +2182,9 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::WatchDrainTick
         | Message::ExplorerViewportMeasured(_)
         | Message::EditorViewportMeasured(_)
-        | Message::PathFieldPasteResolved(_) => None,
+        | Message::PathFieldPasteResolved(_)
+        | Message::ProjectAttentionRequested
+        | Message::WindowOpened(_) => None,
     }
 }
 
@@ -3008,6 +3044,29 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::TerminalWoke(terminal_id) => {
             handle_terminal_woke(state, &terminal_id);
         }
+        Message::WindowOpened(window_id) => {
+            state.window_id = Some(window_id);
+        }
+        // RFC-058 D9: best-effort, and worded by construction rather than
+        // by care at each call site -- `request_user_attention` never
+        // claims the window was raised, switched to, or focused (there is
+        // no `Task` here that could say so even if someone tried); on a
+        // platform where it does nothing (Wayland's own `gain_focus` is
+        // "Unsupported" there, per winit's own documentation -- this
+        // function is the one that *does* work), the compositor's own
+        // silence is the only difference, never a wrong claim from this
+        // process. `None` (no window learned yet) is a silent no-op, the
+        // same degradation every other `state.window_id`-dependent path
+        // would have.
+        Message::ProjectAttentionRequested => {
+            return match state.window_id {
+                Some(window_id) => iced::window::request_user_attention(
+                    window_id,
+                    Some(iced::window::UserAttention::Informational),
+                ),
+                None => Task::none(),
+            };
+        }
         Message::GitSummaryComputed {
             project_id,
             summary,
@@ -3403,6 +3462,16 @@ pub(crate) enum PathFieldError {
     PermissionDenied,
     CannotReadFolder,
     SymlinkAmbiguous,
+}
+
+/// RFC-058 D8: `ProjectOpenOutcome::Blocked`, carried the same
+/// path-free, display-safe way [`PathFieldError`] carries its own
+/// validation failure -- `holder_pid` is the one field worth keeping
+/// (a diagnostic, never rendered; see `project_open_blocked_notice`'s
+/// own doc comment for why).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProjectOpenBlockedNotice {
+    holder_pid: Option<u32>,
 }
 
 impl PathFieldError {
@@ -5093,25 +5162,34 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
         return;
     };
     let root_path = restored.recent_project.root_path.clone();
+    state.project_open_blocked_notice = None;
 
-    match state.app_shell.add_project_from_path(&root_path) {
-        Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
-            record_new_project_added(state, project_id.clone());
-            reconcile_project_watch(state, &project_id);
-            verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
-            // RFC-045 PR-045-B, D6: "projects opened after load"
-            // includes this one. Applied here rather than centrally
-            // for the same reason `verify_restored_trust` above is:
-            // there is no single point every newly-opened project
-            // passes through.
-            apply_configured_project_settings(&mut state.app_shell, &state.configuration);
-            // RFC-050 PR-050-B: the transcripts earlier runs left for this
-            // project, so purge and the figures cover what exists.
-            load_earlier_transcripts_for_opened_project(state, &project_id);
-            trigger_git_summary_refresh(&mut state.app_shell, &project_id);
-            // RFC-027 PR-027-C, Amendment 1: this is exactly the reopen a crash or an
-            // unsaved quit leaves records for -- the project the user is returning to.
-            offer_recovery_for_opened_project(state, &project_id);
+    let Some(state_root) = open_real_recovery_state_root() else {
+        // RFC-058: no resolvable state root means no lock is even
+        // attempted (the same "no `XDG_STATE_HOME`/`HOME`" degradation
+        // every other real-state-root consumer in this file already has)
+        // -- opens unprotected rather than refusing, matching D5's own
+        // policy one level up.
+        match state.app_shell.add_project_from_path(&root_path) {
+            Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
+                finish_opening_reopened_project(state, project_id);
+            }
+            Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {}
+            Err(error) => {
+                state.path_field = root_path.display().to_string();
+                state.path_field_requested = true;
+                state.path_field_notice = Some(PathFieldError::from_validation_error(&error));
+            }
+        }
+        return;
+    };
+
+    match state
+        .app_shell
+        .add_project_from_path_protected(&root_path, &state_root)
+    {
+        Ok(tekstide_core::app::ProjectOpenOutcome::Added(project_id)) => {
+            finish_opening_reopened_project(state, project_id);
         }
         // Should not normally happen -- a `Recent*`-kind row is, by
         // construction, not currently open -- but if the board's rows
@@ -5119,13 +5197,45 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
         // happened" is still the correct, existing precedent
         // (`attempt_open_project_from_path_field`'s own `FocusedExisting`
         // arm), not an error.
-        Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {}
+        Ok(tekstide_core::app::ProjectOpenOutcome::FocusedExisting(_)) => {}
+        // RFC-058 D8: another live process holds this project. No session
+        // was added -- there is nothing to reconcile, trigger, or offer
+        // recovery for, unlike the `Added` arm above.
+        Ok(tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. }) => {
+            state.project_open_blocked_notice = Some(ProjectOpenBlockedNotice { holder_pid });
+        }
         Err(error) => {
             state.path_field = root_path.display().to_string();
             state.path_field_requested = true;
             state.path_field_notice = Some(PathFieldError::from_validation_error(&error));
         }
     }
+}
+
+/// The `Added` arm every real open call site shares -- factored out once
+/// a fourth outcome (`Blocked`, RFC-058) made each call site's own match
+/// long enough that duplicating this arm's own five lines a third time
+/// would have been the first real cost of not sharing it.
+fn finish_opening_reopened_project(
+    state: &mut State,
+    project_id: tekstide_core::project::ProjectId,
+) {
+    record_new_project_added(state, project_id.clone());
+    reconcile_project_watch(state, &project_id);
+    verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
+    // RFC-045 PR-045-B, D6: "projects opened after load"
+    // includes this one. Applied here rather than centrally
+    // for the same reason `verify_restored_trust` above is:
+    // there is no single point every newly-opened project
+    // passes through.
+    apply_configured_project_settings(&mut state.app_shell, &state.configuration);
+    // RFC-050 PR-050-B: the transcripts earlier runs left for this
+    // project, so purge and the figures cover what exists.
+    load_earlier_transcripts_for_opened_project(state, &project_id);
+    trigger_git_summary_refresh(&mut state.app_shell, &project_id);
+    // RFC-027 PR-027-C, Amendment 1: this is exactly the reopen a crash or an
+    // unsaved quit leaves records for -- the project the user is returning to.
+    offer_recovery_for_opened_project(state, &project_id);
 }
 
 /// RFC-039 PR-039-B: workflow 4 ("Enter a project and work in it"),
@@ -5806,33 +5916,44 @@ fn push_to_path_field(state: &mut State, text: &str) {
 /// demotion pass `State::new` already runs once at boot.
 fn attempt_open_project_from_path_field(state: &mut State) {
     state.path_field_notice = None;
+    state.project_open_blocked_notice = None;
     let path = state.path_field.clone();
-    match state.app_shell.add_project_from_path(&path) {
-        Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
-            record_new_project_added(state, project_id.clone());
-            reconcile_project_watch(state, &project_id);
-            verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
-            // RFC-045 PR-045-B, D6: "projects opened after load"
-            // includes this one. Applied here rather than centrally
-            // for the same reason `verify_restored_trust` above is:
-            // there is no single point every newly-opened project
-            // passes through.
-            apply_configured_project_settings(&mut state.app_shell, &state.configuration);
-            // RFC-050 PR-050-B: the transcripts earlier runs left for this
-            // project, so purge and the figures cover what exists.
-            load_earlier_transcripts_for_opened_project(state, &project_id);
-            trigger_git_summary_refresh(&mut state.app_shell, &project_id);
-            // RFC-027 PR-027-C, Amendment 1: a typed path reaching a project with
-            // recovery records is as much a reopen as the board's own row is.
-            offer_recovery_for_opened_project(state, &project_id);
-            state.path_field.clear();
-            state.path_field_requested = false;
+
+    let Some(state_root) = open_real_recovery_state_root() else {
+        // RFC-058: see `reopen_recent_project`'s own identical fallback.
+        match state.app_shell.add_project_from_path(&path) {
+            Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
+                finish_opening_path_field_project(state, project_id);
+            }
+            Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
+                state.path_field.clear();
+                state.path_field_requested = false;
+            }
+            Err(error) => {
+                state.path_field_notice = Some(PathFieldError::from_validation_error(&error));
+            }
         }
-        Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
+        return;
+    };
+
+    match state
+        .app_shell
+        .add_project_from_path_protected(&path, &state_root)
+    {
+        Ok(tekstide_core::app::ProjectOpenOutcome::Added(project_id)) => {
+            finish_opening_path_field_project(state, project_id);
+        }
+        Ok(tekstide_core::app::ProjectOpenOutcome::FocusedExisting(_)) => {
             // Same as `open_cli_project_path_and_record`'s own
             // `FocusedExisting` arm: nothing new happened, so no record.
             state.path_field.clear();
             state.path_field_requested = false;
+        }
+        // RFC-058 D8: deliberately does not clear `path_field` either --
+        // same reasoning as the `Err` arm below, a refused attempt is
+        // exactly what the user needs to see, not have silently wiped.
+        Ok(tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. }) => {
+            state.project_open_blocked_notice = Some(ProjectOpenBlockedNotice { holder_pid });
         }
         Err(error) => {
             // Deliberately does not clear `path_field`: a rejected path
@@ -5841,6 +5962,26 @@ fn attempt_open_project_from_path_field(state: &mut State) {
             state.path_field_notice = Some(PathFieldError::from_validation_error(&error));
         }
     }
+}
+
+/// The `Added` arm [`attempt_open_project_from_path_field`] shares with
+/// no other call site -- its own `path_field` cleanup is specific to the
+/// field this attempt came from, unlike [`finish_opening_reopened_project`]'s.
+fn finish_opening_path_field_project(
+    state: &mut State,
+    project_id: tekstide_core::project::ProjectId,
+) {
+    record_new_project_added(state, project_id.clone());
+    reconcile_project_watch(state, &project_id);
+    verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
+    apply_configured_project_settings(&mut state.app_shell, &state.configuration);
+    load_earlier_transcripts_for_opened_project(state, &project_id);
+    trigger_git_summary_refresh(&mut state.app_shell, &project_id);
+    // RFC-027 PR-027-C, Amendment 1: a typed path reaching a project with
+    // recovery records is as much a reopen as the board's own row is.
+    offer_recovery_for_opened_project(state, &project_id);
+    state.path_field.clear();
+    state.path_field_requested = false;
 }
 
 /// [`attempt_open_project_from_path_field`]'s own audit write -- same
@@ -5954,30 +6095,42 @@ fn choose_current_browsed_directory(state: &mut State) {
     modal.open_error = None;
     let path = modal.scan.current_dir.clone();
 
-    match state.app_shell.add_project_from_path(&path) {
-        Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
-            record_new_project_added(state, project_id.clone());
-            reconcile_project_watch(state, &project_id);
-            verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
-            // RFC-045 PR-045-B, D6: "projects opened after load"
-            // includes this one. Applied here rather than centrally
-            // for the same reason `verify_restored_trust` above is:
-            // there is no single point every newly-opened project
-            // passes through.
-            apply_configured_project_settings(&mut state.app_shell, &state.configuration);
-            // RFC-050 PR-050-B: the transcripts earlier runs left for this
-            // project, so purge and the figures cover what exists.
-            load_earlier_transcripts_for_opened_project(state, &project_id);
-            trigger_git_summary_refresh(&mut state.app_shell, &project_id);
-            state.modal = None;
-            // RFC-027 PR-027-C, Amendment 1: after clearing the folder browser's own
-            // modal, never before -- `offer_recovery_for_opened_project`'s own
-            // `state.modal.is_some()` guard must see the slot empty, the same ordering
-            // reason every other modal-opening call in this file already respects.
-            offer_recovery_for_opened_project(state, &project_id);
+    let Some(state_root) = open_real_recovery_state_root() else {
+        // RFC-058: see `reopen_recent_project`'s own identical fallback.
+        match state.app_shell.add_project_from_path(&path) {
+            Ok(tekstide_core::app::AddProjectOutcome::Added(project_id)) => {
+                finish_opening_browsed_project(state, project_id);
+            }
+            Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
+                state.modal = None;
+            }
+            Err(error) => {
+                if let Some(ModalContent::FolderBrowser(modal)) = state.modal.as_mut() {
+                    modal.open_error = Some(PathFieldError::from_validation_error(&error));
+                }
+            }
         }
-        Ok(tekstide_core::app::AddProjectOutcome::FocusedExisting(_)) => {
+        return;
+    };
+
+    match state
+        .app_shell
+        .add_project_from_path_protected(&path, &state_root)
+    {
+        Ok(tekstide_core::app::ProjectOpenOutcome::Added(project_id)) => {
+            finish_opening_browsed_project(state, project_id);
+        }
+        Ok(tekstide_core::app::ProjectOpenOutcome::FocusedExisting(_)) => {
             state.modal = None;
+        }
+        // RFC-058 D8: a second instance does not open a duplicate. The
+        // modal closes (there is nothing further to browse for) and the
+        // same shared notice the other two real open call sites use
+        // reports it, once the modal that would otherwise cover it is
+        // gone.
+        Ok(tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. }) => {
+            state.modal = None;
+            state.project_open_blocked_notice = Some(ProjectOpenBlockedNotice { holder_pid });
         }
         Err(error) => {
             if let Some(ModalContent::FolderBrowser(modal)) = state.modal.as_mut() {
@@ -5985,6 +6138,28 @@ fn choose_current_browsed_directory(state: &mut State) {
             }
         }
     }
+}
+
+/// The `Added` arm [`choose_current_browsed_directory`] shares with no
+/// other call site -- its own modal-close-before-recovery-offer ordering
+/// is specific to this call site's own `state.modal.is_some()` guard
+/// dependency, unlike the other two real open call sites' own helpers.
+fn finish_opening_browsed_project(
+    state: &mut State,
+    project_id: tekstide_core::project::ProjectId,
+) {
+    record_new_project_added(state, project_id.clone());
+    reconcile_project_watch(state, &project_id);
+    verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
+    apply_configured_project_settings(&mut state.app_shell, &state.configuration);
+    load_earlier_transcripts_for_opened_project(state, &project_id);
+    trigger_git_summary_refresh(&mut state.app_shell, &project_id);
+    state.modal = None;
+    // RFC-027 PR-027-C, Amendment 1: after clearing the folder browser's own
+    // modal, never before -- `offer_recovery_for_opened_project`'s own
+    // `state.modal.is_some()` guard must see the slot empty, the same ordering
+    // reason every other modal-opening call in this file already respects.
+    offer_recovery_for_opened_project(state, &project_id);
 }
 
 /// RFC-038 PR-038-G: `Enter`'s real handler for the folder browser --
@@ -7536,6 +7711,83 @@ fn terminal_wake_stream(
     })
 }
 
+/// RFC-058 D9/D10: one project this process holds the lock for, same
+/// shape as [`terminal_wake_subscription`] -- a dedicated OS thread
+/// blocks on a real `accept(2)` (never a timer), and forwards exactly
+/// [`Message::ProjectAttentionRequested`] into `iced`'s async world each
+/// time a knock arrives, looping for as long as the subscription itself
+/// is offered (unlike the one-shot Git-summary stream below: a project
+/// can be knocked at any number of times while it stays open).
+fn attention_listener_subscription(
+    project_id: tekstide_core::project::ProjectId,
+    listener: std::os::unix::net::UnixListener,
+) -> Subscription<Message> {
+    Subscription::run_with(
+        AttentionListenerSource {
+            project_id,
+            listener,
+        },
+        attention_listener_stream,
+    )
+}
+
+/// `Subscription::run_with`'s own identity data. **`Hash` is
+/// hand-written, not derived, and deliberately ignores `listener`** --
+/// the identical reasoning [`TerminalWakeSource`]'s own doc comment
+/// gives for `notifier`: `subscription()` builds a fresh, freshly
+/// `try_clone`d listener for a given `project_id` on every rebuild, and
+/// only the *first* one for that id should ever reach
+/// [`attention_listener_stream`]. Every later, redundant source for an
+/// already-running `project_id` is simply dropped once built (closing
+/// its own duplicated fd harmlessly) without its `listener` ever being
+/// used.
+struct AttentionListenerSource {
+    project_id: tekstide_core::project::ProjectId,
+    listener: std::os::unix::net::UnixListener,
+}
+
+impl std::hash::Hash for AttentionListenerSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.project_id.hash(state);
+    }
+}
+
+/// The bridging stream itself. `Message::ProjectAttentionRequested`
+/// carries no `project_id` (its own doc comment says why: one window,
+/// not one per project) -- so unlike [`terminal_wake_stream`], nothing
+/// here needs to clone anything out of `source` into the message itself,
+/// only to keep accepting on the same listener.
+fn attention_listener_stream(
+    source: &AttentionListenerSource,
+) -> impl iced::futures::Stream<Item = Message> + use<> {
+    let listener = source.listener.try_clone();
+    iced::stream::channel(1, async move |mut output| {
+        let Ok(listener) = listener else {
+            // Duplicating an already-bound listener should not fail in
+            // practice; if it somehow does, this project just never
+            // reports a knock through this stream again -- D9's own
+            // best-effort framing, degraded one step further rather than
+            // a panic or a lost project.
+            std::future::pending::<()>().await;
+            return;
+        };
+        std::thread::spawn(move || {
+            loop {
+                if listener.accept().is_err() {
+                    return;
+                }
+                let send_result = iced::futures::executor::block_on(
+                    output.send(Message::ProjectAttentionRequested),
+                );
+                if send_result.is_err() {
+                    return;
+                }
+            }
+        });
+        std::future::pending::<()>().await;
+    })
+}
+
 /// RFC-030 PR-030-B, review 410: one project's background Git evaluation
 /// (`compute_summary`), same shape as [`terminal_wake_subscription`] --
 /// a dedicated OS thread does the real (blocking: subprocess spawns,
@@ -8142,6 +8394,15 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 
     let mut subscriptions: Vec<Subscription<Message>> = Vec::new();
 
+    // RFC-058 D9: learned once; stops being offered the moment
+    // `Message::WindowOpened` sets it, the same "checked but usually
+    // absent" shape every subscription below already uses -- this one is
+    // absent after the first frame or two of any real session, not
+    // merely usually.
+    if state.window_id.is_none() {
+        subscriptions.push(iced::window::open_events().map(Message::WindowOpened));
+    }
+
     // RFC-017 PR-017-C: only added when a demo pane exists (the env var
     // was set), so this changes nothing about the routing above for any
     // normal run -- the same "checked but usually absent" shape the
@@ -8222,6 +8483,25 @@ pub fn subscription(state: &State) -> Subscription<Message> {
                 project_id.clone(),
                 watch.generation,
                 events,
+            ));
+        }
+    }
+    // RFC-058 D9/D10: one long-lived subscription per open project this
+    // process actually holds the lock for (and therefore has an
+    // attention listener bound for) -- `None` for a project opened
+    // unprotected under `CannotDecide` (D5), the same "nothing to
+    // subscribe to" absence every other per-project loop above already
+    // tolerates. Offered for as long as the project stays open, same
+    // shape as the watch subscription just above.
+    for project in state.app_shell.state().projects() {
+        if let Some(listener) = state
+            .app_shell
+            .state()
+            .try_clone_attention_listener(project.id())
+        {
+            subscriptions.push(attention_listener_subscription(
+                project.id().clone(),
+                listener,
             ));
         }
     }
@@ -9661,10 +9941,20 @@ fn content_area(state: &State) -> Element<'_, Message> {
                 // RFC-025 D2/D7: the model, not four functions' strings --
                 // `project_board_notifications` is the one place that builds
                 // and orders the `Vec<Notification>`; this extracts the text.
-                let board_lines: Vec<String> = project_board_notifications(state)
+                let mut board_lines: Vec<String> = project_board_notifications(state)
                     .into_iter()
                     .map(|notification| notification.text)
                     .collect();
+                // RFC-058 D8: the most recent blocked-open attempt, if
+                // any -- outside the `Notification` model (neither of its
+                // two lifetimes fit a one-shot action outcome; see the
+                // field's own doc comment), so spliced in here rather
+                // than forced into a system built for two different,
+                // specifically named shapes. Leads the list: it is about
+                // the action the user on this screen just took.
+                if state.project_open_blocked_notice.is_some() {
+                    board_lines.insert(0, state.catalog.get("project-board-open-blocked"));
+                }
                 if board_lines.is_empty() {
                     board
                 } else {

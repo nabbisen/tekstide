@@ -15,6 +15,7 @@ use crate::test_support::RealProcessLimiter;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -944,6 +945,23 @@ impl TestSandbox {
         Self { root }
     }
 
+    /// RFC-058: a `project-locks/<uuid>.attention.sock` path lives under
+    /// whatever this sandbox's own root is, and a `sockaddr_un` is bounded
+    /// (~107 usable bytes) -- `new`'s own nanosecond-timestamp label
+    /// already spends most of that budget before the socket's own
+    /// filename is considered (the same `SocketPathTooLong` lesson
+    /// `approval::tests::reference_adapter::unique_temp_dir`'s own doc
+    /// comment states). This constructor exists only for tests that bind
+    /// such a socket; every other caller keeps using `new`.
+    fn new_short(label: &str) -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root =
+            std::env::temp_dir().join(format!("ta-{label}-{}-{sequence}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        Self { root }
+    }
+
     fn path(&self, name: &str) -> PathBuf {
         self.root.join(name)
     }
@@ -1154,6 +1172,14 @@ struct HeldProbe {
     child: crate::test_support::KillOnDropChild,
     pid: u32,
     stdin: Option<std::process::ChildStdin>,
+    stderr: Option<std::process::ChildStderr>,
+    // Kept alive for this struct's whole life regardless of whether a
+    // caller ever reads another line from it: dropping it early closes
+    // the parent's own read end of the pipe, and this process's later
+    // lines (printed after release) would then hit a broken pipe and
+    // panic mid-`println!` -- found by running this exact test, not by
+    // reasoning about pipe lifetimes in the abstract.
+    stdout: std::io::BufReader<std::process::ChildStdout>,
     project_id: String,
     status_line: String,
 }
@@ -1180,6 +1206,7 @@ impl HeldProbe {
             .stdin
             .take()
             .expect("a piped child must have a stdin handle");
+        let stderr = child.stderr.take();
         let stdout = child
             .stdout
             .take()
@@ -1211,6 +1238,8 @@ impl HeldProbe {
             child: crate::test_support::KillOnDropChild::new(child),
             pid,
             stdin: Some(stdin),
+            stderr,
+            stdout: reader,
             project_id,
             status_line,
         }
@@ -1229,8 +1258,37 @@ impl HeldProbe {
     }
 
     /// Closes this process's stdin (its own signal to stop blocking) and
-    /// waits for a clean exit.
+    /// waits for a clean exit. Panics with the child's own stderr on a
+    /// non-zero exit, the same "never silently read as fine" discipline
+    /// `run_project_process_probe`'s own doc comment states.
     fn release(mut self) {
+        drop(self.stdin.take());
+        let status = self
+            .child
+            .wait()
+            .expect("wait for the held probe to exit after releasing it");
+        if status.success() {
+            return;
+        }
+        use std::io::Read;
+        let mut stderr = String::new();
+        if let Some(handle) = self.stderr.as_mut() {
+            let _ = handle.read_to_string(&mut stderr);
+        }
+        panic!(
+            "the held probe (pid {}) exited with {:?} after being released: {stderr}",
+            self.pid,
+            status.code()
+        );
+    }
+
+    /// Same as [`Self::release`], and also reads the one extra line a
+    /// held, `ACQUIRED` probe prints after being released (RFC-058
+    /// PR-058-C): `ATTENTION_RECEIVED` or `ATTENTION_NOT_RECEIVED`,
+    /// reporting whether a real knock arrived on this process's own
+    /// attention listener while it was held.
+    fn release_reading_attention_line(mut self) -> String {
+        use std::io::BufRead;
         drop(self.stdin.take());
         let status = self
             .child
@@ -1242,6 +1300,11 @@ impl HeldProbe {
             self.pid,
             status.code()
         );
+        let mut line = String::new();
+        self.stdout
+            .read_line(&mut line)
+            .expect("read the held probe's own attention-outcome line");
+        line.trim().to_owned()
     }
 }
 
@@ -1257,7 +1320,7 @@ impl HeldProbe {
 /// and does not write at all, per D5/D8.
 #[test]
 fn two_real_processes_opening_the_same_root_share_an_id_but_the_second_is_blocked_from_writing() {
-    let sandbox = TestSandbox::new("rfc058-regression");
+    let sandbox = TestSandbox::new_short("r58reg");
     let state_root = sandbox.create_dir("state");
     let project_root = sandbox.create_dir("project");
     sandbox.create_file("project/doc.txt");
@@ -1310,5 +1373,57 @@ fn two_real_processes_opening_the_same_root_share_an_id_but_the_second_is_blocke
         !record_json.contains("instance B's edit"),
         "the second writer's text must never have reached disk at all -- this is the \
          regression PR-058-A's own reproduction became: {record_json}"
+    );
+}
+
+/// RFC-058 PR-058-C, D8/D9/D10: the second instance names the real holder
+/// and sends it a real knock, delivered over a real `AF_UNIX` socket
+/// (D10), and the holder reports having actually received it -- not three
+/// separate claims taken on trust, but one real round trip between two
+/// real processes, each piece checked against what the other one did.
+#[test]
+fn a_blocked_second_process_names_the_real_holder_and_its_knock_is_received() {
+    let sandbox = TestSandbox::new_short("r58att");
+    let state_root = sandbox.create_dir("state");
+    let project_root = sandbox.create_dir("project");
+    sandbox.create_file("project/doc.txt");
+
+    let held = HeldProbe::spawn(&state_root, &project_root, "doc.txt", "instance A's edit");
+    held.assert_still_holding();
+    let holder_pid = held.pid;
+
+    let second =
+        run_project_process_probe(&state_root, &project_root, "doc.txt", "instance B's edit");
+
+    // D8: the holder is *named*, not merely "someone has it" -- the exact
+    // real pid, parsed back out of the rendered status line rather than
+    // asserted only internally.
+    let named_pid: u32 = second
+        .status_line
+        .split_whitespace()
+        .nth(1)
+        .expect("a BLOCKED status line must name a holder pid")
+        .parse()
+        .expect("the named holder must be a real pid, not a placeholder");
+    assert_eq!(
+        named_pid, holder_pid,
+        "the second process must name the real holder's own pid: {}",
+        second.status_line
+    );
+
+    // D10: the knock was sent, and this process says so.
+    assert!(
+        second.status_line.ends_with("KNOCKED"),
+        "the second process must report having sent a real knock: {}",
+        second.status_line
+    );
+
+    // The other half of the same round trip: the holder, not merely the
+    // knocker, says the knock arrived.
+    let attention_line = held.release_reading_attention_line();
+    assert_eq!(
+        attention_line, "ATTENTION_RECEIVED",
+        "the holder must report having actually accepted the knock on its own attention \
+         listener, not only that the knocker's own connect() returned Ok"
     );
 }

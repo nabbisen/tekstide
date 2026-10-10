@@ -20,8 +20,8 @@ use super::{
     path_field_error_text, poll_approval_channels, project_board_audit_lines,
     project_board_configuration_lines, project_close_dialog_body,
     project_close_dialog_names_running_processes, project_close_dialog_path,
-    project_close_dialog_reasons_line, status_bar_summary, terminal_paste_refusal_text,
-    terminated_outcome_and_session_confirmation, test_audit_state_dir,
+    project_close_dialog_reasons_line, resolve_agent_run_state_dir, status_bar_summary,
+    terminal_paste_refusal_text, terminated_outcome_and_session_confirmation, test_audit_state_dir,
     transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
     verify_restored_trust_against, zone_style,
 };
@@ -12590,6 +12590,70 @@ fn the_real_open_button_message_reopens_the_same_project_the_keyboard_does() {
     assert_eq!(
         active.root_path(),
         project_dir.canonicalize().unwrap().as_path()
+    );
+}
+
+/// RFC-058 D8/D9: a second attempt at a project **another real holder**
+/// (here, this same process's own `acquire_project_lock` call,
+/// standing in for a second instance the same way
+/// `project_lock::tests`'s own two-handle proof does) already holds does
+/// not open a duplicate tab, and the message it shows never claims the
+/// window was raised, switched to, or focused -- checked against the
+/// rendered string itself, not the intent behind it (the checklist's own
+/// row-2 instruction).
+#[test]
+fn a_second_attempt_at_a_locked_project_opens_no_duplicate_and_says_nothing_false() {
+    let (mut state, project_id, _project_dir) =
+        state_with_cached_trusted_recent_project("board-row-reopen-locked");
+
+    // The same state root `reopen_recent_project`'s own
+    // `resolve_agent_run_state_dir` call will resolve to -- memoized per
+    // thread, so calling it here first, then holding the real lock it
+    // names, stands in for "another live process already has this
+    // project open" without needing a second real OS process for a test
+    // that is really about the GUI's own wording and routing, not the
+    // lock mechanism itself (`project_lock::tests` already proves that
+    // against real processes).
+    let state_root = resolve_agent_run_state_dir().expect("a test state root must resolve");
+    let _held =
+        match tekstide_core::project_lock::acquire_project_lock(&state_root, project_id.as_str()) {
+            tekstide_core::project_lock::ProjectLockOutcome::Acquired(lock) => lock,
+            other => {
+                panic!("test precondition: the lock must be freely acquirable here: {other:?}")
+            }
+        };
+
+    let _ = super::update(
+        &mut state,
+        Message::ReopenRecentProjectRowPressed(project_id.clone()),
+    );
+
+    assert!(
+        state.app_shell.state().projects().is_empty(),
+        "a second attempt at a locked project must not add a session at all (D8)"
+    );
+    assert!(
+        state.app_shell.state().active_project_id().is_none(),
+        "nothing must become active from a blocked attempt"
+    );
+    assert!(
+        state.project_open_blocked_notice.is_some(),
+        "the blocked attempt must be recorded for the board to show"
+    );
+
+    let rendered = state.catalog.get("project-board-open-blocked");
+    let lowered = rendered.to_lowercase();
+    for forbidden in ["raised", "switched", "focused", "activated"] {
+        assert!(
+            !lowered.contains(forbidden),
+            "the rendered message must never claim a raise/switch/focus happened \
+             (found {forbidden:?} in {rendered:?})"
+        );
+    }
+    assert!(
+        lowered.contains("already open") && lowered.contains("attention"),
+        "the rendered message must say the project is already open and that attention was \
+         asked for: {rendered:?}"
     );
 }
 

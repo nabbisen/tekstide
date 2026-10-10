@@ -226,19 +226,64 @@ fn open_cli_project_path_and_record(
     selected_path: impl AsRef<std::path::Path>,
     audit_health: &mut tekstide_core::audit::AuditHealth,
 ) -> Result<(), tekstide_core::project::root::ProjectRootValidationError> {
-    match app_shell.add_project_from_path(selected_path)? {
-        tekstide_core::app::AddProjectOutcome::Added(project_id) => {
-            // RFC-050 PR-050-B: a project named on the command line gets the
-            // transcripts earlier runs left, like every other open path.
-            shell::load_earlier_transcripts(app_shell, &project_id);
-            // RFC-030 PR-030-B: the Git-evaluation trigger, same as every
-            // GUI project-open path (`shell::trigger_git_summary_refresh`).
-            shell::trigger_git_summary_refresh(app_shell, &project_id);
-            record_project_added_if_possible(app_shell, project_id, audit_health);
+    // RFC-058: resolved independently, the same "cheap, stateless env-var
+    // read, resolved separately per consumer" shape `instance_marker` and
+    // `store` above already use in `boot()` -- a third resolution of the
+    // identical directory, not a new one. `None` degrades to the
+    // unprotected path (D5): a CLI argument must open exactly as it
+    // always did when the state root itself cannot be resolved, not
+    // refuse to boot over it.
+    let Some(state_root) = tekstide_core::project::recent::AppStatePathProvider::linux_default()
+        .ok()
+        .map(|path_provider| path_provider.state_dir().to_path_buf())
+    else {
+        return match app_shell.add_project_from_path(selected_path)? {
+            tekstide_core::app::AddProjectOutcome::Added(project_id) => {
+                finish_opening_cli_project(app_shell, project_id, audit_health);
+                Ok(())
+            }
+            tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => Ok(()),
+        };
+    };
+
+    match app_shell.add_project_from_path_protected(selected_path, &state_root)? {
+        tekstide_core::app::ProjectOpenOutcome::Added(project_id) => {
+            finish_opening_cli_project(app_shell, project_id, audit_health);
         }
-        tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => {}
+        tekstide_core::app::ProjectOpenOutcome::FocusedExisting(_) => {}
+        // RFC-058 D8/D5: refused, not a validation error -- this does
+        // not abort the boot the way `Err` below still does. Informational
+        // only, the same non-fatal `eprintln!` shape `boot()`'s own crash
+        // detection already uses a few lines above this function's call
+        // site, never an exit code.
+        tekstide_core::app::ProjectOpenOutcome::Blocked { .. } => {
+            eprintln!(
+                "tekstide: this project is already open in another Tekstide window; it has \
+                 been asked for your attention"
+            );
+        }
     }
     Ok(())
+}
+
+/// The `Added` arm [`open_cli_project_path_and_record`]'s two paths (state
+/// root resolvable or not) share -- factored out so `trigger_git_summary_refresh`'s
+/// own enumeration test (`tests::trigger_git_summary_refresh_is_called_from_every_expected_site`)
+/// still sees exactly one textual call site in this file, matching the one
+/// real production CLI-argument path it actually is, not two copies of the
+/// same sequence that happen never to both run.
+fn finish_opening_cli_project(
+    app_shell: &mut ApplicationShell,
+    project_id: tekstide_core::project::ProjectId,
+    audit_health: &mut tekstide_core::audit::AuditHealth,
+) {
+    // RFC-050 PR-050-B: a project named on the command line gets the
+    // transcripts earlier runs left, like every other open path.
+    shell::load_earlier_transcripts(app_shell, &project_id);
+    // RFC-030 PR-030-B: the Git-evaluation trigger, same as every
+    // GUI project-open path (`shell::trigger_git_summary_refresh`).
+    shell::trigger_git_summary_refresh(app_shell, &project_id);
+    record_project_added_if_possible(app_shell, project_id, audit_health);
 }
 
 /// RFC-031 PR-031-B: best-effort, matching every other producer call

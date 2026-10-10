@@ -25,6 +25,27 @@ pub struct AppState {
     projects: Vec<ProjectSession>,
     recent_projects: Vec<RestoredRecentProject>,
     active_project_id: Option<ProjectId>,
+    /// RFC-058: one entry per project *this process* currently holds the
+    /// lock for. Never consulted to decide anything -- its only two jobs
+    /// are keeping each `ProjectLock` alive (RAII) for exactly as long as
+    /// the project stays open here, and giving a GUI subscription
+    /// something to clone the attention listener from
+    /// (`try_clone_attention_listener`). Removed, dropping both fields,
+    /// the moment [`AppState::remove_active_project_session`] removes the
+    /// session itself -- one removal path, not two things to keep in
+    /// sync by hand.
+    project_protections: std::collections::HashMap<ProjectId, ProjectProtection>,
+}
+
+#[derive(Debug)]
+struct ProjectProtection {
+    // Never read again after insertion -- held only so dropping it (and
+    // therefore this whole map entry) releases the lock, the same "unread
+    // field is the honest shape of a Drop-only guard" reasoning
+    // `project_lock::ProjectLock`'s own file field already states.
+    #[allow(dead_code)]
+    lock: crate::project_lock::ProjectLock,
+    attention_listener: Option<std::os::unix::net::UnixListener>,
 }
 
 impl AppState {
@@ -210,6 +231,81 @@ impl AppState {
         let project_id =
             self.add_project_session(root.display_name, root.selected_path, root.canonical_path);
         AddProjectOutcome::Added(project_id)
+    }
+
+    /// RFC-058 D3/D5/D8: the same sequence [`Self::add_project_from_path`]
+    /// already runs, with the project lock attempted immediately
+    /// afterward, against the exact id that call just reused or minted --
+    /// never a second, independently-computed id that could disagree with
+    /// it. `FocusedExisting` short-circuits before any lock attempt: the
+    /// project is already open *in this process*, so there is nothing a
+    /// second instance's hazard could apply to.
+    ///
+    /// **`CannotDecide` opens the project unprotected (D5)** -- the same
+    /// session [`Self::add_validated_project_root`] would have produced,
+    /// simply with no entry in `project_protections`. **`HeldByAnother`
+    /// undoes the add** (D8): a second instance does not keep a duplicate
+    /// session around for a project it does not own, so
+    /// [`Self::remove_active_project_session`] removes exactly what
+    /// [`Self::add_project_session`] just pushed, leaving `self.projects`
+    /// as if the open had never been attempted.
+    pub fn add_project_from_path_protected(
+        &mut self,
+        selected_path: impl AsRef<std::path::Path>,
+        state_root: &std::path::Path,
+    ) -> Result<ProjectOpenOutcome, ProjectRootValidationError> {
+        let outcome = self.add_project_from_path(selected_path)?;
+        let project_id = match outcome {
+            AddProjectOutcome::FocusedExisting(project_id) => {
+                return Ok(ProjectOpenOutcome::FocusedExisting(project_id));
+            }
+            AddProjectOutcome::Added(project_id) => project_id,
+        };
+
+        match crate::project_lock::acquire_project_lock(state_root, project_id.as_str()) {
+            crate::project_lock::ProjectLockOutcome::Acquired(lock) => {
+                let attention_listener = crate::project_lock::attention::bind_attention_listener(
+                    state_root,
+                    project_id.as_str(),
+                );
+                self.project_protections.insert(
+                    project_id.clone(),
+                    ProjectProtection {
+                        lock,
+                        attention_listener,
+                    },
+                );
+                Ok(ProjectOpenOutcome::Added(project_id))
+            }
+            crate::project_lock::ProjectLockOutcome::HeldByAnother { holder_pid } => {
+                self.remove_active_project_session(&project_id);
+                Ok(ProjectOpenOutcome::Blocked {
+                    project_id,
+                    holder_pid,
+                })
+            }
+            crate::project_lock::ProjectLockOutcome::CannotDecide { .. } => {
+                Ok(ProjectOpenOutcome::Added(project_id))
+            }
+        }
+    }
+
+    /// The attention listener bound for a project this process itself
+    /// holds the lock for (`None` if this process does not hold it, or if
+    /// binding failed -- D5/D9's own best-effort shape). A fresh
+    /// [`std::os::unix::net::UnixListener::try_clone`] each call, the same
+    /// shape [`crate::runtime::terminal::WakeNotifier::try_clone`] already
+    /// gives a GUI subscription for the identical reason: the subscription
+    /// is rebuilt on every view, and only a cheap duplicate of the real
+    /// listener, not the listener itself, may be handed out each time.
+    pub fn try_clone_attention_listener(
+        &self,
+        project_id: &ProjectId,
+    ) -> Option<std::os::unix::net::UnixListener> {
+        self.project_protections
+            .get(project_id)
+            .and_then(|protection| protection.attention_listener.as_ref())
+            .and_then(|listener| listener.try_clone().ok())
     }
 
     pub fn switch_active_project(&mut self, project_id: &ProjectId) -> bool {
@@ -692,6 +788,11 @@ impl AppState {
         if self.active_project_id.as_ref() == Some(project_id) {
             self.active_project_id = self.projects.first().map(|project| project.id().clone());
         }
+        // RFC-058 D4: every removal path releases this process's own lock
+        // on the project (if it held one) through the one place that
+        // removes the session itself -- not a second call a future
+        // removal path could forget to make.
+        self.project_protections.remove(project_id);
 
         true
     }
@@ -806,6 +907,25 @@ impl AddProjectOutcome {
             Self::Added(project_id) | Self::FocusedExisting(project_id) => project_id,
         }
     }
+}
+
+/// RFC-058 D8: [`AddProjectOutcome`] with the one outcome that
+/// requirement adds -- `add_project_from_path_protected`'s own return
+/// type, never [`AddProjectOutcome`] itself, so a caller cannot reach the
+/// protected path and still match only the two older variants.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectOpenOutcome {
+    Added(ProjectId),
+    FocusedExisting(ProjectId),
+    /// Another live process holds this project. No session was added --
+    /// `self.projects` is exactly as it was before this call. `holder_pid`
+    /// is `None` only when the holder could not be named (its own lock
+    /// file was unreadable), never when no one holds it: `CannotDecide`
+    /// is a different variant entirely (folded into `Added`, per D5).
+    Blocked {
+        project_id: ProjectId,
+        holder_pid: Option<u32>,
+    },
 }
 
 #[cfg(test)]

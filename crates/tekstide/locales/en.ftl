@@ -375,6 +375,14 @@ project-board-run-record-left-in-place = { $count ->
    *[other] { $count } agent run records could not be read, and could not be renamed either. They stay where they were, and their runs are listed as transcripts with no run.
 }
 project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
+# RFC-058 D8/D9: a second attempt to open a project another live Tekstide
+# process already holds. Deliberately never says "switched to", "raised",
+# "focused" or any synonym -- on Wayland this process cannot raise another
+# window (winit's own `gain_focus` is documented unsupported there), and
+# this sentence must stay true regardless of what the compositor actually
+# shows. "Asked for your attention" describes this process's own action
+# (the knock it sent), not a promise about what happens next.
+project-board-open-blocked = This project is already open in another Tekstide window. It has been asked for your attention.
 
 # §6's second state, and response 376's requirement that it name the
 # key rather than count keys. Since PR-045-A the parser *refuses* every
