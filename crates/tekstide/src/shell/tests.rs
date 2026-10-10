@@ -50,6 +50,7 @@ fn state_with_configuration(
         tekstide_core::audit::AuditHealth::default(),
         configuration,
         None,
+        None,
     )
 }
 
@@ -12667,6 +12668,100 @@ fn a_second_attempt_at_a_locked_project_opens_no_duplicate_and_says_nothing_fals
     );
 }
 
+/// Review 519 Required: a CLI-launched instance refused for an
+/// already-open project used to log to `stderr` alone. `boot()` calls
+/// `open_cli_project_path_and_record` **before** `State` exists, so
+/// `project_open_blocked_notice` stayed `None` no matter what the CLI
+/// path saw, and the booted window showed an empty board with no
+/// explanation -- a silent refusal, the exact class this RFC and
+/// RFC-066 both exist to end. `cli_project_open_blocked` now threads
+/// the refusal out of `boot()` the same way `instance_marker` already
+/// is (RFC-027 PR-027-A).
+///
+/// Proven through the **real CLI entry point**,
+/// `open_cli_project_path_and_record`, called twice -- two independent
+/// `ApplicationShell`s standing in for two processes, the same
+/// substitution already established for a real OS `flock`
+/// (`project_lock::tests`) -- rather than only through the GUI message
+/// path the sibling test above covers, since the defect this closes was
+/// specific to the path that sibling test cannot reach.
+///
+/// **Ablated**: reverted `State::new` to its old `project_open_blocked_notice:
+/// None` and dropped the new parameter -- this test's own board-line
+/// assertion failed (`project_open_blocked_notice must lead the list`,
+/// no line found), the regression this fix closes; reverted.
+#[test]
+fn a_cli_launched_second_attempt_at_a_locked_project_sets_the_real_board_notice() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("cli-open-blocked-second-attempt"));
+    let project_dir = fresh_project_dir("cli-open-blocked-second-attempt");
+
+    let mut holder_shell = ApplicationShell::new();
+    let mut holder_audit_health = tekstide_core::audit::AuditHealth::default();
+    let first_result = crate::open_cli_project_path_and_record(
+        &mut holder_shell,
+        &project_dir,
+        &mut holder_audit_health,
+    )
+    .expect("the first real open of a freshly created directory must succeed");
+    assert!(
+        first_result.is_none(),
+        "test precondition: the first open must not itself be blocked"
+    );
+
+    // `AppState::open_project` only reuses the first shell's project id
+    // for this canonical root once it has been **restored** from
+    // `recent-projects.json` -- exactly what the real second process
+    // does by calling `RecentProjectStore::load_or_recover()` before its
+    // own CLI loop in `boot()`. A brand-new `ApplicationShell` with no
+    // restore would mint its own, different id for the same path and
+    // never contend for the same lock at all.
+    let mut second_shell = ApplicationShell::new();
+    second_shell.restore_recent_projects(holder_shell.recent_project_state());
+    let mut second_audit_health = tekstide_core::audit::AuditHealth::default();
+    let blocked = crate::open_cli_project_path_and_record(
+        &mut second_shell,
+        &project_dir,
+        &mut second_audit_health,
+    )
+    .expect("a blocked attempt is refused, not a validation error")
+    .expect("the second attempt must be refused while the first still holds the project's lock");
+
+    assert!(
+        second_shell.state().projects().is_empty(),
+        "a second CLI attempt at a locked project must not add a session either (D8)"
+    );
+
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let state = State::new(
+        second_shell,
+        catalog,
+        second_audit_health,
+        ConfigurationState::unconfigured(),
+        None,
+        Some(blocked),
+    );
+
+    let lines = project_board_lines(&state);
+    let rendered = lines.first().expect(
+        "a CLI-launched blocked attempt must produce at least one board line, leading the list \
+         -- the exact gap this fix closes",
+    );
+    let lowered = rendered.to_lowercase();
+    for forbidden in ["raised", "switched", "focused", "activated"] {
+        assert!(
+            !lowered.contains(forbidden),
+            "the rendered message must never claim a raise/switch/focus happened \
+             (found {forbidden:?} in {rendered:?})"
+        );
+    }
+    assert!(
+        lowered.contains("already open") && lowered.contains("attention"),
+        "a CLI-launched instance refused for an already-open project must say so on a real \
+         board, not only to stderr: {rendered:?}"
+    );
+}
+
 /// `what-a-path-field-must-not-trust.md` §5's own audit guard, proven
 /// for the reopen call site (`reopen_recent_project`), the same way
 /// `opening_a_project_through_the_real_field_writes_exactly_one_real_project_added_record`
@@ -21637,6 +21732,7 @@ fn state_holds_the_instance_marker_for_its_whole_lifetime_so_a_normal_exit_remov
         tekstide_core::audit::AuditHealth::default(),
         ConfigurationState::unconfigured(),
         Some(startup.marker),
+        None,
     );
     assert!(
         marker_path.is_file(),

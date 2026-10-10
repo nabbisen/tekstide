@@ -170,12 +170,23 @@ fn boot() -> shell::State {
     // (abort rather than boot with a partially-applied argument list)
     // without needing `iced::Result`/`iced::Error` to express a custom
     // exit code.
+    // Review 519: the same "last one wins" single-notice shape the three
+    // GUI open call sites already have -- `State` holds at most one
+    // `project_open_blocked_notice` at a time, so a later CLI argument's
+    // own refusal is what the booted window shows if more than one is
+    // given.
+    let mut cli_project_open_blocked = None;
     for selected_path in std::env::args_os().skip(1) {
-        if let Err(error) =
-            open_cli_project_path_and_record(&mut app_shell, selected_path, &mut audit_health)
-        {
-            eprintln!("{error}");
-            std::process::exit(1);
+        match open_cli_project_path_and_record(&mut app_shell, selected_path, &mut audit_health) {
+            Ok(blocked) => {
+                if blocked.is_some() {
+                    cli_project_open_blocked = blocked;
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
         }
     }
 
@@ -199,6 +210,7 @@ fn boot() -> shell::State {
         audit_health,
         configuration,
         instance_marker,
+        cli_project_open_blocked,
     )
     .with_recent_project_list_repair(recent_projects_repair)
 }
@@ -221,11 +233,19 @@ fn boot() -> shell::State {
 /// passive remembered-projects list -- so "restoring on startup" cannot
 /// itself fire this producer; only this CLI-argument path can, in the
 /// shipped application today.
+/// Returns `Ok(Some(notice))` when this particular argument was refused
+/// (RFC-058 D8) rather than opened -- `boot()`'s own loop carries that
+/// out to [`shell::State::new`], the same "last one wins" single-notice
+/// shape the three GUI open call sites already have, since
+/// `project_open_blocked_notice` holds at most one refusal at a time.
 fn open_cli_project_path_and_record(
     app_shell: &mut ApplicationShell,
     selected_path: impl AsRef<std::path::Path>,
     audit_health: &mut tekstide_core::audit::AuditHealth,
-) -> Result<(), tekstide_core::project::root::ProjectRootValidationError> {
+) -> Result<
+    Option<shell::ProjectOpenBlockedNotice>,
+    tekstide_core::project::root::ProjectRootValidationError,
+> {
     // RFC-058: resolved independently, the same "cheap, stateless env-var
     // read, resolved separately per consumer" shape `instance_marker` and
     // `store` above already use in `boot()` -- a third resolution of the
@@ -240,12 +260,13 @@ fn open_cli_project_path_and_record(
         return match app_shell.add_project_from_path(selected_path)? {
             tekstide_core::app::AddProjectOutcome::Added(project_id) => {
                 finish_opening_cli_project(app_shell, project_id, audit_health);
-                Ok(())
+                Ok(None)
             }
-            tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => Ok(()),
+            tekstide_core::app::AddProjectOutcome::FocusedExisting(_) => Ok(None),
         };
     };
 
+    let mut blocked_notice = None;
     match app_shell.add_project_from_path_protected(selected_path, &state_root)? {
         tekstide_core::app::ProjectOpenOutcome::Added(project_id) => {
             finish_opening_cli_project(app_shell, project_id, audit_health);
@@ -265,9 +286,16 @@ fn open_cli_project_path_and_record(
             // GUI open call sites now give `holder_pid`, not a value kept
             // for a purpose nothing serves.
             shell::log_project_open_blocked(holder_pid);
+            // Review 519: `stderr` alone used to be the whole story for a
+            // CLI-launched refusal -- a window opened with an empty board
+            // and no explanation, invisible to anyone not watching the
+            // terminal. Carried out to `boot()` the same way
+            // `instance_marker` already is, so `State::new` can set the
+            // real board notice a GUI-driven refusal already gets.
+            blocked_notice = Some(shell::ProjectOpenBlockedNotice { holder_pid });
         }
     }
-    Ok(())
+    Ok(blocked_notice)
 }
 
 /// The `Added` arm [`open_cli_project_path_and_record`]'s two paths (state

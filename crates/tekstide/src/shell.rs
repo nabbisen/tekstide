@@ -1403,12 +1403,23 @@ impl State {
     /// than discarding it and starting over, is what makes `State`'s
     /// own copy the true accumulation for the whole session rather than
     /// missing whatever happened before it existed.
+    /// `cli_project_open_blocked` is threaded in the same way
+    /// `instance_marker` is: `boot()`'s own CLI-argument open can be
+    /// refused (RFC-058 D8) before `State` exists to hold the notice a
+    /// GUI-driven refusal already sets. Review 519: a CLI-launched
+    /// instance refused this way used to log to `stderr` alone, which a
+    /// desktop launcher or a terminal the user stops watching would
+    /// never show -- the window opened with an empty board and no
+    /// explanation, exactly the silent-refusal class this RFC exists to
+    /// end. `None` when no CLI argument was refused, same as every other
+    /// boot that opens cleanly.
     pub fn new(
         mut app_shell: ApplicationShell,
         catalog: Catalog,
         mut audit_health: tekstide_core::audit::AuditHealth,
         configuration: ConfigurationState,
         instance_marker: Option<tekstide_core::recovery::InstanceMarker>,
+        cli_project_open_blocked: Option<ProjectOpenBlockedNotice>,
     ) -> Self {
         // RFC-032 PR-032-C, response 245: the audit store, not the
         // user-writable recent-projects cache, is authoritative for
@@ -1525,7 +1536,7 @@ impl State {
             change_review_selection: None,
             path_field: String::new(),
             path_field_notice: None,
-            project_open_blocked_notice: None,
+            project_open_blocked_notice: cli_project_open_blocked,
             path_field_requested: false,
             run_report_field: None,
             run_report_notice: None,
@@ -3471,7 +3482,7 @@ pub(crate) enum PathFieldError {
 /// own doc comment for why).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ProjectOpenBlockedNotice {
-    holder_pid: Option<u32>,
+    pub(crate) holder_pid: Option<u32>,
 }
 
 /// Review 517 Required 1: `holder_pid` needed a real consumer or it
