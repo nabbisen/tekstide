@@ -518,7 +518,7 @@ find of this round**: that test would have passed while proving nothing, for the
 RFC-058's own summary names as what makes the clobber possible. Restoring the recent-project state
 to mirror `boot()`'s real order is the right fix, not a workaround. Gate: `760 + 19 + 1132`.
 
-- [ ] **`main.rs`'s wiring is not covered by any test.** Your ablation reverted
+- [x] **`main.rs`'s wiring is not covered by any test.** Your ablation reverted
   `project_open_blocked_notice: cli_project_open_blocked` **inside `State::new`**, which the test
   does exercise. I ablated one line further out — `cli_project_open_blocked = blocked;` in `boot()`'s
   own CLI loop — and **every test still passed.**
@@ -534,6 +534,25 @@ to mirror `boot()`'s real order is the right fix, not a workaround. Gate: `760 +
   **The remedy is your own, one slice old**: at review 518 you factored `project_board_lines` out of
   `content_area` so a test could assert on what the view actually composes. Do the same here —
   lift the CLI loop's "keep the last refusal" step into something callable, and test that.
+
+  **Done.** The loop's own "keep the last refusal" reduction is now `fold_cli_project_open_blocked(current,
+  latest) -> latest.or(current)`, a free function with no `boot()`-only dependency, called from the loop
+  as the single line `cli_project_open_blocked = fold_cli_project_open_blocked(cli_project_open_blocked,
+  blocked);`. Three direct unit tests in `tests.rs`:
+  `a_later_refusal_overwrites_an_earlier_one`, `a_clean_open_never_clears_a_refusal_an_earlier_argument_already_recorded`,
+  `no_refusal_at_all_stays_none`. **Ablated at the exact call site you ablated** (clean tree,
+  `ablate.sh`, `cargo test --workspace`): replacing the loop's assignment with `let _ =
+  fold_cli_project_open_blocked(...)` (discarding the result, as if the assignment itself had been
+  deleted) left every test green except one unrelated, already-registered flake
+  (`approval::tests::channel::bind_recovers_from_a_stale_socket_file`, `test-process-leak.md` row 1,
+  standing verdict Accept) — confirming the residual gap is exactly what you named: `boot()`'s own
+  one-line call to the now-tested fold function, the same structural limit
+  `open_cli_project_path_and_record`'s own doc comment already accepts for the rest of this file (it
+  reads real `std::env::args_os()` and cannot be driven from a test). The logic itself — what the fold
+  does — is now fully covered; the one line invoking it in `boot()` is the same irreducible untested
+  sliver every other piece of this function's own logic already has, not a gap specific to this fix.
+  `760 + 19 + 1132` → `763 + 19 + 1132` (three new tests), three consecutive clean full-workspace
+  runs, 0 fixture entries. Commit `68eda97`, pushed.
 
 ## Final Acceptance Decision
 
