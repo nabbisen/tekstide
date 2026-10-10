@@ -222,6 +222,21 @@ review 503's finding, cross-referencing it, with the same "not scheduled, raised
 `audit/store.rs` itself remains untouched — the disposition review 515 confirmed (out of this RFC's
 own scope, on the real cause this time) stands.
 
+### PR-058-B closed at review 516
+
+The correction landed in all three places, and the table row is now precise: *"Yes, for an
+established store"*, the TOCTOU named, and — the part that matters — **the right out-of-scope
+reason** (app-wide, not project-scoped, so `acquire_project_lock` could never have guarded it)
+rather than the coordination framing that was doing the work before.
+
+The recorded entry names **the shape of a real fix** (`CREATE TABLE IF NOT EXISTS`, or a lock held
+across the `exists()` check) rather than leaving it as "coordination". That is what stops a future
+reader scoping it as a large problem it is not.
+
+*"It is the diagnosis that had to change, not the conclusion"* is the right summary, and worth
+saying back: **a correct conclusion resting on a wrong reason is still worth fixing, because the
+next person inherits the reason.** Gate: `758 + 19 + 1128`, 0 fixture entries.
+
 ## PR-058-C — saying it
 
 - [ ] A second attempt **names the holder and opens no duplicate** (D8).
