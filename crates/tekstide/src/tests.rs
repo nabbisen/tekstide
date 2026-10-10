@@ -12,7 +12,42 @@ use tekstide_core::audit::{AuditEventFamily, AuditQuery};
 use tekstide_core::project::ProjectId;
 use tekstide_core::shell::ApplicationShell;
 
-use super::{open_cli_project_path_and_record, shell};
+use super::{fold_cli_project_open_blocked, open_cli_project_path_and_record, shell};
+
+/// Review 520: `boot()`'s own CLI loop reads real `std::env::args_os()`
+/// and cannot be driven from a test -- this is the fold it performs,
+/// proven directly rather than only through `open_cli_project_path_and_record`
+/// (which proves the *source* of a refusal) and `State::new` (which
+/// proves the *storage* of one). Those two tests passed with the loop's
+/// own accumulation step deleted; this is the one that cannot.
+///
+/// **Ablated**: reverted `latest.or(current)` to always returning
+/// `current` (as if the loop's assignment were simply deleted) -- the
+/// `a_later_refusal_overwrites_an_earlier_one` case below failed by
+/// name; reverted.
+#[test]
+fn a_later_refusal_overwrites_an_earlier_one() {
+    let first = Some(shell::ProjectOpenBlockedNotice {
+        holder_pid: Some(111),
+    });
+    let second = Some(shell::ProjectOpenBlockedNotice {
+        holder_pid: Some(222),
+    });
+    assert_eq!(fold_cli_project_open_blocked(first, second), second);
+}
+
+#[test]
+fn a_clean_open_never_clears_a_refusal_an_earlier_argument_already_recorded() {
+    let refused = Some(shell::ProjectOpenBlockedNotice {
+        holder_pid: Some(333),
+    });
+    assert_eq!(fold_cli_project_open_blocked(refused, None), refused);
+}
+
+#[test]
+fn no_refusal_at_all_stays_none() {
+    assert_eq!(fold_cli_project_open_blocked(None, None), None);
+}
 
 fn fresh_project_dir(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(

@@ -170,18 +170,12 @@ fn boot() -> shell::State {
     // (abort rather than boot with a partially-applied argument list)
     // without needing `iced::Result`/`iced::Error` to express a custom
     // exit code.
-    // Review 519: the same "last one wins" single-notice shape the three
-    // GUI open call sites already have -- `State` holds at most one
-    // `project_open_blocked_notice` at a time, so a later CLI argument's
-    // own refusal is what the booted window shows if more than one is
-    // given.
     let mut cli_project_open_blocked = None;
     for selected_path in std::env::args_os().skip(1) {
         match open_cli_project_path_and_record(&mut app_shell, selected_path, &mut audit_health) {
             Ok(blocked) => {
-                if blocked.is_some() {
-                    cli_project_open_blocked = blocked;
-                }
+                cli_project_open_blocked =
+                    fold_cli_project_open_blocked(cli_project_open_blocked, blocked);
             }
             Err(error) => {
                 eprintln!("{error}");
@@ -213,6 +207,25 @@ fn boot() -> shell::State {
         cli_project_open_blocked,
     )
     .with_recent_project_list_repair(recent_projects_repair)
+}
+
+/// Review 520: `boot()`'s own CLI loop is the "last refusal wins" step
+/// itself -- not only the thing nothing could test before this slice,
+/// but, once `open_cli_project_path_and_record` and `State::new` were
+/// each independently proven, **the only remaining line nothing
+/// watched**. An ablation one line further out than review 519's own
+/// (deleting the fold's own call site in the loop, not the field
+/// assignment inside `State::new`) passed every test green. Factored out
+/// the same way review 518 factored `project_board_lines` out of
+/// `content_area` so a test could assert on what the view actually
+/// composes: a later `Some` always wins over an earlier one, and a
+/// `None` (an argument that opened cleanly) never clears a refusal an
+/// earlier argument already recorded.
+fn fold_cli_project_open_blocked(
+    current: Option<shell::ProjectOpenBlockedNotice>,
+    latest: Option<shell::ProjectOpenBlockedNotice>,
+) -> Option<shell::ProjectOpenBlockedNotice> {
+    latest.or(current)
 }
 
 /// RFC-031 PR-031-B: the real, testable open-a-project-from-the-CLI
