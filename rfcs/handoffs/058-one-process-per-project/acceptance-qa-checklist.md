@@ -554,6 +554,44 @@ to mirror `boot()`'s real order is the right fix, not a workaround. Gate: `760 +
   `760 + 19 + 1132` → `763 + 19 + 1132` (three new tests), three consecutive clean full-workspace
   runs, 0 fixture entries. Commit `68eda97`, pushed.
 
+### Required at review 521 — the test suite writes into the owner's real state directory
+
+**The fold itself is accepted and the residual gap is closed.** Three direct unit tests cover the
+logic, and I closed the "does `boot()` call it" sliver the way RFC-027's own marker wiring was
+closed at review 481 — **by running it**: two real CLI-launched instances under an isolated
+`XDG_STATE_HOME`, and instance B's board carries *"This project is already open in another Tekstide
+window. It has been asked for your attention."* on a real screen. That is the defect from review 519
+confirmed fixed on the one path a test cannot reach. Evidence:
+`evidence/pr-058-c/reviewer-cli-launched-second-instance.png`.
+
+- [ ] **`cargo test -p tekstide --bin tekstide` writes 8 entries into
+  `~/.local/state/tekstide/project-locks/` — the owner's real state.** Measured, not inferred:
+
+  ```
+  full gate run:        before=190  after=198   delta=8
+  tekstide-core --lib:  delta=0
+  tekstide --bin:       delta=8
+  ```
+
+  Four projects' worth of `<uuid>.lock` **and `<uuid>.attention.sock`** per run, with fresh ids each
+  time, never removed. **190 had accumulated since PR-058-B landed on 10-10.** The GUI open paths
+  resolve their state root through `open_real_recovery_state_root()`, which is
+  `AppStatePathProvider::linux_default()` with no test override, so any test driving those messages
+  binds a real socket in the real directory.
+
+  **Three reasons this blocks the candidate rather than waiting:**
+  1. It is **new with this RFC** and would ship with `0.34.0`.
+  2. It runs on **every gate** — three times per slice, many times a day — not once per capture.
+  3. **The gate's own cleanliness criterion cannot see it.** "0 fixture entries left in a fresh short
+     `TMPDIR`" has been passing truthfully this whole time while this accumulated somewhere else.
+
+  The shape of the fix is already in the codebase twice: `AppStatePathProvider::from_state_dir` for
+  the recent store, and `project_lock`'s own tests using `TMPDIR` correctly. The GUI paths need the
+  same injectable root.
+
+  **The 198 existing files are yours to clear**, not mine — the owner's ruling at review 495 is that
+  leftovers belong to the agent that created them. Please remove them with the fix.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
