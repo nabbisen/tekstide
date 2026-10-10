@@ -107,13 +107,59 @@ introduced is the right amount.
 
 ## PR-058-B — the mechanism
 
-- [ ] Process-visible, under the state directory, project-scoped. **Not in-memory** (§row 4).
-- [ ] **Released when the holder dies** (§row 3), proven against a real killed process — and
+- [x] Process-visible, under the state directory, project-scoped. **Not in-memory** (§row 4).
+      New module `tekstide_core::project_lock`: `<state_root>/project-locks/<project_id>.lock`,
+      a real OS `flock` (`std::fs::File::try_lock`, the same primitive RFC-050's transcript
+      writer already uses) — proven process-visible by `an_acquired_lock_is_visible_to_a_second_independent_handle`
+      (a second, independent `File::open` sees it held, the identical proof technique the
+      transcript's own lock test uses) and project-scoped by `different_projects_or_different_state_roots_never_collide`.
+- [x] **Released when the holder dies** (§row 3), proven against a real killed process — and
       `a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` read first.
-- [ ] **Cannot-decide opens the project** (§row 1), tested deliberately on: a lock naming a dead
+      Read first, and its own "release is asserted within a bound, not at the instant of drop"
+      lesson applied twice: `dropping_the_lock_releases_it_for_a_later_acquire` (plain drop,
+      polled with the same 5s/10ms bound after hitting the identical fork-pressure flake once
+      in dev) and `a_real_sigkilled_holder_releases_the_lock` (a real child process holding the
+      lock via `project_process_probe`, confirmed held from an independent handle, **SIGKILL**ed
+      and reaped, lock confirmed free again within the same bound).
+- [x] **Cannot-decide opens the project** (§row 1), tested deliberately on: a lock naming a dead
       process, an unreadable state directory, and a lock this build does not understand.
-- [ ] The reproduction from PR-058-A now fails to clobber — the regression test.
-- [ ] The audit store is untouched and still works with two live processes (§row 5).
+      `a_lock_file_naming_a_pid_but_held_by_nobody_does_not_block_opening`,
+      `an_unreadable_locks_directory_cannot_decide`, `unparseable_lock_content_does_not_block_opening`
+      — all three in `project_lock/tests.rs`. The design makes the first and third trivially
+      correct rather than merely tested: the exclusivity decision is `try_lock`'s alone, and the
+      lock file's own content (a pid, for naming the holder later) plays no part in it, so stale
+      or unparseable content can never make the mechanism refuse. Found and fixed while writing
+      the second case: the directory's permissions were being unconditionally reset after
+      creation (mirroring `recovery::write_recovery_record`'s own defensive reset), which
+      silently repaired the simulated-unreadable directory before the open attempt — exactly
+      the "quietly fixed instead of reported" failure row 1 warns against, caught by the test
+      itself failing, not by re-reading the code.
+- [x] The reproduction from PR-058-A now fails to clobber — the regression test.
+      Renamed and rewritten: `two_real_processes_opening_the_same_root_share_an_id_but_the_second_is_blocked_from_writing`.
+      Same two overlapping real processes PR-058-A built; the second now finds the project
+      locked (`BLOCKED <pid>`) and never calls `write_recovery_record` at all — the surviving
+      record is the first process's own text, unclobbered.
+- [x] The audit store is untouched and still works with two live processes (§row 5).
+      `audit::tests::two_live_writers::two_concurrent_writers_against_the_same_store_both_succeed`:
+      two independent `AuditStore` handles, barrier-synchronized onto the same `append` instant,
+      both succeed, both records readable back. Not two real OS processes — two independent
+      connections, the same substitution the transcript lock test already relies on for `flock`,
+      since SQLite's own file locking is enforced against the open descriptor, not a process
+      identity. `audit/store.rs` itself untouched.
+
+      **A real, narrower hazard found and deliberately left alone**: the first version of this
+      test raced the *first-ever creation* of the database file between the two handles (no
+      synchronization before `AuditStore::open` itself, only before `append`) and hit a genuine
+      `AuditStoreError { reason: Io }` — SQLite's own schema-creation race on a brand-new file,
+      before `busy_timeout` is even set on either connection. Fixed the test by establishing the
+      schema once before the concurrent pair starts, which is what D1's own claim is actually
+      about (writers against an *established* store) and what the requirements table's "Protected
+      today: Yes, already" already assumes. Not fixed in `audit/store.rs`: two processes racing to
+      create a brand-new audit store for the very first time is outside this RFC's own scope
+      (the table names only recovery records as the live hazard; the non-goals rule out a general
+      multi-instance model) and the audit store is app-wide, not project-scoped, so
+      `acquire_project_lock` could not guard it even if that were in scope. Disclosed, not
+      silently absorbed into "confirmed."
 
 ## PR-058-C — saying it
 

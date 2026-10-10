@@ -1,14 +1,16 @@
-//! RFC-058 PR-058-A: a real second Tekstide process, for the reproduction.
+//! RFC-058: a real second Tekstide process, for both the reproduction
+//! (PR-058-A) and the mechanism's own regression test (PR-058-B).
 //!
 //! **This is a test-and-proof artifact, not a product feature.** It exists so
-//! PR-058-A's clobber can be watched happen between two real OS processes
-//! rather than reasoned about by reading `app.rs` and `recovery/record.rs`
-//! (D2's own standard, the RFC-066 D5 lesson applied before the fact). It
-//! drives exactly the production sequence a real boot already runs --
-//! `RecentProjectStore::load_or_recover`, `ApplicationShell::
-//! add_project_from_path`, `RecentProjectStore::save`,
-//! `tekstide_core::recovery::write_recovery_record` -- never a
-//! reimplementation of any of them.
+//! RFC-058's own hazard -- and the fix for it -- can be watched happen
+//! between two real OS processes rather than reasoned about by reading
+//! `app.rs`, `recovery/record.rs` and `project_lock.rs` (D2's own standard,
+//! the RFC-066 D5 lesson applied before the fact). It drives exactly the
+//! production sequence a real boot already runs -- `RecentProjectStore::
+//! load_or_recover`, `ApplicationShell::add_project_from_path`,
+//! `RecentProjectStore::save`, `tekstide_core::project_lock::
+//! acquire_project_lock`, `tekstide_core::recovery::write_recovery_record` --
+//! never a reimplementation of any of them.
 //!
 //! # Usage
 //!
@@ -25,19 +27,32 @@
 //! shape `tekstide/src/shell.rs`'s own `recovery_record_for` uses (cursor and
 //! viewport at the origin -- nothing here depends on either).
 //!
-//! Prints the project id this process ended up with to stdout as soon as its
-//! own write has landed, flushed immediately, then: without `--hold`, exits
-//! at once; with `--hold`, blocks reading stdin until it sees EOF before
-//! exiting. **`--hold` is what makes "two real processes" mean two
+//! Opens the project, then attempts the project lock exactly where a real
+//! boot's own persistence tick would (D3): held -> writes the record and
+//! keeps the lock for the rest of this process's life; held by another live
+//! process -> **does not write**, per D5/D8 (a second instance must not
+//! clobber what the first is protecting); cannot decide -> writes anyway,
+//! unprotected, per D5 (never refuse to run over an ambiguous lock).
+//!
+//! Prints exactly two lines to stdout, flushed immediately:
+//! 1. this process's project id, always, whether or not it wrote anything;
+//! 2. one of `ACQUIRED`, `BLOCKED <holder-pid-or-dash>`, or `UNPROTECTED
+//!    <reason>`, naming which of the three outcomes above happened.
+//!
+//! Then: without `--hold`, exits at once; with `--hold`, blocks reading
+//! stdin until it sees EOF before exiting (and before releasing the lock,
+//! if it holds one). **`--hold` is what makes "two real processes" mean two
 //! *overlapping* ones** (review 513) -- a harness that reads this process's
-//! id line first knows the write already happened and this process has not
-//! exited, and can then start a second probe while this one is still alive,
-//! holding it open exactly as long as the test needs by not yet closing its
-//! stdin. Exits non-zero with a message on stderr on any failure.
+//! two lines first knows both outcomes already happened and this process
+//! has not exited, and can then start a second probe while this one is
+//! still alive, holding it open exactly as long as the test needs by not
+//! yet closing its stdin. Exits non-zero with a message on stderr on any
+//! failure before either line is printed.
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use tekstide_core::project::recent::{AppStatePathProvider, RecentProjectStore};
+use tekstide_core::project_lock::{ProjectLockOutcome, acquire_project_lock};
 use tekstide_core::recovery::{
     RecoveryFileSnapshot, RecoveryRecord, RecoveryRetentionLimits, write_recovery_record,
 };
@@ -85,37 +100,62 @@ fn main() {
         std::process::exit(4);
     }
 
-    let text_bytes = text.len() as u64;
-    let record = RecoveryRecord {
-        version: tekstide_core::recovery::RECOVERY_RECORD_VERSION,
-        relative_path: relative_path.clone(),
-        text: text.clone(),
-        cursor_line: 0,
-        cursor_column: 0,
-        viewport_first_visible_line: 0,
-        viewport_first_visible_column: 0,
-        snapshot: RecoveryFileSnapshot::from_system_time(
-            &project_root.join(relative_path),
-            std::time::SystemTime::now(),
-            text_bytes,
-        ),
+    // RFC-058 D3: attempted at the same point a real open would -- after
+    // the id is known, before anything write-sensitive is touched. The
+    // guard, if acquired, is kept alive until `main` returns (through
+    // `--hold`'s own blocking read below), the same "held for as long as
+    // this project stays open in this process" shape a real boot would use.
+    let lock_outcome = acquire_project_lock(&state_root, project_id.as_str());
+    let (status_line, held_lock) = match lock_outcome {
+        ProjectLockOutcome::Acquired(lock) => ("ACQUIRED".to_owned(), Some(lock)),
+        ProjectLockOutcome::HeldByAnother { holder_pid } => {
+            let holder = holder_pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "-".to_owned());
+            (format!("BLOCKED {holder}"), None)
+        }
+        ProjectLockOutcome::CannotDecide { reason } => (format!("UNPROTECTED {reason}"), None),
     };
-    if let Err(error) = write_recovery_record(
-        &state_root,
-        project_id.as_str(),
-        &record,
-        RecoveryRetentionLimits::default_limits(),
-    ) {
-        eprintln!("project_process_probe: could not write recovery record: {error:?}");
-        std::process::exit(5);
+
+    // D5/D8: a second instance that does not hold the lock must not write
+    // the record it would otherwise clobber. `CannotDecide` still writes
+    // (unprotected, not refused) -- the one case this probe shares that
+    // policy with a real boot rather than only reproducing a hazard.
+    let may_write = !status_line.starts_with("BLOCKED");
+    if may_write {
+        let text_bytes = text.len() as u64;
+        let record = RecoveryRecord {
+            version: tekstide_core::recovery::RECOVERY_RECORD_VERSION,
+            relative_path: relative_path.clone(),
+            text: text.clone(),
+            cursor_line: 0,
+            cursor_column: 0,
+            viewport_first_visible_line: 0,
+            viewport_first_visible_column: 0,
+            snapshot: RecoveryFileSnapshot::from_system_time(
+                &project_root.join(relative_path),
+                std::time::SystemTime::now(),
+                text_bytes,
+            ),
+        };
+        if let Err(error) = write_recovery_record(
+            &state_root,
+            project_id.as_str(),
+            &record,
+            RecoveryRetentionLimits::default_limits(),
+        ) {
+            eprintln!("project_process_probe: could not write recovery record: {error:?}");
+            std::process::exit(5);
+        }
     }
 
     println!("{}", project_id.as_str());
+    println!("{status_line}");
     let _ = std::io::stdout().flush();
 
     if hold {
         // Blocks until the harness closes (or drops) this process's stdin --
-        // the signal that it has seen this line and finished whatever it
+        // the signal that it has seen both lines and finished whatever it
         // needed this process to still be alive for. A loop of `read_line`
         // calls, each discarded, rather than one `read_to_end`: this is
         // draining a pipe to its close, not reading a file's full content,
@@ -130,4 +170,9 @@ fn main() {
             discard.clear();
         }
     }
+
+    // Explicit, not load-bearing: dropping at the end of `main` would do
+    // the same thing. Named so a reader does not have to go looking for
+    // where the lock this process held is released.
+    drop(held_lock);
 }

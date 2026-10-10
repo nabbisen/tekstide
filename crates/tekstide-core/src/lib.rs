@@ -10,6 +10,7 @@ pub mod domain;
 pub mod navigation;
 pub mod project;
 pub mod project_board;
+pub mod project_lock;
 pub mod recovery;
 pub mod route;
 pub mod runtime;

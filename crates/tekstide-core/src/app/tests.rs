@@ -1082,20 +1082,29 @@ fn project_process_probe_binary_path() -> PathBuf {
     candidate
 }
 
+/// The probe's own two-line stdout contract: a project id, always, and a
+/// lock-outcome status (`ACQUIRED`, `BLOCKED <pid-or-dash>`, or
+/// `UNPROTECTED <reason>`) naming what happened to the write that followed.
+#[derive(Debug)]
+struct ProbeResult {
+    project_id: String,
+    status_line: String,
+}
+
 /// Spawns a real `project_process_probe` process, waits for it to exit, and
-/// returns the project id it printed. Panics with the child's own stderr on
-/// a non-zero exit, so a failure here never silently reads as "same id" --
-/// `unwrap_or_default` on a missing/garbled stdout line would make a crashed
-/// probe look identical to a probe that printed nothing, by accident, which
-/// is exactly the quiet-corruption shape this RFC exists to stop appearing
-/// in Tekstide's own code and must not be allowed to reappear in the harness
-/// proving it.
+/// returns the two lines it printed. Panics with the child's own stderr on
+/// a non-zero exit, or on either line being missing, so a failure here never
+/// silently reads as a legitimate result -- a missing/garbled line reading
+/// as empty would make a crashed probe look identical to a probe that
+/// printed nothing, by accident, which is exactly the quiet-corruption shape
+/// this RFC exists to stop appearing in Tekstide's own code and must not be
+/// allowed to reappear in the harness proving it.
 fn run_project_process_probe(
     state_root: &Path,
     project_root: &Path,
     relative_path: &str,
     text: &str,
-) -> String {
+) -> ProbeResult {
     let _real_process_slot = RealProcessLimiter::acquire();
     let output = Command::new(project_process_probe_binary_path())
         .arg(state_root)
@@ -1110,10 +1119,24 @@ fn run_project_process_probe(
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout)
-        .expect("probe stdout must be valid UTF-8")
-        .trim()
-        .to_owned()
+    let stdout = String::from_utf8(output.stdout).expect("probe stdout must be valid UTF-8");
+    let mut lines = stdout.lines();
+    let project_id = lines
+        .next()
+        .expect("the probe must print a project-id line")
+        .to_owned();
+    let status_line = lines
+        .next()
+        .expect("the probe must print a lock-status line")
+        .to_owned();
+    assert!(
+        !project_id.is_empty(),
+        "the project-id line must not be empty"
+    );
+    ProbeResult {
+        project_id,
+        status_line,
+    }
 }
 
 /// A `project_process_probe --hold`, kept alive on purpose (review 513): a
@@ -1132,6 +1155,7 @@ struct HeldProbe {
     pid: u32,
     stdin: Option<std::process::ChildStdin>,
     project_id: String,
+    status_line: String,
 }
 
 impl HeldProbe {
@@ -1161,8 +1185,9 @@ impl HeldProbe {
             .take()
             .expect("a piped child must have a stdout handle");
 
+        let mut reader = std::io::BufReader::new(stdout);
         let mut project_id = String::new();
-        std::io::BufReader::new(stdout)
+        reader
             .read_line(&mut project_id)
             .expect("read the held probe's own project-id line before it blocks on stdin");
         let project_id = project_id.trim().to_owned();
@@ -1171,12 +1196,23 @@ impl HeldProbe {
             "a held probe must print its project id before blocking on stdin, pid {pid}"
         );
 
+        let mut status_line = String::new();
+        reader
+            .read_line(&mut status_line)
+            .expect("read the held probe's own lock-status line before it blocks on stdin");
+        let status_line = status_line.trim().to_owned();
+        assert!(
+            !status_line.is_empty(),
+            "a held probe must print its lock-status line before blocking on stdin, pid {pid}"
+        );
+
         Self {
             _slot: slot,
             child: crate::test_support::KillOnDropChild::new(child),
             pid,
             stdin: Some(stdin),
             project_id,
+            status_line,
         }
     }
 
@@ -1209,23 +1245,31 @@ impl HeldProbe {
     }
 }
 
-/// RFC-058 PR-058-A, D2: the reproduction itself. Two real processes **hold
-/// the same real project root open at the same time** -- the first spawned
-/// with `--hold` and proven still alive before the second even starts
-/// (review 513: a sequential pair of sessions is not the hazard, and is not
-/// something a correct fix would still fail against) -- each dirtying the
-/// same document with different text.
+/// RFC-058 PR-058-A's own reproduction, now PR-058-B's regression test
+/// (the task breakdown's own words: "the reproduction becomes the
+/// regression test, and it is what PR-058-B is checked against"). Same
+/// scenario as PR-058-A found it -- two real processes **hold the same
+/// real project root open at the same time** (the first spawned with
+/// `--hold` and proven still alive before the second even starts; review
+/// 513: a sequential pair of sessions is not the hazard), each dirtying the
+/// same document with different text -- but the clobber this test used to
+/// observe no longer happens: the second process finds the project locked
+/// and does not write at all, per D5/D8.
 #[test]
-fn two_real_processes_opening_the_same_root_get_the_same_project_id_and_clobber_the_record() {
-    let sandbox = TestSandbox::new("rfc058-reproduce");
+fn two_real_processes_opening_the_same_root_share_an_id_but_the_second_is_blocked_from_writing() {
+    let sandbox = TestSandbox::new("rfc058-regression");
     let state_root = sandbox.create_dir("state");
     let project_root = sandbox.create_dir("project");
     sandbox.create_file("project/doc.txt");
 
     let held = HeldProbe::spawn(&state_root, &project_root, "doc.txt", "instance A's edit");
     held.assert_still_holding();
+    assert_eq!(
+        held.status_line, "ACQUIRED",
+        "the first, uncontended probe must acquire the project lock"
+    );
 
-    let second_id =
+    let second =
         run_project_process_probe(&state_root, &project_root, "doc.txt", "instance B's edit");
 
     held.assert_still_holding();
@@ -1233,31 +1277,38 @@ fn two_real_processes_opening_the_same_root_get_the_same_project_id_and_clobber_
     held.release();
 
     assert_eq!(
-        first_id, second_id,
-        "two real processes opening the same canonical root must get the same project id -- \
-         the mechanism `recent_project_id_by_canonical_root` reuses, not just a symptom of it"
+        first_id, second.project_id,
+        "two real processes opening the same canonical root must still get the same project \
+         id -- the lock protects what they write, it does not change `app.rs`'s own id-reuse \
+         mechanism"
+    );
+    assert!(
+        second.status_line.starts_with("BLOCKED"),
+        "the second process must find the project locked by a live holder: {}",
+        second.status_line
     );
 
     let records_dir = crate::recovery::records_dir(&state_root, &first_id);
     let entries: Vec<_> = std::fs::read_dir(&records_dir)
-        .expect("both processes computing the same project id must produce one shared records dir")
+        .expect("the first process's own write must still have produced a records dir")
         .map(|entry| entry.expect("a readable directory entry").path())
         .collect();
     assert_eq!(
         entries.len(),
         1,
-        "both processes must write the same record file, not two: {entries:?}"
+        "exactly one record must exist -- the second process's own write never happened: \
+         {entries:?}"
     );
 
     let record_json =
-        std::fs::read_to_string(&entries[0]).expect("the clobbered record must be readable");
+        std::fs::read_to_string(&entries[0]).expect("the surviving record must be readable");
     assert!(
-        record_json.contains("instance B's edit"),
-        "the second writer's text must be in the surviving record: {record_json}"
+        record_json.contains("instance A's edit"),
+        "the first writer's text must survive, unclobbered: {record_json}"
     );
     assert!(
-        !record_json.contains("instance A's edit"),
-        "the clobber is real: instance A's own edit must be gone, not merged or appended -- \
-         last tick wins, silently, which is the defect this RFC exists to stop: {record_json}"
+        !record_json.contains("instance B's edit"),
+        "the second writer's text must never have reached disk at all -- this is the \
+         regression PR-058-A's own reproduction became: {record_json}"
     );
 }
