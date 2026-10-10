@@ -161,6 +161,54 @@ introduced is the right amount.
       `acquire_project_lock` could not guard it even if that were in scope. Disclosed, not
       silently absorbed into "confirmed."
 
+### Required at review 515 — the audit race is misdiagnosed, and D1 is too broad
+
+The mechanism is right and I verified the property that matters most: **only `WouldBlock` blocks.**
+`TryLockError::Error(_)` is `CannotDecide`, and `read_holder_pid` is explicitly outside the
+exclusivity decision — so stale or unparseable content cannot refuse an open **by construction**,
+which is what row 1 asked for. D4 holds against a real `SIGKILL` (5 runs on my machine). The
+`DirBuilder::mode()` fix is the right distinction, and catching it because a test *failed by
+passing* is the find of the slice. Gate: `758 + 19 + 1128`, 0 fixture entries.
+
+- [ ] **The audit-store race is not what you diagnosed, and the real cause changes the disposition.**
+  You attributed it to two connections racing "before either has set `busy_timeout`". But
+  `busy_timeout` is set immediately after `Connection::open_with_flags` and **before** any schema
+  work. It is not the cause, and it could not have been: a busy timeout makes a connection *wait
+  for a lock*; it does not make `CREATE TABLE` idempotent.
+
+  The real cause is a **TOCTOU**, three statements earlier:
+
+  ```rust
+  let existed = storage_path.database_file().exists();   // both processes: false
+  …
+  if existed { prepare_existing_store(…) } else { create_current_schema(…) }
+  ```
+
+  Both processes test `exists()` **before opening any connection**, both take the `else` branch, and
+  both run `create_current_schema` — which has **no `IF NOT EXISTS`** anywhere (checked: zero
+  occurrences in `audit/schema.rs`). The second one is correctly rejected by SQLite.
+
+  **Why this matters beyond accuracy:** you concluded it was out of scope because a general
+  multi-instance coordination fix is a non-goal. The project-lock half of that is right — the audit
+  store is app-wide and `acquire_project_lock` could not guard it. But this is **not** a coordination
+  problem; it is a contained TOCTOU in one function, and the remedies are ordinary ones. *"Out of
+  scope"* may still be the right answer, but it has to rest on the real cause.
+
+- [ ] **Amend D1 and the RFC's own table.** They say the audit store is *"Protected today: Yes,
+  already"*, full stop. Your own test showed that is true for an **established** store and false for
+  its first creation. **That is D1's premise, and confirming it was D1's whole job** — the
+  confirmation found the claim too broad, which is the outcome "confirm it, do not duplicate it" was
+  there to produce. Narrow the claim to what SQLite's locking actually delivers.
+
+- [ ] **Record it where it belongs: beside review 503's audit finding, not here.** An audit store
+  that fails to open means audit writes that silently do not happen — the same family as the 52
+  `CHECK` constraints with nothing asserting a family and outcome lands. Both are pre-1.0 items about
+  the one store this product promises honesty about. They should be read together.
+
+**Disclosing it at all was right**, and fixing the test by establishing the schema first — rather
+than quietly widening the test until it passed — is what let the real cause be found at review
+rather than in production.
+
 ## PR-058-C — saying it
 
 - [ ] A second attempt **names the holder and opens no duplicate** (D8).
