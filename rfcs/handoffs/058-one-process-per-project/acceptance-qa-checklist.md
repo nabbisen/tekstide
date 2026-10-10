@@ -150,16 +150,18 @@ introduced is the right amount.
       **A real, narrower hazard found and deliberately left alone**: the first version of this
       test raced the *first-ever creation* of the database file between the two handles (no
       synchronization before `AuditStore::open` itself, only before `append`) and hit a genuine
-      `AuditStoreError { reason: Io }` — SQLite's own schema-creation race on a brand-new file,
-      before `busy_timeout` is even set on either connection. Fixed the test by establishing the
-      schema once before the concurrent pair starts, which is what D1's own claim is actually
-      about (writers against an *established* store) and what the requirements table's "Protected
-      today: Yes, already" already assumes. Not fixed in `audit/store.rs`: two processes racing to
-      create a brand-new audit store for the very first time is outside this RFC's own scope
-      (the table names only recovery records as the live hazard; the non-goals rule out a general
-      multi-instance model) and the audit store is app-wide, not project-scoped, so
-      `acquire_project_lock` could not guard it even if that were in scope. Disclosed, not
-      silently absorbed into "confirmed."
+      `AuditStoreError { reason: Io }`. **Corrected at review 515**: the cause is a TOCTOU in
+      `AuditStore::open_internal`, not a `busy_timeout` gap — both connections read
+      `storage_path.database_file().exists()` before either opens a connection, both see `false`,
+      both reach `create_current_schema`, whose `CREATE_SCHEMA_V3` has no `IF NOT EXISTS`
+      anywhere; SQLite correctly rejects the second `CREATE TABLE`. Fixed the test by establishing
+      the schema once before the concurrent pair starts, which is what D1's own claim is actually
+      about (writers against an *established* store). Not fixed in `audit/store.rs`: still outside
+      this RFC's own scope on the merits review 515 confirmed (the audit store is app-wide, not
+      project-scoped, so `acquire_project_lock` could not guard it regardless of the exact cause,
+      and a general multi-instance coordination fix is this RFC's own non-goal) — but resting on
+      the real cause this time, not the wrong one. Disclosed, not silently absorbed into
+      "confirmed"; recorded in `rfcs/future-work.md` beside review 503's finding.
 
 ### Required at review 515 — the audit race is misdiagnosed, and D1 is too broad
 
@@ -170,7 +172,7 @@ which is what row 1 asked for. D4 holds against a real `SIGKILL` (5 runs on my m
 `DirBuilder::mode()` fix is the right distinction, and catching it because a test *failed by
 passing* is the find of the slice. Gate: `758 + 19 + 1128`, 0 fixture entries.
 
-- [ ] **The audit-store race is not what you diagnosed, and the real cause changes the disposition.**
+- [x] **The audit-store race is not what you diagnosed, and the real cause changes the disposition.**
   You attributed it to two connections racing "before either has set `busy_timeout`". But
   `busy_timeout` is set immediately after `Connection::open_with_flags` and **before** any schema
   work. It is not the cause, and it could not have been: a busy timeout makes a connection *wait
@@ -194,13 +196,13 @@ passing* is the find of the slice. Gate: `758 + 19 + 1128`, 0 fixture entries.
   problem; it is a contained TOCTOU in one function, and the remedies are ordinary ones. *"Out of
   scope"* may still be the right answer, but it has to rest on the real cause.
 
-- [ ] **Amend D1 and the RFC's own table.** They say the audit store is *"Protected today: Yes,
+- [x] **Amend D1 and the RFC's own table.** They say the audit store is *"Protected today: Yes,
   already"*, full stop. Your own test showed that is true for an **established** store and false for
   its first creation. **That is D1's premise, and confirming it was D1's whole job** — the
   confirmation found the claim too broad, which is the outcome "confirm it, do not duplicate it" was
   there to produce. Narrow the claim to what SQLite's locking actually delivers.
 
-- [ ] **Record it where it belongs: beside review 503's audit finding, not here.** An audit store
+- [x] **Record it where it belongs: beside review 503's audit finding, not here.** An audit store
   that fails to open means audit writes that silently do not happen — the same family as the 52
   `CHECK` constraints with nothing asserting a family and outcome lands. Both are pre-1.0 items about
   the one store this product promises honesty about. They should be read together.
@@ -208,6 +210,17 @@ passing* is the find of the slice. Gate: `758 + 19 + 1128`, 0 fixture entries.
 **Disclosing it at all was right**, and fixing the test by establishing the schema first — rather
 than quietly widening the test until it passed — is what let the real cause be found at review
 rather than in production.
+
+**Done at review 515's own request.** The real cause (a TOCTOU in `AuditStore::open_internal`:
+`database_file().exists()` read before either connection opens, `create_current_schema`'s
+`CREATE_SCHEMA_V3` has no `IF NOT EXISTS`) is now stated correctly in three places that previously
+repeated the wrong one: this checklist (above), the test's own doc comment
+(`audit/tests/two_live_writers.rs`), and the RFC's own "What is actually at risk" table, whose
+audit-store row is narrowed from "Yes, already" (full stop) to "Yes, for an established store,"
+naming the first-creation race explicitly. A new `rfcs/future-work.md` entry sits directly beside
+review 503's finding, cross-referencing it, with the same "not scheduled, raised as pre-1.0" shape.
+`audit/store.rs` itself remains untouched — the disposition review 515 confirmed (out of this RFC's
+own scope, on the real cause this time) stands.
 
 ## PR-058-C — saying it
 

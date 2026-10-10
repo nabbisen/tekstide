@@ -33,7 +33,7 @@ find what two processes corrupt, not to invent a general lock.
 | --- | --- | --- |
 | **Recovery records** (`recovery/records/<project-id>/<path-hash>`) | **Yes — identical paths** | **No. The live hazard.** |
 | `recent-projects.json` (trust decisions, ordering) | Yes, app-global | No — last writer wins |
-| The audit store | Yes | **Yes, already.** SQLite's own file locking with a `busy_timeout` (`journal_mode = DELETE`) serialises writers between processes — *"or equivalent conflict-prevention mechanism"* is already satisfied here |
+| The audit store | Yes | **Yes, for an established store.** SQLite's own file locking with a `busy_timeout` (`journal_mode = DELETE`) serialises writers between processes once the store exists — *"or equivalent conflict-prevention mechanism"* is satisfied there. **Narrowed at PR-058-B's own confirmation (review 515):** two processes racing to *create* the database for the first time can still lose — `AuditStore::open_internal` checks `database_file().exists()` before either opens a connection, and `create_current_schema`'s `CREATE_SCHEMA_V3` has no `IF NOT EXISTS`, so the second `CREATE TABLE` is rejected. Recorded in `rfcs/future-work.md` beside review 503's finding; out of this RFC's own scope (app-wide, not project-scoped — `acquire_project_lock` could not guard it) |
 | Transcripts | Per agent-run id | Not shared; two instances produce different runs |
 | Instance markers | Per pid, by design | Not shared (RFC-027 D12) |
 

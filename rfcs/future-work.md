@@ -1229,3 +1229,35 @@ asserted to land. `record.rs` already holds the enumeration — 69 family-to-str
 
 **Not scheduled against a release yet.** Raised to the owner at review 503 as a pre-1.0 item: the
 audit store's honesty is a 1.0 promise, and right now nothing checks that it can keep it.
+
+## Two processes creating the audit store for the first time race, and the second loses — found 2026-10-10 (RFC-058 PR-058-B, review 515)
+
+**A second, separate way the same store can silently fail to open — read beside the finding above,
+not folded into it.**
+
+While confirming RFC-058's own D1 ("the audit store already satisfies `REQ-PROJ-009`, do not
+duplicate the mechanism"), a test spawning two independent `AuditStore` handles against the same
+real sqlite file found that *writers against an established store* really are serialised correctly
+— but two processes racing to **create** that store for the first time are not. `AuditStore::
+open_internal` reads `storage_path.database_file().exists()` **before either connection opens at
+all**; both see `false`, both take the `else` branch, and both call `create_current_schema`, whose
+`CREATE_SCHEMA_V3` has no `IF NOT EXISTS` anywhere in it. The second `CREATE TABLE` is correctly
+rejected by SQLite — a genuine `AuditStoreError { reason: Io }`, not a busy-timeout matter at all
+(a busy timeout makes a connection wait for a lock; it does not make `CREATE TABLE` idempotent, and
+by the time either connection would be waiting on anything, the second has already failed).
+
+**Same family as the finding above: a write (here, the store's own creation) can fail and nothing
+above it in the stack distinguishes "never happened" from "succeeded elsewhere."** The audit store's
+own documented promise in `local-data-and-privacy.md` does not survive this race either.
+
+**Narrower than it sounds, and deliberately not fixed as part of RFC-058.** The audit store is
+app-wide, not project-scoped — RFC-058's own `acquire_project_lock` protects one project's
+write-sensitive state and could never guard a resource that exists before any project is opened.
+A general multi-instance coordination fix is that RFC's own stated non-goal. The shape of a real
+fix is ordinary (`CREATE TABLE IF NOT EXISTS`, or a file-level lock held across the `exists()`
+check and the create, mirroring RFC-058's own `project_lock` primitive one level up), but it has not
+been scheduled.
+
+**Not scheduled against a release yet.** Raised to the owner at review 515 as a pre-1.0 item, read
+together with the finding above: both are about the one store this product promises honesty about,
+and a reader deciding whether to schedule either should see both.

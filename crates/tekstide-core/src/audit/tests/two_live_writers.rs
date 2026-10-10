@@ -26,9 +26,17 @@ fn two_concurrent_writers_against_the_same_store_both_succeed() {
     let dirs = TestAuditDirs::new("two-live-writers");
     // Establish the schema with one handle first, then close it. D1's own
     // claim is about *writers against an established store*, not about two
-    // processes racing to create the database file for the first time --
-    // SQLite's own schema-creation race on a brand-new file is a narrower,
-    // separate hazard this test deliberately does not conflate with it.
+    // processes racing to create the database file for the first time.
+    // That race is real, but it is a TOCTOU in `AuditStore::open_internal`,
+    // not a `busy_timeout` gap: both connections read
+    // `storage_path.database_file().exists()` -- a plain filesystem check,
+    // before either has opened a connection or set a busy timeout -- see
+    // both `false`, and both reach `create_current_schema`, whose
+    // `CREATE_SCHEMA_V3` has no `IF NOT EXISTS` anywhere. SQLite correctly
+    // rejects the second `CREATE TABLE`; no amount of waiting on a lock
+    // would have made it succeed. Recorded as its own item in
+    // `rfcs/future-work.md`, beside review 503's finding -- this test
+    // deliberately does not conflate the two.
     drop(AuditStore::open(dirs.storage_path.clone()).expect("establish the schema once"));
 
     let barrier = std::sync::Arc::new(Barrier::new(2));
