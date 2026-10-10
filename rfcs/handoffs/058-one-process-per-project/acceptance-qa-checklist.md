@@ -291,27 +291,46 @@ working. D9's wording is right and for the right reason: *"has been asked for yo
 claims **this** process's own action and nothing about the other end. Gate: `759 + 19 + 1132`,
 0 fixture entries.
 
-- [ ] **`holder_pid` is justified as "a diagnostic" and nothing diagnoses with it.** It is written
+- [x] **`holder_pid` is justified as "a diagnostic" and nothing diagnoses with it.** It is written
   into `ProjectOpenBlockedNotice` at three call sites and **never read again** — not rendered, not
   logged, not traced (grepped). A field kept for a purpose it does not serve is the shape review 490
   found in a different guise: a value whose stated reason is not the one holding it up. **Give it a
   consumer or remove it** — writing the blocked pid to `stderr` beside the existing crash-detection
   line would be a real diagnostic and costs one line.
 
-- [ ] **D8 says "names the instance that holds it" and the product does not — and the wording is
+  **Done.** New `log_project_open_blocked(holder_pid: Option<u32>)` (`shell.rs`), the same
+  non-fatal `eprintln!`-to-`stderr` shape `boot()`'s own crash-detection line already uses for a
+  fact nothing in the product renders. Called from all three real GUI open call sites and the CLI
+  path (`main.rs`, replacing its own pid-less `eprintln!`), so every place `holder_pid` is captured
+  now does something with it.
+
+- [x] **D8 says "names the instance that holds it" and the product does not — and the wording is
   mine to fix.** Your reading is right and I agree with it: a raw pid means nothing to a user, and
   the knock addressing the correct holder is what matters. But that resolution currently lives in
   two doc comments, while the RFC still says something the UI deliberately does not do. **Amend D8**
   to say the holder is *addressed*, not named to the user, and why. A decision a reader can only
   find by reading the implementation is not recorded.
 
-- [ ] **The wording guard reads the catalog, not the view.** `state.catalog.get("project-board-open-blocked")`
+  **Done.** Both of the RFC's own "names the holder" occurrences (D8's own line and the "D8 is
+  implemented as" paragraph below D9) now say "addresses," with a new paragraph explaining why: the
+  pid means nothing to a user and is never rendered; the real mechanism is the attention socket's
+  own path, derived from the project id, never a pid a person would read.
+
+- [x] **The wording guard reads the catalog, not the view.** `state.catalog.get("project-board-open-blocked")`
   proves the *string* carries none of the forbidden words. The view at `shell.rs:9956` inserts that
   string verbatim, so today the two are equivalent — **but nothing holds that**, and a later edit
   composing it with other text would keep the test green while the screen claimed a switch. This is
   review 492's gap again, in the one place D9 exists to protect. Either assert on whatever the view
   composes, or state in the test that it is a string-level guard and the view placement is covered
   only by the capture.
+
+  **Done, the first option.** `content_area`'s own board-lines composition factored into
+  `project_board_lines(state) -> Vec<String>` — the exact function the view now calls, not a
+  parallel copy of its logic — and the test reads `project_board_lines(&state).first()` instead of
+  the catalog directly. **Proven to close the real gap, not merely rephrased**: an `ablate.sh` run
+  changing `content_area`'s own insertion line to append `" It has switched to this window."`
+  (composition drift the catalog string itself never shows) fails the same assertion by name;
+  reverted. The original catalog-only version of this test would have passed that exact ablation.
 
 - [ ] **The live capture: deferral accepted, required before the candidate.** I checked the desktop
   myself rather than ruling on it abstractly — six windows, the focused one not ours, **including
