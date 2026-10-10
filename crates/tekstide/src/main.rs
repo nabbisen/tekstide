@@ -256,11 +256,15 @@ fn open_cli_project_path_and_record(
         // only, the same non-fatal `eprintln!` shape `boot()`'s own crash
         // detection already uses a few lines above this function's call
         // site, never an exit code.
-        tekstide_core::app::ProjectOpenOutcome::Blocked { .. } => {
+        tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. } => {
             eprintln!(
                 "tekstide: this project is already open in another Tekstide window; it has \
                  been asked for your attention"
             );
+            // Review 517 Required 1: the same real diagnostic the three
+            // GUI open call sites now give `holder_pid`, not a value kept
+            // for a purpose nothing serves.
+            shell::log_project_open_blocked(holder_pid);
         }
     }
     Ok(())

@@ -3474,6 +3474,20 @@ pub(crate) struct ProjectOpenBlockedNotice {
     holder_pid: Option<u32>,
 }
 
+/// Review 517 Required 1: `holder_pid` needed a real consumer or it
+/// should have been removed -- this is the one. The same non-fatal,
+/// stderr-only shape `boot()`'s own crash-detection line already uses
+/// for an informational fact nothing in the product renders: a real
+/// diagnostic for whoever launched Tekstide from a terminal, never
+/// user-facing text (D9 row 2 is about the rendered notice, which this
+/// is not), and `None` (the holder could not be named) is simply silent
+/// rather than printing a placeholder.
+pub(crate) fn log_project_open_blocked(holder_pid: Option<u32>) {
+    if let Some(pid) = holder_pid {
+        eprintln!("tekstide: this project is already open and held by pid {pid}");
+    }
+}
+
 impl PathFieldError {
     fn from_validation_error(
         error: &tekstide_core::project::root::ProjectRootValidationError,
@@ -5202,6 +5216,7 @@ fn reopen_recent_project(state: &mut State, project_id: &tekstide_core::project:
         // was added -- there is nothing to reconcile, trigger, or offer
         // recovery for, unlike the `Added` arm above.
         Ok(tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. }) => {
+            log_project_open_blocked(holder_pid);
             state.project_open_blocked_notice = Some(ProjectOpenBlockedNotice { holder_pid });
         }
         Err(error) => {
@@ -5953,6 +5968,7 @@ fn attempt_open_project_from_path_field(state: &mut State) {
         // same reasoning as the `Err` arm below, a refused attempt is
         // exactly what the user needs to see, not have silently wiped.
         Ok(tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. }) => {
+            log_project_open_blocked(holder_pid);
             state.project_open_blocked_notice = Some(ProjectOpenBlockedNotice { holder_pid });
         }
         Err(error) => {
@@ -6130,6 +6146,7 @@ fn choose_current_browsed_directory(state: &mut State) {
         // gone.
         Ok(tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. }) => {
             state.modal = None;
+            log_project_open_blocked(holder_pid);
             state.project_open_blocked_notice = Some(ProjectOpenBlockedNotice { holder_pid });
         }
         Err(error) => {
@@ -9912,6 +9929,31 @@ fn agent_run_launch_transcript_budget_notice(
         })
 }
 
+/// The exact lines `content_area` renders above the board, in order --
+/// factored out so review 517's own required fix holds: a test asserting
+/// on this function's own return value is asserting on what the view
+/// actually composes, not on a catalog string in isolation that a later
+/// edit could leave behind while the rendered line changed around it.
+///
+/// RFC-025 D2/D7: `project_board_notifications` is the one place that
+/// builds and orders the `Vec<Notification>`; this extracts the text.
+/// RFC-058 D8/D9 adds the most recent blocked-open attempt, if any --
+/// outside the `Notification` model (neither of its two lifetimes fit a
+/// one-shot action outcome; see `State::project_open_blocked_notice`'s
+/// own doc comment), so spliced in here rather than forced into a system
+/// built for two different, specifically named shapes. Leads the list:
+/// it is about the action the user on this screen just took.
+fn project_board_lines(state: &State) -> Vec<String> {
+    let mut lines: Vec<String> = project_board_notifications(state)
+        .into_iter()
+        .map(|notification| notification.text)
+        .collect();
+    if state.project_open_blocked_notice.is_some() {
+        lines.insert(0, state.catalog.get("project-board-open-blocked"));
+    }
+    lines
+}
+
 fn content_area(state: &State) -> Element<'_, Message> {
     let content: Element<'_, Message> = if state.is_measuring_typing() {
         typing_measurement_view(state)
@@ -9938,23 +9980,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                     state.project_board_row_highlight,
                     Message::ReopenRecentProjectRowPressed,
                 );
-                // RFC-025 D2/D7: the model, not four functions' strings --
-                // `project_board_notifications` is the one place that builds
-                // and orders the `Vec<Notification>`; this extracts the text.
-                let mut board_lines: Vec<String> = project_board_notifications(state)
-                    .into_iter()
-                    .map(|notification| notification.text)
-                    .collect();
-                // RFC-058 D8: the most recent blocked-open attempt, if
-                // any -- outside the `Notification` model (neither of its
-                // two lifetimes fit a one-shot action outcome; see the
-                // field's own doc comment), so spliced in here rather
-                // than forced into a system built for two different,
-                // specifically named shapes. Leads the list: it is about
-                // the action the user on this screen just took.
-                if state.project_open_blocked_notice.is_some() {
-                    board_lines.insert(0, state.catalog.get("project-board-open-blocked"));
-                }
+                let board_lines = project_board_lines(state);
                 if board_lines.is_empty() {
                     board
                 } else {

@@ -112,8 +112,14 @@ have open. It is adopted — **with one constraint, established by reading the s
 assuming it.**
 
 **D8 — A second attempt sends the user to the holder; it does not open a duplicate.** The project
-is held by one process. A second instance asked for the same root does not open it, names the
-instance that holds it, and asks that window for attention.
+is held by one process. A second instance asked for the same root does not open it, **addresses**
+the instance that holds it, and asks that window for attention. **Corrected at PR-058-C's own
+review (517): "addresses," not "names."** A raw pid means nothing to a user and is not shown to
+one; what matters, and what the implementation actually does, is that the knock reaches the
+*correct* holder — the real mechanism is the attention socket's own path, derived from the project
+id, never a pid a person would have to read. The pid is kept only as this process's own
+diagnostic (`stderr`, never the rendered notice), the same non-fatal shape the boot's own crash
+detection already uses for a fact nothing in the product renders.
 
 **D9 — Raising the window is not possible on this platform, and nothing may promise it.** Checked
 in the dependency tree actually in use:
@@ -128,8 +134,8 @@ in the dependency tree actually in use:
   wanting attention, and the compositor surfaces that however it chooses. **The user still moves;
   the window does not come to them.**
 
-**So D8 is implemented as: refuse the duplicate, name the holder, request attention best-effort —
-and say nothing that claims a raise happened.** `0.23.0` was called *What The Window Says Is True*;
+**So D8 is implemented as: refuse the duplicate, address the holder, request attention best-effort
+— and say nothing that claims a raise happened.** `0.23.0` was called *What The Window Says Is True*;
 a message reading "switched you to the existing window" when the compositor did not switch anything
 would be that defect returning. On platforms where `gain_focus` is supported (X11, macOS, Windows),
 it may additionally be called — which makes this a **capability that degrades by platform**, and

@@ -18,7 +18,7 @@ use super::{
     content_within_bound, evaluate_promotion, focus_marker, main_area_key, main_area_label,
     modal_scrim_style, open_audit_store_recording_failure, open_real_audit_store,
     path_field_error_text, poll_approval_channels, project_board_audit_lines,
-    project_board_configuration_lines, project_close_dialog_body,
+    project_board_configuration_lines, project_board_lines, project_close_dialog_body,
     project_close_dialog_names_running_processes, project_close_dialog_path,
     project_close_dialog_reasons_line, resolve_agent_run_state_dir, status_bar_summary,
     terminal_paste_refusal_text, terminated_outcome_and_session_confirmation, test_audit_state_dir,
@@ -12641,7 +12641,17 @@ fn a_second_attempt_at_a_locked_project_opens_no_duplicate_and_says_nothing_fals
         "the blocked attempt must be recorded for the board to show"
     );
 
-    let rendered = state.catalog.get("project-board-open-blocked");
+    // Review 517 Required 3: asserted on `project_board_lines`, the exact
+    // function `content_area` calls to build what it renders -- not on
+    // the catalog key in isolation, which `content_area` no longer even
+    // reads directly. A later edit that composed this line with other
+    // text (a project name, the pid) would change what this function
+    // returns too, so this guard keeps covering the real rendered string
+    // rather than a value the view has moved past.
+    let lines = project_board_lines(&state);
+    let rendered = lines
+        .first()
+        .expect("a blocked attempt must produce at least one board line, leading the list");
     let lowered = rendered.to_lowercase();
     for forbidden in ["raised", "switched", "focused", "activated"] {
         assert!(
