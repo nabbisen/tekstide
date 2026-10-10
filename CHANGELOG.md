@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.34.0 - A Project Held By One Process
+
+Status: **released 2026-10-11.** RFC-058's three slices and its Whole-RFC checklist are all
+implemented, gated and closed. This entry was written incrementally as slices closed, then re-read
+against the finished set at the candidate; see `rfcs/handoffs/058-one-process-per-project/` for the
+full handoff pack.
+
+**Two Tekstide windows could hold the same project and neither knew.** `RFC-027`'s recovery records
+are keyed by project id and a hash of the document's path, and `AppState::open_project` reuses the
+same project id for the same canonical root — which is what lets recovery survive a restart at all,
+and also what let two windows on one project write the exact same record file. Open one project
+twice, edit the same file differently in each, and the last write wins with nothing saying the
+other edit ever existed. **Reproduced against two real processes before anything was designed
+against it**, and the reproduction became the regression test the fix is checked against.
+
+**A project root is now held by one process at a time, with a real, process-visible lock — not an
+in-memory flag.** A real OS `flock`, the same primitive this project's own transcript writer
+already uses, at `$XDG_STATE_HOME/tekstide/project-locks/<project-id>.lock`. Proven released even
+when its holder is killed outright, not only when it exits cleanly: a real child process held the
+lock, was `SIGKILL`ed, and the lock was free again within a bounded poll. If the mechanism cannot
+tell who, if anyone, holds a project — an unreadable state directory, say — opening proceeds
+unprotected rather than refusing: a text editor that will not open because a lock file is confusing
+has chosen the wrong failure.
+
+**A second attempt at an already-open project is refused, not opened as a duplicate copy, and the
+window that holds it is asked for your attention.** The project board says so — *"This project is
+already open in another Tekstide window. It has been asked for your attention"* — and that is
+exactly what happens, no more: a Wayland window cannot bring itself to the front on its own, so
+nothing here claims a raise, switch, or focus took place. The request reaches the real holder over
+a small local socket next to the lock file, proven end to end between two real processes — the
+holder's own listener reports receiving the knock, not merely that the request was sent.
+
+**A real, narrower hazard was found and deliberately left alone.** The audit store was assumed
+already protected against two processes by SQLite's own file locking, and mostly is — but two
+processes racing to *create* the database for the first time can still lose, a genuine TOCTOU with
+no `IF NOT EXISTS` guarding it. Out of this RFC's own scope (the audit store is app-wide, not
+project-scoped, so a per-project lock could never have guarded it regardless), and recorded in
+`future-work.md` beside an earlier, related finding rather than left for this RFC's own "already
+protected" claim to appear to cover a gap it does not.
+
 ## 0.33.0 - The Sidebar Stops Being Two Things
 
 Status: **released 2026-10-10.** RFC-067's three slices and its Whole-RFC checklist are

@@ -155,6 +155,43 @@ merely that the knocker's `connect()` returned `Ok`.
 Returns to the Project-lifecycle coverage row in `rfcs/delivery-plan.md`, naming what the
 mechanism actually is (a real `flock` plus a real `AF_UNIX` knock), not "a lock exists now."
 
+### Live capture
+
+Deferred at review 517 pending a quiet desktop; taken once `niri msg -j windows` showed four
+terminal windows and nothing else live. Two real `tekstide` processes, an isolated
+`XDG_STATE_HOME` and a throwaway project, both under a short `/dev/shm` path.
+
+Instance A (`tekstide /dev/shm/t58cap/project`) opened normally and held the lock. Instance B,
+launched the same way against the same state root and project root, was refused as expected
+(`stderr`: `this project is already open in another Tekstide window; it has been asked for your
+attention` / `this project is already open and held by pid <A's pid>`) — **but its project board
+showed nothing special**, just the ordinary never-opened-this-run row. That is not a bug: a
+CLI-argument open is resolved inside `boot()`, before `shell::State` exists, so
+`open_cli_project_path_and_record`'s `Blocked` arm has no `State` to set
+`project_open_blocked_notice` on and can only do what D6 lets it do from there — tell `stderr`,
+the same shape `log_project_open_blocked` already uses. Worth recording here because it is the
+reason the capture needed a second step: the GUI notice is only reachable through a GUI-driven
+open.
+
+With instance B's window focused (checked via `niri msg -j windows` immediately before), its
+project board row was highlighted by default; `wtype -k Return` drove the real
+`handle_project_board_row_key` → `Message::ReopenRecentProjectRowPressed` → `reopen_recent_project`
+path — the same one a mouse click on the row's "Open" button reaches — which found the project
+locked again (`stderr` repeated the same two lines) and set `project_open_blocked_notice`. Focus
+was re-checked immediately before the screenshot
+(`niri msg action screenshot-window --id 7 -d true -p false`; saved from the Wayland clipboard with
+`wl-paste`, since this desktop's own `screenshot-path null` setting means the `-d` flag has nowhere
+to write to disk on its own).
+
+`evidence/pr-058-c/second-window-asked-for-attention.png` — instance B's real window, the project
+row still showing "Restricted" / "Open" (never opened by this process), and at the bottom of the
+window: *"This project is already open in another Tekstide window. It has been asked for your
+attention."* — the exact `project-board-open-blocked` string, composed by `project_board_lines`,
+on a real screen.
+
+Both processes terminated with `SIGTERM` after capture (`ps` confirmed both gone); `/dev/shm/t58cap`
+removed afterward. Nothing outside this RFC's own `evidence/pr-058-c/` directory was kept.
+
 ## Gate
 
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean.

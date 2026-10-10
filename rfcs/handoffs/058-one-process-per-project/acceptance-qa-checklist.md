@@ -274,9 +274,20 @@ next person inherits the reason.** Gate: `758 + 19 + 1128`, 0 fixture entries.
       second process's own status line names the *real* holder pid (parsed back out of the rendered
       line), and the held probe, released afterward, reports `ATTENTION_RECEIVED` on its own
       listener, not merely that the knocker's `connect()` returned `Ok`.
-- [ ] **Live capture**: two real instances, the second's message on screen, under an isolated
-      `XDG_STATE_HOME` with a throwaway project. *(Pending -- see this turn's own review request for
-      why, rather than a capture rushed under time pressure or claimed without being taken.)*
+- [x] **Live capture**: two real instances, the second's message on screen, under an isolated
+      `XDG_STATE_HOME` with a throwaway project. **Done.** Taken once the desktop was quiet (checked
+      via `niri msg -j windows` first: four terminals, nothing else live). Two real processes under
+      `/dev/shm/t58cap`; instance A held the project, instance B's CLI-launched attempt was refused
+      (confirmed in `stderr`) but its board showed nothing special, because a CLI open resolves
+      inside `boot()` before `State` exists — recorded in `qa-evidence.md`'s own "Live capture"
+      section as the reason the capture needed a second, GUI-driven step. Focus on instance B's
+      window was checked immediately before `wtype -k Return` (driving the real
+      `ReopenRecentProjectRowPressed` path) and again immediately before
+      `niri msg action screenshot-window`. Screenshot saved from the Wayland clipboard
+      (`screenshot-path null` in this desktop's own config means `-d` has nowhere to write) and
+      copied into `evidence/pr-058-c/second-window-asked-for-attention.png`, showing the real
+      `project-board-open-blocked` sentence on screen. Both processes `SIGTERM`ed and reaped, throwaway
+      `/dev/shm` state removed.
 - [x] `REQ-PROJ-009` returns to the Project-lifecycle coverage row, naming **what the mechanism is**.
       `rfcs/delivery-plan.md`'s own "Implemented" table, Project lifecycle row: names the real
       `flock` and the real `AF_UNIX` knock, not "a lock exists now."

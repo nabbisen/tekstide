@@ -1778,3 +1778,25 @@ write-then-exec shape, same parallel binary.
 **Disposition: the same verdict as its sibling, whatever that turns out to be.** It belongs to that
 row's family and should be decided with it rather than separately; the disposition pass closed with
 `every_failure_to_answer_…` verdicted, so this one inherits the reasoning. **Owner: the dev team.**
+
+## New row, 2026-10-10 — RFC-058 PR-058-B: a second `flock`-outlives-its-drop flake, same cause and same fix as the `transcript` row above
+
+| Test | First seen |
+| --- | --- |
+| `tekstide_core::project_lock::tests::dropping_the_lock_releases_it_for_a_later_acquire` | PR-058-B's own development, 2026-10-10 |
+
+Failed once in dev: a plain `drop(lock)` followed immediately by a second `acquire_project_lock`
+on the same project saw `HeldByAnother` instead of `Acquired`. **The exact fork-pressure hazard
+`transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped`'s own comment
+already documents** (row above, request 388): a sibling test in the same binary spawning a real
+child process between this test's `fork` and `exec` can inherit a duplicate of the lock's file
+descriptor, keeping the kernel-level `flock` held past the Rust-level `drop` for long enough that
+an immediate re-acquire sees it as still taken.
+
+**Fixed before the flake could recur in CI, not after**: read first, applied the identical
+precedent — poll for `Acquired` against a 5s/10ms-interval deadline instead of asserting on the
+very next line after `drop`. No separate investigation needed; the cause and the fix were both
+already on record in this document. Confirmed clean across RFC-058's own three-slice gate (ten-plus
+full-workspace runs across PR-058-A/B/C's review cycles, 0 recurrence). **Retired from active
+tracking at the same time it was added** — fixed at first disclosure, the same shape as the
+`transcript` row's own resolution.

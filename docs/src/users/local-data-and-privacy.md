@@ -206,11 +206,46 @@ above — preferably with Tekstide closed. Deleting `recovery/instances/` as wel
 next launch cannot tell whether this one exited cleanly; harmless, and self-correcting at the
 launch after that.
 
+## The project lock and attention socket
+
+**Opening a project root takes a real, process-visible lock — not an in-memory flag.** Each open
+project gets a file at `$XDG_STATE_HOME/tekstide/project-locks/<project-id>.lock`
+(`~/.local/state/tekstide/project-locks/` if `XDG_STATE_HOME` is unset), held by an OS-level
+`flock` for as long as the window has that project open. This is what *A project can be held by
+only one Tekstide window at a time* (see
+[What works today](./what-works-today.md#projects-files-and-editing)) is actually made of: a
+second window asking for the same project root finds the lock held and is refused, rather than
+opening a second copy that could silently overwrite the first window's own recovery records above.
+
+**It never outlives the process that took it.** The lock is released the moment every file handle
+pointing at it closes — ordinary exit, or a crash, including one as abrupt as the process being
+killed outright. There is nothing to clean up by hand, and nothing to get stuck: a lock file left
+behind by a process that is no longer running does not block the next open.
+
+**Its content is a process id, and that id is never shown to you.** It exists only so this
+process's own diagnostic output can name which process is holding a project it was refused — a
+pid means nothing to a person reading the screen, and the lock file's content plays no part in the
+exclusivity decision itself, which belongs to the lock primitive alone.
+
+**A second window's refusal asks the first window for your attention, over a small local socket**
+at `<project-locks>/<project-id>.attention.sock`, also removed when its project closes. This only
+ever *asks*; a Wayland window cannot bring itself to the front on its own, so nothing here claims
+the first window was raised, switched to, or focused — only that it was asked.
+
+**If the mechanism cannot tell who, if anyone, holds a project** — an unreadable state directory,
+for instance — **opening proceeds unprotected rather than refusing.** A text editor that will not
+open because a lock file is confusing has chosen the wrong failure; the trade is a once-over
+protection gap in an abnormal environment, not a product that stops working in one.
+
+**To remove it, delete the `project-locks/` directory** — the path is above — preferably with
+every Tekstide window closed. Nothing beyond the next open depends on it: a missing directory is
+recreated the next time a project is opened.
+
 ## Where the full policies live
 
 The retention and purge policies, and the audit store's own retention rules, are specified in the
-RFCs that own them — RFC-011 for transcripts and RFC-013 for the audit store, both under
-`rfcs/done/` in the repository, and RFC-027 for crash detection, recovery data and the restart offer, under `rfcs/accepted/`
-until the release that ships it moves it to `rfcs/done/`. [Security
+RFCs that own them — RFC-011 for transcripts, RFC-013 for the audit store, RFC-027 for crash
+detection, recovery data and the restart offer, and RFC-058 for the project lock and attention
+socket, all under `rfcs/done/` in the repository. [Security
 decisions](../contributors/security-decisions.md) is the canonical home for the reasoning behind
 the behaviour described here.

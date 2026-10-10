@@ -113,6 +113,17 @@ would reach, **Reload** button included — never a silent overwrite of a file i
 [Local data and privacy](./local-data-and-privacy.md#unsaved-buffer-recovery-data) for what gets
 written, where, and how to turn it off.
 
+**A project can be held by only one Tekstide window at a time.** Opening a project root that
+another Tekstide process already has open does not open a second copy of it: the attempt is
+refused, that window is asked for your attention, and the board says so — *"This project is
+already open in another Tekstide window. It has been asked for your attention."* The first window
+keeps working, unaffected. The request for attention is best-effort and may do nothing visible:
+Wayland does not let a window bring itself to the front, so you may still need to switch to it
+yourself, and nothing claims otherwise. See [Local data and
+privacy](./local-data-and-privacy.md#the-project-lock-and-attention-socket) for what makes the
+refusal real — a lock file, not an in-memory flag — and why it is what stops two windows from
+racing to write the same recovery records above.
+
 File **names** in the explorer and the editor header are escaped, because they are untrusted,
 attacker-influenced text. File **contents** are deliberately not: the editor shows a file as it
 is, which means source containing a bidi-override character still *reads* differently from how it

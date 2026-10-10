@@ -1,6 +1,7 @@
 # RFC-058: A Project Held By One Process
 
-Status: **Accepted by the human owner 2026-10-10.** D1–D7 as written; **the open question answered with a third option the owner proposed** — see *Decided on acceptance*. Proposed 2026-10-10. `0.34.0`, M13. `REQ-PROJ-009`, moved out of the Project-lifecycle
+Status: **Implemented and closed 2026-10-11; released as `0.34.0` 2026-10-11.** See the
+*Closed* section. **Accepted by the human owner 2026-10-10.** D1–D7 as written; **the open question answered with a third option the owner proposed** — see *Decided on acceptance*. Proposed 2026-10-10. `0.34.0`, M13. `REQ-PROJ-009`, moved out of the Project-lifecycle
 coverage row on 2026-09-23 because no such mechanism existed. **It is a `must`, and the hazard it
 names got worse in `0.31.0`.**
 
@@ -150,3 +151,39 @@ whatever makes it discoverable must not outlive it (D4).
 **What this removes:** my option 1 is gone. No instance opens a project it does not own, so there is
 no "opened but unprotected" state to explain, and D6's obligation to disclose a downgrade has
 nothing left to disclose — a better outcome than the one I recommended.
+
+## Closed (2026-10-11)
+
+All three slices and the Whole-RFC checklist are done. **Released as `0.34.0` 2026-10-11** — see
+`CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
+
+**PR-058-A** reproduced the clobber against two real, overlapping `tekstide` processes before
+anything was designed against it (D2): the same canonical root resolves to the same project id in
+both, so both write the same recovery record, and the second write wins silently. **PR-058-B**
+built the mechanism D3–D5 ask for — a real OS `flock` at
+`<state_root>/project-locks/<project_id>.lock`, proven process-visible, proven released against a
+real `SIGKILL`ed holder (not only an orderly drop), and proven to fail open rather than refuse when
+the lock cannot be read — and confirmed D1's claim about the audit store, narrowing it in the
+process: SQLite's own locking protects an *established* store, not two processes racing to create
+one for the first time, a real, narrower, deliberately out-of-scope hazard recorded beside review
+503's own finding in `future-work.md` rather than silently left for D1 to appear to cover. **PR-058-C**
+wired the lock into every real open path — three GUI call sites and the CLI — refusing a duplicate
+rather than opening one (D8), addressing the holder over a real `AF_UNIX` knock rather than naming
+it to the user (D10, corrected from "names" at review 517), and asking for the user's attention
+without ever claiming a raise, switch or focus happened, because Wayland does not let a window
+bring itself forward (D9).
+
+**The live capture, carried from review 517 to this close**, is the last thing that was only read
+from the code until now: two real processes, an isolated `XDG_STATE_HOME`, a throwaway project, and
+a real screenshot of the second window's own board showing *"This project is already open in
+another Tekstide window. It has been asked for your attention."* —
+`rfcs/handoffs/058-one-process-per-project/evidence/pr-058-c/second-window-asked-for-attention.png`.
+It also surfaced a fact worth recording rather than only fixing around: a CLI-argument open is
+resolved inside `boot()`, before `shell::State` exists, so a CLI-launched instance that is refused
+can only tell `stderr` — the GUI notice this RFC is about is reachable only through a GUI-driven
+open. Not a defect; D6 is still satisfied (`stderr` is exactly the shape `log_project_open_blocked`
+already gives every other `holder_pid` consumer), but worth a reader knowing rather than assuming
+every refusal looks the same.
+
+Full handoff pack, evidence, and the acceptance checklist with every item's own proof:
+`rfcs/handoffs/058-one-process-per-project/`.
