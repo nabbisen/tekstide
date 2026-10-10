@@ -510,6 +510,31 @@ today for whoever makes that call. Noted here rather than guessed at or silently
 Required item done at review 519, commit `43d1e10`. `760 + 19 + 1132`, 0 failures, 0 fixture
 entries, three consecutive clean full-workspace runs. **`0.34.0` is recommended to the owner.**
 
+### Required at review 520 — the one line that delivers the fix is unguarded
+
+The fix is right and the threading matches `instance_marker` exactly. **Catching that two brand-new
+`ApplicationShell`s mint different ids — so the second never contended for the lock at all — is the
+find of this round**: that test would have passed while proving nothing, for the very mechanism
+RFC-058's own summary names as what makes the clobber possible. Restoring the recent-project state
+to mirror `boot()`'s real order is the right fix, not a workaround. Gate: `760 + 19 + 1132`.
+
+- [ ] **`main.rs`'s wiring is not covered by any test.** Your ablation reverted
+  `project_open_blocked_notice: cli_project_open_blocked` **inside `State::new`**, which the test
+  does exercise. I ablated one line further out — `cli_project_open_blocked = blocked;` in `boot()`'s
+  own CLI loop — and **every test still passed.**
+
+  The reason is structural: the test calls `crate::open_cli_project_path_and_record` directly and
+  never reaches `boot()`. So it proves the function *returns* the notice and that `State::new`
+  *stores* one — but the three lines in `main.rs` that carry the first into the second are
+  unguarded. **Delete the assignment and a launcher-started user is silently back to an empty board
+  with no explanation**, with a green gate.
+
+  That is the entire delivery mechanism of the fix, and it is the only part of it nothing watches.
+
+  **The remedy is your own, one slice old**: at review 518 you factored `project_board_lines` out of
+  `content_area` so a test could assert on what the view actually composes. Do the same here —
+  lift the CLI loop's "keep the last refusal" step into something callable, and test that.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
