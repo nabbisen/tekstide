@@ -376,21 +376,64 @@ desktop I checked myself. It is the last unproven thing in this RFC.
 
 ## Whole-RFC
 
-- [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
-- [ ] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
+- [x] The colour-alone, i18n completeness and internal-identifier scans still pass. These are
+      ordinary tests inside `cargo test --workspace` (`i18n::enforcement::*`,
+      `the_highlight_and_the_open_file_are_distinguishable_without_colour`,
+      `paste_dialog_accept_reject_distinction_is_a_real_textual_marker_not_colour_only`, etc.), not
+      a separate invocation — covered by the three full-workspace runs below. The one new catalog
+      key (`project-board-open-blocked`) passed `no_catalog_string_names_an_internal_identifier` and
+      `every_source_locale_key_resolves_in_every_shipped_locale` (the latter by its own documented
+      fallback-to-`en.ftl` design — `pl.ftl` does not have this key and is not required to; a
+      missing translation resolves through the source locale rather than failing).
+- [x] `cargo fmt`, `clippy --workspace --all-targets -D warnings`, `git diff --cached --check`
       **after staging**, `rfc_docs_invariants`, `cargo test --doc --workspace`, **three consecutive
-      full-workspace runs**, 0 fixture entries in a fresh short fixed `TMPDIR`.
-- [ ] Every new intermittent has a dated row in `test-process-leak.md`.
+      full-workspace runs**, 0 fixture entries in a fresh short fixed `TMPDIR`. All clean. Gate:
+      `759 + 19 + 1132`, 0 failed, 0 fixture entries, three consecutive runs (fresh `/dev/shm`
+      `TMPDIR` each), `git diff --cached --check` silent on the candidate-cut commit.
+- [x] Every new intermittent has a dated row in `test-process-leak.md`. One found and not
+      previously registered: `project_lock::tests::dropping_the_lock_releases_it_for_a_later_acquire`
+      flaked once in dev during PR-058-B (the same fork-pressure duplicate-fd-past-drop class the
+      `transcript` row already documents), fixed immediately with the identical poll-with-deadline
+      precedent, and recorded retroactively at the candidate under its own dated heading — fixed at
+      first disclosure, so retired the same time it was added.
 - [ ] The changelog is written **incrementally as each slice closes**, re-read against the finished
-      set at the candidate.
-- [ ] The book is read against the changelog **in both directions**, and **`locales/en.ftl` is
+      set at the candidate. **Not done incrementally this time** — `CHANGELOG.md` had no `0.34.0`
+      entry anywhere in this RFC's three review cycles; it was written in one pass at the candidate,
+      from the closed checklist and `qa-evidence.md` rather than from memory of each slice as it
+      closed. Disclosed rather than ticked to match the box's own words: the entry itself is
+      complete and was re-read against the finished set, but the *incremental* habit — which is
+      what catches a detail before it is forgotten, not after — was not followed this slice.
+- [x] The book is read against the changelog **in both directions**, and **`locales/en.ftl` is
       grepped for the words whose meaning this RFC changes** — the step that has caught the same
-      drift three times.
-- [ ] `what-works-today.md` says what happens when a project is already open elsewhere.
-- [ ] **`local-data-and-privacy.md` says a lock file exists, where, and what is in it** — it is new
-      state in the state directory, and that page documents everything else there.
-- [ ] The core pin bumps with the version. *(Release-cut item.)*
-- [ ] Commits are pushed once the gate is green.
+      drift three times. `en.ftl` grepped for `already open`, `duplicate`, `attention`, and the new
+      key's own name; the only other `attention` hit (`project-board-attention`) is an unrelated
+      pre-existing status-tag label, not a meaning collision. Reading the book against the changelog
+      found a real, pre-existing drift unrelated to this RFC's own diff: `local-data-and-privacy.md`
+      still said RFC-027 lived in `rfcs/accepted/` "until the release that ships it moves it" —
+      RFC-027 shipped in `0.31.0` and has been in `rfcs/done/` since; corrected in the same edit that
+      added RFC-058's own line.
+- [x] `what-works-today.md` says what happens when a project is already open elsewhere. New
+      paragraph in *Projects, files, and editing*, right after the recovery-offer paragraph it
+      protects: states the refusal, the board sentence verbatim, that the first window is
+      unaffected, and that the attention request is best-effort and may do nothing visible on
+      Wayland — the same disclosure D9 itself makes, not a stronger claim.
+- [x] **`local-data-and-privacy.md` says a lock file exists, where, and what is in it** — it is new
+      state in the state directory, and that page documents everything else there. New section *The
+      project lock and attention socket*, placed directly after *Unsaved-buffer recovery data* (the
+      state it protects): the lock file's path, that its content is a pid used only for this
+      process's own diagnostic and never shown to the user, that it cannot outlive its holder
+      (including a crash), the attention socket's path and that it only ever asks, the fail-open
+      behaviour when the mechanism cannot decide, and how to remove it by hand.
+- [x] The core pin bumps with the version. *(Release-cut item.)* `[workspace.package] version` and
+      the `tekstide-core` dependency pin both `0.33.0` → `0.34.0` in the same commit;
+      `the_workspace_pins_tekstide_core_to_its_own_version` passed in all three full-workspace runs.
+- [x] Commits are pushed once the gate is green. `c446766`, pushed to `origin/main` after the gate
+      above ran clean.
+
+Gate: `759 + 19 + 1132`, 0 failures, 0 fixture entries. One box left honestly unticked (the
+changelog was not written incrementally this slice) and one real pre-existing drift found and fixed
+along the way (RFC-027's stale `rfcs/accepted/` reference). **`0.34.0` is recommended to the
+owner.**
 
 ## Final Acceptance Decision
 
