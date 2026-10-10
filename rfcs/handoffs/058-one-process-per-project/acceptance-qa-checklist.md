@@ -445,7 +445,7 @@ nothing of the owner's in frame. **Fixing the handoff-pack frontmatter because i
 than because a test would catch it**, and fixing `local-data-and-privacy.md`'s RFC-027 drift found
 by the both-directions read, are both the habit working on things nothing was watching.
 
-- [ ] **A launcher-started user is told nothing on screen.** You found this and called it "not a
+- [x] **A launcher-started user is told nothing on screen.** You found this and called it "not a
   bug — D6 is still satisfied, the same `stderr` shape every other consumer gets." **It is not the
   same shape.** The three GUI call sites set `project_open_blocked_notice` *and* log; the CLI path
   logs only. So `tekstide /path/to/held/project` from a desktop launcher, a file manager, or a
@@ -459,6 +459,30 @@ by the both-directions read, are both the habit working on things nothing was wa
 
   This is also the *likeliest* way a user meets this feature at all, and it is the one path the
   capture could not show — which is worth noticing about the capture as much as about the code.
+
+  **Done.** `open_cli_project_path_and_record` now returns
+  `Result<Option<shell::ProjectOpenBlockedNotice>, ...>` instead of `Result<(), ...>`; its `Blocked`
+  arm builds the notice (the field made `pub(crate)` so `main.rs` can construct it, the same
+  visibility `log_project_open_blocked`'s own parameter already has) alongside the existing `stderr`
+  lines, never in place of them. `boot()`'s CLI loop carries the **last** refused argument's own
+  notice out to a new `cli_project_open_blocked` parameter on `State::new`, threaded exactly the way
+  `instance_marker` already is — same single-notice-at-a-time shape the three GUI call sites already
+  have, so a later argument's refusal is what the booted window shows if more than one path is given.
+  **Proven through the real CLI entry point, not only inspected**:
+  `a_cli_launched_second_attempt_at_a_locked_project_sets_the_real_board_notice` calls
+  `open_cli_project_path_and_record` twice — two independent `ApplicationShell`s standing in for two
+  processes, the same substitution `project_lock::tests` already established for a real `flock` —
+  with the second shell's `recent_project_state` restored from the first's before its own CLI open,
+  mirroring the real `RecentProjectStore::load_or_recover()` → CLI-loop order `boot()` itself follows
+  so the two shells reuse the same project id rather than minting two different ones for the same
+  path. Builds a real `State` from the returned notice and asserts `project_board_lines` leads with
+  the real sentence, with the same raised/switched/focused/activated wording guard the GUI-level
+  sibling test already has. **Ablated** (clean tree, `ablate.sh`): reverted `project_open_blocked_notice:
+  cli_project_open_blocked` to `None` — this test failed by name (`a CLI-launched blocked attempt
+  must produce at least one board line ... the exact gap this fix closes`), the GUI-level sibling
+  test still passed throughout, confirming only the CLI path's own wiring was ever untested; reverted.
+  `759 + 19 + 1132` → `760 + 19 + 1132` (one new test), three consecutive clean full-workspace runs,
+  0 fixture entries. Commit `43d1e10`, pushed.
 
 **Observation, not required.** The capture puts the notice at the **bottom edge** of the window
 while the row the user activated is at the top, and nothing else on screen changes — the project
@@ -476,6 +500,15 @@ the missed habit.
 `release-0.34.0.md` record and `post-publish-check.sh` for `0.34.0` and `0.33.0` are the
 architect's, on the owner's authorisation, exactly as for `0.30.0` through `0.33.0`. You were right
 not to guess.
+
+**On the bottom-edge observation: left for the owner's own judgement, not acted on unprompted.**
+Moving where `project_board_lines`' inserted notice renders relative to the activated row is a
+layout decision outside what this review asked for, and the capture
+(`evidence/pr-058-c/second-window-asked-for-attention.png`) already shows exactly where it lands
+today for whoever makes that call. Noted here rather than guessed at or silently fixed.
+
+Required item done at review 519, commit `43d1e10`. `760 + 19 + 1132`, 0 failures, 0 fixture
+entries, three consecutive clean full-workspace runs. **`0.34.0` is recommended to the owner.**
 
 ## Final Acceptance Decision
 
