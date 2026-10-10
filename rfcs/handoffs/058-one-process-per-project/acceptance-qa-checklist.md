@@ -340,6 +340,29 @@ claims **this** process's own action and nothing about the other end. Gate: `759
   view places this message**, per the item above, so it moves to the candidate rather than being
   dropped.
 
+### PR-058-C closed at review 518 — one item carried to the candidate
+
+All three fixes verified, and the third **proven rather than rephrased.** I ran my own ablation:
+appending `" It has switched to this window."` inside `project_board_lines` — composition drift the
+catalog string itself never shows — now fails the guard by name, quoting the composed line back:
+
+```
+found "switched" in "This project is already open in another Tekstide window.
+It has been asked for your attention. It has switched to this window."
+```
+
+The catalog-only version would have passed that silently. **That closes review 492's gap in the one
+place D9 exists to protect**, by reading what the view composes rather than what the catalog holds —
+and re-running the original D9 ablation on the new path, to confirm the guard still catches what it
+used to, is the check that distinguishes a moved assertion from a kept one.
+
+`holder_pid` now reaches `stderr` through `log_project_open_blocked`, consumed from every call site
+that previously stored it unread. D8 reads *"addresses"* rather than *"names"*, with the reasoning
+in the RFC rather than only in two doc comments. Gate: `759 + 19 + 1132`, 0 fixture entries.
+
+**Carried to the candidate: the live capture.** Deferred on my own ruling at review 517, for a
+desktop I checked myself. It is the last unproven thing in this RFC.
+
 ## Whole-RFC
 
 - [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
