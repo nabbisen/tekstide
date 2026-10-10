@@ -281,6 +281,46 @@ next person inherits the reason.** Gate: `758 + 19 + 1128`, 0 fixture entries.
       `rfcs/delivery-plan.md`'s own "Implemented" table, Project lifecycle row: names the real
       `flock` and the real `AF_UNIX` knock, not "a lock exists now."
 
+### Required at review 517
+
+Strong slice. **The round trip is the part I would keep**: the holder reporting
+`ATTENTION_RECEIVED` on its own listener proves both ends, where asserting `connect()` returned
+`Ok` would have proved only that a socket existed. Both ablations were run on the committed tree.
+The enumeration test catching a literal duplicate call site in `main.rs` is the house pattern
+working. D9's wording is right and for the right reason: *"has been asked for your attention"*
+claims **this** process's own action and nothing about the other end. Gate: `759 + 19 + 1132`,
+0 fixture entries.
+
+- [ ] **`holder_pid` is justified as "a diagnostic" and nothing diagnoses with it.** It is written
+  into `ProjectOpenBlockedNotice` at three call sites and **never read again** — not rendered, not
+  logged, not traced (grepped). A field kept for a purpose it does not serve is the shape review 490
+  found in a different guise: a value whose stated reason is not the one holding it up. **Give it a
+  consumer or remove it** — writing the blocked pid to `stderr` beside the existing crash-detection
+  line would be a real diagnostic and costs one line.
+
+- [ ] **D8 says "names the instance that holds it" and the product does not — and the wording is
+  mine to fix.** Your reading is right and I agree with it: a raw pid means nothing to a user, and
+  the knock addressing the correct holder is what matters. But that resolution currently lives in
+  two doc comments, while the RFC still says something the UI deliberately does not do. **Amend D8**
+  to say the holder is *addressed*, not named to the user, and why. A decision a reader can only
+  find by reading the implementation is not recorded.
+
+- [ ] **The wording guard reads the catalog, not the view.** `state.catalog.get("project-board-open-blocked")`
+  proves the *string* carries none of the forbidden words. The view at `shell.rs:9956` inserts that
+  string verbatim, so today the two are equivalent — **but nothing holds that**, and a later edit
+  composing it with other text would keep the test green while the screen claimed a switch. This is
+  review 492's gap again, in the one place D9 exists to protect. Either assert on whatever the view
+  composes, or state in the test that it is a string-level guard and the view placement is covered
+  only by the capture.
+
+- [ ] **The live capture: deferral accepted, required before the candidate.** I checked the desktop
+  myself rather than ruling on it abstractly — six windows, the focused one not ours, **including
+  the owner's own browser windows**. Declining was correct and is what this project's own
+  "verify focus before every interaction" discipline is for; disclosing it rather than rushing or
+  claiming it is what made the judgement reviewable. **It is still the only thing that proves the
+  view places this message**, per the item above, so it moves to the candidate rather than being
+  dropped.
+
 ## Whole-RFC
 
 - [ ] The colour-alone, i18n completeness and internal-identifier scans still pass.
