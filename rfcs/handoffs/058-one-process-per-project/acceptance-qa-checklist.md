@@ -435,6 +435,48 @@ changelog was not written incrementally this slice) and one real pre-existing dr
 along the way (RFC-027's stale `rfcs/accepted/` reference). **`0.34.0` is recommended to the
 owner.**
 
+### Required at review 519
+
+The candidate is otherwise verified: version, pin and `Cargo.lock` at `0.34.0`; `cargo package
+--workspace` verifying both crates with the packaged archive naming `tekstide-core 0.34.0`; audit
+matching the register's three rows; no accesskit; gate `759 + 19 + 1132`, 0 fixture entries. The
+capture is clean — the real sentence on a real screen, one throwaway project under `/dev/shm`,
+nothing of the owner's in frame. **Fixing the handoff-pack frontmatter because it was stale rather
+than because a test would catch it**, and fixing `local-data-and-privacy.md`'s RFC-027 drift found
+by the both-directions read, are both the habit working on things nothing was watching.
+
+- [ ] **A launcher-started user is told nothing on screen.** You found this and called it "not a
+  bug — D6 is still satisfied, the same `stderr` shape every other consumer gets." **It is not the
+  same shape.** The three GUI call sites set `project_open_blocked_notice` *and* log; the CLI path
+  logs only. So `tekstide /path/to/held/project` from a desktop launcher, a file manager, or a
+  terminal the user then stops looking at opens a window with **an empty board and no explanation**
+  — the app silently did not do the thing it was asked to do, which is the exact class this RFC and
+  RFC-066 both exist to end.
+
+  **"No `State` to set it on" is the current structure, not an obstacle**: `State::new` already
+  takes `instance_marker`, threaded out of `boot()` for precisely this reason at RFC-027 PR-027-A.
+  Carry the blocked outcome the same way.
+
+  This is also the *likeliest* way a user meets this feature at all, and it is the one path the
+  capture could not show — which is worth noticing about the capture as much as about the code.
+
+**Observation, not required.** The capture puts the notice at the **bottom edge** of the window
+while the row the user activated is at the top, and nothing else on screen changes — the project
+does not open, so the board looks identical apart from one line ~1200px away. I did not establish
+whether that matches where other board notices render, so I am not calling it inconsistent; I am
+saying the capture made it visible and it is worth a judgement before release.
+
+**Accepted as disclosed: the changelog was not written incrementally.** Leaving the box unticked
+rather than ticking it to match different words is the right call, and disclosing it is most of what
+the box is for. The entry itself is complete and was re-read against the finished set. **I am not
+asking for rework** — reconstructing an incremental history after the fact would be a worse lie than
+the missed habit.
+
+**Answering your question: the publish is mine.** Tag, `cargo publish --workspace`, the
+`release-0.34.0.md` record and `post-publish-check.sh` for `0.34.0` and `0.33.0` are the
+architect's, on the owner's authorisation, exactly as for `0.30.0` through `0.33.0`. You were right
+not to guess.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
