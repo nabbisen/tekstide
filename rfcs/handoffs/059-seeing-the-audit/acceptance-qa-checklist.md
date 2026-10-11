@@ -63,11 +63,67 @@ slice's own run in its review request and its `qa-evidence.md`.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] **Accepted.**
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
+
+Accepted 2026-10-12 as the `0.35.0` candidate, across review rounds **527 through 534**. Every
+required item raised in those rounds is closed; nothing is carried as a condition of acceptance.
 
 Reviewer notes:
 
 ```text
+What acceptance rests on -- the reviewer's own measurements, not the implementer's reports:
+
+  * Full release-checklist gate re-run by the reviewer at review 534: fmt clean, clippy
+    --workspace --all-targets --all-features -D warnings 0 diagnostics, cargo test --doc
+    --workspace clean, cargo test --workspace --all-targets --no-fail-fast giving
+    779 + 22 + 1135 with 0 failed, 0 fixture entries in a fresh short /dev/shm TMPDIR, and
+    the owner's real state directory at 0.
+  * Both packages built, smoke-checked (no stray .rs, LICENSE/NOTICE/README present, no
+    .git-exclude or agent config) and the published-shape manifest read back: the app pins
+    tekstide-core = "0.35.0", not "0". cargo publish --workspace --dry-run --locked clean.
+  * Unpacked tekstide-core-0.35.0, all [[bin]]s built first: 1134 passed, 1 failed, that one
+    being the documented real_repository_filesystem_scan_cost_headless_benchmark, which
+    refuses to report a number for something that is not a repository.
+  * cargo audit: 0 vulnerabilities; three allowed warnings (paste, ttf-parser, lru) matching
+    dependency-advisories.md exactly.
+  * The compile guard ablated by the reviewer in a disposable git worktree: a thirteenth
+    AuditEventFamily produces E0004 naming family_cycle_index, so a new family cannot be
+    silently omitted from the filter cycle.
+  * The first-creation race ablated by the reviewer, twice: 5 of 5 failures with the lock's
+    call site removed, 0 fixture directories leaked across those failures once the drop
+    guard landed (6 leaked from 6 failures before it).
+
+Defects found in review and fixed before acceptance:
+
+  * 527 -- the documented reproduction recipe did not work: `--lib` does not build [[bin]]
+    targets, so the probe was missing and the test failed for an unrelated reason, reading
+    as a successful reproduction both before and after the fix.
+  * 527 -- fixture cleanup was a trailing call, not a drop guard; measured, six failing runs
+    leaked six directories.
+  * 527 -- the pre-fix proof was taken on a hand-dirtied tree with a git checkout restore,
+    the exact practice ablate.sh exists to replace. Redone in a worktree.
+  * 530 -- the view never said what it was. Approval History discloses that it is lossy; the
+    audit view had no equivalent, so two legitimately disagreeing lists had nothing
+    explaining the difference. Now the first line of the surface.
+  * 530 -- ALL_FAMILIES/ALL_OUTCOMES were hand-maintained arrays of a thing PR-059-A had
+    just made compile-time exhaustive. Now guarded by index functions the cycle navigates
+    through, so the array and the match cannot disagree.
+  * 532 -- purging audit records also revokes trust, because trust is decided by querying
+    the exact rows a purge deletes, and the revocation lands at the next project open rather
+    than immediately. The confirmation described the act as deleting a log and said nothing
+    about it. Now stated in the dialog, both scopes, and in the book.
+
+Deliberately out of scope, recorded rather than fixed:
+
+  * REQ-SEC-023's log half -- a transcript holds raw run output, and a content scanner that
+    misses one secret is worse than no claim. RFC-068, reserved 2026-10-11, not started.
+  * The audit directory's permission modes (0755/0644 under a 0700 ~/.local/state), and the
+    mouse-only reachability of several surfaces' controls. rfcs/future-work.md.
+
+A fourth failure shape of the creation race, UnsupportedApplication, was found by the
+reviewer's own ablation after the fix had landed: the loser opens a database the winner has
+created but not yet stamped, and reads it as foreign. Recorded because it is the clearest
+argument for why the lock covers the whole exists()-through-pragmas sequence.
 ```
