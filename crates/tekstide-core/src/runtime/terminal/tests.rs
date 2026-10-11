@@ -827,7 +827,12 @@ fn cleanup_root(root: PathBuf) {
 /// those are exactly the ones a flaky assertion above used to be able to skip past. `Deref`
 /// to `Path` so a `&CleanupOnDrop` passes anywhere `&root: PathBuf` already did, with no call
 /// site needing its own type to change.
-struct CleanupOnDrop(PathBuf);
+///
+/// `pub(crate)`, review 527: `audit::tests::first_creation_race` needed the identical
+/// drop-guard shape for a different fixture directory, in the same crate -- a reuse, not the
+/// cross-crate copy review 524 Required 3 made for `rfc_docs_invariants.rs` (a different test
+/// binary, where this type is unreachable regardless of visibility).
+pub(crate) struct CleanupOnDrop(pub(crate) PathBuf);
 
 impl std::ops::Deref for CleanupOnDrop {
     type Target = Path;

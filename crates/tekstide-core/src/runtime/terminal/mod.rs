@@ -4,7 +4,7 @@ mod reader;
 mod security;
 mod termination;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod types;
 
 pub use launch::{LinuxTerminalRuntime, TerminalLaunchError, TerminalRuntimeError};

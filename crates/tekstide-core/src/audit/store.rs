@@ -78,10 +78,15 @@ impl AuditStore {
         // kernel lock, blocking rather than polling, has no such schedule to
         // synchronise: the loser is woken exactly once, when the winner
         // releases it, already knowing the outcome rather than guessing when
-        // to look again. Held only across the decide-and-create section below,
-        // the same "a lock for one moment, not the store's own lifetime" shape
-        // `project_lock`'s own doc (RFC-058) uses to explain why that lock is
-        // different from this one.
+        // to look again. A function-local, so it is held until `open_internal`
+        // returns -- through the migration branch below too, not narrowed to
+        // only the decide-and-create half, which review 527 confirmed is
+        // *safer* than a narrower hold would be: dropping it the moment the
+        // decision is made would hand a concurrent migration the identical
+        // race this lock exists to close, one step later. Still "a lock for
+        // one moment, not the store's own lifetime" -- `project_lock`'s own
+        // doc (RFC-058) explains why that distinction is the one that matters
+        // here, not "one specific line or two."
         let _creation_guard = lock_creation_section(&storage_path)?;
 
         let existed = storage_path.database_file().exists();

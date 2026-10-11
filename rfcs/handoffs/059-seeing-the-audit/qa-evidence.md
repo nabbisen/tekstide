@@ -70,25 +70,33 @@ repeated runs:
 **A real, disclosable limitation of the reproduction's own reliability**: run through
 `rfcs/handoffs/ablate.sh` (which invokes `cargo test --workspace --all-targets`, exercising the
 whole suite concurrently), the race did not reproduce across five separate ablation attempts, even
-with the regression test strengthened to 20 iterations per run. Run in **isolation**
-(`cargo test -p tekstide-core --lib two_real_processes_racing_to_create_the_store_both_succeed`,
-nothing else from the workspace running concurrently), it failed reliably, 10/10. The cause is the
-inverse of an ordinary flake: this specific livelock needs *precise, low-noise timing* to manifest,
-and a full-workspace test run's own concurrent activity perturbs that timing enough to mask it.
-Documented here rather than silently relying on a gate that, for this one test, is not the
-instrument that actually proves the fix — the isolated run is.
+with the regression test strengthened to 20 iterations per run. Run in **isolation** --
+`cargo build -p tekstide-core --bins` (required first: `--lib` alone does not build `[[bin]]`
+targets, so without it the run fails with "expected the audit_store_create_probe binary at
+.../target/debug/audit_store_create_probe" on *both* sides of the fix, which reads exactly like the
+defect itself and is not — review 527 caught this in the first version of this recipe), then
+`cargo test -p tekstide-core --lib two_real_processes_racing_to_create_the_store_both_succeed` --
+it failed reliably. The cause is the inverse of an ordinary flake: this specific livelock needs
+*precise, low-noise timing* to manifest, and a full-workspace test run's own concurrent activity
+perturbs that timing enough to mask it. Documented here, in `ablate.sh`'s own header (commit
+`04471ed`), and in the test's own doc comment, not only one of the three -- a gate that, for this
+one test, is not the instrument that actually proves the fix.
 
 ### The fix
 
 A real OS `flock`, the same primitive `project_lock` (RFC-058) already established for this
 codebase, but **blocking** (`std::fs::File::lock`) rather than `try_lock`: this lock is held for one
-moment (deciding whether to create the schema or open an existing one), not for the store's own
-lifetime, so refusing is wrong where RFC-058's own lock correctly refuses. `lock_creation_section`
-(`store.rs`) acquires `<audit_dir>/.create.lock` before the `exists()` check and holds it through
-either branch of the decision, releasing it (by dropping the `File`) before `open_internal` returns.
-A real kernel wait queue, not a retry schedule: the loser is woken exactly once, when the winner
-releases the lock, already knowing a store exists rather than guessing when to look again — which is
-what closes the livelock, not only the "already exists" conflict the RFC's own prose anticipated.
+moment of the store's own open — a single `open_internal` call, released when it returns — not for
+the store's own operating lifetime, so refusing is wrong where RFC-058's own lock correctly refuses.
+`lock_creation_section` (`store.rs`) acquires `<audit_dir>/.create.lock` before the `exists()` check
+and holds it as a function-local for the rest of `open_internal`, releasing it (by dropping the
+`File`) only when that function returns — through the migration branch too, not narrowed to only the
+decide-and-create half, which is *safer* than a narrower hold: dropping the lock right after the
+decision would hand a concurrent migration the identical race this lock exists to close, one step
+later. A real kernel wait queue, not a retry schedule: the loser is woken exactly once, when the
+winner releases the lock, already knowing a store exists rather than guessing when to look again —
+which is what closes the livelock, not only the "already exists" conflict the RFC's own prose
+anticipated.
 
 **Ablated, in isolation** (the only invocation shown above to reproduce the race at all): reverting
 `lock_creation_section`'s own call site in `store.rs` (clean tree, manual revert matching
