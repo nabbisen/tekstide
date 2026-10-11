@@ -424,3 +424,46 @@ capture's own job here is narrower, confirming the buttons exist and render with
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `778 + 22 + 1135`, 0 failed, 0 fixture
 entries.
+
+### Review 532 required fix — purge also revokes trust, and the dialog did not say so
+
+**The chain, verified independently rather than taken on trust**: `AuditStore::
+has_applied_trust_grant` (`store.rs`) decides trust by querying `audit_events` for the newest
+`TrustChange`/`Applied`/`TrustGrant` row; `purge_records` (`purge.rs`) is `DELETE FROM
+audit_events`, globally or `WHERE project_id = ?1` — the same rows; `verify_restored_trust_against`
+(`shell.rs:7735`) re-checks every currently-trusted project against the store on every real
+project-open call site and demotes one whose row is gone (`deny_unverified_trust`, confirmed by
+reading it directly: sets `WorkspaceTrust::Restricted`). So a purge — per-project or global — also
+revokes trust for whatever it deletes the row for, and the confirmation described the act purely
+as deleting a log.
+
+**Fixed with a new, conditional notice, not a blanket warning.** `AuditPurgeModal::revokes_trust`
+is captured at dialog-open time (the same "captured, not re-read" shape `record_count` already is):
+`true` only for `Project` scope when that specific project is trusted *right now* --
+`audit-view-purge-dialog-trust-notice-project` renders only then, since an already-untrusted
+project's purge has nothing to revoke and a notice there would claim a consequence that does not
+happen. `Global` scope states the consequence unconditionally
+(`audit-view-purge-dialog-trust-notice-global`): a closed, currently-trusted project's state cannot
+be checked from here, and the claim is true regardless. Both say the revocation is not immediate --
+the already-open session keeps working until trust is next re-checked -- matching what
+`verify_restored_trust_against`'s own call sites actually do.
+
+**Proven, not only worded.** `purging_a_trusted_projects_records_demotes_it_once_trust_is_
+reverified` is the mechanism end to end against a real store: grants trust through the real
+dialog flow, opens the real purge dialog and asserts the trust notice is present, confirms the
+purge, asserts the **already-open** session is still `Trusted` (not demoted synchronously), then
+calls `verify_restored_trust` directly (the same function every real open call site calls) and
+asserts the project is demoted. `audit_purge_dialog_body_names_the_scope_count_and_
+irreversibility` was extended to cover both the present case (trusted project) and the absent case
+(already-untrusted project, global scope's unconditional case).
+
+**The book corrected in the same commit**: the new purge paragraph now says the consequence
+explicitly, ties it to the page's own existing "the audit store is authoritative" claim rather
+than introducing a second, disconnected fact, and says the revocation is delayed (next open), not
+immediate.
+
+### Gate, re-run after the required fix
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
+full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `779 + 22 + 1135`, 0 failed, 0 fixture
+entries.

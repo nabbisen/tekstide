@@ -84,10 +84,16 @@ What it records, and what its schema makes impossible:
 purge the audit store, and that deleting the `audit/` directory was the only way to reset it. That
 is no longer true. The Audit view (`Ctrl+Alt+V`, or the "Audit" button in the top bar) can purge
 either one project's own audit records or every project's, each behind a confirmation that names
-its scope and says the act cannot be undone. The number shown afterwards is the real count of rows
-the deletion removed, not a count taken before it ran. Deleting the `audit/` directory by hand
-still works too, and remains the only way to remove the store's own file entirely rather than its
-rows — the in-app purge only ever deletes records, never the database file itself.
+its scope and says the act cannot be undone. **Purging a project's audit records also revokes its
+trust**, because the trust record this page already describes above (*"the audit store is
+authoritative"*) is itself an audit record: once it is gone, that project is no longer trusted, and
+Tekstide asks for trust again the next time the project is opened. The already-open project keeps
+working as it was until then — the revocation is not immediate, only unrecoverable. A global purge
+does the same for every currently trusted project, open or closed. The number shown afterwards is
+the real count of rows the deletion removed, not a count taken before it ran. Deleting the `audit/`
+directory by hand still works too, and remains the only way to remove the store's own file
+entirely rather than its rows — the in-app purge only ever deletes records, never the database
+file itself.
 `TEKSTIDE_TERMINAL_DEMO` still exists for diagnostic use, but `Ctrl+Alt+T` is what ordinary use
 reaches, and it opens the same store.
 

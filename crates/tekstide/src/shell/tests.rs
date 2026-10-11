@@ -22809,14 +22809,15 @@ fn audit_purge_dialog_body_names_the_scope_count_and_irreversibility() {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
     let project_id = tekstide_core::project::ProjectId::new_uuid();
 
-    let project_modal = AuditPurgeModal {
-        target: AuditPurgeTarget::Project(project_id),
+    let trusted_project_modal = AuditPurgeModal {
+        target: AuditPurgeTarget::Project(project_id.clone()),
         record_count: 3,
+        revokes_trust: true,
         focus: AuditPurgeButton::Cancel,
     };
     let project_body = strip_isolates(vec![audit_view::purge_dialog_body(
         &catalog,
-        &project_modal,
+        &trusted_project_modal,
     )])
     .remove(0);
     assert!(
@@ -22831,9 +22832,39 @@ fn audit_purge_dialog_body_names_the_scope_count_and_irreversibility() {
     );
     assert!(project_body.contains('3'), "got: {project_body}");
 
+    // Review 532 Required: purging a project's audit records also
+    // revokes its trust (`has_applied_trust_grant` reads the same rows
+    // the purge deletes) -- the dialog must say so before the user
+    // presses Purge, not leave it to be discovered at the next open.
+    let trust_notice = audit_view::purge_dialog_trust_notice(&catalog, &trusted_project_modal)
+        .expect("a currently trusted project's purge dialog must carry the trust notice");
+    assert!(
+        trust_notice.to_lowercase().contains("trust"),
+        "got: {trust_notice}"
+    );
+    assert!(
+        trust_notice.to_lowercase().contains("no longer be trusted"),
+        "the notice must name the consequence plainly, got: {trust_notice}"
+    );
+
+    // Absent when this specific project is not currently trusted --
+    // nothing is actually revoked, so nothing is claimed.
+    let untrusted_project_modal = AuditPurgeModal {
+        target: AuditPurgeTarget::Project(project_id),
+        record_count: 3,
+        revokes_trust: false,
+        focus: AuditPurgeButton::Cancel,
+    };
+    assert!(
+        audit_view::purge_dialog_trust_notice(&catalog, &untrusted_project_modal).is_none(),
+        "an already-untrusted project's purge dialog must not claim a revocation that does not \
+         happen"
+    );
+
     let global_modal = AuditPurgeModal {
         target: AuditPurgeTarget::Global,
         record_count: 0,
+        revokes_trust: false,
         focus: AuditPurgeButton::Cancel,
     };
     let global_body =
@@ -22846,6 +22877,14 @@ fn audit_purge_dialog_body_names_the_scope_count_and_irreversibility() {
         global_body.to_lowercase().contains("every project"),
         "the global body must say every project is affected, not just this one, got: \
          {global_body}"
+    );
+    // Global scope states the trust consequence unconditionally (a
+    // closed, currently-trusted project cannot be checked from here).
+    let global_trust_notice = audit_view::purge_dialog_trust_notice(&catalog, &global_modal)
+        .expect("the global purge dialog must always carry the trust notice");
+    assert!(
+        global_trust_notice.to_lowercase().contains("trust"),
+        "got: {global_trust_notice}"
     );
 }
 
@@ -23057,4 +23096,82 @@ fn cancelling_the_audit_purge_dialog_deletes_nothing() {
         state.audit_view.last_purge_for_test().is_none(),
         "declining must not record a purge outcome at all"
     );
+}
+
+/// Review 532 Required, the mechanism itself proven end to end: purging
+/// a trusted project's audit records really does revoke its trust, not
+/// only in the dialog's own words. `has_applied_trust_grant` reads the
+/// exact `TrustChange`/`Applied` row a project-scoped purge deletes, and
+/// `verify_restored_trust_against` is what notices and demotes --
+/// called here directly (the same function every real project-open call
+/// site already calls), since the already-open session itself keeps
+/// working trusted until something re-checks, exactly as the dialog's
+/// own wording says ("the next time this project is opened").
+#[test]
+fn purging_a_trusted_projects_records_demotes_it_once_trust_is_reverified() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("audit-view-purge-demotes-trust"));
+    let (mut state, project_id) = state_with_a_real_project("audit-view-purge-demotes-trust");
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    press_trust_settings_action(&mut state);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "test precondition: the project must be trusted before purging its records"
+    );
+
+    let _ = super::update(
+        &mut state,
+        Message::OpenAuditPurgeDialog(AuditPurgeTarget::Project(project_id.clone())),
+    );
+    match state.modal.as_ref() {
+        Some(ModalContent::AuditPurge(modal)) => assert!(
+            modal_carries_the_trust_notice(&state, modal),
+            "the dialog opened against a trusted project must carry the trust-revocation notice"
+        ),
+        other => panic!("expected the real audit-purge modal, got: {other:?}"),
+    }
+    let _ = super::update(&mut state, Message::AuditPurgePressed);
+
+    // The purge itself does not demote anything synchronously -- the
+    // open session keeps working trusted, exactly as the dialog's own
+    // wording says, until trust is next re-checked.
+    assert_eq!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "the already-open session must not be demoted synchronously by the purge itself"
+    );
+
+    super::verify_restored_trust(&mut state.app_shell, &mut state.audit_health);
+
+    assert_ne!(
+        state
+            .app_shell
+            .state()
+            .project(&project_id)
+            .unwrap()
+            .trust_state()
+            .label(),
+        "Trusted",
+        "re-verifying trust after the purge must demote the project -- the row \
+         has_applied_trust_grant relies on is gone"
+    );
+}
+
+fn modal_carries_the_trust_notice(state: &State, modal: &AuditPurgeModal) -> bool {
+    audit_view::purge_dialog_trust_notice(&state.catalog, modal).is_some()
 }

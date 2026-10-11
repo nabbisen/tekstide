@@ -1710,6 +1710,17 @@ audit-view-purge-dialog-body-global = This permanently deletes { $count ->
     [one] { $count } audit record
    *[other] { $count } audit records
 } recorded across every project, open or closed. This cannot be undone.
+# Review 532 Required: `AuditStore::has_applied_trust_grant` decides trust
+# by querying the exact rows a purge deletes, so this is the consequence
+# the body above does not otherwise say. Project scope: shown only when
+# this specific project is trusted right now (`AuditPurgeModal::
+# revokes_trust`, captured at open time) -- absent otherwise, since there
+# is nothing to revoke. Global scope: shown unconditionally, since a
+# closed, currently-trusted project cannot be checked from here and the
+# claim is true regardless of whether any open project happens to be
+# trusted at this moment.
+audit-view-purge-dialog-trust-notice-project = This project is currently trusted. Purging its audit records removes the record that trust relies on: it will no longer be trusted, and Tekstide will ask you to grant trust again the next time this project is opened.
+audit-view-purge-dialog-trust-notice-global = This also revokes trust for every project that currently has it, open or closed: each one will need to be granted trust again the next time it is opened.
 audit-view-purge-dialog-purge = Purge
 audit-view-purge-dialog-cancel = Cancel
 audit-view-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.

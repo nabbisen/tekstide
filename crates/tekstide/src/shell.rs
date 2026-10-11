@@ -375,10 +375,21 @@ pub(crate) enum AuditPurgeTarget {
 /// (`AuditStore::count_matching`), the same "captured, not re-read" shape
 /// [`TranscriptPurgeModal`] already uses -- what the confirmation states
 /// is exactly what was true when the user chose to open it.
+///
+/// Review 532 Required: `AuditStore::has_applied_trust_grant` decides
+/// trust by querying the exact rows a purge deletes, and
+/// `verify_restored_trust_against` re-checks every restored project
+/// against the store, demoting one whose `TrustChange`/`Applied` row is
+/// gone. A purge therefore also revokes trust -- `revokes_trust` is
+/// `true` only for `Project` scope when that project is trusted *right
+/// now*, captured the same "at open time" way `record_count` is, so the
+/// dialog never claims a consequence that project scope does not
+/// actually have.
 #[derive(Debug)]
 pub(crate) struct AuditPurgeModal {
     target: AuditPurgeTarget,
     record_count: u64,
+    revokes_trust: bool,
     focus: AuditPurgeButton,
 }
 
@@ -14367,6 +14378,20 @@ mod audit_view {
             super::AuditPurgeTarget::Project(id) => Some(id.clone()),
             super::AuditPurgeTarget::Global => None,
         };
+        // Review 532 Required: captured here, at open time, the same way
+        // `record_count` is -- `has_applied_trust_grant` decides trust
+        // from the exact rows this purge deletes, so a currently
+        // trusted project loses that trust the moment the deleted row
+        // is next checked (`verify_restored_trust_against`, on this
+        // project's next open).
+        let revokes_trust = match &target {
+            super::AuditPurgeTarget::Project(id) => {
+                state.app_shell.state().project(id).is_some_and(|project| {
+                    project.trust_state() == tekstide_core::project::WorkspaceTrust::Trusted
+                })
+            }
+            super::AuditPurgeTarget::Global => false,
+        };
         let query = AuditQuery {
             project_id,
             family: None,
@@ -14386,6 +14411,7 @@ mod audit_view {
         state.modal = Some(super::ModalContent::AuditPurge(super::AuditPurgeModal {
             target,
             record_count,
+            revokes_trust,
             focus: super::AuditPurgeButton::Cancel,
         }));
     }
@@ -14441,6 +14467,31 @@ mod audit_view {
         catalog.get_with_args(key, &CatalogArgs::new().number("count", modal.record_count))
     }
 
+    /// Review 532 Required: `AuditStore::has_applied_trust_grant` decides
+    /// trust from the exact rows a purge deletes, so this is not a
+    /// second, unrelated fact -- it is the consequence the body above
+    /// does not otherwise mention. Global scope states it unconditionally
+    /// (any project currently trusted, open or closed, is affected, and
+    /// closed ones cannot be checked from here); project scope states it
+    /// only when `modal.revokes_trust` is true, the same "absent when
+    /// not true" shape `transcript_purge_still_being_written_notice`
+    /// already uses, rather than warning about a consequence this
+    /// specific purge does not actually have.
+    pub(super) fn purge_dialog_trust_notice(
+        catalog: &super::Catalog,
+        modal: &super::AuditPurgeModal,
+    ) -> Option<String> {
+        match modal.target {
+            super::AuditPurgeTarget::Project(_) if modal.revokes_trust => {
+                Some(catalog.get("audit-view-purge-dialog-trust-notice-project"))
+            }
+            super::AuditPurgeTarget::Global => {
+                Some(catalog.get("audit-view-purge-dialog-trust-notice-global"))
+            }
+            super::AuditPurgeTarget::Project(_) => None,
+        }
+    }
+
     pub(super) fn purge_dialog_view<'a>(
         state: &'a State,
         modal: &'a super::AuditPurgeModal,
@@ -14455,13 +14506,18 @@ mod audit_view {
             .on_press(on_press)
         };
 
-        let lines: Vec<Element<'_, Message>> = vec![
+        let mut lines: Vec<Element<'_, Message>> = vec![
             text(purge_dialog_title(&state.catalog, modal))
                 .size(state.theme.font_size_heading())
                 .into(),
             text(purge_dialog_body(&state.catalog, modal))
                 .size(state.theme.font_size_body())
                 .into(),
+        ];
+        if let Some(notice) = purge_dialog_trust_notice(&state.catalog, modal) {
+            lines.push(text(notice).size(state.theme.font_size_body()).into());
+        }
+        lines.extend([
             button_line(
                 super::AuditPurgeButton::Purge,
                 "audit-view-purge-dialog-purge",
@@ -14477,7 +14533,7 @@ mod audit_view {
             text(state.catalog.get("audit-view-purge-dialog-hint"))
                 .size(state.theme.font_size_status())
                 .into(),
-        ];
+        ]);
         super::modal_dialog_box_split(state, lines, 3)
     }
 
