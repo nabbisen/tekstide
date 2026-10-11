@@ -1,10 +1,11 @@
 # RFC-059: Seeing The Audit
 
-Status: **Proposed 2026-10-11.** `0.35.0`, pre-1.0. `REQ-SEC-023` (in part — see *Non-goals*),
-`REQ-SEC-025` (untracked until now), and the gap that **nothing renders the audit store**. Reserved
-as number 059 on 2026-09-24 under the title *"Seeing The Audit, And Redacting It"*; this RFC
-proposes **dropping the second half** and says why. Decisions D1–D6 and one open question are for
-the owner, on acceptance.
+Status: **Accepted by the human owner 2026-10-11.** D1–D6 as written; the split accepted; **the
+open question answered by the acceptance itself** — see *Decided on acceptance*. Proposed
+2026-10-11. `0.35.0`, pre-1.0. `REQ-SEC-025` (untracked until now), `REQ-SEC-023` in part (see
+*Non-goals*), and the gap that **nothing renders the audit store**. Reserved as number 059 on
+2026-09-24 under the title *"Seeing The Audit, And Redacting It"*; the second half is now
+**RFC-068**.
 
 ## Summary
 
@@ -109,7 +110,7 @@ reader who is shown a list concludes that the list is what happened.
   D4's filters.
 - **PR-059-C — purge, reachable.** Per-project and global, with the receipt shown.
 
-## Open question for the owner, to decide on acceptance
+## Open question as it was put to the owner
 
 **Where does the audit view live, and who can reach it?**
 
@@ -128,3 +129,24 @@ board. Three options, and I do not think the choice is obvious:
 My recommendation is **(1)**: it is the only one whose scope matches the data's scope, and under
 the standing criterion that a user must not be able to misunderstand, a per-project framing over an
 app-wide store is the option most likely to mislead.
+
+## Decided on acceptance (2026-10-11)
+
+**How the open question was answered matters, and is recorded rather than smoothed over.** The
+owner replied *"Accepted."* without naming an option. The only reading that leaves nothing
+undecided is that the recommendation stands, so:
+
+- **D7. The audit view is a top-level destination reached from the Project Board** — option (1).
+  Decided by acceptance of the recommendation, not by a separate instruction. If the owner meant
+  otherwise, this is the line to correct, and correcting it before PR-059-B starts costs nothing.
+
+**The split is accepted.** `REQ-SEC-023`'s log half leaves this RFC and becomes **RFC-068, Redacting
+What A Run Prints**, reserved 2026-10-11. This RFC keeps the part that is already true
+structurally, and claims nothing about transcript content.
+
+**`REQ-SEC-025` is now tracked**, for the first time, by this RFC's D5.
+
+**D6 stands and is load-bearing.** Both recorded store defects — the silently dropped write and the
+first-creation race — are in scope, and PR-059-A lands before any view is built. The order is the
+decision: a view over a store that can silently fail to write is a view that can be confidently
+wrong, and finding more dropped writes after designing the view would be the expensive order.

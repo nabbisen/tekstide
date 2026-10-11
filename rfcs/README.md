@@ -25,7 +25,10 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 059 | [Seeing The Audit](./proposed/059-seeing-the-audit.md) | **Proposed 2026-10-11.** `0.35.0`. D1–D6 and one open question for the owner, on acceptance. Proposes dropping the reserved title's *"And Redacting It"* half into its own RFC |
+
+*(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
+folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+
 
 ## Accepted
 
@@ -35,8 +38,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is accepted and not yet closed. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 059 | [Seeing The Audit](./accepted/059-seeing-the-audit.md) | **Accepted 2026-10-11.** `0.35.0`. D1–D7 decided; `REQ-SEC-023`'s log half split out as RFC-068. Handoff pack: [`059-seeing-the-audit/`](./handoffs/059-seeing-the-audit/README.md) |
 
 ### Reserved numbers — check this before authoring
 
@@ -47,6 +49,7 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | RFC | Title | Milestone |
 | --- | --- | --- |
 | 028 | Cross-Platform Support | M14 |
+| 068 | Redacting What A Run Prints | pre-1.0 |
 | 029 | Documentation, CI, and Release Automation | M14 |
 | 060 | Command Approval A User Can Reach | pre-1.0, **1.0 blocker** |
 | 061 | A Bound On Combining Marks Per Cell | terminal boundary |
