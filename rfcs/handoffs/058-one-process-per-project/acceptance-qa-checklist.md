@@ -649,6 +649,43 @@ written *"candidate, not yet published"* correctly — this was a departure from
   clean, three consecutive full-workspace runs (`763 + 21 + 1132`, 0 fixture entries). Commit
   `02b1a81`, pushed.
 
+### Required at review 523 — three items on the new check, found by re-running it rather than reading it
+
+The reviewer re-ran the ablation independently (`763 + 21 + 1132`, 0 compile errors) and confirmed
+it failed on the real defect with the right remedy. Then went further than reading the new check:
+ran it.
+
+- [x] **The check was one-directional.** A planted `release-0.34.0.md` with all seven sites still
+  correctly saying "candidate" passed 21/21 — a shipped release with no document admitting it,
+  the exact `0.30.0` failure mode review 522's own sibling-check comment already names. **Done**:
+  `newest_release_status_disagrees_with_the_publish_record` (renamed, same function) now checks
+  both branches — claims released with no record, *and* a real record with the section still
+  saying "candidate" — and returns the one that applies. `the_publish_record_check_catches_a_planted_violation_in_either_direction`
+  proves both: the second direction's own assertion (`found.expect(...)`) is itself the red-first
+  proof, the same shape the first direction's test already had.
+- [x] **The older check (`readme_release_state_disagreements`) told the reader to spread the
+  falsehood.** In the one-directional ablation, two correct `rfcs/README.md` rows were named as the
+  defect and the message said to make them agree with the lying changelog — *"the changelog wins"*
+  stopped being true the moment something could check the changelog itself. **Done**: a new
+  `unverified` parameter (populated by `rfc_ids_the_newest_section_cannot_be_trusted_about`, which
+  is empty unless the new bidirectional check itself found a disagreement) redirects the message to
+  *"THE CHANGELOG IS THE DOCUMENT TO FIX, not this row"* for exactly the ids the newest section
+  cannot be trusted about, leaving every other row's message unchanged. New test
+  `an_unverified_changelog_claim_tells_the_reader_to_fix_the_changelog_not_the_row` reproduces the
+  reviewer's own ablation scenario directly and asserts the old unconditional wording is gone.
+- [x] **The new test's cleanup was a call after two asserts, not a drop guard** — any failure above
+  it would leak the fixture directory and fail the gate twice. **Done**: a small `CleanupOnDrop`
+  local to this test file (the same shape `runtime::terminal::tests::CleanupOnDrop` already
+  established in `tekstide-core`, copied rather than reused across the crate boundary, per the
+  reviewer's own instruction). Not ablated by forcing a panic — Rust's own unwind-on-panic guarantee
+  (confirmed no `panic = "abort"` override anywhere in this workspace) is what a `Drop` impl rests
+  on, the same standard the reviewer applied to their own finding rather than a reason to withhold
+  one here.
+
+  `rfc_docs_invariants` is now 22/22 (one test renamed, one added). `cargo fmt`, `clippy -D
+  warnings`, doctests: clean. Three consecutive full-workspace runs: `763 + 22 + 1132`, 0 fixture
+  entries. Commit `7d77027`, pushed.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
