@@ -22,4 +22,11 @@ pub enum AppCommand {
     /// already-running run -- this command is only about landing on the
     /// live session right after starting it.
     LaunchAgentRun,
+    /// RFC-059 D7: lands on `AppRoute::AuditView` unconditionally -- no
+    /// active-project gate, unlike `OpenActiveProjectSurface`, since the
+    /// audit store is app-wide. The real query against the store is I/O
+    /// `tekstide-core` has no business performing; the GUI crate's own
+    /// `open_audit_view` dispatches this and loads the first page
+    /// alongside it, the same split `LaunchTerminal` already uses.
+    OpenAuditView,
 }

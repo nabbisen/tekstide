@@ -86,6 +86,16 @@ never knowable in advance, which is itself the argument for the fix's own error-
   argument for why the lock has to cover the whole `exists()`-through-pragmas sequence, not only the
   `CREATE TABLE` statement.
 
+**One bound on the fix, confirmed by review 529**: `lock_creation_section` serialises processes
+that take the lock — it does not make the file's on-disk state atomic. A `0.34.0` or earlier
+process has no such lock at all (the reviewer's own ablation removed exactly that line to reproduce
+the race), so two different installed versions racing to create the store on one machine still
+race, and the older one cannot participate; and anything else reading the file mid-creation — a
+backup tool, `sqlite3` at a prompt — can still observe the torn state. Neither is a defect in the
+fix: a cross-version guarantee would need the older binary to cooperate, which is impossible by
+construction, and RFC-058's own project lock has the identical property. The guarantee is "between
+participants", not "the file is never torn".
+
 **A real, disclosable limitation of the reproduction's own reliability**: run through
 `rfcs/handoffs/ablate.sh` (which invokes `cargo test --workspace --all-targets`, exercising the
 whole suite concurrently), the race did not reproduce across five separate ablation attempts, even
@@ -150,3 +160,144 @@ do confirm nothing else regressed).
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `763 + 22 + 1134`, 0 failed, 0 fixture
 entries. No UI touched — `crates/tekstide/src/` has no diff in this slice.
+
+## PR-059-B — the view
+
+### D7: a new top-level destination, not a `ProjectOpenSurface`
+
+`AppRoute` gained a third variant, `AuditView`, sibling to `ProjectBoard`/`ActiveProjectWorkspace`
+(`crates/tekstide-core/src/route.rs`) — not a `ProjectOpenSurface`, since every one of those requires
+`AppState::active_project_mut()` to be `Some`, and the audit store is app-wide. `AppCommand::
+OpenAuditView` dispatches to it unconditionally (`ApplicationShell::dispatch`, `tekstide-core/src/
+shell.rs`); `NavigationAction::OpenAuditView` carries `Ctrl+Alt+V` in `KeybindingPolicy::linux_mvp()`
+(`navigation.rs`), checked by its own mechanical collision test
+(`open_audit_view_shortcut_is_a_candidate_that_collides_with_no_other_rule`, `navigation/tests.rs`).
+The real control is the top bar's own new "Audit" button (`top_bar_title_and_actions_row`), always
+shown — the same no-active-project-required shape `Help`'s own button already has, not `Trust
+Settings`'s conditional one.
+
+Opening the route alone performs no I/O (`AppCommand::OpenAuditView`'s own `dispatch` arm is a pure
+route change); the real query is `open_audit_view`'s own job, special-cased in `update_message`
+alongside `LaunchTerminal`/`LaunchAgentRun` for the identical reason — real I/O the route change
+itself cannot perform.
+
+### D4: filters are exactly `AuditQuery`'s own fields
+
+`project`, `family`, `outcome`, `operation` — nothing else. No free-text input exists anywhere in
+this surface: `i18n::enforcement::no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate`
+covers every `text(...)` call in the crate including this module's, and the project filter cycles
+only through currently-open projects (never a typed id), consistent with §5's own "do not reconstruct
+a path for a project the board no longer shows." The `operation` filter has no dropdown of its own —
+it is reached only by clicking a shown record's own "View full operation chain" button
+(`AuditViewShowOperationPressed`), which also clears the other three filters at the same time:
+viewing one operation's full chain with a leftover family/outcome filter active could silently hide
+the other phase of the exact pair the click exists to show (PR-059-A's own cross-record authorization
+contract, `AuditStore::append`'s `validate_operation_phase`).
+
+Family and outcome each cycle through their own fixed list (`ALL_FAMILIES`/`ALL_OUTCOMES`) via a
+button click, the same "cycle on click, wrap to All" idiom `SwitchActiveProject`/
+`SwitchActiveDocument` already establish elsewhere in this codebase, rather than introducing this
+crate's first `pick_list` widget for a four-field filter set.
+
+**A real, disclosed gap, not a defect**: `ALL_FAMILIES`/`ALL_OUTCOMES` are hand-maintained arrays,
+separate from the compile-time-exhaustive `family_symbol`/`outcome_symbol` matches that actually
+render a row's text. Adding a 13th family forces a new arm in `family_symbol` (a real compile error)
+but does not force an entry in `ALL_FAMILIES` — the new family would simply be unreachable as a
+*filter* until the array is extended by hand, though every one of its records still renders correctly
+in the unfiltered list. Recorded in `rfcs/future-work.md` ("The audit view's own family and outcome
+filter lists do not fail to compile when a new variant is added").
+
+### D3: the bounded-count wording
+
+`audit-view-bounded-notice`'s own fluent select reproduces `agent::report::count_text`'s exact
+wording ("{kept} listed, {omitted} more not recorded", bare number when nothing is omitted) rather
+than calling that function directly — `CatalogArgs` has no method for embedding a precomputed
+`String` (only `number`/`untrusted`/`trusted_symbol`), so the integration point is the fluent
+template matching the same words, not a cross-crate call. `omitted` is computed from a second,
+independent query (`AuditStore::count_matching`, new) against the same filters, ignoring
+`before_sequence`/`limit` — **not** a running tally kept beside the page.
+
+**§1's own honesty requirement, closed for the case `count_text`'s own callers never had to
+consider**: `count_matching` can itself fail even when the page query above it succeeded. The first
+draft called `state.catalog.get("audit-view-count-unavailable")` with no args for this case even
+though the message interpolates `$kept` — caught by `audit_view_shows_count_unavailable_rather_than_
+claiming_nothing_is_omitted`, which found the key rendering as its own literal name (the catalog's
+own "a message that needs an arg it was not given is a failure, not a partial render" rule). Fixed by
+passing `kept` through. `total_matching: Option<u64>` — `None` renders `audit-view-count-unavailable`
+("the total could not be counted"), never read as `omitted == 0`.
+
+### D1/D5: rows and paging
+
+One row per durable record, newest first, via `AuditStore::query` with `before_sequence`/`limit` —
+`PAGE_LIMIT = 50`, well under `MAX_AUDIT_QUERY_LIMIT` (200). "Load more" appends via `AuditRecordPage::
+next_before_sequence`; no offset path exists anywhere in `audit_view`. A record's own `project_id`,
+when present, is shown as the id the store holds — never a path, never reconstructed or guessed (§5).
+
+### §6: `AuditHealth` is not a second, parallel disclosure
+
+The view's own `lines` function opens with `project_board_audit_notifications(state)` — the exact
+producer the Project Board already uses — converted to text the same way `project_board_lines` does,
+not a second health-reading code path that could disagree with it. `audit_view_surfaces_a_degraded_
+audit_health_the_same_way_the_project_board_does` asserts the view's own lines are a superset
+containing every line the board shows for a degraded session. A **query** failure (the store open and
+healthy, the read itself failing) is a distinct case `AuditHealth` has no slot for (it tracks only
+open/write) — surfaced via the view's own `load_error` field and `audit-view-load-error`, which takes
+precedence over the bounded-count notice (nothing honest to say about a page that never loaded).
+
+### The wording guard
+
+`audit_view::lines(state) -> Vec<String>` and `audit_view::row_text(catalog, record) -> String` are
+the exact functions `content_area`'s `AuditView` arm and its row loop call — the same "factored-out
+function, not a string rebuilt in the test" shape RFC-058 review 518 required of `project_board_
+lines`. Eight tests assert directly against their output: the bare-count case, the omitted case, the
+count-unavailable case, the `AuditHealth`-reuse case, the load-error-takes-precedence case, the
+row's project-name-or-"no project recorded" case, plus two real-store end-to-end tests (below).
+
+### A real store, real records, real filtering — not a fixture
+
+`opening_the_audit_view_through_a_real_key_event_loads_real_records_from_the_real_store` opens a real
+`AuditStore` at the same path `open_audit_view`'s own route uses (`test_audit_state_dir`), writes a
+real trust-grant chain through the real UI action (`press_trust_settings_action`, the same producer
+RFC-058's own trust tests rely on), opens the audit view through a real dispatched `NavigationAction::
+OpenAuditView`, and cross-checks the loaded page's sequences against an independent, direct
+`AuditStore::query` — not against anything the test itself constructed.
+`audit_view_filter_cycling_and_show_operation_narrow_and_widen_the_real_page` extends this: cycling
+the family filter to one the store holds no records of narrows to empty (not a silent no-op showing
+the unfiltered page); cycling once more to `TrustChange` narrows to exactly the real pair; clearing
+widens back to both; clicking a record's own real operation id returns exactly its two real phases,
+each carrying that same operation id.
+
+### Live capture
+
+A real window, a throwaway project (`mktemp -d` under the session scratchpad) and a throwaway
+`XDG_STATE_HOME` (same), per the pack's own recipe — `wl-copy --clear` → `niri msg action
+screenshot-window --id <id>` → confirm `wl-paste --list-types` prints `image/png` → `wl-paste` to
+file, with focus (`niri msg -j windows`, `is_focused`) re-verified before every `wtype` call on the
+shared desktop. Four captures, four distinct checksums (confirming none is `wl-paste`'s own stale
+previous-clipboard fallback):
+
+- `pr-059-b-01-first-opened-one-record.png` — `Ctrl+Alt+V` on a freshly opened, untrusted project:
+  one real `project_added` record, `Showing: 1`, every filter at "All", no "View full operation
+  chain" button (this record has no `operation_id`).
+- `pr-059-b-02-trust-granted.png` — Trust Settings after a real grant, through the real
+  Tab-then-Enter dialog flow, for context on what produced the next capture's records.
+- `pr-059-b-03-three-records-with-view-chain-buttons.png` — the audit view again, now showing all
+  three real records (`project_added`, and the `trust_change` `Authorized`/`Applied` pair, newest
+  first), each `trust_change` row carrying a real "View full operation chain" button, `Showing: 3`,
+  and the status bar reading "Audit View | 1 project".
+
+**A real, disclosed limitation of this round's own capture**: no mouse-click tool was available in
+this environment, only `wtype` (keyboard). The filter-cycle and "view chain" buttons have no
+keyboard route of their own (by design — they are ordinary in-surface buttons, the same
+`click_message_kind::BackgroundControl` classification `ChangeReviewFileRowPressed` already has, not
+a `NavigationAction` that `control_coverage` would require one for), so clicking them live was not
+possible this round. Covered instead by `audit_view_filter_cycling_and_show_operation_narrow_and_
+widen_the_real_page`, dispatching the exact `Message`s each button's own `.on_press` sends, against
+the same real store — arguably stronger evidence (exact, deterministic, real) than a live click would
+have added, but the live-capture checklist item itself should note this is what stood in for it.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
+full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `771 + 22 + 1135`, 0 failed, 0 fixture
+entries.

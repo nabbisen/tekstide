@@ -14,16 +14,16 @@ use super::{
     TerminalPasteRefusal, TranscriptPurgeButton, TranscriptPurgeModal, TrustGrantButton,
     agent_run_launch_audit_notice, agent_run_launch_refusal_text, apply_recovery_outcome,
     attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
-    attempt_agent_run_launch_with_profile_state_root_and_capture, configured_agent_run_launch_plan,
-    content_within_bound, evaluate_promotion, focus_marker, main_area_key, main_area_label,
-    modal_scrim_style, open_audit_store_recording_failure, open_real_audit_store,
-    path_field_error_text, poll_approval_channels, project_board_audit_lines,
-    project_board_configuration_lines, project_board_lines, project_close_dialog_body,
-    project_close_dialog_names_running_processes, project_close_dialog_path,
-    project_close_dialog_reasons_line, resolve_agent_run_state_dir, status_bar_summary,
-    terminal_paste_refusal_text, terminated_outcome_and_session_confirmation, test_audit_state_dir,
-    transcript_local_data_summary_for, trust_grant_dialog_body, trusted_ui_state,
-    verify_restored_trust_against, zone_style,
+    attempt_agent_run_launch_with_profile_state_root_and_capture, audit_view,
+    configured_agent_run_launch_plan, content_within_bound, evaluate_promotion, focus_marker,
+    main_area_key, main_area_label, modal_scrim_style, open_audit_store_recording_failure,
+    open_real_audit_store, path_field_error_text, poll_approval_channels,
+    project_board_audit_lines, project_board_configuration_lines, project_board_lines,
+    project_close_dialog_body, project_close_dialog_names_running_processes,
+    project_close_dialog_path, project_close_dialog_reasons_line, resolve_agent_run_state_dir,
+    status_bar_summary, terminal_paste_refusal_text, terminated_outcome_and_session_confirmation,
+    test_audit_state_dir, transcript_local_data_summary_for, trust_grant_dialog_body,
+    trusted_ui_state, verify_restored_trust_against, zone_style,
 };
 use crate::i18n::{Catalog, LocalePreference};
 use crate::input::{FocusZone, SubscriptionMode};
@@ -11918,7 +11918,7 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     );
     assert_eq!(
         lines.len(),
-        19,
+        20,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
     );
 }
@@ -22338,5 +22338,385 @@ fn recovery_offer_header_includes_the_no_undo_history_notice() {
     assert!(
         no_undo_notice.to_lowercase().contains("undo"),
         "the second header line must be the no-undo-history notice, got: {no_undo_notice}"
+    );
+}
+
+// RFC-059 PR-059-B: the audit view's own wording guard -- asserted
+// against `audit_view::lines`/`audit_view::row_text`, the exact
+// functions `content_area`'s `AuditView` arm renders, the same
+// "factored-out function, not a string rebuilt in the test" shape
+// RFC-058 review 518 required of `project_board_lines`.
+
+/// Fluent's own `NUMBER()` isolation marks (FSI/PDI) around every
+/// interpolated number -- stripped here the same way another assertion
+/// elsewhere in this file already does, so a wording assertion reads as
+/// the words a user sees, not the bidi-isolation machinery around them.
+fn strip_isolates(lines: Vec<String>) -> Vec<String> {
+    lines
+        .into_iter()
+        .map(|line| line.replace(['\u{2068}', '\u{2069}'], ""))
+        .collect()
+}
+
+fn audit_record(
+    family: tekstide_core::audit::AuditEventFamily,
+    outcome: tekstide_core::audit::AuditOutcome,
+    action_kind: tekstide_core::audit::AuditActionKind,
+) -> tekstide_core::audit::DurableAuditRecordV1 {
+    tekstide_core::audit::DurableAuditRecordV1::new(
+        family,
+        outcome,
+        action_kind,
+        tekstide_core::audit::AuditActorKind::AppPolicy,
+        tekstide_core::audit::AuditActionSource::PolicyEngine,
+    )
+}
+
+#[test]
+fn audit_view_bounded_notice_is_a_bare_count_when_nothing_is_omitted() {
+    let app_shell = ApplicationShell::new();
+    let mut state = state_with(app_shell);
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let record = audit_record(
+        tekstide_core::audit::AuditEventFamily::AuditStoreRecovery,
+        tekstide_core::audit::AuditOutcome::Completed,
+        tekstide_core::audit::AuditActionKind::AuditStoreRecovery,
+    );
+    state.audit_view.set_for_test(
+        vec![tekstide_core::audit::SequencedAuditRecord {
+            sequence: 1,
+            record,
+        }],
+        Some(1),
+    );
+
+    let lines = strip_isolates(audit_view::lines(&state));
+    assert!(
+        lines.iter().any(|line| line == "Showing: 1"),
+        "with nothing omitted, count_text's own bare-number case applies, got: {lines:?}"
+    );
+}
+
+/// D3: the existing wording (`agent::report::count_text`'s own
+/// `"{kept} listed, {omitted} more not recorded"`), reproduced by
+/// `audit-view-bounded-notice`'s own fluent select -- not a second idiom
+/// for the same honesty.
+#[test]
+fn audit_view_bounded_notice_reuses_count_text_wording_when_something_is_omitted() {
+    let app_shell = ApplicationShell::new();
+    let mut state = state_with(app_shell);
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let record = audit_record(
+        tekstide_core::audit::AuditEventFamily::AuditStoreRecovery,
+        tekstide_core::audit::AuditOutcome::Completed,
+        tekstide_core::audit::AuditActionKind::AuditStoreRecovery,
+    );
+    state.audit_view.set_for_test(
+        vec![tekstide_core::audit::SequencedAuditRecord {
+            sequence: 1,
+            record,
+        }],
+        Some(4),
+    );
+
+    let lines = strip_isolates(audit_view::lines(&state));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "Showing: 1 listed, 3 more not recorded"),
+        "got: {lines:?}"
+    );
+}
+
+/// §1: a bounded page must not imply completeness it cannot demonstrate.
+/// When the independent count query itself fails, the honest answer is
+/// "unknown," never a silent "nothing omitted" -- the failure mode this
+/// test exists to catch is `total_matching: None` being read as
+/// `omitted == 0`.
+#[test]
+fn audit_view_shows_count_unavailable_rather_than_claiming_nothing_is_omitted() {
+    let app_shell = ApplicationShell::new();
+    let mut state = state_with(app_shell);
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let record = audit_record(
+        tekstide_core::audit::AuditEventFamily::AuditStoreRecovery,
+        tekstide_core::audit::AuditOutcome::Completed,
+        tekstide_core::audit::AuditActionKind::AuditStoreRecovery,
+    );
+    state.audit_view.set_for_test(
+        vec![tekstide_core::audit::SequencedAuditRecord {
+            sequence: 1,
+            record,
+        }],
+        None,
+    );
+
+    let lines = audit_view::lines(&state);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("could not be counted")),
+        "got: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.starts_with("Showing: 1 (")
+            || line == "Showing: 1"
+            || line.contains("not recorded")),
+        "an unknown total must never be read as zero omitted, got: {lines:?}"
+    );
+}
+
+/// §6: "the view is the one place a user could find that out" --
+/// `AuditHealth` already exists and is already surfaced on the Project
+/// Board (`project_board_audit_notifications`); this is the audit
+/// view's own reuse of that exact producer, not a second, parallel
+/// disclosure that could drift from it.
+#[test]
+fn audit_view_surfaces_a_degraded_audit_health_the_same_way_the_project_board_does() {
+    let mut state = state_with(ApplicationShell::new());
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state
+        .audit_health
+        .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
+
+    let board_lines = super::project_board_audit_notifications(&state)
+        .into_iter()
+        .map(|notification| notification.text)
+        .collect::<Vec<_>>();
+    let view_lines = audit_view::lines(&state);
+
+    assert!(
+        !board_lines.is_empty(),
+        "test precondition: a degraded session must produce at least one board line"
+    );
+    for line in &board_lines {
+        assert!(
+            view_lines.contains(line),
+            "the audit view must show the same degraded line the Project Board does, got: \
+             {view_lines:?}"
+        );
+    }
+}
+
+/// §6's other half: `AuditHealth` tracks only open/write, never a read,
+/// so a query failure against an otherwise healthy, open store needs
+/// its own, distinct line -- and must not fall through to the
+/// bounded-count notice, which would have nothing honest to say about a
+/// page that never loaded.
+#[test]
+fn audit_view_load_error_is_shown_instead_of_a_bounded_notice() {
+    let app_shell = ApplicationShell::new();
+    let mut state = state_with(app_shell);
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state
+        .audit_view
+        .fail_for_test(tekstide_core::audit::AuditStoreErrorReason::Busy);
+
+    let lines = audit_view::lines(&state);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Could not load events")),
+        "got: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.starts_with("Showing:")),
+        "a query failure must not also claim a bounded-count notice, got: {lines:?}"
+    );
+}
+
+/// RFC-059 D1: a row names the project it is about, or says plainly
+/// that none was recorded -- never a guessed or reconstructed one (§5).
+#[test]
+fn audit_view_row_text_names_the_project_or_says_none_was_recorded() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+
+    let mut with_project = audit_record(
+        tekstide_core::audit::AuditEventFamily::ProjectAdded,
+        tekstide_core::audit::AuditOutcome::Applied,
+        tekstide_core::audit::AuditActionKind::ProjectAdd,
+    );
+    with_project.project_id = Some(project_id.clone());
+    let without_project = audit_record(
+        tekstide_core::audit::AuditEventFamily::AuditStoreRecovery,
+        tekstide_core::audit::AuditOutcome::Completed,
+        tekstide_core::audit::AuditActionKind::AuditStoreRecovery,
+    );
+
+    let with_project_text = audit_view::row_text(
+        &catalog,
+        &tekstide_core::audit::SequencedAuditRecord {
+            sequence: 1,
+            record: with_project,
+        },
+    );
+    let without_project_text = audit_view::row_text(
+        &catalog,
+        &tekstide_core::audit::SequencedAuditRecord {
+            sequence: 2,
+            record: without_project,
+        },
+    );
+
+    assert!(
+        with_project_text.contains(project_id.as_str()),
+        "got: {with_project_text}"
+    );
+    assert!(
+        without_project_text.contains("no project recorded"),
+        "got: {without_project_text}"
+    );
+}
+
+/// RFC-059 PR-059-B's own first checklist item: a real store with real
+/// records renders; counts and filters are checked against the store,
+/// not against a fixture built beside it. Opens a real `AuditStore` at
+/// the same path `open_audit_view`'s own real route uses
+/// (`test_audit_state_dir`), writes a real trust-grant chain through the
+/// real UI action (`press_trust_settings_action`, the same producer
+/// `revoking_trust_through_the_real_route_records_a_single_applied_record`
+/// already relies on), then opens the audit view through a real
+/// `Ctrl+Alt+V` key event and cross-checks what it loaded against an
+/// independent, direct query of that same real store.
+#[test]
+fn opening_the_audit_view_through_a_real_key_event_loads_real_records_from_the_real_store() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("audit-view-real-records"));
+    let (mut state, project_id) = state_with_a_real_project("audit-view-real-records");
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    // Opens the real Trust Grant dialog; granting needs the same
+    // focus-then-activate round trip
+    // `revoking_trust_through_the_real_route_records_a_single_applied_record`
+    // already uses, not only the one key press that opens it.
+    press_trust_settings_action(&mut state);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenAuditView,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::AuditView,
+        "OpenAuditView must land on AppRoute::AuditView"
+    );
+
+    let real_records = open_real_audit_store(&state.app_shell)
+        .expect("the real audit store must open")
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id.clone()),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .expect("querying the real audit store directly must succeed")
+        .records;
+    assert!(
+        !real_records.is_empty(),
+        "test precondition: granting trust must have written at least one real record"
+    );
+
+    let loaded_sequences: Vec<i64> = state
+        .audit_view
+        .records_for_test()
+        .iter()
+        .map(|record| record.sequence)
+        .collect();
+    let real_sequences: Vec<i64> = real_records.iter().map(|record| record.sequence).collect();
+    assert_eq!(
+        loaded_sequences, real_sequences,
+        "the view's own loaded page must be exactly what the real store holds, not a fixture"
+    );
+}
+
+/// RFC-059 D4: the filter buttons and the "view full operation chain"
+/// button, each driven through the real `Message`s their own
+/// `.on_press` dispatches -- against the same real store the test above
+/// uses, not a fixture. `state_with_a_real_project` itself writes no
+/// `project_added` record (that is `add_project_from_path_protected`'s
+/// own job, not the plain `add_project_from_path` this helper calls --
+/// `opening_the_audit_view_...`'s own doc names the same distinction);
+/// granting trust is what produces this test's two real records, a
+/// `trust_change` pair (`Authorized` then `Applied`, sharing one
+/// `operation_id`).
+#[test]
+fn audit_view_filter_cycling_and_show_operation_narrow_and_widen_the_real_page() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("audit-view-filter-cycling"));
+    let (mut state, _project_id) = state_with_a_real_project("audit-view-filter-cycling");
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    press_trust_settings_action(&mut state);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+    super::open_audit_view(&mut state);
+    assert_eq!(
+        state.audit_view.records_for_test().len(),
+        2,
+        "test precondition: trust_change (authorized, applied)"
+    );
+
+    // One cycle from `None` lands on `AuditEventFamily`'s own first
+    // declared variant, `ProjectAdded` -- narrows the real page to
+    // zero records, since this store holds none of that family (no
+    // false match, not even an empty-vs-absent confusion).
+    let _ = super::update(&mut state, Message::AuditViewCycleFamilyPressed);
+    assert!(
+        state.audit_view.records_for_test().is_empty(),
+        "cycling to a family the store holds none of must narrow to nothing, not leave the \
+         unfiltered page showing"
+    );
+
+    // The next cycle lands on `TrustChange`, the second declared
+    // variant -- narrows to exactly the real pair.
+    let _ = super::update(&mut state, Message::AuditViewCycleFamilyPressed);
+    let narrowed: Vec<_> = state
+        .audit_view
+        .records_for_test()
+        .iter()
+        .map(|record| record.record.family)
+        .collect();
+    assert_eq!(
+        narrowed,
+        vec![
+            tekstide_core::audit::AuditEventFamily::TrustChange,
+            tekstide_core::audit::AuditEventFamily::TrustChange,
+        ],
+        "cycling to TrustChange must narrow the real page to only that family"
+    );
+
+    let _ = super::update(&mut state, Message::AuditViewClearFiltersPressed);
+    assert_eq!(
+        state.audit_view.records_for_test().len(),
+        2,
+        "clearing filters must widen back to every record the store holds"
+    );
+
+    // A `trust_change` record's own operation id, clicked to see its
+    // full chain -- both phases share one `operation_id` per
+    // `AuditStore::append`'s own cross-record contract, so this must
+    // return exactly the two trust-change records, not one.
+    let operation_id = state
+        .audit_view
+        .records_for_test()
+        .iter()
+        .find_map(|record| record.record.operation_id.clone())
+        .expect("test precondition: the trust-change pair must share a real operation id");
+    let _ = super::update(
+        &mut state,
+        Message::AuditViewShowOperationPressed(operation_id.clone()),
+    );
+    let chain = state.audit_view.records_for_test();
+    assert_eq!(
+        chain.len(),
+        2,
+        "an operation's full chain is both its phases"
+    );
+    assert!(
+        chain
+            .iter()
+            .all(|record| record.record.operation_id.as_ref() == Some(&operation_id)),
+        "every record in the chain must share the clicked operation id"
     );
 }

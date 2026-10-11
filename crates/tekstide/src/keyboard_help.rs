@@ -69,6 +69,7 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::SwitchActiveDocument => Some("keyboard-help-switch-active-document"),
         NavigationAction::SaveAllDocuments => Some("keyboard-help-save-all-documents"),
         NavigationAction::OpenDiffReview => Some("keyboard-help-open-diff-review"),
+        NavigationAction::OpenAuditView => Some("keyboard-help-open-audit-view"),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,
@@ -242,6 +243,12 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
             description: "TrustSettings's own \"Change Review\" button (RFC-020, the change \
                           review surface)",
             on_press_snippet: ".on_press(Message::OpenDiffReviewButtonPressed)",
+        }),
+        NavigationAction::OpenAuditView => Some(ControlCoverage::VisibleControl {
+            description: "the top bar's own \"Audit\" button (top_bar_title_and_actions_row, \
+                          RFC-059 D7), shown always -- the keyboard reference reachable with no \
+                          project open, the same reasoning as OpenHelp's own",
+            on_press_snippet: ".on_press(Message::OpenAuditViewButtonPressed)",
         }),
         NavigationAction::SwitchActiveDocument => Some(ControlCoverage::KeyboardOnly(
             "RFC-065 D5/D11, and the RFC's own non-goal: \"a tab bar for documents, if a \

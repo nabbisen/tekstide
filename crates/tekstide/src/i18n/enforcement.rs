@@ -775,6 +775,23 @@ fn generic_args() -> CatalogArgs<'static> {
             &tekstide_core::text_safety::quote_untrusted("fixture-project"),
         )
         .trusted_symbol("outcome", "pending")
+        // RFC-059 PR-059-B: the audit view's own five new variable
+        // names. `family`/`has_project` are trusted selector symbols not
+        // covered by any existing arm set above (falling through to
+        // each message's own default arm is a real, working render, not
+        // a gap); `created_at` is untrusted the same way `branch`/`name`
+        // above are; `kept`/`omitted` are `count_text`'s own pair,
+        // reused as numbers rather than a formatted string (D3's own
+        // wording is reproduced in `audit-view-bounded-notice`'s select
+        // expression, not built in Rust and interpolated whole).
+        .trusted_symbol("family", "trust_change")
+        .trusted_symbol("has_project", "yes")
+        .untrusted(
+            "created_at",
+            &tekstide_core::text_safety::quote_untrusted("2026-01-01T00:00:00Z"),
+        )
+        .number("kept", 1u32)
+        .number("omitted", 1u32)
 }
 
 fn shipped_additional_locales() -> Vec<String> {

@@ -119,13 +119,22 @@ pub enum NavigationAction {
     /// does not use either because unlike that one, "save all" already has a universal
     /// keyboard convention to match.
     SaveAllDocuments,
+    /// RFC-059 D7: opens the audit view, a new top-level destination
+    /// (`AppRoute::AuditView`) rather than a `ProjectOpenSurface` --
+    /// reachable with no active project, since the audit store is
+    /// app-wide. Global, in the top bar's chrome alongside `OpenHelp`,
+    /// not nested inside `TrustSettings` the way `OpenDiffReview`'s own
+    /// button is: `what-the-audit-view-must-not-do.md`'s whole premise
+    /// is a surface that shows what happened across every project, so
+    /// requiring one to already be open would contradict it.
+    OpenAuditView,
 }
 
 impl NavigationAction {
     /// Every action, in declaration order. `config_name` is an exhaustive match,
     /// so adding an action without a name does not compile; a test holds this
     /// list to the policy so adding one without a rule does not pass.
-    pub const ALL: [NavigationAction; 22] = [
+    pub const ALL: [NavigationAction; 23] = [
         Self::OpenProjectBoard,
         Self::OpenProjectEntryField,
         Self::SwitchActiveProject,
@@ -148,6 +157,7 @@ impl NavigationAction {
         Self::ReloadConfiguration,
         Self::SwitchActiveDocument,
         Self::SaveAllDocuments,
+        Self::OpenAuditView,
     ];
 
     /// The key a `[keybindings]` entry uses for this action: the identifier in
@@ -177,6 +187,7 @@ impl NavigationAction {
             Self::ReloadConfiguration => "reload_configuration",
             Self::SwitchActiveDocument => "switch_active_document",
             Self::SaveAllDocuments => "save_all_documents",
+            Self::OpenAuditView => "open_audit_view",
         }
     }
 
@@ -549,6 +560,17 @@ impl KeybindingPolicy {
                 // `save_all_documents_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone).
                 KeybindingRule::bound(NavigationAction::SaveAllDocuments, "Ctrl+Shift+S"),
+                // RFC-059 D7: `Ctrl+Alt+V` (audit View) -- following the
+                // existing `Ctrl+Alt+<letter>` shape (`P`, `O`, `M`, `T`,
+                // `A`, `N`, `R`, `H`, `U`, `D`, `K`, `B`, `C`, `F` above).
+                // `A` (Audit) is already `LaunchAgentRun`'s; the task
+                // breakdown calls this surface "the view" throughout, and
+                // `V` is unclaimed by any other rule here and not
+                // `Ctrl+Shift+P`'s `Reserved` command-palette binding, so
+                // it collides with nothing (checked mechanically by
+                // `open_audit_view_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
+                // not by inspection alone).
+                KeybindingRule::bound(NavigationAction::OpenAuditView, "Ctrl+Alt+V"),
             ],
         }
     }

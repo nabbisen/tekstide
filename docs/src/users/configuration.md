@@ -89,6 +89,7 @@ terminal, and a dialog still swallows every key but its own.
 | `reload_configuration` | `Ctrl+Alt+C` |
 | `switch_active_document` | `Ctrl+Alt+F` |
 | `save_all_documents` | `Ctrl+Shift+S` |
+| `open_audit_view` | `Ctrl+Alt+V` |
 
 **Two actions have no chord and cannot be rebound**, and neither is an oversight:
 `cycle_visible_terminal_session` (there is no handler — a new terminal becomes the one that receives

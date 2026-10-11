@@ -215,6 +215,44 @@ impl AuditStore {
         })
     }
 
+    /// RFC-059 PR-059-B, D3: how many records match `query`'s filters in
+    /// total, ignoring `before_sequence`/`limit` -- the audit view's own
+    /// honest "how many more" (`what-the-audit-view-must-not-do.md` §1):
+    /// a bounded page must say what it left out, not print a count that
+    /// is really the number of rows retained while implying it is the
+    /// number of events that happened. Same `WHERE` clause [`Self::query`]
+    /// uses, repeated rather than shared, since this one has no `ORDER
+    /// BY`/`LIMIT` to agree on.
+    pub fn count_matching(&self, query: &AuditQuery) -> Result<u64, AuditStoreError> {
+        let project_id = query
+            .project_id
+            .as_ref()
+            .map(|project_id| project_id.as_str().to_owned());
+        let family = query.family.map(|family| family.as_code().to_owned());
+        let outcome = query.outcome.map(|outcome| outcome.as_code().to_owned());
+        let operation_id = query
+            .operation_id
+            .as_ref()
+            .map(|operation_id| operation_id.as_str().to_owned());
+
+        let count: i64 = self
+            .connection
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM audit_events
+                WHERE (?1 IS NULL OR project_id = ?1)
+                  AND (?2 IS NULL OR family = ?2)
+                  AND (?3 IS NULL OR outcome = ?3)
+                  AND (?4 IS NULL OR operation_id = ?4)
+                "#,
+                params![project_id, family, outcome, operation_id],
+                |row| row.get(0),
+            )
+            .map_err(AuditStoreError::sqlite)?;
+        Ok(count.max(0) as u64)
+    }
+
     /// RFC-032 PR-032-C, response 245: whether the durable record itself
     /// -- not the user-writable recent-projects cache PR-032-B restores
     /// trust from on reopen -- currently shows `project_id` as trusted.

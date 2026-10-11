@@ -1213,6 +1213,13 @@ pub struct State {
     /// anyway.
     audited_agent_runs:
         std::collections::HashMap<tekstide_core::domain::AgentRunId, AuditedAgentRunIdentity>,
+    /// RFC-059 D7: the audit view's own filters and current page --
+    /// lives for the whole session, not only while `AppRoute::AuditView`
+    /// is current, the same "field lives as long as `State` does" shape
+    /// most of its neighbours already have, so filters survive leaving
+    /// and returning to the view (`reload` re-runs them fresh on every
+    /// open, never stale data left showing).
+    audit_view: AuditViewState,
     /// RFC-027 PR-027-A, D1/D12: this instance's own crash-detection marker, written in
     /// `boot()` and held for the whole application lifetime so a normal exit's own `Drop`
     /// removes it -- the same "field lives as long as `State` does" shape `audit_health`
@@ -1549,6 +1556,7 @@ impl State {
             recent_project_list_repair: None,
             transcript_cleanup_notice: None,
             audited_agent_runs: std::collections::HashMap::new(),
+            audit_view: AuditViewState::default(),
             _instance_marker: instance_marker,
         };
         // RFC-054 PR-054-B: the configured family, before the first frame.
@@ -1762,6 +1770,34 @@ pub enum Message {
     /// there. `Ctrl+Alt+D` is the accelerator; both converge on
     /// [`open_diff_review`].
     OpenDiffReviewButtonPressed,
+    /// RFC-059 D7: the top bar's own real "Audit" button, global and
+    /// always shown -- `OpenHelpButtonPressed`'s own shape, not
+    /// `OpenDiffReviewButtonPressed`'s (that one needs an active
+    /// project; this route does not). `Ctrl+Alt+V` is the accelerator;
+    /// both converge on [`open_audit_view`].
+    OpenAuditViewButtonPressed,
+    /// RFC-059 D4: cycles the audit view's own family filter, wrapping
+    /// through `None` ("All") and every `AuditEventFamily`.
+    AuditViewCycleFamilyPressed,
+    /// The outcome filter's own cycle, the same shape as
+    /// `AuditViewCycleFamilyPressed`.
+    AuditViewCycleOutcomePressed,
+    /// The project filter's own cycle, through the currently open
+    /// projects plus `None` ("All projects") -- never a project the
+    /// board does not currently show (§5: no path to reconstruct or
+    /// guess for one that is gone).
+    AuditViewCycleProjectPressed,
+    /// Resets every filter to `None` in one press, rather than cycling
+    /// three buttons back to their own starts individually.
+    AuditViewClearFiltersPressed,
+    /// Appends the next page via `before_sequence` -- D3's own keyset
+    /// paging, never an offset.
+    AuditViewLoadMorePressed,
+    /// A shown record's own operation id, clicked to see that
+    /// operation's full chain -- clears the other three filters at the
+    /// same time ([`audit_view::show_operation`]'s own doc explains
+    /// why).
+    AuditViewShowOperationPressed(tekstide_core::domain::AuditOperationId),
     /// RFC-041 PR-041-B: a shown file's own row button on the Change
     /// Review surface -- converges with `handle_change_review_key`'s own
     /// `Enter` case on [`select_change_review_file`], the same "one
@@ -2120,6 +2156,17 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::OpenTrustSettingsButtonPressed
         | Message::OpenHelpButtonPressed
         | Message::OpenDiffReviewButtonPressed
+        // RFC-059 D7: the top bar's own "Audit" button and the audit
+        // view's own five controls (filter cycles, clear, load more, a
+        // shown record's "view chain" button) -- each handler carries
+        // the identical `state.modal.is_some()` guard the ten above do.
+        | Message::OpenAuditViewButtonPressed
+        | Message::AuditViewCycleFamilyPressed
+        | Message::AuditViewCycleOutcomePressed
+        | Message::AuditViewCycleProjectPressed
+        | Message::AuditViewClearFiltersPressed
+        | Message::AuditViewLoadMorePressed
+        | Message::AuditViewShowOperationPressed(_)
         // RFC-041 PR-041-B: a row on the Change Review surface selecting
         // which file to preview -- not a `NavigationAction` (no global
         // keybinding names it, the same shape explorer/approval-history
@@ -2433,6 +2480,14 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
                     launch_terminal_in_active_project(state);
                 } else if command == AppCommand::LaunchAgentRun {
                     launch_agent_run_in_active_project(state);
+                } else if command == AppCommand::OpenAuditView {
+                    // RFC-059 D7: the same reason `LaunchTerminal`/
+                    // `LaunchAgentRun` above are special-cased rather than
+                    // reached through the generic `dispatch` branch -- the
+                    // first page is real I/O against the audit store,
+                    // which `AppCommand::OpenAuditView`'s own `dispatch`
+                    // arm (a pure route change) does not perform.
+                    open_audit_view(state);
                 } else {
                     state.app_shell.dispatch(command);
                     // RFC-019 PR-019-B: any command that could have
@@ -2909,6 +2964,15 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenTrustSettingsButtonPressed => open_trust_settings(state),
         Message::OpenHelpButtonPressed => open_help(state),
         Message::OpenDiffReviewButtonPressed => open_diff_review(state),
+        Message::OpenAuditViewButtonPressed => open_audit_view(state),
+        Message::AuditViewCycleFamilyPressed => audit_view::cycle_family(state),
+        Message::AuditViewCycleOutcomePressed => audit_view::cycle_outcome(state),
+        Message::AuditViewCycleProjectPressed => audit_view::cycle_project(state),
+        Message::AuditViewClearFiltersPressed => audit_view::clear_filters(state),
+        Message::AuditViewLoadMorePressed => audit_view::load_more(state),
+        Message::AuditViewShowOperationPressed(operation_id) => {
+            audit_view::show_operation(state, operation_id)
+        }
         Message::ChangeReviewFileRowPressed(path) => select_change_review_file(state, path),
         Message::ChangeReviewDecisionButtonPressed(decision) => {
             record_change_review_decision(state, decision)
@@ -7076,7 +7140,7 @@ pub(crate) fn open_real_audit_store(
 /// maintain or get stale.
 ///
 /// Returns `Option`, matching every call site's own existing
-/// control-flow shape (`let Some(mut store) = ... else { return }` and
+/// control-flow shape (`let Some(store) = ... else { return }` and
 /// `if let Some(store) = ...` both still compile unchanged) -- true
 /// again this slice, now covering the recovered case too: a caller
 /// that only wants "do I have a store" needs no changes to keep working
@@ -8221,6 +8285,12 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         NavigationAction::OpenDiffReview => Some(AppCommand::OpenActiveProjectSurface(
             ProjectOpenSurface::DiffReview,
         )),
+        // RFC-059 D7: the route change itself goes through this normal
+        // `Some(command)` branch -- `update_message`'s own `else if
+        // command == AppCommand::OpenAuditView` arm is what adds the
+        // real I/O (the first page), the same split `LaunchTerminal`/
+        // `LaunchAgentRun` already use.
+        NavigationAction::OpenAuditView => Some(AppCommand::OpenAuditView),
         // RFC-018 PR-018-B: paste needs no core route/mode change --
         // `update`'s `Shell` arm special-cases it directly, the same
         // shape `LaunchTerminal` uses for the half of its own work that
@@ -8813,6 +8883,10 @@ fn top_bar(state: &State) -> Element<'_, Message> {
 /// button's precondition (an active project) already always holds by
 /// construction of where it lives; this one's does not, since `top_bar`
 /// renders on every route.
+///
+/// RFC-059 D7 adds a third, also always shown: the audit store is
+/// app-wide, so "Audit" has the same no-active-project-required shape
+/// `Help` already does, not `Trust Settings`'s own conditional one.
 /// Factored out of [`top_bar_title_and_actions_row`] for the same
 /// testability reason [`main_area_label`]/[`sidebar_label`] already are
 /// -- an `Element` is not directly inspectable, so the decision itself is
@@ -8843,6 +8917,14 @@ fn top_bar_title_and_actions_row(state: &State) -> Element<'_, Message> {
             .into(),
         );
     }
+    actions.push(
+        crate::theme::button(
+            state.theme,
+            text(state.catalog.get("top-bar-audit-button")).size(state.theme.font_size_body()),
+        )
+        .on_press(Message::OpenAuditViewButtonPressed)
+        .into(),
+    );
     actions.push(
         crate::theme::button(
             state.theme,
@@ -9079,6 +9161,7 @@ fn route_symbol(route: AppRoute) -> &'static str {
     match route {
         AppRoute::ProjectBoard => "project-board",
         AppRoute::ActiveProjectWorkspace => "active-project-workspace",
+        AppRoute::AuditView => "audit-view",
     }
 }
 
@@ -10012,6 +10095,7 @@ fn content_area(state: &State) -> Element<'_, Message> {
                 }
             }
             AppRoute::ActiveProjectWorkspace => active_project_workspace_view(state),
+            AppRoute::AuditView => audit_view::view(state),
         }
     };
 
@@ -13485,6 +13569,22 @@ fn open_diff_review(state: &mut State) {
     ensure_explorer_scanned(state);
 }
 
+/// RFC-059 D7: `Message::OpenAuditViewButtonPressed`'s handler, and the
+/// same function the keyboard accelerator's `RoutedInput::Shell` arm
+/// reaches -- `AppCommand::OpenAuditView` needs real I/O alongside the
+/// route change (the first page, from the real store), the same split
+/// `launch_terminal_in_active_project` already uses for `LaunchTerminal`,
+/// so this is special-cased in `update_message` rather than reached
+/// through the generic `Some(command)` branch that plain `dispatch`
+/// alone would be enough for.
+fn open_audit_view(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    state.app_shell.dispatch(AppCommand::OpenAuditView);
+    audit_view::reload(state);
+}
+
 /// RFC-041 PR-041-B: `Message::ChangeReviewFileRowPressed`'s handler,
 /// and the same function `handle_change_review_key`'s own `Enter` case
 /// reaches -- the "one setup, two routes" shape [`open_diff_review`]
@@ -13758,6 +13858,591 @@ mod change_review_content {
     }
 }
 use change_review_content::ChangeReviewContentLine;
+
+/// RFC-059 PR-059-B: the audit view -- a new top-level destination
+/// (`AppRoute::AuditView`, D7), not a `ProjectOpenSurface`. Nested here
+/// the same way [`change_review_content`] is, rather than a sibling
+/// top-level file declared from `main.rs`: this module's whole job is
+/// building `Element<'_, Message>`, and `Message` is `shell.rs`'s own
+/// type.
+mod audit_view {
+    use super::{CatalogArgs, Element, Length, Message, State, column, row, scrollable, text};
+    use tekstide_core::audit::{
+        AuditEventFamily, AuditOutcome, AuditQuery, AuditRecordPage, AuditStoreErrorReason,
+        SequencedAuditRecord,
+    };
+    use tekstide_core::domain::AuditOperationId;
+    use tekstide_core::project::{ProjectId, ProjectSession};
+
+    /// A page at a time, never the whole store -- `AuditQuery::limit`'s
+    /// own bound (`MAX_AUDIT_QUERY_LIMIT` is 200; this is well under it
+    /// so "Load more" stays a real, visible action rather than one
+    /// click loading everything).
+    const PAGE_LIMIT: u32 = 50;
+
+    /// Every family, in `AuditEventFamily`'s own declaration order --
+    /// the filter cycle's own list. **Not compiler-exhaustive the way
+    /// [`family_symbol`] below is**: adding a thirteenth family does not
+    /// fail this array to compile, only leaves it unreachable as a
+    /// filter until someone notices and extends the list -- a disclosed
+    /// gap (`rfcs/future-work.md`), not a silent lie, since every record
+    /// of that family still shows up in the unfiltered list.
+    const ALL_FAMILIES: [AuditEventFamily; 12] = [
+        AuditEventFamily::ProjectAdded,
+        AuditEventFamily::TrustChange,
+        AuditEventFamily::CommandApproval,
+        AuditEventFamily::ManagedProcessLifecycle,
+        AuditEventFamily::PlainTerminalObservation,
+        AuditEventFamily::PasteBlocked,
+        AuditEventFamily::RestrictedModeBlocked,
+        AuditEventFamily::RootAccessBlocked,
+        AuditEventFamily::SafeCloseDecision,
+        AuditEventFamily::SensitiveConfigChanged,
+        AuditEventFamily::TranscriptPurge,
+        AuditEventFamily::AuditStoreRecovery,
+    ];
+
+    /// The outcome filter cycle's own list -- same caveat as
+    /// [`ALL_FAMILIES`].
+    const ALL_OUTCOMES: [AuditOutcome; 10] = [
+        AuditOutcome::Requested,
+        AuditOutcome::Authorized,
+        AuditOutcome::Applied,
+        AuditOutcome::Failed,
+        AuditOutcome::Started,
+        AuditOutcome::Terminated,
+        AuditOutcome::Blocked,
+        AuditOutcome::Cancelled,
+        AuditOutcome::Completed,
+        AuditOutcome::Anomaly,
+    ];
+
+    /// RFC-059 D4: filters are exactly [`AuditQuery`]'s own fields --
+    /// `project_id`, `family`, `outcome`, `operation_id` -- and nothing
+    /// else; there is no free-text field here to search with (§3).
+    /// `records`/`next_before_sequence`/`total_matching` are the current
+    /// page, replaced wholesale on a filter change or a fresh open,
+    /// appended to on "Load more" (D3's own keyset paging, never an
+    /// offset).
+    #[derive(Debug, Default)]
+    pub(super) struct AuditViewState {
+        filter_project: Option<ProjectId>,
+        filter_family: Option<AuditEventFamily>,
+        filter_outcome: Option<AuditOutcome>,
+        filter_operation: Option<AuditOperationId>,
+        records: Vec<SequencedAuditRecord>,
+        next_before_sequence: Option<i64>,
+        /// `None` means "unknown," never "zero" -- set from a second,
+        /// independent query (`AuditStore::count_matching`) that can
+        /// itself fail even when the page query above succeeded. §1:
+        /// a bounded page must not imply completeness it cannot
+        /// demonstrate, so an unknown total renders its own honest
+        /// line (`audit-view-count-unavailable`) rather than silently
+        /// treating "unknown" as "nothing omitted."
+        total_matching: Option<u64>,
+        /// A *query* failure, distinct from `AuditHealth` (which tracks
+        /// only open/write, per its own doc) -- §6's other half: the
+        /// store can open and accept writes fine and still fail to
+        /// answer this view's own read.
+        load_error: Option<AuditStoreErrorReason>,
+    }
+
+    impl AuditViewState {
+        fn query(&self, before_sequence: Option<i64>) -> AuditQuery {
+            AuditQuery {
+                project_id: self.filter_project.clone(),
+                family: self.filter_family,
+                outcome: self.filter_outcome,
+                operation_id: self.filter_operation.clone(),
+                before_sequence,
+                limit: PAGE_LIMIT,
+            }
+        }
+
+        fn replace_page(&mut self, page: AuditRecordPage, total_matching: Option<u64>) {
+            self.records = page.records;
+            self.next_before_sequence = page.next_before_sequence;
+            self.total_matching = total_matching;
+            self.load_error = None;
+        }
+
+        fn append_page(&mut self, page: AuditRecordPage) {
+            self.records.extend(page.records);
+            self.next_before_sequence = page.next_before_sequence;
+            self.load_error = None;
+        }
+
+        fn fail(&mut self, reason: AuditStoreErrorReason) {
+            self.load_error = Some(reason);
+        }
+
+        /// Test-only escape hatch, the same explicit-at-the-boundary
+        /// shape [`ChangeReviewContentLine::as_str`] already is: builds
+        /// a page's worth of state directly, without a real store,
+        /// specifically so the bounded-count wording's `omitted > 0` and
+        /// `total_matching: None` branches are each reachable without
+        /// appending 51+ real records through I/O just to exercise one
+        /// `lines` arm.
+        #[cfg(test)]
+        pub(super) fn set_for_test(
+            &mut self,
+            records: Vec<SequencedAuditRecord>,
+            total_matching: Option<u64>,
+        ) {
+            self.records = records;
+            self.total_matching = total_matching;
+            self.load_error = None;
+        }
+
+        #[cfg(test)]
+        pub(super) fn fail_for_test(&mut self, reason: AuditStoreErrorReason) {
+            self.load_error = Some(reason);
+        }
+
+        #[cfg(test)]
+        pub(super) fn records_for_test(&self) -> &[SequencedAuditRecord] {
+            &self.records
+        }
+    }
+
+    fn cycle_copy<T: Copy + PartialEq>(current: Option<T>, all: &[T]) -> Option<T> {
+        match current {
+            None => all.first().copied(),
+            Some(value) => {
+                let position = all.iter().position(|candidate| *candidate == value);
+                match position {
+                    Some(index) if index + 1 < all.len() => Some(all[index + 1]),
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    fn next_project_filter(current: Option<&ProjectId>, all: &[ProjectId]) -> Option<ProjectId> {
+        match current {
+            None => all.first().cloned(),
+            Some(value) => {
+                let position = all.iter().position(|candidate| candidate == value);
+                match position {
+                    Some(index) if index + 1 < all.len() => Some(all[index + 1].clone()),
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    pub(super) fn cycle_family(state: &mut State) {
+        if state.modal.is_some() {
+            return;
+        }
+        state.audit_view.filter_family = cycle_copy(state.audit_view.filter_family, &ALL_FAMILIES);
+        reload(state);
+    }
+
+    pub(super) fn cycle_outcome(state: &mut State) {
+        if state.modal.is_some() {
+            return;
+        }
+        state.audit_view.filter_outcome =
+            cycle_copy(state.audit_view.filter_outcome, &ALL_OUTCOMES);
+        reload(state);
+    }
+
+    pub(super) fn cycle_project(state: &mut State) {
+        if state.modal.is_some() {
+            return;
+        }
+        let open_projects: Vec<ProjectId> = state
+            .app_shell
+            .state()
+            .projects()
+            .iter()
+            .map(|project| project.id().clone())
+            .collect();
+        state.audit_view.filter_project =
+            next_project_filter(state.audit_view.filter_project.as_ref(), &open_projects);
+        reload(state);
+    }
+
+    /// Clears the other three filters, not only setting this one: the
+    /// whole point of "view this operation's full chain" is to see
+    /// every phase of it, and a leftover family/outcome/project filter
+    /// could silently hide the other half of the exact pair this click
+    /// exists to show (`AuditStore::append`'s own cross-record
+    /// authorization-phase contract, PR-059-A's `qa-evidence.md`).
+    pub(super) fn show_operation(state: &mut State, operation_id: AuditOperationId) {
+        if state.modal.is_some() {
+            return;
+        }
+        state.audit_view.filter_project = None;
+        state.audit_view.filter_family = None;
+        state.audit_view.filter_outcome = None;
+        state.audit_view.filter_operation = Some(operation_id);
+        reload(state);
+    }
+
+    pub(super) fn clear_filters(state: &mut State) {
+        if state.modal.is_some() {
+            return;
+        }
+        state.audit_view.filter_project = None;
+        state.audit_view.filter_family = None;
+        state.audit_view.filter_outcome = None;
+        state.audit_view.filter_operation = None;
+        reload(state);
+    }
+
+    /// Opens the real store, runs the current filters' first page plus
+    /// the independent total-count query, and replaces whatever page
+    /// was showing -- called on first opening the view and after every
+    /// filter change, never merged with [`load_more`]'s own
+    /// append-only update.
+    pub(super) fn reload(state: &mut State) {
+        let query = state.audit_view.query(None);
+        let Some(store) =
+            super::open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+        else {
+            // Recorded on `audit_health` already, surfaced through
+            // `project_board_audit_notifications` and reused by
+            // `lines` below (§6) -- nothing further to set on
+            // `audit_view` itself for an *open* failure.
+            return;
+        };
+        match store.query(&query) {
+            Ok(page) => {
+                let total_matching = store.count_matching(&query).ok();
+                state.audit_view.replace_page(page, total_matching);
+            }
+            Err(error) => state.audit_view.fail(error.reason),
+        }
+    }
+
+    /// Appends the next page via `before_sequence`, the keyset cursor
+    /// `AuditRecordPage::next_before_sequence` already carries -- no
+    /// offset path exists beside it (D3). A no-op past the last page.
+    pub(super) fn load_more(state: &mut State) {
+        if state.modal.is_some() {
+            return;
+        }
+        let Some(before_sequence) = state.audit_view.next_before_sequence else {
+            return;
+        };
+        let query = state.audit_view.query(Some(before_sequence));
+        let Some(store) =
+            super::open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+        else {
+            return;
+        };
+        match store.query(&query) {
+            Ok(page) => state.audit_view.append_page(page),
+            Err(error) => state.audit_view.fail(error.reason),
+        }
+    }
+
+    /// A compile-time literal symbol per family -- the same
+    /// `trusted_symbol` division of labour `route_symbol`/
+    /// `change_detection_status_symbol` already use, exhaustive by
+    /// design (no wildcard): a thirteenth family fails this to compile,
+    /// forcing a decision here even though [`ALL_FAMILIES`] above does
+    /// not force one.
+    fn family_symbol(family: AuditEventFamily) -> &'static str {
+        match family {
+            AuditEventFamily::ProjectAdded => "project_added",
+            AuditEventFamily::TrustChange => "trust_change",
+            AuditEventFamily::CommandApproval => "command_approval",
+            AuditEventFamily::ManagedProcessLifecycle => "managed_process_lifecycle",
+            AuditEventFamily::PlainTerminalObservation => "plain_terminal_observation",
+            AuditEventFamily::PasteBlocked => "paste_blocked",
+            AuditEventFamily::RestrictedModeBlocked => "restricted_mode_blocked",
+            AuditEventFamily::RootAccessBlocked => "root_access_blocked",
+            AuditEventFamily::SafeCloseDecision => "safe_close_decision",
+            AuditEventFamily::SensitiveConfigChanged => "sensitive_config_changed",
+            AuditEventFamily::TranscriptPurge => "transcript_purge",
+            AuditEventFamily::AuditStoreRecovery => "audit_store_recovery",
+        }
+    }
+
+    /// The same symbol split, for `Option<AuditEventFamily>` -- `"all"`
+    /// when no filter is set, matching `audit-view-family-label`'s own
+    /// `*[all]`-adjacent arm set in `en.ftl`.
+    fn family_filter_symbol(family: Option<AuditEventFamily>) -> &'static str {
+        family.map_or("all", family_symbol)
+    }
+
+    /// Exhaustive by design, the same reason [`family_symbol`] is.
+    fn outcome_symbol(outcome: AuditOutcome) -> &'static str {
+        match outcome {
+            AuditOutcome::Requested => "requested",
+            AuditOutcome::Authorized => "authorized",
+            AuditOutcome::Applied => "applied",
+            AuditOutcome::Failed => "failed",
+            AuditOutcome::Started => "started",
+            AuditOutcome::Terminated => "terminated",
+            AuditOutcome::Blocked => "blocked",
+            AuditOutcome::Cancelled => "cancelled",
+            AuditOutcome::Completed => "completed",
+            AuditOutcome::Anomaly => "anomaly",
+        }
+    }
+
+    fn outcome_filter_symbol(outcome: Option<AuditOutcome>) -> &'static str {
+        outcome.map_or("all", outcome_symbol)
+    }
+
+    /// Exhaustive by design, the same reason [`family_symbol`] is --
+    /// every `AuditStoreErrorReason` this view can be shown must have a
+    /// word, not a silent fallback that could read as "nothing is
+    /// wrong."
+    fn error_reason_symbol(reason: AuditStoreErrorReason) -> &'static str {
+        match reason {
+            AuditStoreErrorReason::Path => "path",
+            AuditStoreErrorReason::Io => "io",
+            AuditStoreErrorReason::Busy => "busy",
+            AuditStoreErrorReason::ReadOnly => "read_only",
+            AuditStoreErrorReason::StorageFull => "storage_full",
+            AuditStoreErrorReason::Corrupt => "corrupt",
+            AuditStoreErrorReason::DecodeFailed => "decode_failed",
+            AuditStoreErrorReason::UnsupportedApplication => "unsupported_application",
+            AuditStoreErrorReason::UnsupportedSchema => "unsupported_schema",
+            AuditStoreErrorReason::InvalidRecord => "invalid_record",
+            AuditStoreErrorReason::InvalidQuery => "invalid_query",
+            AuditStoreErrorReason::InvalidMigration => "invalid_migration",
+            AuditStoreErrorReason::RecoveryIncomplete => "recovery_incomplete",
+            AuditStoreErrorReason::DuplicateEventConflict => "duplicate_event_conflict",
+            AuditStoreErrorReason::MissingAuthorization => "missing_authorization",
+            AuditStoreErrorReason::OperationConflict => "operation_conflict",
+            AuditStoreErrorReason::PhaseConflict => "phase_conflict",
+        }
+    }
+
+    /// RFC-059 task breakdown's own required shape ("the wording guard
+    /// asserts what the view composes," citing RFC-058 review 518's
+    /// `project_board_lines`): the exact text `content_area`'s
+    /// `AuditView` arm renders, factored out so a test can call this
+    /// directly rather than comparing against a string rebuilt beside
+    /// it.
+    pub(super) fn lines(state: &State) -> Vec<String> {
+        let mut lines: Vec<String> = super::project_board_audit_notifications(state)
+            .into_iter()
+            .map(|notification| notification.text)
+            .collect();
+        if let Some(reason) = state.audit_view.load_error {
+            lines.push(state.catalog.get_with_args(
+                "audit-view-load-error",
+                &CatalogArgs::new().trusted_symbol("reason", error_reason_symbol(reason)),
+            ));
+        } else {
+            match state.audit_view.total_matching {
+                Some(total) => {
+                    let kept = state.audit_view.records.len() as u64;
+                    let omitted = total.saturating_sub(kept);
+                    lines.push(
+                        state.catalog.get_with_args(
+                            "audit-view-bounded-notice",
+                            &CatalogArgs::new()
+                                .number("kept", kept)
+                                .number("omitted", omitted),
+                        ),
+                    );
+                }
+                None => {
+                    let kept = state.audit_view.records.len() as u64;
+                    lines.push(state.catalog.get_with_args(
+                        "audit-view-count-unavailable",
+                        &CatalogArgs::new().number("kept", kept),
+                    ));
+                }
+            }
+        }
+        lines
+    }
+
+    /// One record's own row text -- factored out the same testable-
+    /// without-`Element` way [`approval_history_entry_body`] already is,
+    /// since a row mixes a compile-time family/outcome symbol with a
+    /// dynamic, trusted-but-not-`'static` timestamp and id, which
+    /// `CatalogArgs` only carries via `.untrusted` (quoting an id is
+    /// harmless over-caution, not a lie: ids are already bounded to
+    /// `[A-Za-z0-9_.:-]`, never attacker-shaped free text, §3).
+    pub(super) fn row_text(catalog: &super::Catalog, record: &SequencedAuditRecord) -> String {
+        let created_at =
+            tekstide_core::text_safety::quote_untrusted(record.record.created_at.as_str());
+        let has_project = record.record.project_id.is_some();
+        let project = tekstide_core::text_safety::quote_untrusted(
+            record
+                .record
+                .project_id
+                .as_ref()
+                .map_or("", ProjectId::as_str),
+        );
+        catalog.get_with_args(
+            "audit-view-row",
+            &CatalogArgs::new()
+                .untrusted("created_at", &created_at)
+                .trusted_symbol("family", family_symbol(record.record.family))
+                .trusted_symbol("outcome", outcome_symbol(record.record.outcome))
+                .trusted_symbol("has_project", if has_project { "yes" } else { "no" })
+                .untrusted("project", &project),
+        )
+    }
+
+    fn family_filter_label(catalog: &super::Catalog, family: Option<AuditEventFamily>) -> String {
+        catalog.get_with_args(
+            "audit-view-family-label",
+            &CatalogArgs::new().trusted_symbol("family", family_filter_symbol(family)),
+        )
+    }
+
+    fn outcome_filter_label(catalog: &super::Catalog, outcome: Option<AuditOutcome>) -> String {
+        catalog.get_with_args(
+            "audit-view-outcome-label",
+            &CatalogArgs::new().trusted_symbol("outcome", outcome_filter_symbol(outcome)),
+        )
+    }
+
+    fn project_filter_label(
+        catalog: &super::Catalog,
+        project: Option<&ProjectId>,
+        projects: &[ProjectSession],
+    ) -> String {
+        let name = project.and_then(|id| {
+            projects
+                .iter()
+                .find(|project| project.id() == id)
+                .map(ProjectSession::display_name)
+        });
+        match name {
+            Some(name) => {
+                let name = tekstide_core::text_safety::quote_untrusted(name);
+                catalog.get_with_args(
+                    "audit-view-project-label",
+                    &CatalogArgs::new()
+                        .trusted_symbol("has_project", "yes")
+                        .untrusted("project", &name),
+                )
+            }
+            None => catalog.get_with_args(
+                "audit-view-project-label",
+                &CatalogArgs::new()
+                    .trusted_symbol("has_project", "no")
+                    .untrusted("project", &tekstide_core::text_safety::quote_untrusted("")),
+            ),
+        }
+    }
+
+    /// `ProjectOpenSurface::DiffReview`'s own render arm is
+    /// `change_review_view`; this is `AppRoute::AuditView`'s. Same "pin
+    /// the claims, scroll the list" shape that surface's own doc
+    /// explains: [`lines`] above (health/error/bounded-count, each one
+    /// line Tekstide wrote about the whole surface) plus the filter
+    /// buttons are pinned; the record rows -- unboundedly many, up to
+    /// `PAGE_LIMIT` at a time -- get their own scroll region.
+    pub(super) fn view(state: &State) -> Element<'_, Message> {
+        let mut pinned: Vec<Element<'_, Message>> = vec![
+            text(state.catalog.get("audit-view-heading"))
+                .size(state.theme.font_size_heading())
+                .into(),
+        ];
+        for line in lines(state) {
+            pinned.push(text(line).size(state.theme.font_size_status()).into());
+        }
+
+        let projects = state.app_shell.state().projects();
+        pinned.push(
+            row![
+                crate::theme::button(
+                    state.theme,
+                    text(family_filter_label(
+                        &state.catalog,
+                        state.audit_view.filter_family
+                    ))
+                    .size(state.theme.font_size_body())
+                )
+                .on_press(Message::AuditViewCycleFamilyPressed),
+                crate::theme::button(
+                    state.theme,
+                    text(outcome_filter_label(
+                        &state.catalog,
+                        state.audit_view.filter_outcome
+                    ))
+                    .size(state.theme.font_size_body())
+                )
+                .on_press(Message::AuditViewCycleOutcomePressed),
+                crate::theme::button(
+                    state.theme,
+                    text(project_filter_label(
+                        &state.catalog,
+                        state.audit_view.filter_project.as_ref(),
+                        projects
+                    ))
+                    .size(state.theme.font_size_body())
+                )
+                .on_press(Message::AuditViewCycleProjectPressed),
+                crate::theme::button(
+                    state.theme,
+                    text(state.catalog.get("audit-view-clear-filters-button"))
+                        .size(state.theme.font_size_body())
+                )
+                .on_press(Message::AuditViewClearFiltersPressed),
+            ]
+            .spacing(8)
+            .into(),
+        );
+
+        let mut row_elements: Vec<Element<'_, Message>> = Vec::new();
+        if state.audit_view.records.is_empty() {
+            row_elements.push(
+                text(state.catalog.get("audit-view-empty"))
+                    .size(state.theme.font_size_body())
+                    .into(),
+            );
+        }
+        for record in &state.audit_view.records {
+            row_elements.push(
+                text(row_text(&state.catalog, record))
+                    .size(state.theme.font_size_body())
+                    .into(),
+            );
+            if let Some(operation_id) = &record.record.operation_id {
+                row_elements.push(
+                    crate::theme::button(
+                        state.theme,
+                        text(state.catalog.get("audit-view-view-chain-button"))
+                            .size(state.theme.font_size_status()),
+                    )
+                    .on_press(Message::AuditViewShowOperationPressed(operation_id.clone()))
+                    .into(),
+                );
+            }
+        }
+
+        let mut footer: Vec<Element<'_, Message>> = Vec::new();
+        if state.audit_view.next_before_sequence.is_some() {
+            footer.push(
+                crate::theme::button(
+                    state.theme,
+                    text(state.catalog.get("audit-view-load-more-button"))
+                        .size(state.theme.font_size_body()),
+                )
+                .on_press(Message::AuditViewLoadMorePressed)
+                .into(),
+            );
+        }
+
+        column![
+            column(pinned).spacing(8),
+            scrollable(column(row_elements).spacing(8))
+                .width(Length::Fill)
+                .height(Length::Fill),
+            column(footer).spacing(8),
+        ]
+        .spacing(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+}
+use audit_view::AuditViewState;
 
 mod run_report;
 use run_report::{RunReportField, RunReportFieldKind, RunReportNotice};

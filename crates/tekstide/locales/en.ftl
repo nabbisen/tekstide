@@ -77,6 +77,7 @@ main-area-switch-to-content-button = Switch to Content
 
 status-bar-summary = { $route ->
     [project-board] Project Board
+    [audit-view] Audit View
    *[active-project-workspace] Project Workspace
 } | { $count ->
     [one] {$count} project
@@ -965,6 +966,10 @@ approval-history-entry-open = Open
 # actions, in the chrome on every route.
 top-bar-trust-settings-button = Trust Settings
 top-bar-help-button = ?
+# RFC-059 D7: the third, also global and always shown -- the audit store
+# is app-wide, the same no-active-project-required shape `Help` already
+# has.
+top-bar-audit-button = Audit
 
 # RFC-032: `ProjectOpenSurface::TrustSettings`'s own view. `$state` is a
 # compile-time literal symbol (`trust_state_symbol`), never
@@ -1426,6 +1431,7 @@ keyboard-help-open-folder-browser = Browse for a project folder
 keyboard-help-switch-active-project = Switch to the next open project
 keyboard-help-switch-active-document = Switch to the next open document
 keyboard-help-save-all-documents = Save every open document
+keyboard-help-open-audit-view = Audit View: every recorded event, filterable and paged
 
 # RFC-044 D2/PR-044-C: the surface-grouped section, generated from
 # `SURFACE_ACTION_ORDER`/`surface_action_entry` in `keyboard_help.rs`, not
@@ -1519,3 +1525,125 @@ status-bar-pending-approvals = { $count } awaiting approval
 status-bar-git-changed-files = { $count } changed
 status-bar-git-ahead = { $count } ahead
 status-bar-git-behind = { $count } behind
+
+# RFC-059 D7: the audit view, a top-level destination reached from the
+# Project Board's own "Audit" button (`top-bar-audit-button`), not nested
+# inside Trust Settings -- the audit store is app-wide, so this surface
+# shows every project's recorded events, not only the active project's.
+audit-view-heading = Audit
+audit-view-empty = No events match the current filters.
+audit-view-clear-filters-button = Clear filters
+audit-view-view-chain-button = View full operation chain
+audit-view-load-more-button = Load more
+# `what-the-audit-view-must-not-do.md` §6: a *query* against an otherwise
+# healthy, open store can still fail -- distinct from `AuditHealth`, which
+# tracks only open/write, never a read. `$reason` is a compile-time symbol
+# (`error_reason_symbol`), never `AuditStoreErrorReason`'s own `Debug` text.
+audit-view-load-error = Could not load events: { $reason ->
+    [path] the audit directory could not be reached
+    [io] a disk read failed
+    [busy] the store was busy
+    [read_only] the store is read-only
+    [storage_full] storage is full
+    [corrupt] the store's own file is corrupt
+    [decode_failed] a record could not be decoded
+    [unsupported_application] the file at this path is not a Tekstide audit store
+    [unsupported_schema] the store was written by a newer version of Tekstide
+    [invalid_record] a stored record failed validation
+    [invalid_query] the current filters are not valid
+    [invalid_migration] a schema migration failed
+    [recovery_incomplete] a prior recovery did not finish
+    [duplicate_event_conflict] a duplicate event id was found
+    [missing_authorization] a record is missing its required authorization
+   *[phase_conflict] a record conflicts with another of the same operation
+}
+# §1: a bounded page must not imply completeness it cannot demonstrate.
+# The total this view's own `AuditStore::count_matching` call needs is a
+# second, independent query that can itself fail even when the page above
+# loaded fine -- `audit-view-count-unavailable` is the honest answer for
+# that case, never a silent "nothing omitted."
+audit-view-count-unavailable = Showing: { $kept } (the total could not be counted)
+# D3: the existing wording (`agent::report::count_text`'s own
+# "{kept} listed, {omitted} more not recorded"), reproduced here rather
+# than a second idiom for the same honesty.
+audit-view-bounded-notice = Showing: { $omitted ->
+    [0] { $kept }
+   *[other] { $kept } listed, { $omitted } more not recorded
+}
+# The filter buttons' own current-value labels. `$family`/`$outcome` are
+# compile-time symbols (`family_filter_symbol`/`outcome_filter_symbol`,
+# `"all"` when no filter is set) -- exhaustive by design in the Rust match
+# that produces them, though this list itself is not (`ALL_FAMILIES`/
+# `ALL_OUTCOMES`'s own doc names the disclosed gap: a new family or
+# outcome is filterable only once this list and the Rust symbol match are
+# both extended).
+audit-view-family-label = Family: { $family ->
+    [all] All
+    [project_added] Project added
+    [trust_change] Trust change
+    [command_approval] Command approval
+    [managed_process_lifecycle] Managed process lifecycle
+    [plain_terminal_observation] Plain terminal observation
+    [paste_blocked] Paste blocked
+    [restricted_mode_blocked] Restricted mode blocked
+    [root_access_blocked] Root access blocked
+    [safe_close_decision] Safe close decision
+    [sensitive_config_changed] Sensitive config changed
+    [transcript_purge] Transcript purge
+   *[audit_store_recovery] Audit store recovery
+}
+audit-view-outcome-label = Outcome: { $outcome ->
+    [all] All
+    [requested] Requested
+    [authorized] Authorized
+    [applied] Applied
+    [failed] Failed
+    [started] Started
+    [terminated] Terminated
+    [blocked] Blocked
+    [cancelled] Cancelled
+    [completed] Completed
+   *[anomaly] Anomaly
+}
+# `$project` is the project's own `display_name` (untrusted, project-
+# controlled text) when `$has_project` is `yes`; an empty placeholder
+# otherwise, unused by the `no` branch.
+audit-view-project-label = Project: { $has_project ->
+    [yes] { $project }
+   *[no] All projects
+}
+# RFC-059 D1: one row per durable record. `$family`/`$outcome` are
+# compile-time symbols (`family_symbol`/`outcome_symbol`, exhaustive --
+# see their own doc); `$created_at`/`$project` are untrusted (quoted via
+# `quote_untrusted`, even though both are already bounded ids/timestamps
+# rather than attacker-shaped free text -- §3, no free-text column exists
+# to need escaping from in the first place, this is the same caution
+# `CatalogArgs::untrusted` costs nothing extra to apply anyway).
+audit-view-row = { $created_at } · { $family ->
+    [project_added] Project added
+    [trust_change] Trust change
+    [command_approval] Command approval
+    [managed_process_lifecycle] Managed process lifecycle
+    [plain_terminal_observation] Plain terminal observation
+    [paste_blocked] Paste blocked
+    [restricted_mode_blocked] Restricted mode blocked
+    [root_access_blocked] Root access blocked
+    [safe_close_decision] Safe close decision
+    [sensitive_config_changed] Sensitive config changed
+    [transcript_purge] Transcript purge
+   *[audit_store_recovery] Audit store recovery
+} · { $outcome ->
+    [requested] Requested
+    [authorized] Authorized
+    [applied] Applied
+    [failed] Failed
+    [started] Started
+    [terminated] Terminated
+    [blocked] Blocked
+    [cancelled] Cancelled
+    [completed] Completed
+   *[anomaly] Anomaly
+} · { $has_project ->
+    [yes] project { $project }
+   *[no] no project recorded
+}

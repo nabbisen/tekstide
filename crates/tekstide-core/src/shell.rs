@@ -92,6 +92,9 @@ impl ApplicationShell {
                     self.route = AppRoute::ActiveProjectWorkspace;
                 }
             }
+            AppCommand::OpenAuditView => {
+                self.route = AppRoute::AuditView;
+            }
         }
     }
 
@@ -296,6 +299,14 @@ impl ApplicationShell {
         match self.route {
             AppRoute::ProjectBoard => render_project_board(&self.project_board()),
             AppRoute::ActiveProjectWorkspace => render_active_project_workspace(&self.state),
+            // RFC-059 D7: the real query against the audit store, and the
+            // filters/page it was run with, are GUI-crate-only state
+            // (`crate audit::AuditStore` needs real I/O to open) -- this
+            // headless text render has nothing of `AppState`'s own to
+            // show for this route, the same honest-empty shape every
+            // other route-level fact here already has when there is
+            // nothing to say.
+            AppRoute::AuditView => "Audit View\n".to_owned(),
         }
     }
 }

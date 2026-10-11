@@ -36,6 +36,24 @@ store, and one with no recorded grant is Restricted again.
 
 What it records, and what its schema makes impossible:
 
+- **Projects added.** Adding a project records the project and that it was added — never a
+  path outside the project root, and never anything about the files inside it.
+- **Command approvals.** A command proposed in a Managed AI CLI session records that it was
+  requested, and then approved, edited-and-approved, or rejected — never the command text, its
+  arguments, or its output. Only a risk level and a reference bounded to a fixed symbol set are
+  recorded alongside the decision. A proposal whose claimed working directory disagreed with the
+  one Tekstide itself verified records that mismatch as its own distinct event — never which path
+  was claimed, only that a disagreement happened.
+- **Restricted-mode refusals.** A feature blocked because a project is in Restricted mode
+  records that something was blocked, and that Restricted mode was the reason — never which
+  feature. **This family's schema has no field for naming one.**
+- **Root-access refusals.** A path operation blocked for escaping the project root, or following
+  a symlink out of it, records which of those two reasons applied — never the path itself.
+- **Safe-close decisions.** Closing a project with live work running records whether the user
+  chose to terminate it or leave it running, or that this was itself treated as a destructive
+  action — never which processes, their output, or their command lines.
+- **Audit store recovery.** A session that repaired its own audit store after an interruption
+  records that a recovery completed — never what was found broken or what was discarded.
 - **Terminal sessions.** Each launch records a `Started` event; if the session later exits —
   typing `exit`, or the shell dying — a matching `Terminated` event names only whether the
   process exited or was signalled. Never a command, its output, or a path. **This family's

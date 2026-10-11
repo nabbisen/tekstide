@@ -353,6 +353,29 @@ fn open_diff_review_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
     );
 }
 
+#[test]
+fn open_audit_view_shortcut_is_a_candidate_that_collides_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let rule = policy
+        .rule_for(NavigationAction::OpenAuditView)
+        .expect("Open Audit View should have a keyboard policy");
+
+    assert_eq!(rule.default_binding(), Some("Ctrl+Alt+V"));
+    assert_eq!(rule.status(), KeybindingStatus::Bound);
+
+    let collisions: Vec<NavigationAction> = policy
+        .rules
+        .iter()
+        .filter(|other| other.action != NavigationAction::OpenAuditView)
+        .filter(|other| other.default_binding() == rule.default_binding())
+        .map(|other| other.action)
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "Ctrl+Alt+V must not collide with any other rule, reserved or not: {collisions:?}"
+    );
+}
+
 /// RFC-039 PR-039-B: `Ctrl+Alt+N` cycles to the next open project --
 /// checked mechanically, not by inspection alone, the same shape every
 /// other real binding above already uses.
@@ -526,6 +549,7 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+C",
             "Ctrl+Alt+F",
             "Ctrl+Shift+S",
+            "Ctrl+Alt+V",
         ],
     );
 
@@ -718,8 +742,8 @@ fn every_advertised_chord_round_trips() {
         checked += 1;
     }
     assert_eq!(
-        checked, 20,
-        "twenty chords are held (nineteen bound, one reserved)"
+        checked, 21,
+        "twenty-one chords are held (twenty bound, one reserved)"
     );
 }
 

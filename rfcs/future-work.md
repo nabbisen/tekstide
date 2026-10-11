@@ -1390,3 +1390,27 @@ refusal, which is metadata about the user rather than about the project.
 
 **Not scheduled against a release.** Raised at review 527 as a pre-1.0 item, deliberately not fixed
 in the same slice that found it.
+
+## The audit view's own family and outcome filter lists do not fail to compile when a new variant is added — found 2026-10-11 (RFC-059 PR-059-B)
+
+`crates/tekstide/src/shell.rs`'s `audit_view` module has two compile-time-exhaustive matches
+(`family_symbol`, `outcome_symbol` — no wildcard arm, the same discipline `DurableAuditRecordV1::
+validate()`'s own `match self.family` already holds this codebase to) and two **separate**,
+hand-maintained arrays (`ALL_FAMILIES`, `ALL_OUTCOMES`) that drive the filter buttons' own cycle
+order. Adding a thirteenth `AuditEventFamily` forces a new arm in `family_symbol` (a real compile
+error) but does **not** force an entry in `ALL_FAMILIES` — the new family is simply unreachable as a
+filter until someone notices and extends the array by hand. The identical gap exists for
+`AuditOutcome`/`ALL_OUTCOMES`.
+
+**Narrower than it sounds.** A family left out of the cycle list is not hidden from the view: every
+record of that family still shows up in the unfiltered list (`filter_family: None`), and still
+renders correctly through the same exhaustive `family_symbol` match a row uses. The gap is "cannot
+filter down to only this family yet," not "this family's own events are invisible" — the honesty
+property PR-059-A exists to protect (every combination lands and comes back from `query`) is
+unaffected.
+
+**Not fixed in this slice.** A `const fn` or macro that derives `ALL_FAMILIES` from the same
+declaration list `family_symbol`'s match already enumerates would close this properly; doing so for
+two four-to-twelve-variant enums felt like more machinery than the gap's own consequence (a filter
+button briefly missing an option) justified against this slice's own scope. Worth revisiting if a
+13th family or 11th outcome is ever added and this array is not the first thing touched.
