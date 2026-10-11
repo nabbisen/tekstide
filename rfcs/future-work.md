@@ -1293,3 +1293,18 @@ waiting on." The shape of a fix is the same pattern `readme_release_state_disagr
 establishes for `rfcs/README.md` — read each of the remaining four sites' own publish-state claim
 and compare it against `rfcs_named_by_released_sections`/`newest_release_status_disagrees_with_the_publish_record`,
 the same two ground truths already built.
+
+**Addendum, found at review 525: "distrusted" is broader than "released," because both ground
+truths scrape every `RFC-NNN` a section mentions, not only the one it releases.** The `0.34.0`
+entry's own `rfc_ids_the_newest_section_cannot_be_trusted_about` output named *both* RFC-058 (the
+release) and RFC-027 (mentioned once, as background for why two windows could write the same
+record file) — harmless today, since `rfcs/README.md`'s RFC-027 row was correct throughout, but a
+real misdirection waiting on two coincidences: the newest section is in a genuine release/publish
+drift window, *and* a different RFC it merely mentions has its own, unrelated stale row in
+`rfcs/README.md`. In that case the header would point the reader at the changelog for a row that
+really is the problem. `rfcs_named_by_released_sections` has always worked this way (it is not new
+at review 524 or 525), so this is not a regression — it is a precision gap the four-site work above
+should close at the same time, since both come down to the same underlying question: which RFC a
+changelog section *releases*, as against which ones it merely *mentions*. Deciding that once (likely
+by reading the version the section's own heading names, from `rfcs/delivery-plan.md`'s own release
+column, rather than scanning the body text for every `RFC-` occurrence) serves both gaps.
