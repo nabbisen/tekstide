@@ -304,11 +304,24 @@ Checked every release, because a watch that depends on someone remembering is no
 - [ ] Include observed gate output summaries.
 - [ ] Include known limitations and deferred themes.
 - [ ] Receive an accepted review response before tagging.
-- [ ] **`grep` the release's version string across `*.md` and confirm no document yet claims it
-      released.** Added 2026-10-11 after review 522. The candidate's status lines say *"candidate,
-      not yet published"* in every one of the five places; the flip to *"released"* belongs to the
-      publish commit, with the tag and the post-publish check behind it. One command:
-      `grep -rniE "released (as )?.?<version>" --include="*.md" .`
+- [ ] **Confirm no document yet claims the release.** Added 2026-10-11 after review 522. The
+      candidate's status lines say *"candidate, not yet published"* in every one of the five places;
+      the flip to *"released"* belongs to the publish commit, with the tag and the post-publish
+      check behind it. `rfc_docs_invariants`'
+      `the_newest_release_claimed_in_the_changelog_has_a_publish_record` enforces this for
+      `CHANGELOG.md` against `rfcs/handoffs/release-<version>.md`, a record only a publish writes —
+      so the gate already covers the place that matters. For the four other status places, sweep the
+      **status-line shape, not the version string**:
+      `grep -rnE "^(Status:|status:).*[Rr]eleased" --include="*.md" rfcs/` and read each hit against
+      whether that version actually published.
+- [ ] **Corrected 2026-10-11, review 523 — the first version of this item was a check that could
+      not fail on its own defect.** It said to grep `released (as )?.?<version>`. Against the
+      `0.34.0` candidate that matched six of the seven false sites and **missed `CHANGELOG.md:5`**,
+      whose line read `Status: **released 2026-10-11.**` — a date, no version string. The one
+      document every other invariant treats as ground truth was the one the grep could not see, and
+      a changelog-only slip is the most likely form of this mistake because the cut starts there. A
+      pattern built from the version is the wrong shape; the status line is the thing being
+      claimed.
 
 ## Post-Publish Verification
 
