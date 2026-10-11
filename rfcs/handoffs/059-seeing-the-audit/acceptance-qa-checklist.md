@@ -1,7 +1,7 @@
 ---
 title: "RFC-059 acceptance and QA checklist"
-source_rfc: "../../accepted/059-seeing-the-audit.md"
-source_rfc_status: "Accepted by the human owner 2026-10-11"
+source_rfc: "../../done/059-seeing-the-audit.md"
+source_rfc_status: "Implemented and closed 2026-10-12; `0.35.0` candidate, not yet published."
 ---
 
 # RFC-059 — acceptance and QA checklist

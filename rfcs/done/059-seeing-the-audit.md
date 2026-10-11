@@ -1,7 +1,8 @@
 # RFC-059: Seeing The Audit
 
-Status: **Accepted by the human owner 2026-10-11.** D1–D6 as written; the split accepted; **the
-open question answered by the acceptance itself** — see *Decided on acceptance*. Proposed
+Status: **Implemented and closed 2026-10-12; `0.35.0` candidate, not yet published.** See the
+*Closed* section. **Accepted by the human owner 2026-10-11.** D1–D6 as written; the split accepted;
+**the open question answered by the acceptance itself** — see *Decided on acceptance*. Proposed
 2026-10-11. `0.35.0`, pre-1.0. `REQ-SEC-025` (untracked until now), `REQ-SEC-023` in part (see
 *Non-goals*), and the gap that **nothing renders the audit store**. Reserved as number 059 on
 2026-09-24 under the title *"Seeing The Audit, And Redacting It"*; the second half is now
@@ -150,3 +151,73 @@ structurally, and claims nothing about transcript content.
 first-creation race — are in scope, and PR-059-A lands before any view is built. The order is the
 decision: a view over a store that can silently fail to write is a view that can be confidently
 wrong, and finding more dropped writes after designing the view would be the expensive order.
+
+## Closed (2026-10-12)
+
+All three slices and the Whole-RFC checklist are done. **`0.35.0` candidate, not yet published** —
+see `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
+
+**PR-059-A (the store can be believed)** proved every `(AuditEventFamily, AuditOutcome,
+AuditActionKind)` combination the type can produce actually lands in a real on-disk store and comes
+back from `query` — derived from the type via an exhaustive `chains_for_family` match (no
+wildcard), not a hand-written list, so a reviewer could break it by adding a family arm and watch
+the test fail to compile. The one previously-known gap (`safe_close_decision` + `blocked`, review
+503) was confirmed already closed by an earlier migration; no other gap was found. A second,
+independent defect was reproduced and fixed alongside it: two real processes racing to *create* the
+audit database for the first time could livelock, not merely lose — SQLite's own `busy_timeout`
+retry schedule is fixed, not jittered, so two processes released close together can retry in
+lockstep and both exhaust it. Four distinct failure shapes were eventually catalogued for this one
+race, the fourth (`UnsupportedApplication`, a torn store read as foreign) found only by the
+reviewer's own independent worktree ablation. Fixed with a real blocking OS `flock`
+(`lock_creation_section`) across the whole create-or-open decision, the same primitive RFC-058's
+`project_lock` already established, held function-local through the migration branch rather than
+narrowed — narrowing it would hand a concurrent migration the identical race one step later.
+
+**PR-059-B (the view)** is a new top-level destination, `AppRoute::AuditView` (`Ctrl+Alt+V`, or the
+top bar's own always-shown "Audit" button) — not a `ProjectOpenSurface`, since every one of those
+needs an active project and the audit store does not. Filters are exactly `AuditQuery`'s own fields
+(project, family, outcome, operation) with no free-text search; family and outcome cycle through a
+fixed list on a button click, the project filter cycles through currently-open projects, and the
+operation filter is reached only by clicking a shown record's own "View full operation chain"
+button, which clears the other three filters at the same time so an operation's full chain is never
+silently half-hidden. The bounded-count notice reproduces `count_text`'s own existing wording
+rather than inventing a second idiom; `AuditHealth` is reused from the Project Board's own producer
+for open/write failures, and a distinct notice covers a *query* failure against an otherwise
+healthy store, which `AuditHealth` has no slot for. The view leads with a disclosure naming which
+question it answers — added at review 530 after the first draft said nothing about itself,
+leaving a reader who compared it against Approval History with no way to know the two would
+legitimately disagree. The family/outcome filter-cycle lists were a disclosed, non-compile-time-
+enforced gap in the first draft; closed at review 531 with `family_cycle_index`/
+`outcome_cycle_index`, exhaustive matches a 13th variant fails to compile against, which
+`cycle_copy` now navigates by directly rather than a runtime scan.
+
+**PR-059-C (purge, reachable)** wires the storage layer's own already-finished
+`AuditStore::purge_project_records`/`purge_all_records` to a new confirmation dialog, mirroring
+`TranscriptPurgeModal`'s own shape (RFC-033): scope named two ways (the title, and the body's own
+"other projects are not affected" for project scope), the real pre-purge count, and "this cannot be
+undone." The receipt shown afterwards is `AuditPurgeReceipt::deleted_record_count`, read off the
+real `DELETE`, never a count taken before it; a failed purge is shown as a failure, with no
+best-effort fallback available, since the audit store is both what is being mutated and what would
+record the mutation. **A real consequence was found while building the confirmation, not assumed**:
+purging a project's audit records also revokes its trust, because `has_applied_trust_grant`
+decides trust from the exact rows a purge deletes, and `verify_restored_trust_against` demotes a
+project whose row is gone on its next open. Closed at review 532/533 by naming the consequence in
+the dialog itself, before the user presses Purge, and proving the whole mechanism end to end
+against a real store: grant, purge, confirm the already-open session stays trusted, re-verify,
+confirm the demotion. The book's own *"There is no in-app command to purge the audit store"* was
+corrected in the same slice that made it false.
+
+**`REQ-SEC-025`** is tracked and met for audit data for the first time by this release — named in
+no plan row before this RFC. **`REQ-SEC-023`** is met structurally for audit views only: every
+`audit_events` column is an id, an enumerated symbol, or a bounded reference, so there is no field
+that could hold free text to redact. The log-content half is unmet and is **RFC-068**, reserved and
+not started; no entry anywhere in this release implies transcript or log content is redacted.
+
+**Live-captured** against a real project, a real trust grant, and real audit records, throwaway
+project and throwaway `XDG_STATE_HOME` under the session scratchpad:
+`rfcs/handoffs/059-seeing-the-audit/evidence/pr-059-b/` and `evidence/pr-059-c/`. The purge-opening
+and filter-cycle buttons are ordinary `BackgroundControl`s with no keyboard route (the same
+classification several existing controls elsewhere in this crate already have), so clicking
+through to a purge confirmation or a filtered page could not be captured live with the keyboard-
+only tooling available this round — covered instead by real-store end-to-end tests dispatching the
+exact `Message`s each button sends.

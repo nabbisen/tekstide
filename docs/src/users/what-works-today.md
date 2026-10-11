@@ -268,6 +268,14 @@ What each family can and cannot contain is in
 [Local data and privacy](./local-data-and-privacy.md), which is the chapter to read if the
 question is what ends up on your disk.
 
+**The store is now reachable, not only written to.** `Ctrl+Alt+V`, or the "Audit" button in the
+top bar, opens a top-level view over every recorded event — filterable by project, family, outcome
+and operation, paged, and visible with no project open, since the store is app-wide. It leads with
+a line naming what it answers: *what happened*, never *what is live right now* (that is Approval
+History's own question, and the two will legitimately disagree). The same view can purge records,
+per-project or globally, each behind a confirmation naming its scope, its real count, and that the
+act cannot be undone — including, for a trusted project, that purging also revokes its trust.
+
 ## Git
 
 The active project's status bar shows its current branch and whether it has uncommitted changes,

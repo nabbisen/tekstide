@@ -1,6 +1,6 @@
 ---
 title: "What the audit view must not do"
-source_rfc: "../../accepted/059-seeing-the-audit.md"
+source_rfc: "../../done/059-seeing-the-audit.md"
 ---
 
 # What the audit view must not do

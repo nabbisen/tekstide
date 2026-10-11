@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.35.0 - Seeing The Audit
+
+Status: **candidate, not yet published.** RFC-059's three slices and its Whole-RFC checklist are
+all implemented, gated and closed. This entry was written incrementally as slices closed, then
+re-read against the finished set at the candidate; see `rfcs/handoffs/059-seeing-the-audit/` for
+the full handoff pack.
+
+**Twelve audit families recorded, and nothing could see or remove any of it.** `AuditStore::query`
+and `AuditStore::purge_all_records`/`purge_project_records` were already written and tested in
+`tekstide-core`, with zero production call sites — a storage layer finished ahead of any surface
+that used it. This release spends itself on reaching both, and on two recorded defects that decide
+whether what the view shows can be believed.
+
+**Every family-and-outcome combination the type can produce was proven to actually land in the real
+store, not assumed from the Rust-level validator alone.** An enumeration test, derived from the
+type with no hand-written list, found the one gap already known (`safe_close_decision` +
+`blocked`, closed by an earlier migration) and no others. A real, reproducible defect was found and
+fixed alongside it: two processes racing to *create* the audit database for the first time could
+livelock against SQLite's own fixed busy-handler retry schedule — not merely lose, but both retry
+in lockstep and exhaust the timeout — fixed with a real blocking OS `flock` across the whole
+create-or-open decision, the same primitive RFC-058's project lock already established for this
+codebase.
+
+**The audit view (`Ctrl+Alt+V`, or the "Audit" button in the top bar) is a new top-level
+destination**, reachable with no project open, since the store is app-wide. It filters on exactly
+what `AuditQuery` already supports — project, family, outcome, operation — with no free-text search
+(there is no free text in the schema to search). A bounded page says what it left out in
+`count_text`'s own existing words, `AuditHealth` is surfaced here when the store itself is
+degraded, and a distinct notice covers the case `AuditHealth` cannot: a query against an otherwise
+healthy store that fails on its own. The view leads with a disclosure naming which question it
+answers — *what happened*, never *what is live right now*, which is Approval History's own
+question and the two will legitimately disagree.
+
+**Purge is reachable, per-project and global, each behind a confirmation that names its scope, its
+real count, and that the act cannot be undone — this is the first release to track `REQ-SEC-025`
+("Users must be able to purge local transcripts, logs, and audit data") for audit data at all,
+named in no plan row before this RFC.** The number shown afterwards is `AuditPurgeReceipt::
+deleted_record_count`, read off the real `DELETE`, never a count taken before it. A real
+consequence was found while building the confirmation, not assumed: purging a project's audit
+records also revokes its trust, since trust is decided by querying the exact rows a purge deletes.
+The confirmation says so before the purge runs, naming the mechanism and that the revocation lands
+at the project's next open, not immediately. The book's own *"There is no in-app command to purge
+the audit store"* is corrected in the same slice that makes it false.
+
+**`REQ-SEC-023` is met structurally for audit views, and only for audit views.** Every column in
+`audit_events` is an id, an enumerated symbol, or a bounded reference — there is no field that
+could hold free text, so no redaction logic was needed to make the claim true. The requirement's
+log-content half is unmet and out of scope here; it is **RFC-068**, reserved and not started. No
+entry anywhere in this release implies transcript or log content is redacted.
+
 ## 0.34.0 - A Project Held By One Process
 
 Status: **released 2026-10-11.** RFC-058's three slices and its Whole-RFC checklist are all

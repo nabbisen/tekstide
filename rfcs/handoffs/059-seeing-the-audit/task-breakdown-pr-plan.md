@@ -1,6 +1,6 @@
 ---
 title: "RFC-059 task breakdown and PR plan"
-source_rfc: "../../accepted/059-seeing-the-audit.md"
+source_rfc: "../../done/059-seeing-the-audit.md"
 ---
 
 # RFC-059 — task breakdown and PR plan

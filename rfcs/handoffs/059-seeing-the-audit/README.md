@@ -1,14 +1,14 @@
 ---
 title: "RFC-059 handoff — Seeing The Audit"
-status: "**Accepted 2026-10-11; not started.** `0.35.0`. D1–D7 decided on acceptance; `REQ-SEC-023`'s log half split out as RFC-068."
-source_rfc: "../../accepted/059-seeing-the-audit.md"
-source_rfc_status: "Accepted by the human owner 2026-10-11"
+status: "**Implemented and closed 2026-10-12** — `0.35.0` candidate, not yet published. All three slices and the Whole-RFC checklist closed."
+source_rfc: "../../done/059-seeing-the-audit.md"
+source_rfc_status: "Implemented and closed 2026-10-12; `0.35.0` candidate, not yet published."
 target_release: "0.35.0"
 ---
 
 # RFC-059 — Seeing The Audit
 
-Read [the RFC](../../accepted/059-seeing-the-audit.md) first. D1–D7 are decided; this pack is how
+Read [the RFC](../../done/059-seeing-the-audit.md) first. D1–D7 are decided; this pack is how
 the work is cut, what it must not do, and what it is checked against.
 
 ## The short version
