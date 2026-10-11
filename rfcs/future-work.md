@@ -1308,3 +1308,42 @@ should close at the same time, since both come down to the same underlying quest
 changelog section *releases*, as against which ones it merely *mentions*. Deciding that once (likely
 by reading the version the section's own heading names, from `rfcs/delivery-plan.md`'s own release
 column, rather than scanning the body text for every `RFC-` occurrence) serves both gaps.
+
+## A `proposed/` RFC's status claim is unchecked in every register — found 2026-10-11 (RFC-059 scoping)
+
+**`every_delivery_plan_row_agrees_with_its_rfc_folder` has no `"proposed"` arm.** Its match is:
+
+```rust
+let stale = match folder.as_str() {
+    "done" => claims_unfinished(claim),
+    "accepted" => claim.contains("Proposed"),
+    _ => false,
+};
+```
+
+So for an RFC sitting in `rfcs/proposed/`, **nothing is ever stale**. Its register row may claim
+*Accepted*, *Implemented and closed*, or a release that never happened, and the check returns
+`false` without looking.
+
+**Found by ablation, and the first hypothesis was wrong.** Ablating `rfcs/README.md`'s own row for
+RFC-059 to say *"Implemented and closed 2026-10-11"* while the file sat in `proposed/` produced a
+full green run — 763 + 22 + 1132, 0 compile errors. The assumption was that `delivery-plan.md`'s
+row would be covered where the README's was not; ablating the **plan** row with the identical false
+claim was also green. Only then did reading the code show the shared cause. A positive control
+confirms the check itself is alive: the same false claim on RFC-058's row, which sits in `done/`,
+fails loudly.
+
+**Why it has stayed invisible.** `proposed/` has been empty for most of this project's life — its
+own README note says an empty `proposed/` is the correct state — so no row has had the chance to
+drift this way. RFC-059 is the first RFC to sit there in some time, which is what exposed it.
+
+**Second half of the same gap: `rfcs/README.md` has no folder check at all.** Its rows are read
+against the changelog's *release* state (`every_readme_row_agrees_with_the_changelogs_release_state`)
+and never against the folder the RFC file is in, so the README's lifecycle claim is unchecked for
+**every** folder, not only `proposed/`.
+
+**Read with the four-site item above.** That one is about release-state claim sites with no check;
+this is about lifecycle claim sites with no check. Same shape, same registers, and a fix for either
+should decide the other rather than leave a third asymmetry behind.
+
+**Not scheduled against a release.** Raised while scoping RFC-059.
