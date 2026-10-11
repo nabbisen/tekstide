@@ -188,7 +188,15 @@ above already describes, from the other end.
       **Two things fail from an unpacked package and are not defects — measured at `0.17.0`, after
       they cost the cutter ten minutes each.**
 
-      **(a) Build the binary target first.** `cargo test` in
+      **(a) Build the binary targets first — all of them, by name of none.** Corrected 2026-10-11
+      at `0.34.0`: this step said `cargo build --offline --bin reference_adapter`, naming the one
+      helper binary that existed when it was written. RFC-058 added a second,
+      `src/bin/project_process_probe.rs`, and three of its own tests then failed from the unpacked
+      package with *"expected the project_process_probe binary at …/target/debug/project_process_probe"*
+      — four failures where this box says to expect one, for a release with no packaging defect at
+      all (both `[[bin]]`s are in the archive and in its generated manifest). **Run
+      `cargo build --offline --bins`**, which needs no amendment the next time a helper binary is
+      added. The original note follows. `cargo test` in
       `target/package/tekstide-core-<version>/` fails **ten** tests with *"expected the
       reference_adapter binary at …/target/debug/reference_adapter; the `[[bin]]` target may not
       have built"* — and `--all-targets` does **not** fix it. Those tests shell out to a real
