@@ -467,3 +467,87 @@ immediate.
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `779 + 22 + 1135`, 0 failed, 0 fixture
 entries.
+
+## Whole-RFC — the `0.35.0` candidate cut (2026-10-12)
+
+All three slices and the Whole-RFC checklist are done. `rfcs/accepted/059-seeing-the-audit.md`
+moved to `rfcs/done/`, with a new `## Closed` section; `rfcs/README.md` (the Accepted table, now
+empty again; a new Handoffs row; a new Done row), `rfcs/delivery-plan.md`'s own row, and the
+handoff pack's `README.md`/`acceptance-qa-checklist.md`/`task-breakdown-pr-plan.md`/
+`what-the-audit-view-must-not-do.md` frontmatter pointers all updated in the same commit
+(`ce2e06a`). `Cargo.toml`/`Cargo.lock` bumped to `0.35.0`.
+
+### Whole-RFC checklist items, verified directly
+
+- **`REQ-SEC-025` met for audit data** — the first plan row to track it. Said so, by name and not
+  only by id, in `CHANGELOG.md`'s own new `0.35.0` section.
+- **`REQ-SEC-023` not overclaimed**: `audit_events`'s schema (`schema.rs`, `CREATE_SCHEMA_V3`) was
+  read directly — every column is an id, an enumerated `CHECK`-constrained symbol, or a
+  length-bounded reference. No free-text column exists. The log-content half is stated as unmet
+  and out of scope (RFC-068) in the changelog, the RFC's own `Closed` section, and
+  `delivery-plan.md`'s row.
+- **`RedactionClaimScope` still has exactly one variant** — `security.rs:282`, read directly:
+  `StructuredMetadataOnly` alone.
+- **No free-text column was added** — confirmed from the same schema read above; this RFC's own
+  diff never touches `schema.rs` at all.
+- **Approval History still exists and still answers its own question** — untouched by this RFC;
+  the audit view's own §2 disclosure (review 530) is what keeps the two from being read as the
+  same thing.
+- **The book describes every family the view can display** — all twelve, in
+  `local-data-and-privacy.md` (six added at PR-059-B, closing a gap found during that slice: the
+  page described only six of twelve before this RFC touched it).
+- **`rfcs/handoffs/release-checklist.md` run in full for the candidate** — see below.
+
+### The release checklist, run for the candidate (not the publish)
+
+Per RFC-058's own precedent and the reviewer's confirmation at review 532: the candidate cut
+(version bump, changelog, RFC lifecycle move, register rows) is mine; the actual tag, `cargo
+publish`, `release-0.35.0.md` and `post-publish-check.sh` are the owner's own later step, not run
+here.
+
+- `git status --short`: clean (checked after every edit, not only at the end).
+- `cargo fmt --check`: clean.
+- `cargo test --doc --workspace`: 2 passed (the `WatchEvents` compile-fail guard included).
+- `cargo test --workspace --all-targets`: three consecutive clean runs, `779 + 22 + 1135`, 0
+  failed, 0 fixture entries.
+- `cargo clippy --workspace --all-targets --all-features -D warnings`: 0 diagnostics.
+- `cargo build --release --locked`: clean. `./target/release/tekstide --version` reports `0.35.0`;
+  `--help` lists `Ctrl+Alt+V` with its real description.
+- `cargo package -p tekstide-core --locked` and `cargo package --workspace --locked`: both clean,
+  against the committed tree (an uncommitted `Cargo.toml` refuses packaging by design — confirmed
+  directly, not assumed).
+- `cargo publish --workspace --dry-run --locked`: clean, both crates.
+- **Package Smoke**: no stray `.rs` outside `src/`/`tests/`/`examples/`/`benches/` in either
+  archive; `LICENSE`/`NOTICE`/`README.md`/`Cargo.toml` present in both. Built and tested from the
+  unpacked `tekstide-core-0.35.0` directly (`cargo build --offline --bins`, then `cargo test
+  --offline`): `1134 passed, 1 failed` — the one expected, by-construction failure
+  (`real_repository_filesystem_scan_cost_headless_benchmark`, refusing to benchmark a directory
+  that is not a real repository), exactly the checklist's own documented shape. Did **not** attempt
+  a standalone `cargo build` inside the unpacked `tekstide-0.35.0` directory — the checklist names
+  this exact attempt as failing by construction (`tekstide-core 0.35.0` is not yet on crates.io),
+  and the real pairing gate is the workspace dry-run above, which already passed.
+- `cargo audit`: zero vulnerabilities; three warnings (`paste`, `ttf-parser`, `lru`), matching
+  `dependency-advisories.md`'s own register exactly — no new finding, nothing to retire.
+- **Standing watches**: `cargo tree -p tekstide | grep -i accesskit` — empty (RFC-014 R2 still not
+  reopenable). `README.md:37` still says "No screen-reader support" plainly.
+- **Run It**: the release binary launched as a first-time user, fresh `XDG_STATE_HOME`, no
+  arguments — empty Project Board, "No projects yet," a real path field, "Browse…," and the CLI
+  hint, naming only actions that exist. Captured to
+  `.git-exclude/release-evidence/0.35.0/cold-start-empty-board.png` (not committed, per the
+  checklist's own instruction).
+- **The book against the changelog**: swept `what-works-today.md`'s own `## Audit` section, which
+  described the twelve recording families but said nothing about either new capability this
+  release adds — added two sentences naming the view and the purge controls. Grepped for stale
+  negative claims about audit/purge across both book pages; the one other "no in-app command" hit
+  (`local-data-and-privacy.md:19`) is the unrelated recent-projects cache, unaffected by this RFC.
+
+### Confirmed no document claims the release yet
+
+`grep -rnE "^(Status:|status:).*[Rr]eleased" --include="*.md" rfcs/` was read against this RFC's
+own five status places, all of which say **"candidate, not yet published"**, never "released":
+`CHANGELOG.md`, `rfcs/README.md` (both the Handoffs and Done rows), `rfcs/delivery-plan.md`,
+`rfcs/done/059-seeing-the-audit.md`'s own status line, and the handoff pack's `README.md`
+frontmatter. No `rfcs/handoffs/release-0.35.0.md` exists — confirmed directly, not assumed — so
+`the_newest_release_claimed_in_the_changelog_has_a_publish_record` has nothing to disagree with.
+`rfc_docs_invariants`: 22/22, including `the_newest_release_status_matches_whether_it_was_actually_
+published` and `an_rfc_a_release_names_lives_in_done`.
