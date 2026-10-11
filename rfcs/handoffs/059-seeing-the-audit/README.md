@@ -1,8 +1,8 @@
 ---
 title: "RFC-059 handoff — Seeing The Audit"
-status: "**Implemented and closed 2026-10-12** — `0.35.0` candidate, not yet published. All three slices and the Whole-RFC checklist closed."
+status: "**Implemented and closed 2026-10-12** — released as `0.35.0` 2026-10-12. All three slices and the Whole-RFC checklist closed."
 source_rfc: "../../done/059-seeing-the-audit.md"
-source_rfc_status: "Implemented and closed 2026-10-12; `0.35.0` candidate, not yet published."
+source_rfc_status: "Implemented and closed 2026-10-12; released as `0.35.0` 2026-10-12."
 target_release: "0.35.0"
 ---
 

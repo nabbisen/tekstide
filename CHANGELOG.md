@@ -2,7 +2,7 @@
 
 ## 0.35.0 - Seeing The Audit
 
-Status: **candidate, not yet published.** RFC-059's three slices and its Whole-RFC checklist are
+Status: **released 2026-10-12.** RFC-059's three slices and its Whole-RFC checklist are
 all implemented, gated and closed. This entry was written incrementally as slices closed, then
 re-read against the finished set at the candidate; see `rfcs/handoffs/059-seeing-the-audit/` for
 the full handoff pack.

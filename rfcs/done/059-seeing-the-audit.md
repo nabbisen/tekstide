@@ -1,6 +1,6 @@
 # RFC-059: Seeing The Audit
 
-Status: **Implemented and closed 2026-10-12; `0.35.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-12; released as `0.35.0` 2026-10-12.** See the
 *Closed* section. **Accepted by the human owner 2026-10-11.** D1–D6 as written; the split accepted;
 **the open question answered by the acceptance itself** — see *Decided on acceptance*. Proposed
 2026-10-11. `0.35.0`, pre-1.0. `REQ-SEC-025` (untracked until now), `REQ-SEC-023` in part (see
@@ -154,7 +154,7 @@ wrong, and finding more dropped writes after designing the view would be the exp
 
 ## Closed (2026-10-12)
 
-All three slices and the Whole-RFC checklist are done. **`0.35.0` candidate, not yet published** —
+All three slices and the Whole-RFC checklist are done. **Released as `0.35.0` 2026-10-12** — see `rfcs/handoffs/release-0.35.0.md`, the publish record the invariant reads the changelog against;
 see `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
 
 **PR-059-A (the store can be believed)** proved every `(AuditEventFamily, AuditOutcome,
