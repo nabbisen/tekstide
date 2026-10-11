@@ -686,6 +686,46 @@ ran it.
   warnings`, doctests: clean. Three consecutive full-workspace runs: `763 + 22 + 1132`, 0 fixture
   entries. Commit `7d77027`, pushed.
 
+### Required at review 524 — the panic header, not the function's return value
+
+Two of three accepted outright (verified independently: direction A and B both re-ablated and
+shown red, each naming the real defect). The third, Required 2, was **half done** — the rows
+underneath were corrected, the sentence above them was not.
+
+- [x] **The assert's own header, a separate format string from `readme_release_state_disagreements`'s
+  return value, still said "the changelog wins" unconditionally** — the exact sentence Required 2
+  was about, missed because the review-523 test asserted on the function's return string, not on
+  what a human actually sees when the check fires. A reader acting on the first line, before the
+  rows, would still have made two correct rows agree with a lie, now with a second sentence telling
+  them they were wrong to. **Done.** The header is now built conditionally: "the changelog wins"
+  only when `unverified` is empty; otherwise it names which RFC ids the newest section cannot be
+  trusted about and says `THE CHANGELOG IS THE DOCUMENT TO FIX, not these rows` — matching the rows
+  underneath instead of contradicting them. **Verified the way required, not by a unit test**: the
+  real direction-A ablation (`CHANGELOG.md`'s status line put back to a premature "released" claim,
+  on a clean tree, via `ablate.sh`), reading the **actual panic output**, unfiltered:
+
+  ```
+  an RFC's publish state in rfcs/README.md disagrees with CHANGELOG.md -- but for RFC-027,
+  RFC-058, CHANGELOG.md's own newest section is the one with no publish record backing its claim.
+  THE CHANGELOG IS THE DOCUMENT TO FIX, not these rows:
+    `## Handoffs` row for RFC-058 disagrees with CHANGELOG.md's own newest section ...
+    `## Implemented` row for RFC-058 disagrees with CHANGELOG.md's own newest section ...
+  ```
+
+  No "the changelog wins" anywhere in the real output; tree restored clean, 0 compile errors in the
+  ablation log. Gate: `rfc_docs_invariants` 22/22 on the real (correct) tree, `cargo fmt`/`clippy -D
+  warnings`/doctests clean, three consecutive full-workspace runs (`763 + 22 + 1132`, 0 fixture
+  entries). Commit `2065193`, pushed.
+
+- [ ] **Observation, not required — four of seven release-state claim sites have no check.**
+  Carried, not fixed here, per the reviewer's own explicit ruling ("a fourth round on a candidate
+  the owner is waiting on... please carry it as a recorded item for a later release"). Recorded in
+  `rfcs/future-work.md` under *"Four of the seven release-state claim sites have no check against
+  the changelog"*: `rfcs/delivery-plan.md`'s own register row, both of the closed RFC's own status
+  lines, and the handoff pack's own frontmatter are not read against `CHANGELOG.md`'s release state
+  by any test. Mitigated by hand in the meantime by `release-checklist.md`'s own grep sweep, not by
+  an invariant. Commit `4630c41`, pushed.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
