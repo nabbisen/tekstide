@@ -22382,6 +22382,17 @@ fn audit_record(
 /// on its own position in `ALL_FAMILIES`, cycling silently skips or
 /// repeats an entry, which this test catches before an array edit (an
 /// insertion in the wrong place, say) could do so silently.
+///
+/// **What this does not catch, review 531's own residual note**: a
+/// *wrong but complete* pairing -- a thirteenth family added to both
+/// `family_cycle_index` (say, `=> 12`) and `ALL_FAMILIES` together would
+/// still pass this test, since it iterates `ALL_FAMILIES` itself and
+/// never cross-checks against `AuditEventFamily::ALL` or any other
+/// independent enumeration. The guard turns an *omission* into a
+/// compile error (what review 530 asked for); it does not make an
+/// *inconsistent* edit to both sites at once impossible. That is a
+/// visible mistake made while looking directly at the indices, not a
+/// silent gap, so it is recorded here rather than closed further.
 #[test]
 fn all_families_and_outcomes_cover_every_declared_cycle_index_exactly_once() {
     let family_indices: Vec<usize> = audit_view::ALL_FAMILIES
