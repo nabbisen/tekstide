@@ -98,14 +98,29 @@ winner releases the lock, already knowing a store exists rather than guessing wh
 which is what closes the livelock, not only the "already exists" conflict the RFC's own prose
 anticipated.
 
-**Ablated, in isolation** (the only invocation shown above to reproduce the race at all): reverting
-`lock_creation_section`'s own call site in `store.rs` (clean tree, manual revert matching
-`ablate.sh`'s own replace-run-restore shape, then restored via `git checkout` since the dirty state
-was this exact, deliberate, single-line reversion) — 10 of 10 runs of the 20-iteration regression
-test failed, reproducing the pre-fix behaviour exactly. With the fix restored: clean, every time,
-across more than 30 separate runs during development plus the three consecutive full-workspace gate
-runs below (which do not themselves exercise the race's own failure mode for the reason stated
-above, but do confirm nothing else regressed).
+**Ablated in a disposable `git worktree`** (review 527 Required 3: a dirty main tree, "restored"
+afterward on the strength of "this is only my own deliberate change," is the exact vigilance
+argument `ablate.sh`'s own clean-tree refusal exists to replace — a hand revert-and-checkout was
+wrong to do even though nothing was lost this time):
+
+```
+WT=$(mktemp -d)/wt
+git worktree add -q --detach "$WT" HEAD
+# lock_creation_section's own call site removed, inside $WT only
+cd "$WT" && cargo build -p tekstide-core --bins && cargo test -p tekstide-core --lib \
+  two_real_processes_racing_to_create_the_store_both_succeed
+git worktree remove --force "$WT"
+```
+
+**5 of 5 runs failed**, the main tree never touched. A third error shape appeared this round,
+alongside the two already recorded above: `ERR AuditStoreError { reason: Io }` — the exact
+error-agnostic design of the fallback-free fix means every shape the race can produce closes the
+same way, not only the two shapes any single round of manual testing happened to observe. **Zero
+fixture directories leaked across all 5 failing runs** (`CleanupOnDrop`, review 527 Required 2),
+confirmed by a direct `ls`/count before and after. With the fix restored (the worktree discarded,
+never merged): clean on the main tree, every time, across 30+ separate runs during development plus
+the three consecutive full-workspace gate runs below (which do not themselves exercise the race's
+own failure mode for the reason stated above, but do confirm nothing else regressed).
 
 ### Gate
 

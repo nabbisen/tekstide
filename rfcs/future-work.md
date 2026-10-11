@@ -1347,3 +1347,27 @@ this is about lifecycle claim sites with no check. Same shape, same registers, a
 should decide the other rather than leave a third asymmetry behind.
 
 **Not scheduled against a release.** Raised while scoping RFC-059.
+
+## The audit directory and its own files have no explicit permission mode — found 2026-10-11 (RFC-059 PR-059-A, review 527)
+
+**Pre-existing, not introduced by this slice** — but this slice added a new file to the same
+directory with the precedent already in hand and did not follow it. `grep -rn "mode(0o\|
+set_permissions\|DirBuilder" crates/tekstide-core/src/audit/` finds nothing in production code: the
+audit directory (`fs::create_dir_all(storage_path.audit_dir())`, `store.rs`), the database file
+itself, and the new `<audit_dir>/.create.lock` (`lock_creation_section`, `store.rs`, RFC-059) are
+all created with whatever the process umask leaves — typically world-readable.
+
+RFC-058's own `project_lock` module sets `0o700` on its directory and `0o600` on the lock file
+explicitly, at creation time (not a post-hoc `set_permissions`, which a real bug in that module's
+own first draft showed can silently repair a simulated-unreadable directory and mask a genuine
+`CannotDecide` case — see `project_lock`'s own doc). The same discipline was available to reuse here
+and was not.
+
+**Narrower than it sounds.** The audit store's own records are already non-sensitive by design — no
+free-text column, every value an id, an enumerated symbol, or a bounded reference (RFC-059's own
+`REQ-SEC-023` argument) — so an unreadable-by-others mode is defense in depth, not a claim this
+project currently makes about who can read the database file. The `.create.lock`'s own content (if
+any were ever written to it, which `lock_creation_section` does not do) carries nothing either.
+
+**Not scheduled against a release.** Raised at review 527 as a pre-1.0 item, deliberately not fixed
+in the same slice that found it.
