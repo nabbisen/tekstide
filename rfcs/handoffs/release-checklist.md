@@ -256,6 +256,19 @@ Two shapes, both found by the implementer rather than by the gate:
   program's own words does not half-fix the drift, it creates a new one.** Fix both sides in one
   commit or neither.
 
+- **A document claiming the release event itself, before it happened.** Found at review 522, in
+  `0.34.0`'s own candidate. The candidate cut wrote `CHANGELOG.md`'s status line as *"released
+  2026-10-11"* — a date guessed from the day the cut was made — and the four other status places
+  followed it, seven claim sites in five documents, with no tag, no `release-0.34.0.md` and nothing
+  on crates.io. `0.33.0`'s candidate had written *"candidate, not yet published"* correctly, so this
+  was a departure from a working convention, not a missing one. **The invariant could not catch it,
+  and passed 19/19 while every site was false**: `rfcs_named_by_released_sections` takes
+  `CHANGELOG.md`'s own status line as the definition of released, so a false changelog does not fail
+  the check — it obliges the other four documents to agree with it. A consistency check anchored on
+  one of the documents it checks cannot see them all being wrong together. **Ground truth for
+  "released" has to be something only the publish writes** — the tag, or
+  `rfcs/handoffs/release-<version>.md`.
+
 - [ ] For every capability this release's **Added** section names, search
       `docs/src/users/what-works-today.md` for a claim that it does not exist — *"no X"*, *"There is
       no X"*, *"Not built"*.
@@ -291,6 +304,11 @@ Checked every release, because a watch that depends on someone remembering is no
 - [ ] Include observed gate output summaries.
 - [ ] Include known limitations and deferred themes.
 - [ ] Receive an accepted review response before tagging.
+- [ ] **`grep` the release's version string across `*.md` and confirm no document yet claims it
+      released.** Added 2026-10-11 after review 522. The candidate's status lines say *"candidate,
+      not yet published"* in every one of the five places; the flip to *"released"* belongs to the
+      publish commit, with the tag and the post-publish check behind it. One command:
+      `grep -rniE "released (as )?.?<version>" --include="*.md" .`
 
 ## Post-Publish Verification
 
