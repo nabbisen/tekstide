@@ -259,17 +259,17 @@ fn open_cli_project_path_and_record(
     Option<shell::ProjectOpenBlockedNotice>,
     tekstide_core::project::root::ProjectRootValidationError,
 > {
-    // RFC-058: resolved independently, the same "cheap, stateless env-var
-    // read, resolved separately per consumer" shape `instance_marker` and
-    // `store` above already use in `boot()` -- a third resolution of the
-    // identical directory, not a new one. `None` degrades to the
-    // unprotected path (D5): a CLI argument must open exactly as it
-    // always did when the state root itself cannot be resolved, not
-    // refuse to boot over it.
-    let Some(state_root) = tekstide_core::project::recent::AppStatePathProvider::linux_default()
-        .ok()
-        .map(|path_provider| path_provider.state_dir().to_path_buf())
-    else {
+    // RFC-058: reuses `shell::open_real_recovery_state_root`, not a fresh
+    // `AppStatePathProvider::linux_default()` call of its own -- corrected at
+    // review 521, which found the original independent resolution (matching
+    // `instance_marker`'s own shape) was the one production call site this
+    // crate's `#[cfg(test)]` state-root isolation had not yet reached: every
+    // test calling this function through `tests.rs` was binding a real
+    // `AF_UNIX` socket and writing a real lock file under the developer's
+    // actual `project-locks/`. `None` degrades to the unprotected path (D5):
+    // a CLI argument must open exactly as it always did when the state root
+    // itself cannot be resolved, not refuse to boot over it.
+    let Some(state_root) = shell::open_real_recovery_state_root() else {
         return match app_shell.add_project_from_path(selected_path)? {
             tekstide_core::app::AddProjectOutcome::Added(project_id) => {
                 finish_opening_cli_project(app_shell, project_id, audit_health);

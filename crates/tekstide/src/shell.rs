@@ -3749,7 +3749,16 @@ fn open_real_agent_run_state_root() -> Option<std::path::PathBuf> {
 /// `update()`, which a test drives directly, and `suite-assumes-it-owns-the-machine.md`'s
 /// own lesson is exactly that a production call site reachable from a test must not be
 /// able to resolve the real, developer-owned state root.
-fn open_real_recovery_state_root() -> Option<std::path::PathBuf> {
+///
+/// `pub(crate)`, review 521: `main.rs`'s own `open_cli_project_path_and_record` resolved
+/// `AppStatePathProvider::linux_default()` **directly** for RFC-058's project lock, the
+/// one call site this exact isolation split had not yet reached -- reachable from a test
+/// in this crate's own `tests.rs` (every CLI-path test calls it), so every such test bound
+/// a real `AF_UNIX` socket and wrote a real lock file under the developer's actual
+/// `project-locks/`. Reusing this function closes that the same way every other consumer
+/// of the real state root already is closed, rather than inventing a second isolation split
+/// for one caller.
+pub(crate) fn open_real_recovery_state_root() -> Option<std::path::PathBuf> {
     let state_dir = resolve_agent_run_state_dir()?;
     std::fs::create_dir_all(&state_dir).ok()?;
     Some(state_dir)
