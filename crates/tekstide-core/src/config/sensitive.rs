@@ -89,11 +89,14 @@ pub fn direction(
 /// slice. RFC-023 gives two clean examples -- adding a profile
 /// increases permitted capability, removing one reduces it -- but does
 /// not say what *modifying* an existing profile is. Since RFC-045 D3'
-/// that means its `display_name` or its `command`, and a `command` in
-/// particular could tighten or loosen depending on specifics this module
-/// has no principled way to judge (a new executable path is not
-/// comparably "more" or "less" than the old one the way a retention
-/// day-count is). So the rule here is
+/// (and, as of RFC-060 D1/D2, `adapter` too) that means its
+/// `display_name`, its `command`, or its declared adapter, and a
+/// `command` in particular could tighten or loosen depending on
+/// specifics this module has no principled way to judge (a new
+/// executable path is not comparably "more" or "less" than the old one
+/// the way a retention day-count is) -- while declaring `adapter` on a
+/// profile that did not have it is unambiguously `Increase` on its own,
+/// since it is what grants `Managed` at all. So the rule here is
 /// worst-case-wins, the same reasoning `retention_direction`'s
 /// less-is-safer logic generalises to a set-valued field: `candidate`
 /// is `Reduce` only if it is a **pure subset** of `current` -- every
@@ -101,7 +104,10 @@ pub fn direction(
 /// with an *identical* value. Anything else -- a new key, a changed
 /// value for an existing key, or both -- is `Increase`, because at
 /// least one entry in `candidate` was not already authorized under
-/// `current`'s own values.
+/// `current`'s own values. **This equality is whole-value** (derived
+/// `PartialEq` on [`super::model::ConfiguredAiCliProfile`]), so a
+/// profile that only changed its `adapter` declaration is correctly
+/// `Increase` too, with no field-by-field case needed here.
 fn agent_profiles_direction(
     current: &BTreeMap<String, ConfiguredAiCliProfile>,
     candidate: &BTreeMap<String, ConfiguredAiCliProfile>,

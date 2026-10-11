@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::audit::AuditReference;
 use crate::config::ConfigurationDocument;
 use crate::config::model::{
-    AgentSettings, ConfiguredAiCliProfile, FallbackReason, KeybindingSettings, ResourceSettings,
-    SettingFallback,
+    AgentSettings, ConfiguredAiCliAdapter, ConfiguredAiCliProfile, FallbackReason,
+    KeybindingSettings, ResourceSettings, SettingFallback,
 };
 use crate::config::sensitive::{self, SecuritySensitiveField};
 
@@ -277,11 +277,11 @@ pub struct ConfigLoadOutcome {
 /// value this function can hand back that represents "half-applied."
 ///
 /// **RFC-045 D3': this function accepts exactly the keys with a
-/// consumer.** Four, plus `[agent.profile.<id>]`'s `display_name` and
-/// `command`. Everything else RFC-023's schema defined is refused by
-/// name -- see [`WITHDRAWN_KEYS`] for why that is a refusal and not a
-/// warning, and [`PERMANENTLY_REFUSED_KEYS`] for the three whose refusal
-/// is not waiting on anything.
+/// consumer.** Four, plus `[agent.profile.<id>]`'s `display_name`,
+/// `command`, and (RFC-060 D1/D2) `adapter`. Everything else RFC-023's
+/// schema defined is refused by name -- see [`WITHDRAWN_KEYS`] for why
+/// that is a refusal and not a warning, and [`PERMANENTLY_REFUSED_KEYS`]
+/// for the three whose refusal is not waiting on anything.
 pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagnostic> {
     let mut root: toml::Table =
         source
@@ -485,6 +485,24 @@ fn require_string(
     }
 }
 
+fn take_bool(
+    table: &mut toml::Table,
+    section: &str,
+    field: &str,
+    default: bool,
+) -> Result<bool, ConfigDiagnostic> {
+    match table.remove(field) {
+        None => Ok(default),
+        Some(toml::Value::Boolean(value)) => Ok(value),
+        Some(_) => Err(ConfigDiagnostic {
+            path: None,
+            key: format!("{section}.{field}"),
+            location: None,
+            message: "expected a boolean",
+        }),
+    }
+}
+
 fn extract_agent(
     root: &mut toml::Table,
     warnings: &mut Vec<ConfigWarning>,
@@ -573,6 +591,15 @@ fn extract_agent_profiles(
         refuse_withdrawn_profile_keys(&profile_table, &section)?;
         let display_name = take_string(&mut profile_table, &section, "display_name", &name)?;
         let command = require_string(&mut profile_table, &section, "command")?;
+        // RFC-060 D1/D2: the one key that decides `ConfiguredAiCliAdapter`
+        // -- `Managed` and "an adapter was declared" are the same fact,
+        // so there is exactly one boolean to read here, not a second key
+        // that could disagree with it.
+        let adapter = if take_bool(&mut profile_table, &section, "adapter", false)? {
+            ConfiguredAiCliAdapter::Managed
+        } else {
+            ConfiguredAiCliAdapter::None
+        };
 
         warn_unconsumed(profile_table, &section, warnings);
 
@@ -581,6 +608,7 @@ fn extract_agent_profiles(
             ConfiguredAiCliProfile {
                 display_name,
                 command,
+                adapter,
             },
         );
     }
@@ -589,14 +617,20 @@ fn extract_agent_profiles(
 
 /// RFC-045 D3' inside a `[agent.profile.<id>]` table. `args` is §1's own
 /// opening example -- the key RFC-023 parsed, `to_ai_cli_profile`
-/// dropped, and nothing reported. `adapter` and `environment_policy` are
-/// the same shape. Each returns with the field on `AiCliProfile` that
-/// would carry it (an argv template is an RFC-010 amendment, reserved).
+/// dropped, and nothing reported. `environment_policy` is the same
+/// shape. Each returns with the field on `AiCliProfile` that would carry
+/// it (an argv template is an RFC-010 amendment, reserved).
+///
+/// **`adapter` is no longer withdrawn.** RFC-045 D3' refused it because
+/// RFC-023 parsed it into an unconsumed, freestanding string. RFC-060
+/// D1/D2 reintroduces it as a real boolean with a real consumer
+/// (`extract_agent_profiles`, just above) -- a different key in shape,
+/// not a reinstatement of the old one.
 ///
 /// Not in [`WITHDRAWN_KEYS`] because a profile's section name contains
-/// the user's own profile id, so these three cannot be matched by a
-/// fixed `(section, field)` pair.
-const WITHDRAWN_PROFILE_KEYS: &[&str] = &["args", "adapter", "environment_policy"];
+/// the user's own profile id, so these two cannot be matched by a fixed
+/// `(section, field)` pair.
+const WITHDRAWN_PROFILE_KEYS: &[&str] = &["args", "environment_policy"];
 
 fn refuse_withdrawn_profile_keys(
     profile_table: &toml::Table,

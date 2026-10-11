@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::{
-    ConfigStore, ConfigurationDocument, SecuritySensitiveField, parse_and_validate,
+    ConfigStore, ConfigurationDocument, ConfiguredAiCliAdapter, SecuritySensitiveField,
+    parse_and_validate,
 };
 
 struct TestDir {
@@ -57,6 +58,7 @@ transcript_retention_days = 7
 [agent.profile.codex]
 display_name = "Codex"
 command = "/usr/local/bin/codex"
+adapter = true
 
 [resources]
 agent_run_limit = 3
@@ -74,6 +76,7 @@ agent_run_limit = 3
     let profile = &outcome.document.agent.profiles["codex"];
     assert_eq!(profile.display_name, "Codex");
     assert_eq!(profile.command, "/usr/local/bin/codex");
+    assert_eq!(profile.adapter, ConfiguredAiCliAdapter::Managed);
 }
 
 /// A profile's `display_name` still defaults to its own id, so the
@@ -314,11 +317,53 @@ fn a_profile_args_key_is_refused_rather_than_parsed_and_dropped() {
     assert!(error.message.contains("no effect yet"), "{}", error.message);
 }
 
+/// **Was `a_profile_adapter_key_is_refused_rather_than_parsed_and_
+/// dropped`, before RFC-060 D1/D2 gave `adapter` a real consumer.** That
+/// test asserted the RFC-045 D3' withdrawal; `adapter` is no longer
+/// withdrawn, so the property worth proving now is the opposite --
+/// `adapter` is a real, read, boolean key -- plus the one withdrawal
+/// property that *does* carry over: a non-boolean value is still
+/// refused, now for a different reason (a type error, not a withdrawn
+/// key), but still refused rather than silently coerced or dropped.
 #[test]
-fn a_profile_adapter_key_is_refused_rather_than_parsed_and_dropped() {
+fn a_profile_adapter_key_declares_managed_when_true_and_supervised_when_absent() {
+    let managed =
+        parse_and_validate("[agent.profile.codex]\ncommand = \"codex\"\nadapter = true\n")
+            .expect("a boolean `adapter` key must parse")
+            .document;
+    assert_eq!(
+        managed.agent.profiles["codex"].adapter,
+        ConfiguredAiCliAdapter::Managed
+    );
+
+    let unmanaged = parse_and_validate("[agent.profile.codex]\ncommand = \"codex\"\n")
+        .expect("a profile with no adapter key must still parse")
+        .document;
+    assert_eq!(
+        unmanaged.agent.profiles["codex"].adapter,
+        ConfiguredAiCliAdapter::None
+    );
+
+    let explicit_false =
+        parse_and_validate("[agent.profile.codex]\ncommand = \"codex\"\nadapter = false\n")
+            .expect("an explicit `adapter = false` must still parse")
+            .document;
+    assert_eq!(
+        explicit_false.agent.profiles["codex"].adapter,
+        ConfiguredAiCliAdapter::None
+    );
+}
+
+#[test]
+fn a_profile_adapter_key_that_is_not_a_boolean_is_refused() {
     let error = parse_and_validate("[agent.profile.codex]\ncommand = \"codex\"\nadapter = \"x\"\n")
         .unwrap_err();
     assert_eq!(error.key, "agent.profile.codex.adapter");
+    assert!(
+        error.message.contains("expected a boolean"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]

@@ -20,8 +20,8 @@ pub use load::{
     ConfigWarning, parse_and_validate,
 };
 pub use model::{
-    AgentSettings, ConfigurationDocument, ConfiguredAiCliProfile, FallbackReason,
-    KeybindingSettings, ResourceSettings, SettingFallback,
+    AgentSettings, ConfigurationDocument, ConfiguredAiCliAdapter, ConfiguredAiCliProfile,
+    FallbackReason, KeybindingSettings, ResourceSettings, SettingFallback,
 };
 pub use path::{
     ConfigPathError, ConfigPathErrorReason, ConfigPathProvider, ConfigPathResolver,

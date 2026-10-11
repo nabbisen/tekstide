@@ -111,18 +111,46 @@ pub enum FallbackReason {
 /// represents it -- **not** [`crate::agent::profile::AiCliProfile`].
 /// Translating one into the other is [`super::to_ai_cli_profile`].
 ///
-/// **RFC-045 D3': `args`, `adapter` and `environment_policy` are gone.**
-/// `AiCliProfile` has no field an argv template could go into, and
-/// `to_ai_cli_profile` read none of the three -- so a user could write
-/// `args = ["--model", "x"]`, watch the file validate, launch the
-/// profile, and get no `--model`, with nothing saying so. That is §1 of
-/// the risk document in its original form. An argv template is an
-/// RFC-010 amendment to `AiCliProfile`, reserved and not written; until
-/// then the parser refuses the key rather than storing it.
+/// **RFC-045 D3': `args` and `environment_policy` are gone.** `AiCliProfile`
+/// has no field an argv template could go into, and `to_ai_cli_profile`
+/// read neither -- so a user could write `args = ["--model", "x"]`,
+/// watch the file validate, launch the profile, and get no `--model`,
+/// with nothing saying so. That is §1 of the risk document in its
+/// original form. An argv template is an RFC-010 amendment to
+/// `AiCliProfile`, reserved and not written; until then the parser
+/// refuses the key rather than storing it.
+///
+/// **RFC-060 D1/D2 reintroduces `adapter` -- not the field RFC-045 D3'
+/// withdrew.** That one was an unconsumed, freestanding string with no
+/// agreed shape; this one is [`ConfiguredAiCliAdapter`], a two-variant
+/// enum that *is* the declaration `to_ai_cli_profile` reads to produce
+/// `AgentCompatibilityLevel::Managed` and
+/// `AiCliAdapterCapabilities::structured_action_approval`. There is no
+/// third field either of those could disagree with: `adapter` is the
+/// only thing a document can set that affects either.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfiguredAiCliProfile {
     pub display_name: String,
     pub command: String,
+    pub adapter: ConfiguredAiCliAdapter,
+}
+
+/// RFC-060 D1/D2: whether this profile's `command` speaks Tekstide's own
+/// approval protocol (RFC-021) -- declaring `Managed` and declaring an
+/// adapter are **the same act**, carried by this one field, so a
+/// document cannot set one without the other and cannot set them
+/// inconsistently: there is no second field to disagree with it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConfiguredAiCliAdapter {
+    /// No adapter declared. `to_ai_cli_profile` produces exactly what it
+    /// always has for every profile today: `AgentCompatibilityLevel::
+    /// Supervised`, `structured_action_approval: false`.
+    None,
+    /// `command` speaks Tekstide's approval protocol. §2 of
+    /// `what-the-configuration-must-not-allow.md`: declaring this does
+    /// **not** make it true of the program -- the protocol is
+    /// cooperative, and Tekstide cannot verify a claim like this one.
+    Managed,
 }
 
 /// `transcript_retention_days` reuses the real compiled default

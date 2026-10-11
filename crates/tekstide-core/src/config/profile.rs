@@ -6,7 +6,7 @@ use crate::agent::{
 };
 use crate::domain::AgentCompatibilityLevel;
 
-use super::model::ConfiguredAiCliProfile;
+use super::model::{ConfiguredAiCliAdapter, ConfiguredAiCliProfile};
 
 /// RFC-023 PR-023-E: `ConfiguredAiCliProfile` -> `AiCliProfile` --
 /// `ConfiguredAiCliProfile`'s own doc comment names this translation as
@@ -28,34 +28,38 @@ use super::model::ConfiguredAiCliProfile;
 /// profile from a file inside a project root at all (see this crate's
 /// own handoff pack, Workspace Configuration Checklist).
 ///
-/// `compatibility_level` is always [`AgentCompatibilityLevel::Supervised`],
-/// and `adapter_capabilities` is always the default
-/// (`structured_action_approval: false`) -- there is no field on
-/// `ConfiguredAiCliProfile` a document could use to request `Managed`,
-/// so this is not merely a policy choice this function enforces, it is
-/// the only value this function is capable of producing. **Declaring
-/// `Managed` in configuration does not confer it** (RFC-023's own
-/// requirement) holds twice over: structurally, because there is
-/// nowhere in the schema to declare it, and independently, because even
-/// a future translator bug that set `compatibility_level: Managed`
-/// without also setting `structured_action_approval: true` would still
-/// be rejected by `AgentRunLaunchValidator::validate`'s own, unmodified
-/// `validate_compatibility` check
+/// **RFC-060 D1/D2: `compatibility_level` and `adapter_capabilities.
+/// structured_action_approval` both follow from `configured.adapter`,
+/// the one match below -- never independently.** Before this RFC
+/// neither could be requested at all (the match did not exist, only
+/// `Supervised`); the match is now the *entire* surface for requesting
+/// `Managed`, and there is no second field on `ConfiguredAiCliProfile`
+/// either output could disagree with. **Declaring `Managed` in
+/// configuration does not confer it** (RFC-023's own requirement) still
+/// holds for the reason it always has, independent of this function:
+/// even a translator bug that set `compatibility_level: Managed`
+/// without also setting `structured_action_approval: true` -- which this
+/// match cannot produce, since both arms set both together -- would
+/// still be rejected by `AgentRunLaunchValidator::validate`'s own,
+/// unmodified `validate_compatibility` check
 /// (`managed_compatibility_level_without_structured_action_approval_is_still_rejected`,
-/// `config/tests/profile.rs`, proves the second guarantee directly,
-/// independent of this function).
+/// `config/tests/profile.rs`, proves that guarantee directly, independent
+/// of this function). What is new here is that `Managed` is *reachable*
+/// at all, and reachable only this one way.
 ///
-/// **RFC-045 D3' removed the three fields this comment used to explain
-/// away.** RFC-023 parsed `args`, `adapter` and `environment_policy`
-/// into [`ConfiguredAiCliProfile`] and this function read none of them,
-/// recording that fact in a doc comment and in `qa-evidence.md` --
-/// which is not where a user of the configuration file looks. A profile
-/// with `args = ["--model", "x"]` validated, appeared, launched, and
-/// dropped `--model` in silence. The fields are gone from the model and
-/// [`super::parse_and_validate`] now refuses the keys by name, so the
-/// silence is gone with them; each returns when `AiCliProfile` grows the
-/// field that would carry it (an argv template is an RFC-010 amendment,
-/// reserved and not written).
+/// **RFC-045 D3' removed two fields this comment used to explain away,
+/// and RFC-060 reintroduces a third under a different shape.** RFC-023
+/// parsed `args`, `adapter` and `environment_policy` into
+/// [`ConfiguredAiCliProfile`] and this function read none of them,
+/// recording that fact in a doc comment and in `qa-evidence.md` -- which
+/// is not where a user of the configuration file looks. A profile with
+/// `args = ["--model", "x"]` validated, appeared, launched, and dropped
+/// `--model` in silence. `args` and `environment_policy` stay gone; an
+/// argv template is an RFC-010 amendment, reserved and not written.
+/// `adapter` is back, but not as the withdrawn freestanding string --
+/// [`ConfiguredAiCliAdapter`] is a two-variant enum this function reads
+/// exhaustively, not a value it could silently ignore the way the old
+/// field was ignored.
 ///
 /// Every configuration-defined profile therefore gets
 /// [`AiCliEnvironmentPolicy::Minimal`] -- the least environment exposure
@@ -63,17 +67,24 @@ use super::model::ConfiguredAiCliProfile;
 /// invented for this translation, and now not a value a file can ask to
 /// change without the code to honour the request.
 pub fn to_ai_cli_profile(id: &str, configured: &ConfiguredAiCliProfile) -> AiCliProfile {
+    let compatibility_level = match configured.adapter {
+        ConfiguredAiCliAdapter::None => AgentCompatibilityLevel::Supervised,
+        ConfiguredAiCliAdapter::Managed => AgentCompatibilityLevel::Managed,
+    };
     let mut profile = AiCliProfile::new(
         id,
         configured.display_name.clone(),
         AiCliProfileSource::UserGlobal,
         resolve_executable(&configured.command),
-        AgentCompatibilityLevel::Supervised,
+        compatibility_level,
     );
     profile.environment_policy = AiCliEnvironmentPolicy::Minimal;
     profile.workspace_discovery_policy = AiCliWorkspaceDiscoveryPolicy::NoKnownWorkspaceDiscovery {
         evidence: "configuration-defined profile: no workspace discovery declared".to_owned(),
     };
+    if matches!(configured.adapter, ConfiguredAiCliAdapter::Managed) {
+        profile.adapter_capabilities.structured_action_approval = true;
+    }
     profile
 }
 
@@ -82,8 +93,11 @@ pub fn to_ai_cli_profile(id: &str, configured: &ConfiguredAiCliProfile) -> AiCli
 /// (`"claude"`, `"codex"`) is resolved by reviewed-system-path lookup
 /// only. **Never `ExecutableLookupPath::project_local`** -- there is no
 /// field on `ConfiguredAiCliProfile` that could request one, the same
-/// "structurally incapable, not merely policy-refused" property
-/// `to_ai_cli_profile`'s own doc comment gives `Managed`. The
+/// "structurally incapable, not merely policy-refused" shape
+/// `to_ai_cli_profile`'s own doc comment now gives *the combination* of
+/// `Managed` without an adapter declaration (RFC-060) -- a sibling
+/// property, not the identical one: `Managed` itself is reachable since
+/// RFC-060, `project_local` is not reachable at all. The
 /// project-local-`PATH` bypass case
 /// (`config_profile_relying_on_a_project_local_path_entry_is_rejected`,
 /// `config/tests/profile.rs`) is proven by constructing an

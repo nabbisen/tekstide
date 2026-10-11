@@ -18,10 +18,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::agent::{
-    AgentRunLaunchRequest, AgentRunLaunchValidationError, AgentRunLaunchValidator, AiCliExecutable,
-    AiCliExecutableProvenance, AiCliProfileSource, ExecutableLookupPath,
+    AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchValidationError,
+    AgentRunLaunchValidator, AiCliExecutable, AiCliExecutableProvenance, AiCliProfileSource,
+    ExecutableLookupPath,
 };
-use crate::config::{ConfiguredAiCliProfile, to_ai_cli_profile};
+use crate::config::{ConfiguredAiCliAdapter, ConfiguredAiCliProfile, to_ai_cli_profile};
 use crate::domain::AgentCompatibilityLevel;
 use crate::project::{ProjectId, ProjectSession};
 
@@ -29,6 +30,18 @@ fn configured_profile(command: impl Into<String>) -> ConfiguredAiCliProfile {
     ConfiguredAiCliProfile {
         display_name: "Test Profile".to_owned(),
         command: command.into(),
+        adapter: ConfiguredAiCliAdapter::None,
+    }
+}
+
+/// RFC-060 D1/D2: the one other value `adapter` can hold. Every existing
+/// caller above keeps using [`configured_profile`] unchanged -- this is
+/// additive, not a replacement.
+fn managed_configured_profile(command: impl Into<String>) -> ConfiguredAiCliProfile {
+    ConfiguredAiCliProfile {
+        display_name: "Test Managed Profile".to_owned(),
+        command: command.into(),
+        adapter: ConfiguredAiCliAdapter::Managed,
     }
 }
 
@@ -197,24 +210,30 @@ fn config_profile_relying_on_a_project_local_path_entry_is_rejected() {
     cleanup_root(root);
 }
 
-// --- Managed does not confer Managed ---------------------------------
+// --- RFC-060 D1/D2: Managed follows from declaring an adapter, and only that --------
 
-/// `to_ai_cli_profile` never sets `compatibility_level: Managed` --
-/// structural, not a policy this function enforces at runtime (see its
-/// own doc comment).
+/// **Renamed from `to_ai_cli_profile_never_sets_managed_compatibility_
+/// or_structured_action_approval`, review-corrected for RFC-060.** That
+/// name and its own doc comment claimed this function *never* sets
+/// `Managed` -- true before RFC-060, false now: `managed_configured_
+/// profile` (below) proves the opposite case on the same function.
+/// What is still true, and asserted here, is narrower: a profile with no
+/// adapter declared (`ConfiguredAiCliAdapter::None`, what every profile
+/// in this file produced before RFC-060 and what a file with no
+/// `adapter = true` key still produces today) gets exactly what it
+/// always has -- `Supervised`, no structured-action approval.
 ///
-/// **RFC-045 D3' removed the vector this test used to probe.** It looped
-/// over `adapter` strings (`"managed"`, `"MANAGED"`, …) checking that
-/// none of them produced a `Managed` profile; there is no `adapter` key
-/// for a file to set any more, and `a_profile_adapter_key_is_refused_
-/// rather_than_parsed_and_dropped` (`tests/load.rs`) proves the parser
-/// refuses it outright. What remains, and is asserted here, is the
-/// property that made those strings harmless in the first place: this
-/// function produces `Supervised` and no structured-action approval for
-/// every profile a file can define, because those are the only values it
-/// is capable of producing.
+/// **RFC-045 D3' removed the vector this test used to probe**, before
+/// RFC-060 reintroduced `adapter` under a different shape. It looped
+/// over `adapter` *strings* (`"managed"`, `"MANAGED"`, …) checking that
+/// none of them produced a `Managed` profile; RFC-060's `adapter` is a
+/// boolean read by a real, structured consumer, not a string nothing
+/// read, so that vector is gone for a different reason now: the key
+/// means something, and `managed_configured_profile`'s own test proves
+/// what it means, rather than this test continuing to prove the key is
+/// inert.
 #[test]
-fn to_ai_cli_profile_never_sets_managed_compatibility_or_structured_action_approval() {
+fn to_ai_cli_profile_with_no_adapter_declared_stays_supervised() {
     let profile = to_ai_cli_profile("probe", &configured_profile("claude"));
 
     assert_eq!(
@@ -222,6 +241,102 @@ fn to_ai_cli_profile_never_sets_managed_compatibility_or_structured_action_appro
         AgentCompatibilityLevel::Supervised
     );
     assert!(!profile.adapter_capabilities.structured_action_approval);
+}
+
+/// The other half of the pair above: a profile that **does** declare an
+/// adapter gets `Managed`, and gets `structured_action_approval: true`
+/// alongside it -- the same function, the same call, both outputs from
+/// the one input that decides them.
+#[test]
+fn to_ai_cli_profile_with_an_adapter_declared_becomes_managed() {
+    let profile = to_ai_cli_profile("probe", &managed_configured_profile("claude"));
+
+    assert_eq!(
+        profile.compatibility_level,
+        AgentCompatibilityLevel::Managed
+    );
+    assert!(profile.adapter_capabilities.structured_action_approval);
+}
+
+/// RFC-060 PR-060-A task breakdown, item 3: "prove the impossibility, do
+/// not assert it." `ConfiguredAiCliAdapter` has exactly two values, so
+/// this enumerates both -- not a sample, the whole domain -- and checks
+/// `compatibility_level`/`structured_action_approval` always agree with
+/// each other and with `adapter`. There is no third combination for this
+/// test to fail to find, because there is no third field capable of
+/// producing one: that absence is what "unrepresentable, not merely
+/// rejected" means here, demonstrated rather than claimed.
+#[test]
+fn every_declared_adapter_value_produces_an_internally_consistent_profile() {
+    for adapter in [
+        ConfiguredAiCliAdapter::None,
+        ConfiguredAiCliAdapter::Managed,
+    ] {
+        let configured = ConfiguredAiCliProfile {
+            display_name: "Test Profile".to_owned(),
+            command: "claude".to_owned(),
+            adapter,
+        };
+        let profile = to_ai_cli_profile("probe", &configured);
+
+        let expect_managed = matches!(adapter, ConfiguredAiCliAdapter::Managed);
+        assert_eq!(
+            profile.compatibility_level == AgentCompatibilityLevel::Managed,
+            expect_managed,
+            "compatibility_level must agree with the declared adapter for {adapter:?}"
+        );
+        assert_eq!(
+            profile.adapter_capabilities.structured_action_approval, expect_managed,
+            "structured_action_approval must agree with the declared adapter for {adapter:?}"
+        );
+    }
+}
+
+/// RFC-060 PR-060-A's own first checklist item: "a configuration file
+/// can produce a `Managed` profile that reaches `prepare_adapter_
+/// approval` and gets a real channel back -- demonstrated, not inferred
+/// from types." Goes through the real production entry point,
+/// `ProjectSession::prepare_agent_run_launch`, not
+/// `AgentRunLaunchPlan::prepare_adapter_approval` called directly --
+/// the same "config text, through real code, reaches real validation"
+/// standard this whole file holds to, one hop further: through real
+/// *launch preparation* this time, not only real *validation*. Stops
+/// short of actually spawning the adapter process or completing a
+/// proposal/decision round trip -- that whole path, once, for real, is
+/// PR-060-C's own job; this slice has no UI and is not where the
+/// reference adapter needs to run.
+#[test]
+fn a_configured_managed_profile_reaches_prepare_adapter_approval_and_gets_a_real_channel() {
+    let root = test_root("rfc060-way-in-root");
+    let bin = test_root("rfc060-way-in-bin");
+    let executable = executable_file(&bin, "ai-cli");
+    let state_root = std::env::temp_dir().join(format!("ta-060a-{}", std::process::id()));
+    std::fs::create_dir_all(&state_root).expect("approval state root should be creatable");
+    let mut project = restricted_project(&root);
+
+    let profile = to_ai_cli_profile(
+        "configured-managed",
+        &managed_configured_profile(executable.to_str().unwrap()),
+    );
+    let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "prompt")
+        .with_local_bounded_transcript(state_root.clone());
+    let validation = AgentRunLaunchValidator
+        .validate(&project, &profile, &request)
+        .expect("a real configuration-defined Managed profile should validate for launch");
+    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Configured Adapter")
+        .expect("a validated Managed launch should produce a launch plan");
+
+    let endpoint = project
+        .prepare_agent_run_launch(&mut plan)
+        .expect("preparing a configured Managed launch must succeed")
+        .expect(
+            "a configuration file that declares an adapter must reach a real, bound \
+             approval channel -- this is RFC-060's whole point",
+        );
+    drop(endpoint);
+
+    cleanup_root(root);
+    cleanup_root(bin);
 }
 
 /// The second, independent guarantee `to_ai_cli_profile`'s own doc

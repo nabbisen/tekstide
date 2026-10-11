@@ -1,6 +1,7 @@
 use crate::config::{
-    ConfigurationDocument, ConfiguredAiCliProfile, SecuritySensitiveDirection,
-    SecuritySensitiveField, apply_safe_fields, direction, security_sensitive_diff,
+    ConfigurationDocument, ConfiguredAiCliAdapter, ConfiguredAiCliProfile,
+    SecuritySensitiveDirection, SecuritySensitiveField, apply_safe_fields, direction,
+    security_sensitive_diff,
 };
 
 #[test]
@@ -139,6 +140,27 @@ fn agent_profiles_direction_modifying_an_existing_profile_is_an_increase() {
     );
 }
 
+/// RFC-060 D1/D2: declaring an adapter on a profile that did not have
+/// one is `Increase` even with `display_name`/`command` both unchanged
+/// -- it is what grants `Managed` (and `structured_action_approval`)
+/// at all, so this is the one modification this module could not
+/// afford to under-classify.
+#[test]
+fn agent_profiles_direction_declaring_an_adapter_on_an_existing_profile_is_an_increase() {
+    let mut current = ConfigurationDocument::default();
+    current
+        .agent
+        .profiles
+        .insert("codex".to_owned(), test_profile());
+    let mut candidate = current.clone();
+    candidate.agent.profiles.get_mut("codex").unwrap().adapter = ConfiguredAiCliAdapter::Managed;
+
+    assert_eq!(
+        direction(SecuritySensitiveField::AgentProfiles, &current, &candidate),
+        SecuritySensitiveDirection::Increase
+    );
+}
+
 /// A mixed change -- one profile added, a different one removed in the
 /// same reload -- must still be `Increase`: the removal alone would be
 /// safe, but the addition means `candidate` is not a pure subset of
@@ -156,6 +178,7 @@ fn agent_profiles_direction_a_mixed_add_and_remove_is_an_increase() {
         ConfiguredAiCliProfile {
             display_name: "Claude".to_owned(),
             command: "claude".to_owned(),
+            adapter: ConfiguredAiCliAdapter::None,
         },
     );
 
@@ -202,5 +225,6 @@ fn test_profile() -> ConfiguredAiCliProfile {
     ConfiguredAiCliProfile {
         display_name: "Codex CLI".to_owned(),
         command: "codex".to_owned(),
+        adapter: ConfiguredAiCliAdapter::None,
     }
 }
