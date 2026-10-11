@@ -744,11 +744,66 @@ own next step on the owner's word, not mine.
 
 ## Final Acceptance Decision
 
-- [ ] Accepted.
+- [x] **Accepted.**
 - [ ] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
+
+Accepted 2026-10-11 as the `0.34.0` candidate, across review rounds **513 through 526**. Every
+required item raised in those rounds is closed; nothing is carried as a condition of acceptance.
 
 Reviewer notes:
 
 ```text
+What acceptance rests on -- my own measurements, not the implementer's reports:
+
+  * Full gate re-run by the reviewer at review 525: cargo fmt --check clean, clippy
+    --workspace --all-targets -D warnings 0 diagnostics, cargo test --workspace
+    --all-targets --no-fail-fast in a fresh short /dev/shm TMPDIR giving 763 + 22 + 1132
+    with 0 failed, 0 fixture entries left, and the owner's real state directory at 0
+    before and after. cargo test --doc --workspace clean.
+  * Both directions of the publish-record invariant ablated by the reviewer with
+    rfcs/handoffs/ablate.sh on a clean tree, not read from the request: a premature
+    "released" claim goes red naming CHANGELOG.md, and a planted release-0.34.0.md with a
+    "candidate" status line goes red naming the same document.
+  * The live two-process refusal captured by the reviewer independently of the
+    implementer's own capture -- evidence/pr-058-c/reviewer-cli-launched-second-instance.png.
+
+Defects found in review and fixed before acceptance:
+
+  * 513/514 -- the reproduction did not overlap the two processes. The reviewer's own task
+    breakdown had said "the reproduction becomes the regression test" without saying they
+    must be alive at the same time; corrected in the breakdown, then in the test.
+  * 518 -- the board's wording was asserted against a string the view did not compose.
+    project_board_lines(state) factored out of content_area so the guard reads what ships.
+  * 519 -- a CLI-launched second instance was refused silently: the notice existed and no
+    path carried it to the board.
+  * 521 -- the test suite wrote real flock files and AF_UNIX sockets into the owner's real
+    XDG state directory, 8 per run, 206 accumulated.
+  * 522 -- the leak was NOT the GUI paths the reviewer accused. The implementer corrected
+    the diagnosis: open_cli_project_path_and_record resolved AppStatePathProvider::
+    linux_default() independently, introduced by PR-058-C, the slice that fixed 519. Fixed
+    by calling the resolver the GUI paths already use. The 206 leftovers were removed only
+    after reading each .lock's own recorded pid and confirming with kill(pid, 0) that none
+    was live.
+  * 523/524/525 -- the candidate cut claimed "released 2026-10-11" in seven documents with
+    no tag, no publish record and nothing on crates.io, and the invariant network could not
+    see it because CHANGELOG.md's own status line was its ground truth. Now checked against
+    rfcs/handoffs/release-<version>.md, a record only a publish writes, in both directions.
+
+Deliberately out of scope, recorded rather than fixed:
+
+  * The audit store's first-creation TOCTOU (review 516). App-wide, not project-scoped, so
+    a per-project lock could never have guarded it. rfcs/future-work.md.
+  * Four of the seven release-state claim sites still have no check against the changelog,
+    and both ground truths scrape every RFC- a section mentions rather than the one it
+    releases (reviews 524/525). rfcs/future-work.md, one item, to be decided together.
+
+Reviewer process correction recorded with this acceptance:
+
+  This section was left blank for RFC-065, RFC-066, RFC-027 and RFC-067 -- every RFC this
+  pack shape has carried. Acceptance was written only into .git-exclude/reviewed/, which
+  .gitignore excludes, so for four shipped releases the repository holds no record of the
+  acceptance decision or its reasons. The responses are real and were real at the time;
+  they simply are not in git. Filled in here, and added to the release checklist so the
+  decision is written into the pack at acceptance rather than after.
 ```

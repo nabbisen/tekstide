@@ -304,6 +304,14 @@ Checked every release, because a watch that depends on someone remembering is no
 - [ ] Include observed gate output summaries.
 - [ ] Include known limitations and deferred themes.
 - [ ] Receive an accepted review response before tagging.
+- [ ] **Write the acceptance into the handoff pack's own `## Final Acceptance Decision`, before
+      tagging.** Added 2026-10-11, review 526, after finding that section blank in every pack that
+      has ever carried it — RFC-065, RFC-066, RFC-027 and RFC-067, four shipped releases. The
+      review responses live in `.git-exclude/reviewed/`, which `.gitignore` excludes, so the
+      repository held no record of any acceptance decision or its reasons. Tick the box, name the
+      review rounds, and write what the acceptance rests on, which defects were found and fixed,
+      and what was deferred rather than fixed. The untracked response is correspondence; the pack
+      is the record.
 - [ ] **Confirm no document yet claims the release.** Added 2026-10-11 after review 522. The
       candidate's status lines say *"candidate, not yet published"* in every one of the five places;
       the flip to *"released"* belongs to the publish commit, with the tag and the post-publish
