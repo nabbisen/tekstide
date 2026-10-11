@@ -1544,13 +1544,39 @@ fn every_readme_row_agrees_with_the_changelogs_release_state() {
     let unverified =
         rfc_ids_the_newest_section_cannot_be_trusted_about(&changelog, &rfcs.join("handoffs"));
     let disagreements = readme_release_state_disagreements(&readme, &released, &unverified);
+    // Review 524 Required 2, the part the first fix missed: the *header* above
+    // the row list is a separate format string from `disagreements` itself, so
+    // asserting the old wording was gone from the function's return value left
+    // this literal untouched -- the sentence a reader meets first still said
+    // "the changelog wins" unconditionally, contradicting the corrected rows
+    // printed right under it. "The changelog wins" is only true when nothing
+    // in `unverified` is involved; otherwise the changelog is exactly what the
+    // rows below are saying needs fixing.
+    let header = if unverified.is_empty() {
+        "an RFC's publish state in rfcs/README.md disagrees with CHANGELOG.md, and the \
+         changelog wins (RFC-000):"
+            .to_owned()
+    } else {
+        let ids = {
+            let mut ids: Vec<&str> = unverified.iter().map(String::as_str).collect();
+            ids.sort_unstable();
+            ids.iter()
+                .map(|id| format!("RFC-{id}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        format!(
+            "an RFC's publish state in rfcs/README.md disagrees with CHANGELOG.md -- but for \
+             {ids}, CHANGELOG.md's own newest section is the one with no publish record backing \
+             its claim. THE CHANGELOG IS THE DOCUMENT TO FIX, not these rows:"
+        )
+    };
     assert!(
         disagreements.is_empty(),
-        "an RFC's publish state in rfcs/README.md disagrees with CHANGELOG.md, and the \
-         changelog wins (RFC-000):\n{}\nThis is the check that would have caught RFC-066's own \
-         two rows still saying \"0.32.0 candidate, not yet published\" after 0.32.0 actually \
-         released -- caught by hand at review 511, the second occurrence of the identical miss \
-         (the first was `0.30.0`, during RFC-027's own planning).",
+        "{header}\n{}\nThis is the check that would have caught RFC-066's own two rows still \
+         saying \"0.32.0 candidate, not yet published\" after 0.32.0 actually released -- caught \
+         by hand at review 511, the second occurrence of the identical miss (the first was \
+         `0.30.0`, during RFC-027's own planning).",
         disagreements.join("\n")
     );
 }
