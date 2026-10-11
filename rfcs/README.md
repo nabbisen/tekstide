@@ -25,7 +25,10 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 060 | [Command Approval A User Can Reach](./proposed/060-command-approval-a-user-can-reach.md) | **Proposed 2026-10-12.** `0.36.0`, **a 1.0 blocker**. D1–D7 and one open question for the owner, on acceptance |
+
+*(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
+folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+
 
 
 ## Accepted
@@ -36,8 +39,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is accepted and not yet closed. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 060 | [Command Approval A User Can Reach](./accepted/060-command-approval-a-user-can-reach.md) | **Accepted 2026-10-12.** `0.36.0`, **a 1.0 blocker**. D1–D9 decided; no real-CLI adapter this release (RFC-069). Handoff pack: [`060-command-approval-reachable/`](./handoffs/060-command-approval-reachable/README.md) |
 
 ### Reserved numbers — check this before authoring
 
@@ -48,12 +50,13 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | RFC | Title | Milestone |
 | --- | --- | --- |
 | 028 | Cross-Platform Support | M14 |
-| 068 | Redacting What A Run Prints | pre-1.0 |
 | 029 | Documentation, CI, and Release Automation | M14 |
 | 061 | A Bound On Combining Marks Per Cell | terminal boundary |
 | 062 | Honouring `core.excludesFile` | explorer ignore tail |
 | 063 | Querying The Live UI (`iced_selector`) | GUI verification |
 | 064 | Does `iced`'s `text_editor` Replace Our Own? | editor, pre-1.0 |
+| 068 | Redacting What A Run Prints | pre-1.0 |
+| 069 | An Adapter For A Real AI CLI | pre-1.0 |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
 audit's findings, not guesses; each row's scope is in the release schedule in

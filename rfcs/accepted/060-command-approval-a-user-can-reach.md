@@ -1,8 +1,9 @@
 # RFC-060: Command Approval A User Can Reach
 
-Status: **Proposed 2026-10-12.** `0.36.0`, pre-1.0, **a 1.0 blocker**. `REQ-AGENT-012`,
-`REQ-AGENT-013`, `REQ-SEC-012`, `REQ-SEC-013`. Builds on RFC-021 (the protocol) and RFC-022 (the
-spawn path and the dialog). D1–D7 and one open question are for the owner, on acceptance.
+Status: **Accepted by the human owner 2026-10-12.** D1–D7 as written; **the open question
+answered by the acceptance itself** — see *Decided on acceptance*. Proposed 2026-10-12. `0.36.0`,
+pre-1.0, **a 1.0 blocker**. `REQ-AGENT-012`, `REQ-AGENT-013`, `REQ-SEC-012`, `REQ-SEC-013`. Builds
+on RFC-021 (the protocol) and RFC-022 (the spawn path and the dialog).
 
 ## Summary
 
@@ -113,7 +114,7 @@ the first release in which a user can see the dialog at all.
   through `0.35.0`'s own audit view. Done when that sequence is demonstrated end to end with the
   reference adapter **named as what it is**.
 
-## Open question for the owner, to decide on acceptance
+## Open question as it was put to the owner
 
 **Does `0.36.0` also ship an adapter for a real AI CLI?**
 
@@ -135,3 +136,23 @@ than vaguely later. The reason is the honesty constraint, not the effort: option
 entirely on an interface we do not control, and shipping the reachable pathway first means the
 adapter RFC can be judged on whether it keeps its promise, instead of carrying the 1.0 blocker's
 weight as well.
+
+## Decided on acceptance (2026-10-12)
+
+**How the open question was answered is recorded, not smoothed over.** The owner replied
+*"Accepted."* without naming an option, as they did for RFC-059. The only reading that leaves
+nothing undecided is that the recommendation stands:
+
+- **D8. `0.36.0` does not ship an adapter for any real AI CLI.** Option (1) — the reachable
+  pathway and the contract, with the product saying plainly that no AI CLI ships support today.
+  Decided by acceptance of the recommendation, not by a separate instruction. If the owner meant
+  otherwise, this is the line to correct, and correcting it before PR-060-A starts costs nothing.
+- **D9. The adapter against a real AI CLI is reserved now, not left vague.** **RFC-069, An Adapter
+  For A Real AI CLI**, reserved 2026-10-12. Its own single question is what this project can
+  promise about an interface it does not control, and it carries none of the 1.0 blocker's weight.
+
+**The honesty constraints are load-bearing from this release onward.** RFC-022's
+`what-the-dialog-must-not-lie-about.md` was written for a dialog no user could see. D3 is where
+its highest-consequence sentence — that rejecting does not prevent execution — finally has to
+appear in front of a real user, and D4 makes `REQ-AGENT-013` a sweep of what the product may not
+say rather than a feature to build.
