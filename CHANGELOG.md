@@ -2,7 +2,7 @@
 
 ## 0.34.0 - A Project Held By One Process
 
-Status: **candidate, not yet published.** RFC-058's three slices and its Whole-RFC checklist are all
+Status: **released 2026-10-11.** RFC-058's three slices and its Whole-RFC checklist are all
 implemented, gated and closed. This entry was written incrementally as slices closed, then re-read
 against the finished set at the candidate; see `rfcs/handoffs/058-one-process-per-project/` for the
 full handoff pack.

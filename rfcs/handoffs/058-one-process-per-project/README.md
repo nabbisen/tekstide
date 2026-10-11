@@ -1,6 +1,6 @@
 ---
 title: "RFC-058 handoff: a project held by one process"
-status: "**Implemented and closed 2026-10-11** — `0.34.0` candidate, not yet published. All three slices and the Whole-RFC checklist closed, including the live capture carried from review 517."
+status: "**Implemented and closed 2026-10-11** — released as `0.34.0` 2026-10-11. All three slices and the Whole-RFC checklist closed, including the live capture carried from review 517."
 rfc_file: "../../done/058-a-project-held-by-one-process.md"
 target_milestone: "M13"
 created: "2026-10-10"

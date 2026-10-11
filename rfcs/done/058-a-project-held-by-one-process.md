@@ -1,6 +1,6 @@
 # RFC-058: A Project Held By One Process
 
-Status: **Implemented and closed 2026-10-11; `0.34.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-11; released as `0.34.0` 2026-10-11.** See the
 *Closed* section. **Accepted by the human owner 2026-10-10.** D1–D7 as written; **the open question answered with a third option the owner proposed** — see *Decided on acceptance*. Proposed 2026-10-10. `0.34.0`, M13. `REQ-PROJ-009`, moved out of the Project-lifecycle
 coverage row on 2026-09-23 because no such mechanism existed. **It is a `must`, and the hazard it
 names got worse in `0.31.0`.**
@@ -154,8 +154,9 @@ nothing left to disclose — a better outcome than the one I recommended.
 
 ## Closed (2026-10-11)
 
-All three slices and the Whole-RFC checklist are done. **`0.34.0` candidate, not yet published** —
-see `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
+All three slices and the Whole-RFC checklist are done. **Released as `0.34.0` 2026-10-11** — see
+`CHANGELOG.md`'s own status line, and `rfcs/handoffs/release-0.34.0.md`, the publish record
+`the_newest_release_status_matches_whether_it_was_actually_published` now reads that line against.
 
 **PR-058-A** reproduced the clobber against two real, overlapping `tekstide` processes before
 anything was designed against it (D2): the same canonical root resolves to the same project id in
