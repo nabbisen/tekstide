@@ -1165,6 +1165,152 @@ RFC-052 and RFC-053.
     );
 }
 
+// --- Review 522: the changelog's own "released" claim needs a ground truth
+// it cannot write ----------------------------------------------------------
+//
+// Every check above, and `every_readme_row_agrees_with_the_changelogs_release_state`
+// below, takes `rfcs_named_by_released_sections` -- which reads `CHANGELOG.md`'s
+// own `Status: ... released` line -- as ground truth for "this version shipped."
+// That line is written by the same candidate-cut commit as the other four
+// places a publish state is recorded, so a cut that writes "released" too
+// early does not fail any of those checks: it *passes* them, and then
+// *obliges* `rfcs/README.md`, `rfcs/delivery-plan.md` and the RFC's own two
+// files to agree with the same false claim to stay green. Found exactly this
+// way at review 522: `0.34.0`'s own candidate cut wrote `CHANGELOG.md:5` as
+// `Status: **released 2026-10-11.**` a day before any publish, and
+// `rfc_docs_invariants` passed 19/19 throughout, because the one document the
+// checks trust is the one that lied.
+//
+// `rfcs/handoffs/release-<version>.md` is written only by the publish commit
+// itself, never earlier -- `0.28.0` through `0.33.0` each got one from that
+// version's own publish commit (`794ac77`, `4403813`, `cf12b7a`) and none
+// before. A release candidate cutting its own version bump cannot write this
+// file for itself without also writing the publish steps (the tag,
+// `cargo publish`, `post-publish-check.sh`) the file is evidence of -- which
+// is what makes it a ground truth the other five places cannot forge, unlike
+// `CHANGELOG.md`'s own `Status:` line.
+
+/// `(heading, body)` of the first `## ` section in `changelog` -- the newest
+/// entry, since every release is prepended above the ones before it. **Only
+/// the newest entry is checked below, deliberately not the whole file**: the
+/// ground truth this check relies on, `release-<version>.md`, was only
+/// started at `0.19.0` and adopted inconsistently until `0.28.0` (checked:
+/// `0.20.0` has one, `0.21.0` through `0.27.0` do not), so scanning every
+/// historical section would fail on releases that correctly shipped before
+/// the record-keeping convention existed, not ones with a false claim. The
+/// risk this check exists for is only ever live at the moment a new section
+/// is written, because this project's own discipline never edits a closed
+/// changelog entry afterward -- an old entry that said "released" truthfully
+/// at its own publish stays true forever after.
+fn newest_changelog_section(changelog: &str) -> Option<(String, String)> {
+    let mut lines = changelog.lines();
+    let heading = loop {
+        let line = lines.next()?;
+        if let Some(heading) = line.strip_prefix("## ") {
+            break heading.to_owned();
+        }
+    };
+    let mut body = String::new();
+    for line in lines {
+        if line.starts_with("## ") {
+            break;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    Some((heading, body))
+}
+
+/// The violation, if any: the newest `CHANGELOG.md` section's own `Status:`
+/// line claims `released` with no matching
+/// `rfcs/handoffs/release-<version>.md`. Pure, so a test can plant one;
+/// `heading` is expected to start with the version
+/// (`"0.34.0 - A Project Held By One Process"`), the same shape every
+/// `## ` heading in `CHANGELOG.md` already has.
+fn newest_release_claimed_with_no_publish_record(
+    changelog: &str,
+    handoffs: &Path,
+) -> Option<String> {
+    let (heading, body) = newest_changelog_section(changelog)?;
+    let released = body
+        .lines()
+        .any(|line| line.starts_with("Status:") && line.to_lowercase().contains("released"));
+    if !released {
+        return None;
+    }
+    let version = heading.split_whitespace().next()?;
+    let record = handoffs.join(format!("release-{version}.md"));
+    if record.is_file() {
+        return None;
+    }
+    Some(format!(
+        "CHANGELOG.md's own newest section, `## {heading}`, says released, but {} does not \
+         exist -- the publish record a release candidate cannot write for itself. If this \
+         version has not actually been published yet, its Status line must say \"candidate, \
+         not yet published\", the same wording every other candidate cut uses.",
+        record.display()
+    ))
+}
+
+/// Deliberately run against the real tree, not a fixture: this is the check
+/// that must be shown red against `0.34.0`'s own premature "released" wording
+/// before that wording is fixed (review 522's own required order), so a
+/// reader can see it was capable of failing rather than trusting that it
+/// would have.
+#[test]
+fn the_newest_release_claimed_in_the_changelog_has_a_publish_record() {
+    let Some(rfcs) = rfcs_dir() else {
+        eprintln!("skipped: rfcs/ is not packaged with the published crate");
+        return;
+    };
+    let Ok(changelog) = std::fs::read_to_string(repo_root().join("CHANGELOG.md")) else {
+        eprintln!("skipped: CHANGELOG.md is not packaged with the published crate");
+        return;
+    };
+    let violation =
+        newest_release_claimed_with_no_publish_record(&changelog, &rfcs.join("handoffs"));
+    assert!(violation.is_none(), "{}", violation.unwrap_or_default());
+}
+
+/// The check fails against a planted violation and passes without it, against
+/// a real, temporary `release-<version>.md` rather than only inspecting a
+/// boolean -- so this proves the file's *presence*, not merely its name, is
+/// what the check reads. Also proves the **only the newest section** scoping:
+/// an *older* section making the identical false claim is not flagged.
+#[test]
+fn the_publish_record_check_catches_a_planted_violation_and_nothing_else() {
+    let changelog = "\
+## 0.9.0 - Unpublished
+
+Status: **released 2026-10-11.** RFC-058 shipped here.
+
+## 0.8.0 - Also Claims Released, With No Record, But Is Not The Newest
+
+Status: **released 2026-10-09.** RFC-057 shipped here.
+";
+    let dir = std::env::temp_dir().join(format!(
+        "tekstide-rfc-docs-invariants-publish-record-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("a fresh temp directory must be creatable");
+
+    // Neither version has a record yet: only the newest (0.9.0) is flagged.
+    let found = newest_release_claimed_with_no_publish_record(changelog, &dir);
+    let message = found.expect("the newest section's own false claim must be caught");
+    assert!(message.contains("0.9.0") && message.contains("release-0.9.0.md"));
+    assert!(!message.contains("0.8.0"));
+
+    // Writing the missing record clears the violation.
+    std::fs::write(dir.join("release-0.9.0.md"), "published").expect("must write the fixture");
+    assert!(newest_release_claimed_with_no_publish_record(changelog, &dir).is_none());
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // --- Review 511: rfcs/README.md's rows are a fourth status place --------------
 //
 // `claims_unfinished` and the three checks above police an RFC's *lifecycle*
