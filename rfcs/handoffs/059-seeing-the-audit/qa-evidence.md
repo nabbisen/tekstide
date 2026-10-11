@@ -55,17 +55,36 @@ then releases both with two back-to-back `write_all` calls — the RFC-058 revie
 RFC's own task breakdown names explicitly, so it did not need re-finding: two sequential processes
 prove nothing.
 
-**Against the tree before the fix, in isolation, 10 of 10 runs failed.** Two shapes observed across
-repeated runs:
+**Against the tree before the fix, in isolation, 10 of 10 runs failed.** Four shapes were observed
+across repeated runs, by me and by the reviewer's own independent worktree ablations — the set was
+never knowable in advance, which is itself the argument for the fix's own error-agnostic design
+(probe for a store that now exists on *any* failure, rather than matching one specific error):
 
 - `ERR AuditStoreError { reason: Busy }` — a genuine SQLite multi-process busy-handler livelock.
   `busy_timeout`'s own retry schedule is fixed, not jittered; two processes released at close to the
   same instant can retry in lockstep and both exhaust the full 2-second timeout without either
-  making progress. This is the shape that actually dominated empirically, not the "already exists"
-  conflict the RFC's own prose (written before this reproduction ran) anticipated.
+  making progress. This is the shape that dominated my own first repeated runs, not the "already
+  exists" conflict the RFC's own prose (written before this reproduction ran) anticipated.
 - `ERR AuditStoreError { reason: Sqlite }`, `"table audit_events already exists"` — the loser's own
   `CREATE TABLE` executing after the winner's had already committed, the shape the RFC's prose
   named.
+- `ERR AuditStoreError { reason: Io }` — observed in the review 527 worktree ablation; the specific
+  I/O condition was not isolated further, since the fix's own design does not need to distinguish it
+  from the two shapes above.
+- `ERR AuditStoreError { reason: UnsupportedApplication }` — found by the reviewer's own worktree
+  ablation, and the most important of the four: **the losing process is not failing to create the
+  store at all — it successfully opens a database file the winner has already created but not yet
+  stamped.** `open_internal`'s own fresh-install path writes the table and indexes via
+  `create_current_schema` before the `application_id`/`user_version` pragmas that mark the file as a
+  real Tekstide audit store; a second process opening that exact file in the narrow window between
+  the table existing and the pragmas being set reads a torn, half-built store and
+  `validate_identity` (`migration.rs`) correctly reports it as foreign. In the pre-fix world this is
+  a materially worse symptom than a transient open failure: `diagnostics.rs` maps this reason to its
+  own distinct user-facing status, so a first-run race could have told a user their audit database
+  is **not a Tekstide audit store at all** — about a file Tekstide itself was mid-write on. Neither
+  the RFC's own prose nor this document's own first draft had this shape; it is also the clearest
+  argument for why the lock has to cover the whole `exists()`-through-pragmas sequence, not only the
+  `CREATE TABLE` statement.
 
 **A real, disclosable limitation of the reproduction's own reliability**: run through
 `rfcs/handoffs/ablate.sh` (which invokes `cargo test --workspace --all-targets`, exercising the
@@ -112,15 +131,19 @@ cd "$WT" && cargo build -p tekstide-core --bins && cargo test -p tekstide-core -
 git worktree remove --force "$WT"
 ```
 
-**5 of 5 runs failed**, the main tree never touched. A third error shape appeared this round,
-alongside the two already recorded above: `ERR AuditStoreError { reason: Io }` — the exact
-error-agnostic design of the fallback-free fix means every shape the race can produce closes the
-same way, not only the two shapes any single round of manual testing happened to observe. **Zero
-fixture directories leaked across all 5 failing runs** (`CleanupOnDrop`, review 527 Required 2),
-confirmed by a direct `ls`/count before and after. With the fix restored (the worktree discarded,
-never merged): clean on the main tree, every time, across 30+ separate runs during development plus
-the three consecutive full-workspace gate runs below (which do not themselves exercise the race's
-own failure mode for the reason stated above, but do confirm nothing else regressed).
+**5 of 5 runs failed**, the main tree never touched. A third error shape appeared this round, `ERR
+AuditStoreError { reason: Io }` — recorded above alongside a fourth, `UnsupportedApplication`, found
+independently by the reviewer's own worktree ablation at review 528 and explained there in full:
+four shapes now on record, and the error-agnostic design of the fix (probe for a now-existing store
+on *any* failure) is what closes every one of them the same way, not only the shapes any single
+round of manual testing happened to observe. **Zero fixture directories leaked across all 5 failing
+runs** (`CleanupOnDrop`, review 527 Required 2), confirmed by a direct `ls`/count before and after —
+re-confirmed independently by the reviewer's own re-run at review 528 (also 0 of 5, against the
+identical instrument that had measured 6 leaked directories from 6 failing runs before the fix).
+With the fix restored (the worktree discarded, never merged): clean on the main tree, every time,
+across 30+ separate runs during development plus the three consecutive full-workspace gate runs
+below (which do not themselves exercise the race's own failure mode for the reason stated above, but
+do confirm nothing else regressed).
 
 ### Gate
 
