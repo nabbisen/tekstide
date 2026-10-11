@@ -301,3 +301,37 @@ have added, but the live-capture checklist item itself should note this is what 
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `771 + 22 + 1135`, 0 failed, 0 fixture
 entries.
+
+### Review 530 required fixes
+
+**Required 1 — §2's own disclosure.** The view said nothing about which question it answers; a user
+comparing it against Approval History had no way to know the two would legitimately disagree
+(`what-the-audit-view-must-not-do.md` §2, RFC-059 D2). `audit-view-disclosure` now leads every call
+to `audit_view::lines`, unconditionally: "What happened, as Tekstide recorded it -- kept until
+purged. This is not a live status: for what is pending right now, see Approval History."
+`audit_view_leads_with_the_disclosure_of_which_question_it_answers` asserts it directly.
+
+**Required 2 — a real compile guard, not a disclosed gap.** `family_cycle_index`/
+`outcome_cycle_index` (new, `crates/tekstide/src/shell.rs`) are exhaustive matches (no wildcard),
+the same discipline `family_symbol`/`outcome_symbol` already have, mapping each variant to its own
+position in `ALL_FAMILIES`/`ALL_OUTCOMES`. `cycle_copy` now navigates by that index directly instead
+of a `position()` scan, so the array and the match **must** agree for cycling to work at all --
+pinned by `all_families_and_outcomes_cover_every_declared_cycle_index_exactly_once`, which fails if
+an entry is ever inserted out of order. The `rfcs/future-work.md` entry is marked closed, not
+deleted — review 530's own reasoning (PR-059-A's own enumeration-test bar applies here too) is kept
+alongside the original finding.
+
+**Ablated in a disposable `git worktree`** (`ablate.sh`'s own header recipe, main tree never dirty):
+a 13th `AuditEventFamily` variant (`PlantedThirteenthFamily`) was planted directly in the enum, with
+`validate()`'s own match and the `impl_code!` arms patched just enough for `tekstide-core` to
+compile cleanly (isolating the one thing under test). `cargo build -p tekstide` then failed with
+two `E0004: non-exhaustive patterns` errors, both naming `AuditEventFamily::PlantedThirteenthFamily`
+not covered: `shell.rs:13932` (`family_cycle_index`, the new guard) and `shell.rs:14204`
+(`family_symbol`, the pre-existing one) — the two exhaustive matches this fix now depends on both
+caught it, independently. Worktree removed; the planted variant never touched the main tree.
+
+### Gate, re-run after the required fixes
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
+full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `773 + 22 + 1135`, 0 failed, 0 fixture
+entries.
