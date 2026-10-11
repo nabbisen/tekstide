@@ -326,6 +326,62 @@ pub(crate) struct TranscriptPurgeModal {
     focus: TranscriptPurgeButton,
 }
 
+/// RFC-059 PR-059-C: the audit view's own purge confirmation -- the same
+/// two-item cycle shape as [`TranscriptPurgeButton`], a distinct type for
+/// the same reason that one is: "Purge"/"Cancel" name what *this*
+/// dialog's buttons decide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuditPurgeButton {
+    Purge,
+    Cancel,
+}
+
+impl AuditPurgeButton {
+    const ORDER: [AuditPurgeButton; 2] = [AuditPurgeButton::Purge, AuditPurgeButton::Cancel];
+
+    fn next(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + 1) % Self::ORDER.len()]
+    }
+
+    fn previous(self) -> Self {
+        let index = Self::ORDER
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        Self::ORDER[(index + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+}
+
+/// RFC-059 §4/D5: which records a confirmed purge deletes -- `Project`
+/// names the one project, `Global` names none, the same "affirmative and
+/// by exclusion" shape `TranscriptPurgeModal`'s own dialog body already
+/// states (RFC-033). Not `tekstide_core::audit::AuditPurgeScope` itself:
+/// that type is the receipt's own discriminant, carries no `ProjectId`,
+/// and is constructed by `AuditStore::purge_project_records`/
+/// `purge_all_records` internally -- this is the dialog's own intent,
+/// chosen before either of those run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AuditPurgeTarget {
+    Project(tekstide_core::project::ProjectId),
+    Global,
+}
+
+/// RFC-059 PR-059-C: the audit store's own purge confirmation.
+/// `record_count` is captured once, at open time
+/// (`AuditStore::count_matching`), the same "captured, not re-read" shape
+/// [`TranscriptPurgeModal`] already uses -- what the confirmation states
+/// is exactly what was true when the user chose to open it.
+#[derive(Debug)]
+pub(crate) struct AuditPurgeModal {
+    target: AuditPurgeTarget,
+    record_count: u64,
+    focus: AuditPurgeButton,
+}
+
 /// RFC-039 PR-039-C: the close-confirmation dialog's own focus targets --
 /// the same two-item cycle shape as [`TranscriptPurgeButton`], a distinct
 /// type for the same reason: "Close"/"Cancel" name what *this* dialog's
@@ -683,6 +739,11 @@ pub(crate) enum ModalContent {
     /// without deleting anything -- the paste dialog's shape, not the
     /// approval dialog's.
     TranscriptPurge(TranscriptPurgeModal),
+    /// RFC-059 PR-059-C, §4/D5: opened manually from the audit view's own
+    /// purge controls (`Message::OpenAuditPurgeDialog`), the same
+    /// manual-only, "only `Purge` is a real decision" shape
+    /// `TranscriptPurge` above already has.
+    AuditPurge(AuditPurgeModal),
     /// RFC-038 PR-038-C: the keyboard reference, moved off the Project
     /// Board (RFC-039's second principle: reference material does not
     /// live on a working surface) into a modal reachable from anywhere,
@@ -1683,6 +1744,10 @@ pub enum Message {
     /// button -- same shape as [`Message::PasteConfirmAcceptPressed`].
     /// "Cancel" dispatches `ModalDismiss` directly.
     TranscriptPurgePressed,
+    /// RFC-059 PR-059-C: the audit-purge dialog's real "Purge" button --
+    /// same shape as [`Message::TranscriptPurgePressed`]. "Cancel"
+    /// dispatches `ModalDismiss` directly.
+    AuditPurgePressed,
     /// RFC-040 PR-040-B: the project-close dialog's real "Close" button
     /// -- same shape as [`Message::PasteConfirmAcceptPressed`]. "Cancel"
     /// dispatches `ModalDismiss` directly -- the literal same message
@@ -2013,6 +2078,12 @@ pub enum Message {
     /// deletion is irreversible, and `what-purge-must-remove.md` requires
     /// the confirmation to name the scope and say it cannot be undone).
     OpenTranscriptPurgeDialog,
+    /// RFC-059 PR-059-C, §4/D5: fired by the audit view's own two purge
+    /// controls -- opens the real confirmation dialog, naming the scope
+    /// the carried [`AuditPurgeTarget`] decides. No I/O here, the same
+    /// "no mutation until `ModalActivate` with focus on `Purge`" shape
+    /// `OpenTranscriptPurgeDialog` already has.
+    OpenAuditPurgeDialog(AuditPurgeTarget),
     /// RFC-038 PR-038-A: `Ctrl+V` while the Project Board's empty-state
     /// path field would receive the key (`handle_project_board_path_
     /// field_key`) -- the same async-round-trip shape `TerminalPasteResolved`
@@ -2143,6 +2214,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::OpenTrustGrantDialog
         | Message::ToggleTranscriptCaptureDeclined
         | Message::OpenTranscriptPurgeDialog
+        | Message::OpenAuditPurgeDialog(_)
         | Message::OpenApprovalHistoryEntry(_)
         // RFC-040 PR-040-C's own eight new background controls:
         | Message::ToggleProjectModeButtonPressed
@@ -2201,6 +2273,7 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::ConfiguredProfileLaunchPressed
         | Message::ConfigurationReloadApplyPressed
         | Message::TranscriptPurgePressed
+        | Message::AuditPurgePressed
         | Message::ProjectCloseClosePressed
         | Message::FolderBrowserRowPressed(_)
         | Message::FolderBrowserChooseCurrentDirectory
@@ -2309,6 +2382,11 @@ fn activate_current_modal(state: &mut State) {
         {
             apply_transcript_purge(state, &modal);
         }
+        // RFC-059 PR-059-C: the same "paste dialog" shape again -- only
+        // `Purge` is a real decision.
+        Some(ModalContent::AuditPurge(modal)) if modal.focus == AuditPurgeButton::Purge => {
+            audit_view::apply_purge(state, &modal);
+        }
         // RFC-039 PR-039-C: unlike every guarded arm above,
         // `ProjectCloseModal` has no "closes without
         // consequence" reading at all -- `Cancel` is a real
@@ -2379,6 +2457,7 @@ fn activate_current_modal(state: &mut State) {
         | Some(ModalContent::ExternalChange(_))
         | Some(ModalContent::TrustGrant(_))
         | Some(ModalContent::TranscriptPurge(_))
+        | Some(ModalContent::AuditPurge(_))
         // RFC-038 PR-038-C: nothing to activate -- closes the
         // same way `ModalDismiss` does, the same "no real
         // decision for this arm" shape every other no-op case
@@ -2812,6 +2891,7 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.next(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.next(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.next(),
+            Some(ModalContent::AuditPurge(modal)) => modal.focus = modal.focus.next(),
             // RFC-066 D3: a modal that opened `can_close: false` has no `Close` to
             // cycle to -- focus stays put (there is only `Cancel` to be on, and it
             // already is).
@@ -2852,6 +2932,7 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             Some(ModalContent::Approval(dialog)) => dialog.focus = dialog.focus.previous(),
             Some(ModalContent::TrustGrant(modal)) => modal.focus = modal.focus.previous(),
             Some(ModalContent::TranscriptPurge(modal)) => modal.focus = modal.focus.previous(),
+            Some(ModalContent::AuditPurge(modal)) => modal.focus = modal.focus.previous(),
             // RFC-066 D3: same reasoning as `ModalFocusNext` above -- no `Close` to
             // cycle to while `can_close` is `false`.
             Some(ModalContent::ProjectClose(modal)) if modal.can_close => {
@@ -2914,6 +2995,12 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::TranscriptPurgePressed => {
             if let Some(ModalContent::TranscriptPurge(modal)) = state.modal.as_mut() {
                 modal.focus = TranscriptPurgeButton::Purge;
+            }
+            activate_current_modal(state);
+        }
+        Message::AuditPurgePressed => {
+            if let Some(ModalContent::AuditPurge(modal)) = state.modal.as_mut() {
+                modal.focus = AuditPurgeButton::Purge;
             }
             activate_current_modal(state);
         }
@@ -3205,6 +3292,9 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::OpenTranscriptPurgeDialog => {
             open_transcript_purge_dialog(state);
+        }
+        Message::OpenAuditPurgeDialog(target) => {
+            audit_view::open_purge_dialog(state, target);
         }
     }
     Task::none()
@@ -6697,6 +6787,9 @@ fn trusted_ui_state(state: &State) -> TerminalTrustedUiState {
         | Some(ModalContent::ExternalChange(_))
         | Some(ModalContent::TrustGrant(_))
         | Some(ModalContent::TranscriptPurge(_))
+        // RFC-059 PR-059-C: same generic bucket, same reason as
+        // `TranscriptPurge` above.
+        | Some(ModalContent::AuditPurge(_))
         | Some(ModalContent::Help)
         // RFC-038 PR-038-G: same generic bucket, same reason.
         | Some(ModalContent::FolderBrowser(_))
@@ -8426,6 +8519,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ModalContent::Approval(dialog) => approval_dialog_view(state, dialog),
             ModalContent::TrustGrant(modal) => trust_grant_dialog_view(state, modal),
             ModalContent::TranscriptPurge(modal) => transcript_purge_dialog_view(state, modal),
+            ModalContent::AuditPurge(modal) => audit_view::purge_dialog_view(state, modal),
             ModalContent::Help => help_modal_view(state),
             ModalContent::FolderBrowser(modal) => folder_browser_modal_view(state, modal),
             ModalContent::ProjectClose(modal) => project_close_dialog_view(state, modal),
@@ -13582,7 +13676,7 @@ fn open_audit_view(state: &mut State) {
         return;
     }
     state.app_shell.dispatch(AppCommand::OpenAuditView);
-    audit_view::reload(state);
+    audit_view::open(state);
 }
 
 /// RFC-041 PR-041-B: `Message::ChangeReviewFileRowPressed`'s handler,
@@ -13866,7 +13960,10 @@ use change_review_content::ChangeReviewContentLine;
 /// building `Element<'_, Message>`, and `Message` is `shell.rs`'s own
 /// type.
 mod audit_view {
-    use super::{CatalogArgs, Element, Length, Message, State, column, row, scrollable, text};
+    use super::{
+        AuditPurgeTarget, CatalogArgs, Element, Length, Message, State, column, row, scrollable,
+        text,
+    };
     use tekstide_core::audit::{
         AuditEventFamily, AuditOutcome, AuditQuery, AuditRecordPage, AuditStoreErrorReason,
         SequencedAuditRecord,
@@ -13989,6 +14086,15 @@ mod audit_view {
         /// store can open and accept writes fine and still fail to
         /// answer this view's own read.
         load_error: Option<AuditStoreErrorReason>,
+        /// §4: the outcome of the most recently confirmed purge, shown
+        /// until the next action on this view (any filter change, a
+        /// fresh open, or another purge) replaces or clears it --
+        /// `Ok` carries the real `AuditPurgeReceipt` straight from the
+        /// `DELETE` (`deleted_record_count`, never a count taken before
+        /// or the number of rows the page happened to have listed);
+        /// `Err` is a purge whose transaction failed, which must read as
+        /// a failure, never as a silent success.
+        last_purge: Option<Result<tekstide_core::audit::AuditPurgeReceipt, AuditStoreErrorReason>>,
     }
 
     impl AuditViewState {
@@ -14020,6 +14126,24 @@ mod audit_view {
             self.load_error = Some(reason);
         }
 
+        /// Every action on this view other than the purge flow itself
+        /// (and `load_more`, an extension of the same look rather than a
+        /// new one) clears a prior purge result first -- a receipt from
+        /// an earlier purge must not still be showing once the user has
+        /// moved on to something else, the same "one-shot, not a
+        /// permanent line" property `project_open_blocked_notice`
+        /// elsewhere in this crate already has.
+        fn clear_purge_notice(&mut self) {
+            self.last_purge = None;
+        }
+
+        fn record_purge(
+            &mut self,
+            outcome: Result<tekstide_core::audit::AuditPurgeReceipt, AuditStoreErrorReason>,
+        ) {
+            self.last_purge = Some(outcome);
+        }
+
         /// Test-only escape hatch, the same explicit-at-the-boundary
         /// shape [`ChangeReviewContentLine::as_str`] already is: builds
         /// a page's worth of state directly, without a real store,
@@ -14046,6 +14170,22 @@ mod audit_view {
         #[cfg(test)]
         pub(super) fn records_for_test(&self) -> &[SequencedAuditRecord] {
             &self.records
+        }
+
+        #[cfg(test)]
+        pub(super) fn record_purge_for_test(
+            &mut self,
+            outcome: Result<tekstide_core::audit::AuditPurgeReceipt, AuditStoreErrorReason>,
+        ) {
+            self.record_purge(outcome);
+        }
+
+        #[cfg(test)]
+        pub(super) fn last_purge_for_test(
+            &self,
+        ) -> Option<&Result<tekstide_core::audit::AuditPurgeReceipt, AuditStoreErrorReason>>
+        {
+            self.last_purge.as_ref()
         }
     }
 
@@ -14083,6 +14223,7 @@ mod audit_view {
         if state.modal.is_some() {
             return;
         }
+        state.audit_view.clear_purge_notice();
         state.audit_view.filter_family = cycle_copy(
             state.audit_view.filter_family,
             &ALL_FAMILIES,
@@ -14095,6 +14236,7 @@ mod audit_view {
         if state.modal.is_some() {
             return;
         }
+        state.audit_view.clear_purge_notice();
         state.audit_view.filter_outcome = cycle_copy(
             state.audit_view.filter_outcome,
             &ALL_OUTCOMES,
@@ -14107,6 +14249,7 @@ mod audit_view {
         if state.modal.is_some() {
             return;
         }
+        state.audit_view.clear_purge_notice();
         let open_projects: Vec<ProjectId> = state
             .app_shell
             .state()
@@ -14129,6 +14272,7 @@ mod audit_view {
         if state.modal.is_some() {
             return;
         }
+        state.audit_view.clear_purge_notice();
         state.audit_view.filter_project = None;
         state.audit_view.filter_family = None;
         state.audit_view.filter_outcome = None;
@@ -14140,10 +14284,24 @@ mod audit_view {
         if state.modal.is_some() {
             return;
         }
+        state.audit_view.clear_purge_notice();
         state.audit_view.filter_project = None;
         state.audit_view.filter_family = None;
         state.audit_view.filter_outcome = None;
         state.audit_view.filter_operation = None;
+        reload(state);
+    }
+
+    /// `open_audit_view`'s own entry point (`shell.rs`'s own root
+    /// function, outside this module) -- clears a stale purge notice
+    /// before reloading, so returning to this view after leaving it
+    /// does not still show a receipt from a purge several navigations
+    /// ago. Distinct from [`reload`] itself, which `apply_purge` also
+    /// calls to refresh the page right after a purge -- that call must
+    /// *not* clear the very notice it just set, so the clearing lives
+    /// here, in the one caller that actually means "a fresh look."
+    pub(super) fn open(state: &mut State) {
+        state.audit_view.clear_purge_notice();
         reload(state);
     }
 
@@ -14192,6 +14350,135 @@ mod audit_view {
             Ok(page) => state.audit_view.append_page(page),
             Err(error) => state.audit_view.fail(error.reason),
         }
+    }
+
+    /// RFC-059 §4/D5: `Message::OpenAuditPurgeDialog`'s handler --
+    /// captures `record_count` once, at open time, from
+    /// `AuditStore::count_matching` (the same "captured, not re-read"
+    /// shape `TranscriptPurgeModal` already uses), scoped to `target`.
+    /// Refuses to open rather than show a false count when that query
+    /// itself fails -- `0` would read as "nothing to delete," which is
+    /// not the same fact as "could not be counted."
+    pub(super) fn open_purge_dialog(state: &mut State, target: super::AuditPurgeTarget) {
+        if state.modal.is_some() {
+            return;
+        }
+        let project_id = match &target {
+            super::AuditPurgeTarget::Project(id) => Some(id.clone()),
+            super::AuditPurgeTarget::Global => None,
+        };
+        let query = AuditQuery {
+            project_id,
+            family: None,
+            outcome: None,
+            operation_id: None,
+            before_sequence: None,
+            limit: 1,
+        };
+        let Some(store) =
+            super::open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+        else {
+            return;
+        };
+        let Ok(record_count) = store.count_matching(&query) else {
+            return;
+        };
+        state.modal = Some(super::ModalContent::AuditPurge(super::AuditPurgeModal {
+            target,
+            record_count,
+            focus: super::AuditPurgeButton::Cancel,
+        }));
+    }
+
+    /// RFC-059 §4: `ModalActivate`'s handler when the audit-purge
+    /// dialog's focus is on `Purge` -- the real deletion, through
+    /// `AuditStore::purge_project_records`/`purge_all_records` directly
+    /// (unlike `apply_transcript_purge`, there is no "delete anyway, the
+    /// record is merely best-effort" fallback available: the audit store
+    /// is both the thing being mutated and the thing that would record
+    /// the action, so a failure here must refuse to claim success, not
+    /// merely fail to log one). `record_purge` stores the real `Result`
+    /// either way -- never a success claimed for a failed transaction
+    /// (§4's own "report what it did, not what it intended").
+    pub(super) fn apply_purge(state: &mut State, modal: &super::AuditPurgeModal) {
+        let Some(mut store) =
+            super::open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health)
+        else {
+            // The open failure is already recorded on `audit_health` and
+            // surfaced through `project_board_audit_notifications`
+            // (reused by `lines`, §6) -- nothing was deleted, and
+            // nothing here claims otherwise.
+            return;
+        };
+        let outcome = match &modal.target {
+            super::AuditPurgeTarget::Project(project_id) => store.purge_project_records(project_id),
+            super::AuditPurgeTarget::Global => store.purge_all_records(),
+        }
+        .map_err(|error| error.reason);
+        state.audit_view.record_purge(outcome);
+        reload(state);
+    }
+
+    fn purge_dialog_title(catalog: &super::Catalog, modal: &super::AuditPurgeModal) -> String {
+        match modal.target {
+            super::AuditPurgeTarget::Project(_) => {
+                catalog.get("audit-view-purge-dialog-title-project")
+            }
+            super::AuditPurgeTarget::Global => catalog.get("audit-view-purge-dialog-title-global"),
+        }
+    }
+
+    /// Factored out the same testable-without-`Element` way
+    /// [`transcript_purge_dialog_body`] already is.
+    pub(super) fn purge_dialog_body(
+        catalog: &super::Catalog,
+        modal: &super::AuditPurgeModal,
+    ) -> String {
+        let key = match modal.target {
+            super::AuditPurgeTarget::Project(_) => "audit-view-purge-dialog-body-project",
+            super::AuditPurgeTarget::Global => "audit-view-purge-dialog-body-global",
+        };
+        catalog.get_with_args(key, &CatalogArgs::new().number("count", modal.record_count))
+    }
+
+    pub(super) fn purge_dialog_view<'a>(
+        state: &'a State,
+        modal: &'a super::AuditPurgeModal,
+    ) -> Element<'a, Message> {
+        let button_line = |target: super::AuditPurgeButton, label_key: &str, on_press: Message| {
+            let marker = if modal.focus == target { "> " } else { "  " };
+            crate::theme::button(
+                state.theme,
+                text(format!("{marker}{}", state.catalog.get(label_key)))
+                    .size(state.theme.font_size_body()),
+            )
+            .on_press(on_press)
+        };
+
+        let lines: Vec<Element<'_, Message>> = vec![
+            text(purge_dialog_title(&state.catalog, modal))
+                .size(state.theme.font_size_heading())
+                .into(),
+            text(purge_dialog_body(&state.catalog, modal))
+                .size(state.theme.font_size_body())
+                .into(),
+            button_line(
+                super::AuditPurgeButton::Purge,
+                "audit-view-purge-dialog-purge",
+                Message::AuditPurgePressed,
+            )
+            .into(),
+            button_line(
+                super::AuditPurgeButton::Cancel,
+                "audit-view-purge-dialog-cancel",
+                Message::ModalDismiss,
+            )
+            .into(),
+            text(state.catalog.get("audit-view-purge-dialog-hint"))
+                .size(state.theme.font_size_status())
+                .into(),
+        ];
+        super::modal_dialog_box_split(state, lines, 3)
     }
 
     /// A compile-time literal symbol per family -- the same
@@ -14290,6 +14577,22 @@ mod audit_view {
                 .into_iter()
                 .map(|notification| notification.text),
         );
+        // §4: the real outcome of the most recently confirmed purge, if
+        // any -- `Ok` carries `AuditPurgeReceipt::deleted_record_count`
+        // straight from the `DELETE`, never a count taken before it or
+        // the number of rows the page happened to have listed; `Err`
+        // must read as a failure, never as a silent success.
+        match &state.audit_view.last_purge {
+            Some(Ok(receipt)) => lines.push(state.catalog.get_with_args(
+                "audit-view-purge-receipt",
+                &CatalogArgs::new().number("count", receipt.deleted_record_count),
+            )),
+            Some(Err(reason)) => lines.push(state.catalog.get_with_args(
+                "audit-view-purge-failed",
+                &CatalogArgs::new().trusted_symbol("reason", error_reason_symbol(*reason)),
+            )),
+            None => {}
+        }
         if let Some(reason) = state.audit_view.load_error {
             lines.push(state.catalog.get_with_args(
                 "audit-view-load-error",
@@ -14452,6 +14755,34 @@ mod audit_view {
             .spacing(8)
             .into(),
         );
+
+        // §4/D5: per-project purge is reachable only once the project
+        // filter has picked a project -- it is the existing project
+        // filter that does the choosing, not a second picker invented
+        // for this one action. Global purge needs no such precondition.
+        let mut purge_buttons: Vec<Element<'_, Message>> = vec![
+            crate::theme::button(
+                state.theme,
+                text(state.catalog.get("audit-view-purge-global-button"))
+                    .size(state.theme.font_size_body()),
+            )
+            .on_press(Message::OpenAuditPurgeDialog(AuditPurgeTarget::Global))
+            .into(),
+        ];
+        if let Some(project_id) = &state.audit_view.filter_project {
+            purge_buttons.push(
+                crate::theme::button(
+                    state.theme,
+                    text(state.catalog.get("audit-view-purge-project-button"))
+                        .size(state.theme.font_size_body()),
+                )
+                .on_press(Message::OpenAuditPurgeDialog(AuditPurgeTarget::Project(
+                    project_id.clone(),
+                )))
+                .into(),
+            );
+        }
+        pinned.push(row(purge_buttons).spacing(8).into());
 
         let mut row_elements: Vec<Element<'_, Message>> = Vec::new();
         if state.audit_view.records.is_empty() {

@@ -335,3 +335,92 @@ caught it, independently. Worktree removed; the planted variant never touched th
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `773 + 22 + 1135`, 0 failed, 0 fixture
 entries.
+
+## PR-059-C — purge, reachable
+
+### The storage layer was already finished
+
+`AuditStore::purge_project_records`/`purge_all_records` and `AuditPurgeReceipt` (`crates/tekstide-
+core/src/audit/purge.rs`) existed before this slice, built ahead of any production caller the same
+way `AuditStore::query` was before PR-059-A. This slice is UI only, mirroring `TranscriptPurgeModal`'s
+own confirmation-dialog shape (RFC-033) closely: a new `ModalContent::AuditPurge(AuditPurgeModal)`
+variant, `AuditPurgeButton` (the same two-item `Purge`/`Cancel` cycle), and `AuditPurgeTarget::{
+Project(ProjectId), Global}` naming the dialog's own intent before either real purge function runs.
+
+### §4: what disappears, that it cannot be undone, and the real receipt
+
+The confirmation states scope two ways, the precedent's own "affirmative and by exclusion" shape:
+the title names it (*"Purge this project's audit records?"* / *"Purge every audit record, for every
+project?"*), the body says what is and is not affected (*"Other projects are not affected."* for the
+project-scoped dialog) and ends with the literal sentence *"This cannot be undone."*
+`record_count` is captured once, at dialog-open time, from `AuditStore::count_matching` — the
+confirmation refuses to open rather than show `0` when that query itself fails, since `0` would read
+as "nothing to delete," a different fact from "could not be counted."
+
+The receipt shown afterwards is `AuditPurgeReceipt::deleted_record_count`, read straight off the
+`Result` the real `DELETE` returned — never a count taken before the delete, never the number of rows
+the page happened to have listed. A purge whose transaction failed (`Err(AuditStoreError)`) is stored
+and rendered as a failure (`audit-view-purge-failed`), never silently dropped and never read as a
+success: unlike `apply_transcript_purge`, there is no "delete anyway, the record is merely
+best-effort" fallback available here, because the audit store is both the thing being mutated and the
+thing that would record the action — a failure to open it refuses the whole action rather than
+guessing.
+
+The notice is one-shot: `clear_purge_notice` runs at the start of every other action on this view
+(each filter cycle, clearing filters, viewing an operation's chain, and re-opening the view after
+navigating away) so a receipt from an earlier purge never lingers once the user has moved on to
+something else. `reload`'s own call from inside `apply_purge` deliberately does **not** clear it —
+that is the one reload that must leave the notice it just set standing.
+
+### Tests
+
+Seven new tests. Two pure wording-guard tests: `audit_purge_dialog_body_names_the_scope_count_and_
+irreversibility` (both scopes, both clauses, the real count), `audit_view_purge_receipt_shows_the_
+real_deleted_count`/`audit_view_purge_failure_is_shown_not_silently_dropped` (the success/failure
+split, and that a failure never also renders a receipt). Three real-store end-to-end tests:
+
+- `purging_a_project_through_the_real_dialog_removes_only_that_project_then_global_purge_removes_
+  the_rest` — two real projects, each trust-granted through the real dialog flow (4 real records
+  total), purges the first project through the real `OpenAuditPurgeDialog`/`AuditPurgePressed`
+  messages, cross-checks via an independent direct `AuditStore::query` that **only** that project's
+  records are gone and the other project's **two** are untouched (the dialog's own "other projects
+  are not affected" claim, proven rather than only stated), and that the receipt's
+  `deleted_record_count` is exactly `2`. Then purges globally and confirms the remaining two are
+  gone too.
+- `cancelling_the_audit_purge_dialog_deletes_nothing` — opens the dialog (default focus `Cancel`,
+  the same safe-default `TranscriptPurgeModal` already uses), activates with that default focus
+  still in place, and confirms through a direct store query that nothing was deleted and
+  `last_purge` was never set at all.
+
+### The book, corrected in this slice
+
+`docs/src/users/local-data-and-privacy.md`'s *"There is no in-app command to purge the audit
+store... Delete the `audit/` directory to reset it"* is false as of this slice. Corrected in place,
+per the release checklist's own Corrections rule: names what changed (the Audit view's two purge
+controls, what each one's confirmation requires), and says what a reader who relied on the old
+sentence should now do — manual deletion of `audit/` still works and is still the only way to remove
+the store's own file, not only its rows, which the in-app purge never touches.
+
+### Live capture
+
+Same throwaway-project/throwaway-`XDG_STATE_HOME`/`wl-copy`-`screenshot-window`-`wl-paste` discipline
+as PR-059-B. One capture kept
+(`evidence/pr-059-c/pr-059-c-01-audit-view-with-purge-buttons.png`): the real audit view after a real
+trust grant, showing the disclosure line, three real records, and the "Purge All Records…" button
+rendered correctly.
+
+**The same disclosed limitation as PR-059-B's own capture round, and for the identical reason**: no
+mouse-click tool was available, only `wtype`. The purge-opening buttons (like the filter-cycle
+buttons before them) are ordinary `BackgroundControl`s with no keyboard route, so I could not click
+through to the confirmation dialog, confirm a purge, or reach the per-project purge button (which
+itself requires first clicking the project filter to narrow to one project — also mouse-only) live
+this round. The real-store end-to-end tests above dispatch the exact `Message`s each button's own
+`.on_press` sends — `OpenAuditPurgeDialog`, `AuditPurgePressed` — against a real store, which is what
+actually proves the deletion, the scope isolation, and the receipt's own correctness; the live
+capture's own job here is narrower, confirming the buttons exist and render with the right labels.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
+full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `778 + 22 + 1135`, 0 failed, 0 fixture
+entries.

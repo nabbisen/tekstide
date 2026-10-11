@@ -1541,6 +1541,41 @@ audit-view-empty = No events match the current filters.
 audit-view-clear-filters-button = Clear filters
 audit-view-view-chain-button = View full operation chain
 audit-view-load-more-button = Load more
+# RFC-059 PR-059-C, §4/D5: the two purge controls. Project-scoped purge is
+# reachable only once the project filter has picked a project -- the
+# project button's own label never needs to say which, since the dialog
+# it opens does (`audit-view-purge-dialog-title-project`).
+audit-view-purge-global-button = Purge All Records…
+audit-view-purge-project-button = Purge This Project's Records…
+# §4: `AuditPurgeReceipt::deleted_record_count`, from the real `DELETE` --
+# never a count taken before it, never the number of rows the page
+# happened to have listed. Shown until the next action on this view.
+audit-view-purge-receipt = Purge complete: { $count ->
+    [0] no records were deleted
+    [one] { $count } record was deleted
+   *[other] { $count } records were deleted
+}
+# §6's other half, for a *write* this time rather than a read: the audit
+# store can be open and otherwise healthy and still fail to complete a
+# purge transaction. Must read as a failure, never a silent success.
+audit-view-purge-failed = The purge did not complete: { $reason ->
+    [path] the audit directory could not be reached
+    [io] a disk write failed
+    [busy] the store was busy
+    [read_only] the store is read-only
+    [storage_full] storage is full
+    [corrupt] the store's own file is corrupt
+    [decode_failed] a record could not be decoded
+    [unsupported_application] the file at this path is not a Tekstide audit store
+    [unsupported_schema] the store was written by a newer version of Tekstide
+    [invalid_record] a stored record failed validation
+    [invalid_query] the purge's own filters were not valid
+    [invalid_migration] a schema migration failed
+    [recovery_incomplete] a prior recovery did not finish
+    [duplicate_event_conflict] a duplicate event id was found
+    [missing_authorization] a record is missing its required authorization
+   *[phase_conflict] a record conflicts with another of the same operation
+}. Nothing was deleted.
 # `what-the-audit-view-must-not-do.md` §6: a *query* against an otherwise
 # healthy, open store can still fail -- distinct from `AuditHealth`, which
 # tracks only open/write, never a read. `$reason` is a compile-time symbol
@@ -1653,3 +1688,28 @@ audit-view-row = { $created_at } · { $family ->
     [yes] project { $project }
    *[no] no project recorded
 }
+
+# RFC-059 PR-059-C, §4: the purge confirmation dialog -- `what-purge-must-
+# remove.md`'s own required reading (RFC-033) names the two things any
+# purge confirmation in this crate must state, "what disappears and that
+# it cannot be undone." Scope is stated two ways, the same "affirmative
+# and by exclusion" shape `transcript-purge-dialog-body` already uses:
+# the title names it, and the body explicitly says what is and is not
+# affected. `$count` is captured once, at dialog-open time
+# (`AuditPurgeModal`'s own doc), the same "captured, not re-read" shape
+# `TranscriptPurgeModal` already has.
+audit-view-purge-dialog-title-project = Purge this project's audit records?
+audit-view-purge-dialog-body-project = This permanently deletes { $count ->
+    [0] no audit records
+    [one] { $count } audit record
+   *[other] { $count } audit records
+} recorded for this project. Other projects are not affected. This cannot be undone.
+audit-view-purge-dialog-title-global = Purge every audit record, for every project?
+audit-view-purge-dialog-body-global = This permanently deletes { $count ->
+    [0] no audit records
+    [one] { $count } audit record
+   *[other] { $count } audit records
+} recorded across every project, open or closed. This cannot be undone.
+audit-view-purge-dialog-purge = Purge
+audit-view-purge-dialog-cancel = Cancel
+audit-view-purge-dialog-hint = Tab/Shift+Tab moves focus; Enter activates; Escape always cancels.

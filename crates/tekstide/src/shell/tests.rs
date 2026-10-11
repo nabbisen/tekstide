@@ -8,12 +8,13 @@ use std::path::{Path, PathBuf};
 use tekstide_core::shell::ApplicationShell;
 
 use super::{
-    AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, ConfigurationState,
-    ExternalChangeButton, FolderBrowserModal, MAX_PATH_FIELD_CHARS, Message, ModalButton,
-    ModalContent, PasteConfirmButton, PathFieldError, ProjectCloseButton, State,
-    TerminalPasteRefusal, TranscriptPurgeButton, TranscriptPurgeModal, TrustGrantButton,
-    agent_run_launch_audit_notice, agent_run_launch_refusal_text, apply_recovery_outcome,
-    attempt_agent_run_launch_with_profile, attempt_agent_run_launch_with_profile_and_state_root,
+    AgentRunLaunchRefusal, ApprovalDialog, ApprovalDialogButton, AuditPurgeButton, AuditPurgeModal,
+    AuditPurgeTarget, ConfigurationState, ExternalChangeButton, FolderBrowserModal,
+    MAX_PATH_FIELD_CHARS, Message, ModalButton, ModalContent, PasteConfirmButton, PathFieldError,
+    ProjectCloseButton, State, TerminalPasteRefusal, TranscriptPurgeButton, TranscriptPurgeModal,
+    TrustGrantButton, agent_run_launch_audit_notice, agent_run_launch_refusal_text,
+    apply_recovery_outcome, attempt_agent_run_launch_with_profile,
+    attempt_agent_run_launch_with_profile_and_state_root,
     attempt_agent_run_launch_with_profile_state_root_and_capture, audit_view,
     configured_agent_run_launch_plan, content_within_bound, evaluate_promotion, focus_marker,
     main_area_key, main_area_label, modal_scrim_style, open_audit_store_recording_failure,
@@ -949,8 +950,8 @@ fn no_modal_is_built_without_a_pinned_footer() {
         source
             .matches("modal_dialog_box_split(state, lines, ")
             .count(),
-        8,
-        "the eight Vec-built modals each name how many trailing lines are actions"
+        9,
+        "the nine Vec-built modals each name how many trailing lines are actions"
     );
 }
 
@@ -22793,5 +22794,267 @@ fn audit_view_filter_cycling_and_show_operation_narrow_and_widen_the_real_page()
             .iter()
             .all(|record| record.record.operation_id.as_ref() == Some(&operation_id)),
         "every record in the chain must share the clicked operation id"
+    );
+}
+
+// RFC-059 PR-059-C: purge, reachable.
+
+/// `what-purge-must-remove.md`'s own required reading (RFC-033), the
+/// same bar `transcript-purge-dialog-body` already clears: a purge
+/// confirmation must say what disappears and that it cannot be undone.
+/// Scope is stated two ways -- the title names it, the body says what is
+/// and is not affected, the same "affirmative and by exclusion" shape.
+#[test]
+fn audit_purge_dialog_body_names_the_scope_count_and_irreversibility() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let project_id = tekstide_core::project::ProjectId::new_uuid();
+
+    let project_modal = AuditPurgeModal {
+        target: AuditPurgeTarget::Project(project_id),
+        record_count: 3,
+        focus: AuditPurgeButton::Cancel,
+    };
+    let project_body = strip_isolates(vec![audit_view::purge_dialog_body(
+        &catalog,
+        &project_modal,
+    )])
+    .remove(0);
+    assert!(
+        project_body.contains("This cannot be undone"),
+        "got: {project_body}"
+    );
+    assert!(
+        project_body
+            .to_lowercase()
+            .contains("other projects are not affected"),
+        "got: {project_body}"
+    );
+    assert!(project_body.contains('3'), "got: {project_body}");
+
+    let global_modal = AuditPurgeModal {
+        target: AuditPurgeTarget::Global,
+        record_count: 0,
+        focus: AuditPurgeButton::Cancel,
+    };
+    let global_body =
+        strip_isolates(vec![audit_view::purge_dialog_body(&catalog, &global_modal)]).remove(0);
+    assert!(
+        global_body.contains("This cannot be undone"),
+        "got: {global_body}"
+    );
+    assert!(
+        global_body.to_lowercase().contains("every project"),
+        "the global body must say every project is affected, not just this one, got: \
+         {global_body}"
+    );
+}
+
+/// §4: `AuditPurgeReceipt::deleted_record_count`, the real number from
+/// the `DELETE` -- shown once a purge has run, through the same
+/// wording-guard function every other line in this view goes through.
+#[test]
+fn audit_view_purge_receipt_shows_the_real_deleted_count() {
+    let mut state = state_with(ApplicationShell::new());
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state
+        .audit_view
+        .record_purge_for_test(Ok(tekstide_core::audit::AuditPurgeReceipt {
+            scope: tekstide_core::audit::AuditPurgeScope::Global,
+            deleted_record_count: 5,
+            journal_cleanup: tekstide_core::audit::AuditJournalCleanupStatus::Completed,
+        }));
+
+    let lines = strip_isolates(audit_view::lines(&state));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains('5') && line.to_lowercase().contains("deleted")),
+        "got: {lines:?}"
+    );
+}
+
+/// §6's other half, for a write this time: a purge whose transaction
+/// failed must read as a failure, never a silent success -- and must
+/// not also render a receipt line, which would contradict it.
+#[test]
+fn audit_view_purge_failure_is_shown_not_silently_dropped() {
+    let mut state = state_with(ApplicationShell::new());
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state
+        .audit_view
+        .record_purge_for_test(Err(tekstide_core::audit::AuditStoreErrorReason::Busy));
+
+    let lines = audit_view::lines(&state);
+    assert!(
+        lines.iter().any(|line| line.contains("did not complete")),
+        "got: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.starts_with("Purge complete")),
+        "a failed purge must not also claim a success receipt, got: {lines:?}"
+    );
+}
+
+/// RFC-059 PR-059-C's own first checklist item, end to end against a
+/// real store with two real projects: per-project purge removes exactly
+/// that project's records and leaves the other project's alone (the
+/// dialog's own "other projects are not affected" claim, proven rather
+/// than only stated); the receipt's `deleted_record_count` matches what
+/// the real `DELETE` actually removed, cross-checked against an
+/// independent direct query, not the number the page happened to have
+/// listed. Global purge then removes what remains.
+#[test]
+fn purging_a_project_through_the_real_dialog_removes_only_that_project_then_global_purge_removes_the_rest()
+ {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("audit-view-purge"));
+    let mut app_shell = ApplicationShell::new();
+    let first_dir = fresh_project_dir("audit-view-purge-first");
+    let first_id = match app_shell
+        .add_project_from_path(&first_dir)
+        .expect("a freshly created directory is a valid project root")
+    {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(id) => id,
+    };
+    let second_dir = fresh_project_dir("audit-view-purge-second");
+    let second_id = match app_shell
+        .add_project_from_path(&second_dir)
+        .expect("a freshly created directory is a valid project root")
+    {
+        tekstide_core::app::AddProjectOutcome::Added(id) => id,
+        tekstide_core::app::AddProjectOutcome::FocusedExisting(id) => id,
+    };
+    let mut state = state_with(app_shell);
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+
+    // Grant trust on both real projects, through the real dialog flow --
+    // each writes a real `trust_change` (`Authorized`, `Applied`) pair.
+    for project_id in [&first_id, &second_id] {
+        assert!(
+            state.app_shell.switch_active_project(project_id),
+            "test precondition: switching to a real open project must succeed"
+        );
+        press_trust_settings_action(&mut state);
+        let _ = super::update(&mut state, Message::ModalFocusNext);
+        let _ = super::update(&mut state, Message::ModalActivate);
+    }
+
+    let count_for = |state: &State, project_id: &tekstide_core::project::ProjectId| {
+        open_real_audit_store(&state.app_shell)
+            .expect("the real audit store must open")
+            .query(&tekstide_core::audit::AuditQuery {
+                project_id: Some(project_id.clone()),
+                ..tekstide_core::audit::AuditQuery::latest(50)
+            })
+            .expect("querying the real audit store directly must succeed")
+            .records
+            .len()
+    };
+    assert_eq!(
+        count_for(&state, &first_id),
+        2,
+        "test precondition: granting trust must have written both phases"
+    );
+    assert_eq!(
+        count_for(&state, &second_id),
+        2,
+        "test precondition: granting trust must have written both phases"
+    );
+
+    // Purge the first project only, through the real dialog: open it,
+    // then confirm via `AuditPurgePressed`, the same real `Message`
+    // the button itself dispatches.
+    let _ = super::update(
+        &mut state,
+        Message::OpenAuditPurgeDialog(AuditPurgeTarget::Project(first_id.clone())),
+    );
+    assert!(
+        matches!(state.modal, Some(ModalContent::AuditPurge(_))),
+        "opening the purge dialog must set the real modal"
+    );
+    let _ = super::update(&mut state, Message::AuditPurgePressed);
+
+    assert_eq!(
+        count_for(&state, &first_id),
+        0,
+        "the purged project's own records must be gone from the real store"
+    );
+    assert_eq!(
+        count_for(&state, &second_id),
+        2,
+        "the other project's records must be untouched -- the dialog's own \"other projects \
+         are not affected\" claim, proven"
+    );
+    match state.audit_view.last_purge_for_test() {
+        Some(Ok(receipt)) => {
+            assert_eq!(
+                receipt.deleted_record_count, 2,
+                "must match what was actually deleted"
+            );
+            assert_eq!(
+                receipt.scope,
+                tekstide_core::audit::AuditPurgeScope::Project
+            );
+        }
+        other => panic!("expected a real Ok receipt, got: {other:?}"),
+    }
+
+    // Now purge globally: whatever remains (the second project's own
+    // pair) must be removed too.
+    let _ = super::update(
+        &mut state,
+        Message::OpenAuditPurgeDialog(AuditPurgeTarget::Global),
+    );
+    let _ = super::update(&mut state, Message::AuditPurgePressed);
+
+    assert_eq!(
+        count_for(&state, &second_id),
+        0,
+        "global purge must remove every remaining project's own records too"
+    );
+    match state.audit_view.last_purge_for_test() {
+        Some(Ok(receipt)) => {
+            assert_eq!(
+                receipt.deleted_record_count, 2,
+                "must match exactly what the global purge actually deleted"
+            );
+            assert_eq!(receipt.scope, tekstide_core::audit::AuditPurgeScope::Global);
+        }
+        other => panic!("expected a real Ok receipt, got: {other:?}"),
+    }
+}
+
+/// A purge dialog's own `Cancel` must delete nothing -- the same "paste
+/// dialog" shape `TranscriptPurge`'s own `Cancel` already has, proven
+/// against a real store rather than only asserted by precedent.
+#[test]
+fn cancelling_the_audit_purge_dialog_deletes_nothing() {
+    let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("audit-view-purge-cancel"));
+    let (mut state, project_id) = state_with_a_real_project("audit-view-purge-cancel");
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    press_trust_settings_action(&mut state);
+    let _ = super::update(&mut state, Message::ModalFocusNext);
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let _ = super::update(
+        &mut state,
+        Message::OpenAuditPurgeDialog(AuditPurgeTarget::Project(project_id.clone())),
+    );
+    // Default focus is `Cancel` (`AuditPurgeModal`'s own doc) -- `Enter`
+    // here must decline, not delete.
+    let _ = super::update(&mut state, Message::ModalActivate);
+
+    let remaining = open_real_audit_store(&state.app_shell)
+        .expect("the real audit store must open")
+        .query(&tekstide_core::audit::AuditQuery {
+            project_id: Some(project_id),
+            ..tekstide_core::audit::AuditQuery::latest(50)
+        })
+        .expect("querying the real audit store directly must succeed")
+        .records;
+    assert_eq!(remaining.len(), 2, "Cancel must delete nothing");
+    assert!(
+        state.audit_view.last_purge_for_test().is_none(),
+        "declining must not record a purge outcome at all"
     );
 }

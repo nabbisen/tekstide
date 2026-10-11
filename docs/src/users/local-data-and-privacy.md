@@ -80,7 +80,14 @@ What it records, and what its schema makes impossible:
   reload that weakens a security-relevant setting, records that a sensitive setting changed and
   in which direction — **never which setting or what value, and there is no field that could.**
 
-There is no in-app command to purge the audit store. Delete the `audit/` directory to reset it.
+**Correction, RFC-059 PR-059-C:** earlier editions of this page said there was no in-app command to
+purge the audit store, and that deleting the `audit/` directory was the only way to reset it. That
+is no longer true. The Audit view (`Ctrl+Alt+V`, or the "Audit" button in the top bar) can purge
+either one project's own audit records or every project's, each behind a confirmation that names
+its scope and says the act cannot be undone. The number shown afterwards is the real count of rows
+the deletion removed, not a count taken before it ran. Deleting the `audit/` directory by hand
+still works too, and remains the only way to remove the store's own file entirely rather than its
+rows — the in-app purge only ever deletes records, never the database file itself.
 `TEKSTIDE_TERMINAL_DEMO` still exists for diagnostic use, but `Ctrl+Alt+T` is what ordinary use
 reaches, and it opens the same store.
 
