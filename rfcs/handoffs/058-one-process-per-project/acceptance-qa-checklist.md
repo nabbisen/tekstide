@@ -619,6 +619,36 @@ confirmed fixed on the one path a test cannot reach. Evidence:
   running on this machine at the time (confirmed via `pgrep`) and none would have been touched if one
   had been, since the check is per-pid, not a blind wipe of the directory.
 
+### Required separately at review 522 — the candidate wrote "released" a day early
+
+Not about the fix above. Found while re-reading the changelog against what shipped: this RFC's own
+candidate cut (`c446766`) wrote `CHANGELOG.md:5` as *"Status: released 2026-10-11"* — a date guessed
+from the cut, not a publish — and four other documents (`rfcs/README.md` ×2, `rfcs/delivery-plan.md`,
+both of `rfcs/done/058-a-project-held-by-one-process.md`'s own status lines,
+`rfcs/handoffs/058-one-process-per-project/README.md`) followed it. Seven claim sites, nothing
+published: no tag, no `release-0.34.0.md`, crates.io still at `0.33.0`. `0.33.0`'s own candidate had
+written *"candidate, not yet published"* correctly — this was a departure from a working convention.
+
+- [x] **`rfc_docs_invariants` could not catch this, and its own green 19/19 run was the proof.**
+  `rfcs_named_by_released_sections` takes `CHANGELOG.md`'s own `Status:` line as ground truth for
+  "released," so a false changelog does not fail the check — it *obliges* the other four documents to
+  agree with the lie, and they did. **Done, in the required order**: a new invariant,
+  `the_newest_release_claimed_in_the_changelog_has_a_publish_record`, reads
+  `rfcs/handoffs/release-<version>.md` instead — written only by a version's own publish commit,
+  never earlier (`0.28.0`–`0.33.0` each got one from `794ac77`/`4403813`/`cf12b7a`). **Run against the
+  tree as it stood, with the seven sites still false, before any wording changed**: it failed, naming
+  exactly `CHANGELOG.md`'s own `## 0.34.0 - A Project Held By One Process` section and the missing
+  `release-0.34.0.md`. Only the *newest* changelog section is checked, deliberately — `release-<version>.md`
+  was adopted inconsistently before `0.28.0` (`0.19.0` and `0.20.0` have one, `0.21.0`–`0.27.0` do
+  not), so scanning all of history would fail on releases that correctly shipped before the
+  record-keeping convention existed. A second test, `the_publish_record_check_catches_a_planted_violation_and_nothing_else`,
+  plants a false claim against a real temporary `release-<version>.md` and confirms both that the
+  check fails on it and that an *older* section making the identical false claim is not flagged. All
+  seven sites then reverted to *"candidate, not yet published"*; the invariant re-run and shown green
+  (21/21, two new). `rfc_docs_invariants` is now 21/21, `cargo fmt`/`clippy -D warnings`/doctests
+  clean, three consecutive full-workspace runs (`763 + 21 + 1132`, 0 fixture entries). Commit
+  `02b1a81`, pushed.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
