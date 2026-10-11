@@ -1801,6 +1801,17 @@ full-workspace runs across PR-058-A/B/C's review cycles, 0 recurrence). **Retire
 tracking at the same time it was added** — fixed at first disclosure, the same shape as the
 `transcript` row's own resolution.
 
+## Cost tally, 2026-10-11 — review 533: row 1 again, one run in two
+
+Not a new row and not a new disclosure — **row 1**
+(`approval::tests::channel::bind_recovers_from_a_stale_socket_file`, verdict **Accept**) failed the
+reviewer's first full-workspace run on PR-059-C's own tree, and the immediately following run on
+the same tree was clean (`779 + 22 + 1135`). Isolated, it passed 5 of 5.
+
+Recorded only to keep review 497's own cost argument current as `0.35.0` approaches its candidate:
+an accepted row is accepted *because* re-running is cheaper than fixing it, and that trade only
+stays true while someone is counting. This is one more re-run spent.
+
 ## New row, 2026-10-11 — RFC-059 review 527: `a_blocked_second_process_names_the_real_holder_and_its_knock_is_received`, 8 failures then 20 passes
 
 **Disclosed by the reviewer, found while verifying a different slice.** Not caused by PR-059-A —
