@@ -60,16 +60,34 @@ impl AuditStore {
                 AuditStoreErrorReason::RecoveryIncomplete,
             ));
         }
-        let existed = storage_path.database_file().exists();
-        let probed_version = existed
-            .then(|| probe_existing_store(storage_path.database_file()))
-            .transpose()?;
-
         fs::create_dir_all(storage_path.audit_dir())
             .map_err(|_| AuditStoreError::new(AuditStoreErrorReason::Io))?;
         storage_path
             .validate_before_open()
             .map_err(AuditStoreError::path)?;
+
+        // RFC-059 PR-059-A, D6 (the race `rfcs/future-work.md` already records,
+        // found at RFC-058 review 515): two processes can both read
+        // `database_file().exists() == false` before either opens a connection.
+        // SQLite's own `busy_timeout` alone does not fix this -- its sleep
+        // schedule is fixed, not jittered, so two processes released at close
+        // to the same instant (reproduced directly with real, overlapping
+        // processes: `audit_store_create_probe`, `first_creation_race.rs`) can
+        // retry in lockstep and both exhaust the full timeout, a known SQLite
+        // multi-process busy-handler livelock, not merely a rare loss. A real
+        // kernel lock, blocking rather than polling, has no such schedule to
+        // synchronise: the loser is woken exactly once, when the winner
+        // releases it, already knowing the outcome rather than guessing when
+        // to look again. Held only across the decide-and-create section below,
+        // the same "a lock for one moment, not the store's own lifetime" shape
+        // `project_lock`'s own doc (RFC-058) uses to explain why that lock is
+        // different from this one.
+        let _creation_guard = lock_creation_section(&storage_path)?;
+
+        let existed = storage_path.database_file().exists();
+        let probed_version = existed
+            .then(|| probe_existing_store(storage_path.database_file()))
+            .transpose()?;
 
         let mut connection = Connection::open_with_flags(
             storage_path.database_file(),
@@ -331,6 +349,26 @@ impl AuditStoreError {
         };
         Self::new(reason)
     }
+}
+
+/// Blocks until this process is the only one past this point for this exact
+/// storage path -- `<audit_dir>/.create.lock`, a real OS `flock`
+/// (`std::fs::File::lock`, the blocking kind; `project_lock`'s own RFC-058
+/// precedent uses `try_lock` because it needs to refuse rather than wait).
+/// The returned `File` is the lock itself: dropping it closes the
+/// descriptor, which releases the lock, same as every other Drop-only guard
+/// in this crate.
+fn lock_creation_section(storage_path: &AuditStoragePath) -> Result<fs::File, AuditStoreError> {
+    let path = storage_path.audit_dir().join(".create.lock");
+    let file = fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|_| AuditStoreError::new(AuditStoreErrorReason::Io))?;
+    file.lock()
+        .map_err(|_| AuditStoreError::new(AuditStoreErrorReason::Io))?;
+    Ok(file)
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), AuditStoreError> {
