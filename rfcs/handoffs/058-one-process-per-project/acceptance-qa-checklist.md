@@ -564,7 +564,7 @@ window. It has been asked for your attention."* on a real screen. That is the de
 confirmed fixed on the one path a test cannot reach. Evidence:
 `evidence/pr-058-c/reviewer-cli-launched-second-instance.png`.
 
-- [ ] **`cargo test -p tekstide --bin tekstide` writes 8 entries into
+- [x] **`cargo test -p tekstide --bin tekstide` writes 8 entries into
   `~/.local/state/tekstide/project-locks/` — the owner's real state.** Measured, not inferred:
 
   ```
@@ -591,6 +591,33 @@ confirmed fixed on the one path a test cannot reach. Evidence:
 
   **The 198 existing files are yours to clear**, not mine — the owner's ruling at review 495 is that
   leftovers belong to the agent that created them. Please remove them with the fix.
+
+  **Done, with one correction found while fixing it.** The GUI open paths (`reopen_recent_project`,
+  `attempt_open_project_from_path_field`, `choose_current_browsed_directory`) were never the
+  culprit — they already go through `open_real_recovery_state_root()` → `resolve_agent_run_state_dir()`,
+  which **does** have a `#[cfg(test)]` thread-local override (a fresh temp dir per test thread, with
+  its own "belt and suspenders" panic if it ever resolves to the real directory). The actual leak was
+  `open_cli_project_path_and_record` in `main.rs`: it called `AppStatePathProvider::linux_default()`
+  **directly**, its own independent resolution written at PR-058-C time (matching `instance_marker`'s
+  own independent-resolution shape, which does not write files the same way) — the one production
+  call site this crate's existing state-root isolation split had not yet reached. Every CLI-path test
+  in `tests.rs`, including review 519's and 520's own new ones, was binding a real socket and writing
+  a real lock file through it.
+
+  Fixed by reuse, not a new mechanism: `open_real_recovery_state_root` made `pub(crate)` and called
+  from `open_cli_project_path_and_record` in place of its own direct resolution — the same function
+  the GUI paths already use, so the CLI path now gets the identical test isolation for free.
+  **Measured the fix the same way the gap was measured**: `cargo test -p tekstide --bin tekstide`
+  before and after, real directory count unchanged (`0` → `0`, confirmed empty after cleanup, see
+  below) across three consecutive full-workspace runs. `cargo fmt --check`, `clippy -D warnings`,
+  `rfc_docs_invariants` (19/19), doctests: all clean. Commit `7a1633c`, pushed.
+
+  **The 206 accumulated files removed**, not 198 — more had landed between your measurement and the
+  fix. Checked liveness before deleting anything, rather than assuming every file was stale: read
+  each `.lock` file's own recorded pid and confirmed with `kill(pid, 0)` that no real process held
+  any of them (103 `.lock` + 103 `.attention.sock` pairs, 0 live). No real Tekstide session was
+  running on this machine at the time (confirmed via `pgrep`) and none would have been touched if one
+  had been, since the check is per-pid, not a blind wipe of the directory.
 
 ## Final Acceptance Decision
 
