@@ -118,32 +118,41 @@ fn release_both(mut a: ReadyProbe, mut b: ReadyProbe) -> (String, String) {
 }
 
 /// **The reproduction.** Two real processes, genuinely overlapping, racing
-/// to create the audit store at a path neither has touched yet. Proven
-/// against the tree as it stood before this RFC's own fix by running this
-/// exact test with the fix in `migration.rs` reverted (`ablate.sh`,
-/// recorded in `qa-evidence.md`): over repeated runs, at least one of the
-/// two probes reported `ERR AuditStoreError { reason: Sqlite }` -- the
-/// loser's own `CREATE TABLE audit_events` failing because the winner's had
-/// already committed. **With the fix in place, both must succeed, every
-/// time** -- this is the regression test, not only the reproduction.
+/// to create the audit store at a path neither has touched yet. Run
+/// **20 times, each against a fresh path** -- a single run is not reliable
+/// evidence either way, since the race's own window is small enough that
+/// one pair of processes can miss it under ordinary machine load while the
+/// underlying defect is still live. Proven against the tree as it stood
+/// before this RFC's own fix by running this exact test with
+/// `lock_creation_section`'s own call site in `store.rs` reverted
+/// (`ablate.sh`, recorded in `qa-evidence.md`): most of the 20 iterations
+/// failed, with both the `Busy` shape (a SQLite multi-process busy-handler
+/// livelock between two processes released at close to the same instant,
+/// found while diagnosing this exact race) and the "table already exists"
+/// shape (`execute_batch` losing the race for the lock outright) observed
+/// across repeated runs. **With the fix in place, every one of the 20 must
+/// succeed** -- this is the regression test, not only the reproduction.
 #[test]
 fn two_real_processes_racing_to_create_the_store_both_succeed() {
-    let (state_root, project_root) = fresh_dirs("first-creation");
-    let a = spawn_ready(&state_root, &project_root);
-    let b = spawn_ready(&state_root, &project_root);
-    let (result_a, result_b) = release_both(a, b);
+    for attempt in 0..20 {
+        let (state_root, project_root) = fresh_dirs(&format!("first-creation-{attempt}"));
+        let a = spawn_ready(&state_root, &project_root);
+        let b = spawn_ready(&state_root, &project_root);
+        let (result_a, result_b) = release_both(a, b);
 
-    assert_eq!(
-        result_a, "OK",
-        "the first of two real, overlapping processes creating the store for the first time \
-         must succeed (got {result_a:?}; other process reported {result_b:?})"
-    );
-    assert_eq!(
-        result_b, "OK",
-        "the second of two real, overlapping processes creating the store for the first time \
-         must succeed too, not merely not crash (got {result_b:?}; other process reported \
-         {result_a:?})"
-    );
+        assert_eq!(
+            result_a, "OK",
+            "attempt {attempt}: the first of two real, overlapping processes creating the \
+             store for the first time must succeed (got {result_a:?}; other process reported \
+             {result_b:?})"
+        );
+        assert_eq!(
+            result_b, "OK",
+            "attempt {attempt}: the second of two real, overlapping processes creating the \
+             store for the first time must succeed too, not merely not crash (got \
+             {result_b:?}; other process reported {result_a:?})"
+        );
 
-    let _ = std::fs::remove_dir_all(state_root.parent().unwrap());
+        let _ = std::fs::remove_dir_all(state_root.parent().unwrap());
+    }
 }
