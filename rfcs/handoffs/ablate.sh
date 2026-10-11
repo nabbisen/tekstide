@@ -10,6 +10,35 @@
 # fix, this check is. Commit first, then ablate.
 #
 # Prints the failing test names and restores the file, whatever the result.
+#
+# ---------------------------------------------------------------------------
+# WHEN THIS SCRIPT IS THE WRONG INSTRUMENT (added 2026-10-11, RFC-059 review 527)
+#
+# It always runs `cargo test --workspace --all-targets`, so the whole suite runs
+# concurrently. **Some defects are masked by that concurrency.** RFC-059's own
+# first-creation race is a SQLite multi-process busy-handler livelock that needs
+# low-noise timing: through this script it did not reproduce in five attempts,
+# and in isolation it failed 5 of 5. A green run here is then not evidence the
+# check cannot fail -- it is evidence this instrument cannot see it.
+#
+# Do NOT answer that by editing a dirty tree by hand. The whole point of the
+# clean-tree refusal above is that "the dirty state was only my deliberate
+# one-line change" is the vigilance argument this check exists to replace.
+#
+# Use a throwaway worktree instead. It is isolated, the main tree is never
+# dirty, and nothing you have not committed can be lost:
+#
+#   WT=$(mktemp -d)/wt
+#   git worktree add -q --detach "$WT" HEAD
+#   # edit the ablation into $WT, then, inside it:
+#   #   cargo build -p <crate> --bins        # helper [[bin]]s: `--lib` does not build them
+#   #   cargo test -p <crate> --lib <test>   # the narrow, low-noise invocation
+#   git worktree remove --force "$WT"
+#
+# The `--bins` step is not optional: a test that spawns a helper binary fails
+# with "expected the <name> binary at .../target/debug/<name>" when it was not
+# built, which looks exactly like the defect failing and is not.
+# ---------------------------------------------------------------------------
 set -u
 label=$1; file=$2; old=$3; new=$4; shift 4
 cd "$(git rev-parse --show-toplevel)" || exit 2
