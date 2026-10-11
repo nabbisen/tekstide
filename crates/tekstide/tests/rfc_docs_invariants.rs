@@ -1222,34 +1222,48 @@ fn newest_changelog_section(changelog: &str) -> Option<(String, String)> {
 }
 
 /// The violation, if any: the newest `CHANGELOG.md` section's own `Status:`
-/// line claims `released` with no matching
-/// `rfcs/handoffs/release-<version>.md`. Pure, so a test can plant one;
-/// `heading` is expected to start with the version
-/// (`"0.34.0 - A Project Held By One Process"`), the same shape every
-/// `## ` heading in `CHANGELOG.md` already has.
-fn newest_release_claimed_with_no_publish_record(
+/// line disagrees with whether `rfcs/handoffs/release-<version>.md` exists --
+/// **in either direction** (review 523 Required 1). A first version of this
+/// checked only "claims released, no record" and passed 21/21 on a planted
+/// `release-0.34.0.md` left beside seven sites still correctly saying
+/// "candidate" -- a real version shipped with no document admitting it, and
+/// review 522's own sibling check already names this exact failure mode at
+/// `0.30.0` (`CHANGELOG.md`'s section *"had never said released at all"*).
+/// Pure, so a test can plant either direction; `heading` is expected to start
+/// with the version (`"0.34.0 - A Project Held By One Process"`), the same
+/// shape every `## ` heading in `CHANGELOG.md` already has.
+fn newest_release_status_disagrees_with_the_publish_record(
     changelog: &str,
     handoffs: &Path,
 ) -> Option<String> {
     let (heading, body) = newest_changelog_section(changelog)?;
-    let released = body
+    let claims_released = body
         .lines()
         .any(|line| line.starts_with("Status:") && line.to_lowercase().contains("released"));
-    if !released {
-        return None;
-    }
     let version = heading.split_whitespace().next()?;
     let record = handoffs.join(format!("release-{version}.md"));
-    if record.is_file() {
-        return None;
+    let record_exists = record.is_file();
+
+    if claims_released && !record_exists {
+        return Some(format!(
+            "CHANGELOG.md's own newest section, `## {heading}`, says released, but {} does not \
+             exist -- the publish record a release candidate cannot write for itself. If this \
+             version has not actually been published yet, its Status line must say \"candidate, \
+             not yet published\", the same wording every other candidate cut uses. \
+             THE CHANGELOG IS THE DOCUMENT TO FIX.",
+            record.display()
+        ));
     }
-    Some(format!(
-        "CHANGELOG.md's own newest section, `## {heading}`, says released, but {} does not \
-         exist -- the publish record a release candidate cannot write for itself. If this \
-         version has not actually been published yet, its Status line must say \"candidate, \
-         not yet published\", the same wording every other candidate cut uses.",
-        record.display()
-    ))
+    if !claims_released && record_exists {
+        return Some(format!(
+            "{} exists, so {version} has actually been published, but CHANGELOG.md's own newest \
+             section, `## {heading}`, still says \"candidate, not yet published.\" Its Status \
+             line must say \"released\", the same wording every other published release uses. \
+             THE CHANGELOG IS THE DOCUMENT TO FIX.",
+            record.display()
+        ));
+    }
+    None
 }
 
 /// Deliberately run against the real tree, not a fixture: this is the check
@@ -1258,7 +1272,7 @@ fn newest_release_claimed_with_no_publish_record(
 /// reader can see it was capable of failing rather than trusting that it
 /// would have.
 #[test]
-fn the_newest_release_claimed_in_the_changelog_has_a_publish_record() {
+fn the_newest_release_status_matches_whether_it_was_actually_published() {
     let Some(rfcs) = rfcs_dir() else {
         eprintln!("skipped: rfcs/ is not packaged with the published crate");
         return;
@@ -1268,18 +1282,52 @@ fn the_newest_release_claimed_in_the_changelog_has_a_publish_record() {
         return;
     };
     let violation =
-        newest_release_claimed_with_no_publish_record(&changelog, &rfcs.join("handoffs"));
+        newest_release_status_disagrees_with_the_publish_record(&changelog, &rfcs.join("handoffs"));
     assert!(violation.is_none(), "{}", violation.unwrap_or_default());
 }
 
-/// The check fails against a planted violation and passes without it, against
-/// a real, temporary `release-<version>.md` rather than only inspecting a
-/// boolean -- so this proves the file's *presence*, not merely its name, is
-/// what the check reads. Also proves the **only the newest section** scoping:
-/// an *older* section making the identical false claim is not flagged.
+/// Review 523 Required 3: a drop guard, not a trailing call -- a call after
+/// the assertions below is skipped by any panic above it, the same
+/// fixture-leaks-on-failure shape `runtime::terminal::tests::CleanupOnDrop`
+/// already exists to close, in a different crate and test binary than this
+/// one, so this gets its own small copy rather than a cross-binary reuse.
+struct CleanupOnDrop(PathBuf);
+
+impl std::ops::Deref for CleanupOnDrop {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for CleanupOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The check fails against a planted violation and passes without it, in
+/// **both directions**, against a real, temporary `release-<version>.md`
+/// rather than only inspecting a boolean -- so this proves the file's
+/// *presence*, not merely its name, is what the check reads. Also proves the
+/// **only the newest section** scoping: an *older* section making the
+/// identical false claim is not flagged.
 #[test]
-fn the_publish_record_check_catches_a_planted_violation_and_nothing_else() {
-    let changelog = "\
+fn the_publish_record_check_catches_a_planted_violation_in_either_direction() {
+    let dir = CleanupOnDrop(std::env::temp_dir().join(format!(
+        "tekstide-rfc-docs-invariants-publish-record-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )));
+    std::fs::create_dir_all(&*dir).expect("a fresh temp directory must be creatable");
+
+    // Direction 1: claims released, no record -- neither version has one yet,
+    // so only the newest (0.9.0) is flagged.
+    let claims_released = "\
 ## 0.9.0 - Unpublished
 
 Status: **released 2026-10-11.** RFC-058 shipped here.
@@ -1288,27 +1336,37 @@ Status: **released 2026-10-11.** RFC-058 shipped here.
 
 Status: **released 2026-10-09.** RFC-057 shipped here.
 ";
-    let dir = std::env::temp_dir().join(format!(
-        "tekstide-rfc-docs-invariants-publish-record-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).expect("a fresh temp directory must be creatable");
-
-    // Neither version has a record yet: only the newest (0.9.0) is flagged.
-    let found = newest_release_claimed_with_no_publish_record(changelog, &dir);
-    let message = found.expect("the newest section's own false claim must be caught");
+    let found = newest_release_status_disagrees_with_the_publish_record(claims_released, &dir);
+    let message = found.expect("the newest section's own false \"released\" claim must be caught");
     assert!(message.contains("0.9.0") && message.contains("release-0.9.0.md"));
     assert!(!message.contains("0.8.0"));
+    assert!(message.contains("THE CHANGELOG IS THE DOCUMENT TO FIX"));
 
     // Writing the missing record clears the violation.
     std::fs::write(dir.join("release-0.9.0.md"), "published").expect("must write the fixture");
-    assert!(newest_release_claimed_with_no_publish_record(changelog, &dir).is_none());
+    assert!(
+        newest_release_status_disagrees_with_the_publish_record(claims_released, &dir).is_none()
+    );
 
-    let _ = std::fs::remove_dir_all(dir);
+    // Direction 2 (review 523 Required 1): a real publish record exists, but
+    // the newest section still says "candidate" -- the branch that would have
+    // stayed silent on a shipped `0.30.0` whose own section "had never said
+    // released at all" (review 522's own sibling-check comment).
+    let claims_candidate = "\
+## 0.10.0 - Published, But The Changelog Was Never Told
+
+Status: **candidate, not yet published.** RFC-059 is in this one.
+";
+    std::fs::write(dir.join("release-0.10.0.md"), "published").expect("must write the fixture");
+    let found = newest_release_status_disagrees_with_the_publish_record(claims_candidate, &dir);
+    let message =
+        found.expect("a real publish record with no matching \"released\" status must be caught");
+    assert!(message.contains("0.10.0") && message.contains("release-0.10.0.md"));
+    assert!(message.contains("THE CHANGELOG IS THE DOCUMENT TO FIX"));
+
+    // Fixing the Status line clears the violation.
+    let fixed = claims_candidate.replace("candidate, not yet published.", "released 2026-10-11.");
+    assert!(newest_release_status_disagrees_with_the_publish_record(&fixed, &dir).is_none());
 }
 
 // --- Review 511: rfcs/README.md's rows are a fourth status place --------------
@@ -1368,25 +1426,82 @@ fn readme_rows_under(source: &str, heading: &str) -> Vec<(String, String)> {
     rows
 }
 
+/// RFC ids the newest `CHANGELOG.md` section names, but only populated when
+/// that section's own "released"/"candidate" claim disagrees with whether
+/// `release-<version>.md` actually exists
+/// (`newest_release_status_disagrees_with_the_publish_record`). Review 523
+/// Required 2: these are the ids `readme_release_state_disagreements` must
+/// not blame a disagreeing `rfcs/README.md` row for, because in that state
+/// the changelog is the document that is actually wrong, and the row saying
+/// something different from it may well be correct.
+fn rfc_ids_the_newest_section_cannot_be_trusted_about(
+    changelog: &str,
+    handoffs: &Path,
+) -> HashSet<String> {
+    if newest_release_status_disagrees_with_the_publish_record(changelog, handoffs).is_none() {
+        return HashSet::new();
+    }
+    let Some((_, body)) = newest_changelog_section(changelog) else {
+        return HashSet::new();
+    };
+    let mut ids = HashSet::new();
+    let mut index = 0;
+    while let Some(at) = body[index..].find("RFC-") {
+        let start = index + at + 4;
+        let digits: String = body[start..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if digits.len() == 3 {
+            ids.insert(digits);
+        }
+        index = start.min(body.len());
+    }
+    ids
+}
+
 /// The violations: a `rfcs/README.md` row whose publish-state claim disagrees
 /// with whether `CHANGELOG.md` has a released section naming that RFC. Pure,
 /// so a test can plant one -- review 499's own argument for the sibling check
 /// on `delivery-plan.md`'s register row, repeated here because these two rows
 /// are markdown table cells in exactly the same shape.
-fn readme_release_state_disagreements(readme: &str, released: &HashSet<String>) -> Vec<String> {
+///
+/// **`unverified` (review 523 Required 2): "the changelog wins" is only true
+/// when something has checked the changelog itself.** Before
+/// `newest_release_status_disagrees_with_the_publish_record` existed, nothing
+/// had, so a false "released" claim did not fail this check -- it printed
+/// remediation advice telling the reader to make two *correct* `rfcs/README.md`
+/// rows agree with the lie. Any RFC id in `unverified` gets the corrected
+/// message instead: fix the changelog, not this row.
+fn readme_release_state_disagreements(
+    readme: &str,
+    released: &HashSet<String>,
+    unverified: &HashSet<String>,
+) -> Vec<String> {
     let mut disagreements = Vec::new();
     for heading in ["Handoffs", "Implemented"] {
         for (number, row) in readme_rows_under(readme, heading) {
             let is_released = released.contains(&number);
             let claims_candidate = row.contains("candidate, not yet published");
             let claims_released = row.contains("released as `") || row.contains("released on");
-            if is_released && claims_candidate {
+            let mismatched = (is_released && claims_candidate) || (!is_released && claims_released);
+            if !mismatched {
+                continue;
+            }
+            if unverified.contains(&number) {
+                disagreements.push(format!(
+                    "  `## {heading}` row for RFC-{number} disagrees with CHANGELOG.md's own \
+                     newest section, but that section's own \"released\"/\"candidate\" claim has \
+                     no matching `release-<version>.md` backing it (see \
+                     `the_newest_release_status_matches_whether_it_was_actually_published`). THE \
+                     CHANGELOG IS THE DOCUMENT TO FIX, not this row."
+                ));
+            } else if is_released && claims_candidate {
                 disagreements.push(format!(
                     "  `## {heading}` row for RFC-{number} still says \"candidate, not yet \
                      published\" but a CHANGELOG.md released section already names it"
                 ));
-            }
-            if !is_released && claims_released {
+            } else {
                 disagreements.push(format!(
                     "  `## {heading}` row for RFC-{number} claims a release no CHANGELOG.md \
                      released section names yet"
@@ -1426,7 +1541,9 @@ fn every_readme_row_agrees_with_the_changelogs_release_state() {
         "the check must actually read the released sections it guards"
     );
 
-    let disagreements = readme_release_state_disagreements(&readme, &released);
+    let unverified =
+        rfc_ids_the_newest_section_cannot_be_trusted_about(&changelog, &rfcs.join("handoffs"));
+    let disagreements = readme_release_state_disagreements(&readme, &released, &unverified);
     assert!(
         disagreements.is_empty(),
         "an RFC's publish state in rfcs/README.md disagrees with CHANGELOG.md, and the \
@@ -1466,7 +1583,7 @@ candidate, not yet published.** |
     // above still says "candidate" -- both are already-planted violations, not
     // something this test plants itself, so they are the baseline this test
     // starts from.
-    let found = readme_release_state_disagreements(readme, &released);
+    let found = readme_release_state_disagreements(readme, &released, &HashSet::new());
     assert_eq!(found.len(), 2, "{found:#?}");
     assert!(found.iter().all(|message| message.contains("RFC-066")));
     assert!(found.iter().any(|message| message.contains("Handoffs")));
@@ -1490,7 +1607,7 @@ released as `0.32.0`** |
 | 066 | [A Refused Close](./done/066-a-refused-close.md) | **Implemented and closed; released as \
 `0.32.0`.** |
 ";
-    assert!(readme_release_state_disagreements(fixed, &released).is_empty());
+    assert!(readme_release_state_disagreements(fixed, &released, &HashSet::new()).is_empty());
 
     // The symmetric direction: claiming a release the changelog does not report.
     let premature = "\
@@ -1501,12 +1618,41 @@ released as `0.32.0`** |
 | 067 | [The Sidebar](./handoffs/067-sidebar-not-a-mode/README.md) — **implemented and closed; \
 released as `0.33.0`** |
 ";
-    let found = readme_release_state_disagreements(premature, &released);
+    let found = readme_release_state_disagreements(premature, &released, &HashSet::new());
     assert!(
         found
             .iter()
             .any(|message| message.contains("RFC-067") && message.contains("Handoffs")),
         "{found:#?}"
+    );
+}
+
+/// Review 523 Required 2, reproduced directly: a changelog section falsely
+/// claims "released" with no publish record, and a correct `rfcs/README.md`
+/// row still (correctly) says "candidate." Before the fix, this printed "the
+/// changelog wins" and told the reader to make the row agree with the lie.
+#[test]
+fn an_unverified_changelog_claim_tells_the_reader_to_fix_the_changelog_not_the_row() {
+    let readme = "\
+## Handoffs
+
+| RFC | Handoff Pack |
+| --- | --- |
+| 058 | [One Process](./handoffs/058-one-process-per-project/README.md) — **implemented and \
+closed; `0.34.0` candidate, not yet published** |
+";
+    let released: HashSet<String> = ["058".to_owned()].into_iter().collect();
+    let unverified: HashSet<String> = ["058".to_owned()].into_iter().collect();
+
+    let found = readme_release_state_disagreements(readme, &released, &unverified);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("RFC-058"));
+    assert!(found[0].contains("THE CHANGELOG IS THE DOCUMENT TO FIX"));
+    assert!(
+        !found[0]
+            .to_lowercase()
+            .contains("still says \"candidate, not yet published\" but"),
+        "must not use the old unconditional wording that blames the row: {found:#?}"
     );
 }
 
