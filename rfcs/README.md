@@ -25,9 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
-folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 060 | [Command Approval A User Can Reach](./proposed/060-command-approval-a-user-can-reach.md) | **Proposed 2026-10-12.** `0.36.0`, **a 1.0 blocker**. D1–D7 and one open question for the owner, on acceptance |
 
 
 ## Accepted
@@ -52,7 +50,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 028 | Cross-Platform Support | M14 |
 | 068 | Redacting What A Run Prints | pre-1.0 |
 | 029 | Documentation, CI, and Release Automation | M14 |
-| 060 | Command Approval A User Can Reach | pre-1.0, **1.0 blocker** |
 | 061 | A Bound On Combining Marks Per Cell | terminal boundary |
 | 062 | Honouring `core.excludesFile` | explorer ignore tail |
 | 063 | Querying The Live UI (`iced_selector`) | GUI verification |
