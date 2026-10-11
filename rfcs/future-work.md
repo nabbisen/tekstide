@@ -1369,5 +1369,24 @@ free-text column, every value an id, an enumerated symbol, or a bounded referenc
 project currently makes about who can read the database file. The `.create.lock`'s own content (if
 any were ever written to it, which `lock_creation_section` does not do) carries nothing either.
 
+**Reviewer addendum, review 528 — the modes, measured rather than inferred, and the case where it
+stops being narrow.** On the owner's own machine, `umask 022`:
+
+```
+drwx------  ~/.local
+drwx------  ~/.local/state
+drwxr-xr-x  ~/.local/state/tekstide
+drwxr-xr-x  ~/.local/state/tekstide/audit
+-rw-r--r--  ~/.local/state/tekstide/audit/audit.sqlite3
+```
+
+So the files really are `0644` under `0755` directories, and **the only thing keeping them private
+is `~/.local/state` being `0700` — a mode the user's own system set, not one Tekstide chose.** That
+matters because `XDG_STATE_HOME` relocation is a supported, documented path: point it at a shared
+or world-traversable directory and the audit store becomes world-readable, with nothing in this
+product having made a decision about it either way. The "non-sensitive by design" argument above
+still holds for the *records*; what leaks is the fact and timing of every trust grant, approval and
+refusal, which is metadata about the user rather than about the project.
+
 **Not scheduled against a release.** Raised at review 527 as a pre-1.0 item, deliberately not fixed
 in the same slice that found it.
