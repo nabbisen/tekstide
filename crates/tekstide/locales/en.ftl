@@ -1531,6 +1531,12 @@ status-bar-git-behind = { $count } behind
 # inside Trust Settings -- the audit store is app-wide, so this surface
 # shows every project's recorded events, not only the active project's.
 audit-view-heading = Audit
+# RFC-059 D2, review 530 Required 1: the required disclosure that says
+# which question this surface answers -- "what happened", never "what is
+# happening now" (that is Approval History's own question, and the two
+# will legitimately disagree). Rendered unconditionally, every time this
+# surface renders, by `audit_view::lines`.
+audit-view-disclosure = What happened, as Tekstide recorded it -- kept until purged. This is not a live status: for what is pending right now, see Approval History.
 audit-view-empty = No events match the current filters.
 audit-view-clear-filters-button = Clear filters
 audit-view-view-chain-button = View full operation chain

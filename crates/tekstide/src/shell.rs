@@ -13881,13 +13881,18 @@ mod audit_view {
     const PAGE_LIMIT: u32 = 50;
 
     /// Every family, in `AuditEventFamily`'s own declaration order --
-    /// the filter cycle's own list. **Not compiler-exhaustive the way
-    /// [`family_symbol`] below is**: adding a thirteenth family does not
-    /// fail this array to compile, only leaves it unreachable as a
-    /// filter until someone notices and extends the list -- a disclosed
-    /// gap (`rfcs/future-work.md`), not a silent lie, since every record
-    /// of that family still shows up in the unfiltered list.
-    const ALL_FAMILIES: [AuditEventFamily; 12] = [
+    /// the filter cycle's own list. Review 530 Required 2: a bare
+    /// `const [T; 12]` is not, by itself, forced to grow when a 13th
+    /// variant is added -- `[_; 12]` just stays `12`, the exact hazard
+    /// PR-059-A's own `chains_for_family` was built to close for the
+    /// enumeration test. [`family_cycle_index`]'s own exhaustive match
+    /// (no wildcard) is the real compile-time guard: a 13th family fails
+    /// *that* to compile. `all_families_cover_every_declared_cycle_
+    /// index_exactly_once` (`shell/tests.rs`) is what then forces this
+    /// array itself to be extended -- it fails the moment the two
+    /// disagree, which is the property this comment used to merely
+    /// disclose as a gap (`rfcs/future-work.md`, closed by this fix).
+    pub(super) const ALL_FAMILIES: [AuditEventFamily; 12] = [
         AuditEventFamily::ProjectAdded,
         AuditEventFamily::TrustChange,
         AuditEventFamily::CommandApproval,
@@ -13902,9 +13907,9 @@ mod audit_view {
         AuditEventFamily::AuditStoreRecovery,
     ];
 
-    /// The outcome filter cycle's own list -- same caveat as
-    /// [`ALL_FAMILIES`].
-    const ALL_OUTCOMES: [AuditOutcome; 10] = [
+    /// The outcome filter cycle's own list -- same guard as
+    /// [`ALL_FAMILIES`], via [`outcome_cycle_index`].
+    pub(super) const ALL_OUTCOMES: [AuditOutcome; 10] = [
         AuditOutcome::Requested,
         AuditOutcome::Authorized,
         AuditOutcome::Applied,
@@ -13916,6 +13921,45 @@ mod audit_view {
         AuditOutcome::Completed,
         AuditOutcome::Anomaly,
     ];
+
+    /// Exhaustive by design (no wildcard) -- the real compile-time guard
+    /// [`ALL_FAMILIES`]'s own doc explains. Also what [`cycle_copy`]
+    /// actually navigates by, rather than a `position()` scan: the
+    /// array and this match agreeing on each family's index is an
+    /// invariant `all_families_cover_every_declared_cycle_index_
+    /// exactly_once` checks, not merely assumed.
+    pub(super) const fn family_cycle_index(family: AuditEventFamily) -> usize {
+        match family {
+            AuditEventFamily::ProjectAdded => 0,
+            AuditEventFamily::TrustChange => 1,
+            AuditEventFamily::CommandApproval => 2,
+            AuditEventFamily::ManagedProcessLifecycle => 3,
+            AuditEventFamily::PlainTerminalObservation => 4,
+            AuditEventFamily::PasteBlocked => 5,
+            AuditEventFamily::RestrictedModeBlocked => 6,
+            AuditEventFamily::RootAccessBlocked => 7,
+            AuditEventFamily::SafeCloseDecision => 8,
+            AuditEventFamily::SensitiveConfigChanged => 9,
+            AuditEventFamily::TranscriptPurge => 10,
+            AuditEventFamily::AuditStoreRecovery => 11,
+        }
+    }
+
+    /// The same guard as [`family_cycle_index`], for `AuditOutcome`.
+    pub(super) const fn outcome_cycle_index(outcome: AuditOutcome) -> usize {
+        match outcome {
+            AuditOutcome::Requested => 0,
+            AuditOutcome::Authorized => 1,
+            AuditOutcome::Applied => 2,
+            AuditOutcome::Failed => 3,
+            AuditOutcome::Started => 4,
+            AuditOutcome::Terminated => 5,
+            AuditOutcome::Blocked => 6,
+            AuditOutcome::Cancelled => 7,
+            AuditOutcome::Completed => 8,
+            AuditOutcome::Anomaly => 9,
+        }
+    }
 
     /// RFC-059 D4: filters are exactly [`AuditQuery`]'s own fields --
     /// `project_id`, `family`, `outcome`, `operation_id` -- and nothing
@@ -14005,16 +14049,20 @@ mod audit_view {
         }
     }
 
-    fn cycle_copy<T: Copy + PartialEq>(current: Option<T>, all: &[T]) -> Option<T> {
+    /// Navigates by `index_of`, not a `position()` scan -- `index_of` is
+    /// always one of [`family_cycle_index`]/[`outcome_cycle_index`], the
+    /// real compile-time-exhaustive guard; `all` (always
+    /// [`ALL_FAMILIES`]/[`ALL_OUTCOMES`]) agreeing with it on every
+    /// entry's own index is an invariant a test checks, not merely
+    /// assumed by this function.
+    fn cycle_copy<T: Copy + PartialEq>(
+        current: Option<T>,
+        all: &[T],
+        index_of: impl Fn(T) -> usize,
+    ) -> Option<T> {
         match current {
             None => all.first().copied(),
-            Some(value) => {
-                let position = all.iter().position(|candidate| *candidate == value);
-                match position {
-                    Some(index) if index + 1 < all.len() => Some(all[index + 1]),
-                    _ => None,
-                }
-            }
+            Some(value) => all.get(index_of(value) + 1).copied(),
         }
     }
 
@@ -14035,7 +14083,11 @@ mod audit_view {
         if state.modal.is_some() {
             return;
         }
-        state.audit_view.filter_family = cycle_copy(state.audit_view.filter_family, &ALL_FAMILIES);
+        state.audit_view.filter_family = cycle_copy(
+            state.audit_view.filter_family,
+            &ALL_FAMILIES,
+            family_cycle_index,
+        );
         reload(state);
     }
 
@@ -14043,8 +14095,11 @@ mod audit_view {
         if state.modal.is_some() {
             return;
         }
-        state.audit_view.filter_outcome =
-            cycle_copy(state.audit_view.filter_outcome, &ALL_OUTCOMES);
+        state.audit_view.filter_outcome = cycle_copy(
+            state.audit_view.filter_outcome,
+            &ALL_OUTCOMES,
+            outcome_cycle_index,
+        );
         reload(state);
     }
 
@@ -14222,10 +14277,19 @@ mod audit_view {
     /// directly rather than comparing against a string rebuilt beside
     /// it.
     pub(super) fn lines(state: &State) -> Vec<String> {
-        let mut lines: Vec<String> = super::project_board_audit_notifications(state)
-            .into_iter()
-            .map(|notification| notification.text)
-            .collect();
+        // §2's own required disclosure, review 530 Required 1: this
+        // surface and Approval History will legitimately disagree
+        // (RFC-059 D2 -- "what is live right now" versus "what
+        // happened"), and neither screen may be worded so a reader
+        // takes it for the other. Rendered unconditionally, every time
+        // this surface renders, not only when a reader happens to
+        // compare the two.
+        let mut lines: Vec<String> = vec![state.catalog.get("audit-view-disclosure")];
+        lines.extend(
+            super::project_board_audit_notifications(state)
+                .into_iter()
+                .map(|notification| notification.text),
+        );
         if let Some(reason) = state.audit_view.load_error {
             lines.push(state.catalog.get_with_args(
                 "audit-view-load-error",

@@ -1393,6 +1393,16 @@ in the same slice that found it.
 
 ## The audit view's own family and outcome filter lists do not fail to compile when a new variant is added — found 2026-10-11 (RFC-059 PR-059-B)
 
+**Fixed by the same slice, review 530 Required 2 — the reviewer was not willing to leave this
+recorded rather than closed.** `family_cycle_index`/`outcome_cycle_index` (`crates/tekstide/src/
+shell.rs`) are the real compile-time guard the paragraph below asked for: an exhaustive match (no
+wildcard) that fails to compile on a 13th variant, which `cycle_copy` now navigates by directly
+instead of a `position()` scan. `all_families_and_outcomes_cover_every_declared_cycle_index_
+exactly_once` (`shell/tests.rs`) is the test that then forces `ALL_FAMILIES`/`ALL_OUTCOMES`
+themselves to stay in agreement with it. Ablated in a disposable `git worktree`: a planted 13th
+family variant fails `family_cycle_index`'s own match to compile, named in the error, with the
+main tree never touched.
+
 `crates/tekstide/src/shell.rs`'s `audit_view` module has two compile-time-exhaustive matches
 (`family_symbol`, `outcome_symbol` — no wildcard arm, the same discipline `DurableAuditRecordV1::
 validate()`'s own `match self.family` already holds this codebase to) and two **separate**,

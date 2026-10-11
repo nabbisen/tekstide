@@ -22372,6 +22372,70 @@ fn audit_record(
     )
 }
 
+/// Review 530 Required 2: `ALL_FAMILIES`/`ALL_OUTCOMES` are plain
+/// `const` arrays, which a thirteenth variant does not force to grow --
+/// `family_cycle_index`/`outcome_cycle_index`'s own exhaustive match is
+/// the real compile-time guard (a thirteenth variant fails *that* to
+/// compile), and `cycle_copy` now navigates by that index directly
+/// rather than a `position()` scan. This test is what then forces the
+/// array itself to be extended: if a family's own index does not land
+/// on its own position in `ALL_FAMILIES`, cycling silently skips or
+/// repeats an entry, which this test catches before an array edit (an
+/// insertion in the wrong place, say) could do so silently.
+#[test]
+fn all_families_and_outcomes_cover_every_declared_cycle_index_exactly_once() {
+    let family_indices: Vec<usize> = audit_view::ALL_FAMILIES
+        .iter()
+        .map(|family| audit_view::family_cycle_index(*family))
+        .collect();
+    assert_eq!(
+        family_indices,
+        (0..audit_view::ALL_FAMILIES.len()).collect::<Vec<_>>(),
+        "ALL_FAMILIES[i] must have family_cycle_index(ALL_FAMILIES[i]) == i for every i, got: \
+         {family_indices:?}"
+    );
+
+    let outcome_indices: Vec<usize> = audit_view::ALL_OUTCOMES
+        .iter()
+        .map(|outcome| audit_view::outcome_cycle_index(*outcome))
+        .collect();
+    assert_eq!(
+        outcome_indices,
+        (0..audit_view::ALL_OUTCOMES.len()).collect::<Vec<_>>(),
+        "ALL_OUTCOMES[i] must have outcome_cycle_index(ALL_OUTCOMES[i]) == i for every i, got: \
+         {outcome_indices:?}"
+    );
+}
+
+/// RFC-059 D2, review 530 Required 1: `what-the-audit-view-must-not-do.md`
+/// §2 -- this surface and Approval History will legitimately disagree
+/// (one answers "what is live right now", the other "what happened"),
+/// and neither may be worded so a reader takes it for the other.
+/// Rendered unconditionally, the leading line every call to
+/// `audit_view::lines` produces, not only when a reader happens to
+/// compare the two screens.
+#[test]
+fn audit_view_leads_with_the_disclosure_of_which_question_it_answers() {
+    let app_shell = ApplicationShell::new();
+    let mut state = state_with(app_shell);
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+
+    let lines = audit_view::lines(&state);
+    let disclosure = lines
+        .first()
+        .expect("the disclosure must lead the list, even with nothing else to say");
+    let lowered = disclosure.to_lowercase();
+    assert!(
+        lowered.contains("what happened") || lowered.contains("recorded"),
+        "the disclosure must say this surface answers what happened, got: {disclosure}"
+    );
+    assert!(
+        lowered.contains("not a live status") || lowered.contains("live right now"),
+        "the disclosure must distinguish itself from Approval History's own question, got: \
+         {disclosure}"
+    );
+}
+
 #[test]
 fn audit_view_bounded_notice_is_a_bare_count_when_nothing_is_omitted() {
     let app_shell = ApplicationShell::new();
