@@ -1261,3 +1261,35 @@ been scheduled.
 **Not scheduled against a release yet.** Raised to the owner at review 515 as a pre-1.0 item, read
 together with the finding above: both are about the one store this product promises honesty about,
 and a reader deciding whether to schedule either should see both.
+
+## Four of the seven release-state claim sites have no check against the changelog — found 2026-10-11 (RFC-058 candidate, review 524)
+
+**Review 522 named seven documents that can claim a version released; review 524's own count found
+only three of them are read back against `CHANGELOG.md`'s release state by any test.** Covered:
+`CHANGELOG.md`'s own newest section (against `rfcs/handoffs/release-<version>.md`, both directions —
+`the_newest_release_status_matches_whether_it_was_actually_published`) and `rfcs/README.md`'s
+Handoffs and Implemented rows (against the changelog —
+`every_readme_row_agrees_with_the_changelogs_release_state`). **Not covered by any such check:**
+`rfcs/delivery-plan.md`'s own register row, both of the closed RFC's own status lines (the top
+`Status:` line and its `## Closed` section), and the handoff pack's own frontmatter `status` field.
+`delivery-plan.md` is read elsewhere (`every_delivery_plan_row_agrees_with_its_rfc_folder`,
+`every_accepted_or_done_rfc_has_a_delivery_plan_row`) but for lifecycle state against the RFC's
+folder, never for *release* state against the changelog — a different claim, checked by nothing.
+
+**Why this was found and not fixed here.** `0.34.0`'s own candidate had all seven sites go stale
+together (review 522), so a check covering only three would not have caught that specific
+incident — `rfcs/README.md`'s two rows were enough on their own. But a future drift that touches
+only one of the uncovered four (for instance, a `delivery-plan.md` row edited in isolation while
+closing a different RFC) would pass every test that exists today.
+
+**Mitigated by hand in the meantime, not by a test**: `release-checklist.md`'s own
+`^(Status:|status:).*[Rr]eleased` sweep (added at review 523, corrected at review 523's own
+follow-up) is a manual grep run before every tag, not an automated invariant — it catches the same
+class of drift this gap names, but only when someone remembers to run it.
+
+**Not scheduled against a release yet.** Raised at review 524 as a pre-1.0 item, explicitly deferred
+rather than folded into `0.34.0`'s own candidate: "a fourth round on a candidate the owner is
+waiting on." The shape of a fix is the same pattern `readme_release_state_disagreements` already
+establishes for `rfcs/README.md` — read each of the remaining four sites' own publish-state claim
+and compare it against `rfcs_named_by_released_sections`/`newest_release_status_disagrees_with_the_publish_record`,
+the same two ground truths already built.
