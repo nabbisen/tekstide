@@ -1800,3 +1800,41 @@ already on record in this document. Confirmed clean across RFC-058's own three-s
 full-workspace runs across PR-058-A/B/C's review cycles, 0 recurrence). **Retired from active
 tracking at the same time it was added** — fixed at first disclosure, the same shape as the
 `transcript` row's own resolution.
+
+## New row, 2026-10-11 — RFC-059 review 527: `a_blocked_second_process_names_the_real_holder_and_its_knock_is_received`, 8 failures then 20 passes
+
+**Disclosed by the reviewer, found while verifying a different slice.** Not caused by PR-059-A —
+it fails at the commit before that slice too, which was checked in a worktree rather than assumed.
+
+**The shape.** `BLOCKED <correct-pid> NO-KNOCK` — the second process names the real holder
+correctly, and then `request_attention`'s own `UnixStream::connect` fails, so the test's
+`ends_with("KNOCKED")` assertion fails. The pid assertion above it passes, so both processes agreed
+on the project id and therefore on the socket path.
+
+**What was measured, in order:**
+
+| condition | result |
+| --- | --- |
+| `cargo test -p tekstide-core --lib <this test>`, main at `822265f` | **5 of 5 failed** |
+| same, worktree at `e45f760` (before PR-059-A), bins freshly built | **3 of 3 failed** |
+| full `cargo test -p tekstide-core --lib` (1134 tests) | passed |
+| same filtered invocation, immediately after that full run | 10 of 10 passed |
+| same filtered invocation, 4 busy cores of competing load | 10 of 10 passed |
+
+**No cause established, and none is guessed here.** One ordinary explanation was checked and ruled
+out: `bind_attention_listener` is called in `app.rs` inside the open path, so the holder has bound
+its listener *before* it prints `ACQUIRED`, which is what the test's own spawn waits for. A naive
+bind-after-announce race is therefore not it.
+
+**Worth noticing about the assertion itself, for whoever dispositions this.** The product documents
+this knock as **best-effort** — `request_attention`'s own doc says it "returns whether the holder
+was reached, never blocks", RFC-058 D9 says the same, and
+`docs/src/users/what-works-today.md` tells users "the request for attention is best-effort and may
+do nothing visible". The test asserts `KNOCKED` **unconditionally**. A test that asserts a stronger
+property than the product promises will fail whenever reality exercises the gap, and that may be
+exactly what the five-then-three failures were. The disposition is therefore a real question rather
+than a bug hunt: either the test synchronises on something that makes the strong assertion true, or
+it is asserting more than RFC-058 ever claimed.
+
+**Verdict: none yet.** Open, awaiting disposition per `test-flake-disposition.md`'s own rule that a
+live row needs a verdict — fix, quarantine, or accept with a reason.
