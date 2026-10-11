@@ -726,6 +726,22 @@ underneath were corrected, the sentence above them was not.
   by any test. Mitigated by hand in the meantime by `release-checklist.md`'s own grep sweep, not by
   an invariant. Commit `4630c41`, pushed.
 
+### Review 525 — accepted, nothing required
+
+Re-ran the direction-A ablation independently (`grep -c "changelog wins" target/ablate-last.log` →
+`0`); gate reproduced exactly (`763 + 22 + 1132`, 0 fixture entries, real state directory `0 → 0`).
+**One addendum, not a new round**: the header's own `RFC-NNN` scrape named RFC-027 alongside RFC-058
+in the ablation output — harmless today (RFC-027's own `rfcs/README.md` row was correct throughout)
+but a real misdirection risk the next time a mentioned-not-released RFC also has a stale row of its
+own. Recorded as a paragraph under the four-site `future-work.md` item (commit `a86dda8`), since
+both come down to the same underlying question — which RFC a section *releases* against which it
+merely *mentions*.
+
+**Candidate state**: reviews 519 through 525 all closed. No product code changed since review 522;
+523–525 were tests and documents only, so the candidate needs no re-cut. `0.34.0` is ready for the
+owner's authorization — the tag, the core-first publish, and `release-0.34.0.md` are the architect's
+own next step on the owner's word, not mine.
+
 ## Final Acceptance Decision
 
 - [ ] Accepted.
