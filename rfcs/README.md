@@ -58,6 +58,8 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 064 | Does `iced`'s `text_editor` Replace Our Own? | editor, pre-1.0 |
 | 068 | Redacting What A Run Prints | pre-1.0 |
 | 069 | An Adapter For A Real AI CLI | pre-1.0 |
+| 070 | Check For Updates | M14 |
+| 071 | Windows Packaging And The Microsoft Store | M14 |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
 audit's findings, not guesses; each row's scope is in the release schedule in

@@ -1109,7 +1109,15 @@ product feature with its own decisions, not release tooling, and it does not bel
   Tekstide, when, from which address) and that nothing else is sent.
 
 Scheduled with M14, where it is worth having — a check for updates matters once updating is easy.
-It needs its own RFC when it is scheduled; no number is reserved yet.
+**Reserved as RFC-070 on 2026-10-12**, when the owner scoped M14.
+
+**Addendum, 2026-10-12 — the Microsoft Store makes the "never guess how they installed" point
+sharper, not softer.** The owner intends to publish on the Store as well as AUR. A Store-installed
+application is updated *by the Store*; an AUR one by the package manager; a `cargo install` one by
+cargo. So there are now at least three right answers and no way to infer which applies — which is
+the argument for a link rather than a command, already made above, now with a concrete third case.
+Whether the build can know its own channel at compile time is a decision for RFC-070, not an
+assumption to carry into it.
 
 ## Confirming a project close with an unsaved file kills its terminals and does not close it
 

@@ -475,6 +475,51 @@ Unscheduled — it needs a feature (per-pane focus, or a cycle action with a han
 
 Stated here because it has been practice for fourteen releases and was never written down.
 
+**M14 scope, 2026-10-12 (owner's direction: prebuilt binaries, Microsoft Store, AUR, and the
+install docs).** `cargo install` is the only install this product offers, and it asks an unskilled
+user for a Rust toolchain and a compile. The owner's instruction settles the goal; this note
+settles the order, and records one constraint the owner has to decide.
+
+**The platform cost is lopsided, and the cheap half is not the one that was asked for.** Measured,
+not estimated: **30 unix-specific lines across 12 files**, and the PTY is hand-rolled on
+`libc::openpty` in a single module (`runtime/terminal/pty.rs`). Six real seams —
+`pty.rs` (`openpty`), `approval/channel.rs` (`AF_UNIX`), `project_lock.rs` (`flock`,
+`PermissionsExt`, `DirBuilderExt`), `runtime/terminal/launch.rs` (`CommandExt`, process groups),
+`termination.rs` (`ExitStatusExt`, signals), and the `0o700`/`0o600` modes.
+
+- **macOS crosses all six for free** — every one is POSIX and present on macOS.
+- **Windows crosses none of them.** ConPTY for the terminal, named pipes for the approval channel,
+  `LockFileEx` for the lock, Job Objects for process groups, no signals at all, and ACLs instead of
+  file modes. **Windows is the whole of RFC-028's cost**, and it is what the Microsoft Store needs.
+
+**Order, and why.**
+
+1. **RFC-029 first** — build/test CI (there is none today; `.github/workflows` holds only
+   `docs.yml`), release automation producing prebuilt binaries with published checksums, AUR
+   packaging, the rewritten *Quick Start*/*Install*, and the landing page. This answers the owner's
+   actual complaint on the platform that already works, and builds the CI every later channel
+   needs. **Nothing here waits for cross-platform.**
+2. **RFC-028 second**, as two separate slices: macOS (nearly free) and Windows (the real work).
+3. **The Microsoft Store is its own RFC, not a slice of 029** — reserved as **071**. It depends on
+   RFC-028's Windows half, needs MSIX packaging and a publisher identity the owner holds, and has
+   its own update story: a Store-installed app is updated by the Store, which changes what a
+   "check for updates" answer may say.
+4. **Check for updates — reserved as 070**, the owner's own counter-proposal to an auto-updater
+   (see `future-work.md`). Small, and it belongs after there is something to update *to*. The
+   install-channel point above is now one of its decisions: the right answer differs for Store, AUR
+   and `cargo install`, and the product must not guess.
+5. **The NFR verification band** closes M14.
+
+**The constraint the owner has to decide: nobody can verify macOS.** This project's standard is a
+real run on real hardware — the Run It gate exists because `0.12.0` passed every mechanical check
+while shipping inert buttons. A CI matrix gives compile-and-test evidence on macOS and Windows
+runners, and that is worth having, but it is not the standard this project holds itself to for
+anything a user looks at. The owner has Windows (they intend to publish to the Store). **If nobody
+has a Mac, then claiming macOS support would be a claim with no evidence behind it**, which is the
+one thing this project consistently refuses. Three honest options: ship Windows and Linux and say
+so; ship macOS as *builds and passes tests in CI, unverified on real hardware*, named that plainly;
+or find someone to run it. The reviewer recommends the first or second, never silence.
+
 **Scheduling note, 2026-10-08.** Two insertions this day (**066**, **067**) each moved the queue down one, so **RFC-060 — a 1.0 blocker — has slipped from `0.34.0` to `0.36.0`.** Recorded because the reviewer schedules releases and the owner should not discover a two-release delay to a 1.0 blocker by reading a table. Both insertions are defensible on their own (066 repairs live work loss; 067 removes interface rather than adding it) and either can be moved behind 060 on request.
 
 1. **One RFC per release**, by default. A release exists to carry a closed RFC to users, not to batch.
@@ -552,6 +597,8 @@ Status values: **In progress** · **Next** · **Queued** · **Blocked**
 | 067 | The Sidebar Is Not A Mode | M13 | — | **yes** | **Implemented and closed 2026-10-09; released as `0.33.0` 2026-10-10.** **Accepted 2026-10-08; D1–D6, plus D7–D9.** `0.33.0`. The sidebar no longer matches on `ProjectMode`; the explorer renders in both modes. Activating a file in Terminal mode switches to Content mode and shows it (D7), and a real production bug was found and fixed so that only an explicit activation does so, never a background open or RFC-027's own recovery offer (D8). The switch's own render cost was measured, not assumed (D4): tens of microseconds either way, roughly three orders of magnitude under this project's "a user would notice" yardstick — D5 answered on that measurement: build nothing further. [The RFC](./done/067-the-sidebar-is-not-a-mode.md). [Handoff pack](./handoffs/067-sidebar-not-a-mode/README.md) |
 | 068 | Redacting What A Run Prints | pre-1.0 | 011, 059 | partly | **Reserved 2026-10-11**, split out of RFC-059 on acceptance. `REQ-SEC-023`'s log half: a transcript holds raw run output, and the AgentRun Report exports 16 KiB of it to a user-named path. The single question is what claim about that content can actually be kept — a scanner that misses one secret is worse than no claim, which is why `RedactionClaimScope` still has one variant |
 | 069 | An Adapter For A Real AI CLI | pre-1.0 | 021, 022, 060 | no | **Reserved 2026-10-12**, on RFC-060's acceptance (D9). RFC-060 makes the approval pathway reachable for anyone who writes an adapter; this is the one that makes it real for a user who has not. Its single question is what this project can promise about an interface it does not control — an upstream hook that changes shape without warning is the risk, not the writing of the adapter |
+| 070 | Check For Updates | M14 | 029 | no | **Reserved 2026-10-12.** The owner's own counter-proposal to an embedded auto-updater: a button, pressed deliberately, that asks crates.io and **reports, never installs**. This product's first outbound network request, so `local-data-and-privacy.md` documents what it reveals. Must not guess how the user installed — the right answer differs for the Microsoft Store (the Store updates it), AUR (the package manager does) and `cargo install` |
+| 071 | Windows Packaging And The Microsoft Store | M14 | 028 | no | **Reserved 2026-10-12**, on the owner's direction. Depends on RFC-028's Windows half, which is where that RFC's whole cost sits. MSIX packaging and a publisher identity the owner holds; its own update story, since a Store-installed app is updated by the Store. Not a slice of 029: 029's channels all work on Linux today and must not be blocked behind Windows |
 | 027 | Crash Recovery and Unsaved Buffer Persistence | M13 | — | **yes** | **Implemented and closed 2026-10-09; released as `0.31.0` 2026-10-09** — closed at the candidate, deliberately before publish, the same discipline RFC-065's own row above set. **Accepted 2026-10-08; D1–D11 as written, plus D12–D15.** `0.31.0`. Three slices; the content-writing slice carries its own purge. **A real data-loss defect was found and fixed during its own review** (490/491), not after shipping: a recovered document whose file was both changed and oversize could save directly over it, fixed by guarding on `Conflict` state rather than how a snapshot encodes absence. The offer is driven by the record's own presence, never the marker (Amendment 1, verified against the real binary). [The RFC](./done/027-crash-recovery-and-unsaved-buffer-persistence.md). [Handoff pack](./handoffs/027-crash-recovery/README.md) |
 | 028 | Cross-Platform Support | M14 | most | partly | Queued |
 | 029 | Documentation, CI, and Release Automation | M14 | — | **yes** | Queued (parallel-ready) |
