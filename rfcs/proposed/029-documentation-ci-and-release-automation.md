@@ -2,7 +2,9 @@
 
 Status: **Proposed 2026-10-12.** `0.37.0`, M14. Reserved since the plan's first draft; scoped now
 under the owner's M14 direction (2026-10-12): prebuilt binaries, AUR, and install documentation an
-unskilled user can follow. D1–D8 and one open question are for the owner, on acceptance.
+unskilled user can follow. **D1–D13**, of which D9–D13 reverse this RFC's own first recommendation
+against a one-liner installer after the owner challenged it. One question — what the install page
+leads with — remains for the owner, on acceptance.
 
 ## Summary
 
@@ -86,22 +88,22 @@ That is not an argument against CI. It is an argument about order.
   broken commit before it is trusted.
 - **PR-029-C — release artifacts and checksums** (D5): a tagged build producing a Linux binary and
   its checksum, published on the release.
-- **PR-029-D — AUR** (D6) and **the install rewrite** (D7): `README.md`'s *Quick Start* and
-  `docs/src/users/getting-started.md`'s *Install*, with the verified form first.
-- **PR-029-E — the landing page** (D8).
+- **PR-029-D — the one-liner installer** (D9–D12): the script, its own checksum verification, its
+  truncation safety, and its stated scope. **Truncation safety is proven by truncating it** — serve
+  a prefix, run it, show that nothing was installed — not by reading the wrapper and agreeing it
+  looks right.
+- **PR-029-E — AUR** (D6) and **the install rewrite** (D7, D13): `README.md`'s *Quick Start* and
+  `docs/src/users/getting-started.md`'s *Install*, leading with the one-liner and keeping the
+  four-line form documented beside it as the equivalent, never as the safer one.
+- **PR-029-F — the landing page** (D8).
 
-## Open question for the owner, to decide on acceptance
+## The installer: decided 2026-10-12, against the reviewer's first recommendation
 
-**Does this project offer a `curl … | sh` one-liner?**
+**The owner asked for a one-liner on 2026-10-08. This RFC first recommended against it, and that
+recommendation was wrong.** The argument is recorded in full because the reasoning matters more
+than the outcome.
 
-The owner asked for one on 2026-10-08 (*"To offer one-liner shell installation method"*). The
-analysis recorded at the time pushed back, and it still holds: a one-liner **executes remote code
-with the user's privileges**, which sits badly beside a product whose posture is local-first,
-trust-gated and audited, and whose own dialogs refuse to overclaim safety. What costs an unskilled
-user today is the toolchain and the compile — and **prebuilt binaries remove that whether or not a
-one-liner exists**.
-
-**The saving, counted rather than asserted — one line against four.** The verified form reads:
+**What the reviewer proposed instead** — the verified form, four lines:
 
 ```sh
 curl -LO https://github.com/nabbisen/tekstide/releases/download/<version>/tekstide-x86_64-linux
@@ -110,23 +112,48 @@ sha256sum -c tekstide-x86_64-linux.sha256
 install -m 755 tekstide-x86_64-linux ~/.local/bin/tekstide
 ```
 
-**And one wrinkle that argues against my own recommendation, so it is stated here rather than
-left out:** that fourth line assumes `~/.local/bin` is on `PATH`, which for the unskilled user this
-RFC exists to serve is exactly the sort of thing that is not true and not obvious. A one-liner
-handles it silently. So the honest comparison is four lines plus a `PATH` caveat against one line —
-not four against one. The recommendation below still stands, but it stands on what the form
-*executes*, not on how much typing it saves.
+**Why that was wrong.** The owner asked why four is acceptable when one is not, and there is no good
+answer. Both forms execute code fetched from the same server. **The checksum is served from the same
+release as the binary**, so step 3 catches a corrupted or truncated download — not an attacker who
+can write to that release. Recommending it to a beginner who cannot assess that distinction hands
+them a ritual that *looks* like verification while resting on the same trust root as the thing it
+verifies.
 
-Three options:
+That is the defect this project refuses everywhere else. `what-the-dialog-must-not-lie-about.md` §2:
+*"a dialog that looks like a security control while being an honour system is worse than no dialog:
+it manufactures confidence that is not warranted."* A four-line checksum ceremony with a same-host
+checksum is that sentence, applied to an install page. The fourth line also assumes `~/.local/bin`
+is on `PATH`, which for this RFC's own target user is frequently untrue and never obvious.
 
-1. **No one-liner.** Prebuilt binaries, checksums, AUR, and a short verified-download snippet. The
-   most consistent with everything else this product says about trust.
-2. **A one-liner, with the verified form shown first** and the convenience form second, labelled
-   with what it does.
-3. **A one-liner as the headline**, matching what most projects do.
+**What actually survives the comparison** is narrower, and both are properties of the *script*
+rather than reasons to withhold it:
 
-My recommendation is **(1)**, and I want to be clear that this is a disagreement with the owner's
-earlier instruction rather than a neutral presentation: I think a project that tells users it
-cannot promise to stop a rejected command from running should not also ask them to pipe a URL into
-a shell. If the owner still wants the one-liner, **(2)** is the version I would build, and I will
-build it without further argument.
+- **A truncated download piped to `sh` executes a prefix of the script.** The connection drops and a
+  half-installer runs. The four-line form fails its checksum instead.
+- **A script's scope is unbounded and unseen.** The binary does what Tekstide does, which the user
+  chose; a script can touch shell rc files, system paths, anything, and piping it means the user
+  never sees what it did.
+
+### Decisions
+
+- **D9. Tekstide offers a one-liner installer.** The owner's principle governs: for a beginner,
+  simpler is better, and the complex form was not buying what it appeared to buy.
+- **D10. The script verifies the binary's checksum itself**, before installing it. The verification
+  the four lines performed does not disappear — it moves into the script, where it happens whether
+  or not the user would have done it.
+- **D11. The script is truncation-safe.** Wrapped so that a partial download executes nothing —
+  the whole body in a function, invoked on the last line, or an equivalent that fails closed.
+- **D12. The script's scope is stated where it is offered, and it stays inside that scope.** It
+  installs one binary to one location and touches nothing else — no shell rc edits, no system
+  package changes, no repositories added. If it would need to, it says so first and stops.
+- **D13. The verified four-line form stays documented**, for people who want it and for anyone
+  auditing what the script does — presented as the equivalent, not as the safer one, because on the
+  same trust root it is not.
+
+### Still open for the owner
+
+**Only the headline question.** The installer exists; what the install page *leads* with is the
+owner's call: the one-liner (what a beginner should see first), or `cargo install` (what the page
+leads with today and what D7 already says must change). The reviewer recommends leading with the
+one-liner, now that it is being built.
+
