@@ -292,8 +292,15 @@ existing — **see "What was not tested" below for the one thing that gap means*
 - **The real install path, end to end**: downloaded, verified, installed; the installed binary's
   own SHA-256 matched the source binary exactly, and `tekstide --version` reported `0.36.0` from
   the installed copy.
-- **Exactly one file, one location**: `find "$HOME" -mindepth 1` before and after showed exactly
-  one new path, `.local/bin/tekstide` — no rc file, no other directory, nothing else present.
+- **One binary, plus the directory it goes in — required correction, review 547.** `find "$HOME"
+  -mindepth 1` on a genuinely fresh `$HOME` shows three new paths, not one: `.local`, `.local/bin`,
+  `.local/bin/tekstide` — `mkdir -p "$install_dir"` creates the destination directory chain when
+  it does not already exist, which is part of installing one binary to one location, not a defect
+  (the review's own framing: failing instead "would be worse for the beginner this is for"). The
+  first draft of this evidence said "exactly one new path," and the script's own header made the
+  same imprecise claim ("installs ONE file to ONE location ... touches nothing else") — both
+  corrected. What remains true and is the actual property this bullet exists to prove: no rc file,
+  no other top-level directory, nothing outside `.local/bin` present either before or after.
 - **Both `PATH` branches**: installed with the target directory absent from `PATH` (correctly
   reported not-yet-on-`PATH`, with the exact command to add it) and present (correctly reported
   already-on-`PATH`).

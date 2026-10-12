@@ -2,11 +2,12 @@
 # Tekstide installer.
 #
 # Downloads the Linux x86_64 release binary, verifies it against its own
-# published checksum, and installs ONE file to ONE location:
-# $HOME/.local/bin/tekstide. Touches nothing else -- no shell rc file, no
-# package repository, no sudo. See docs/src/users/getting-started.md for
-# what this script does and does not do, stated before the command, not
-# only here (RFC-029 D12, what-the-installer-must-not-do.md §1).
+# published checksum, and installs ONE binary to $HOME/.local/bin/tekstide --
+# plus the directory it goes in, if that does not already exist. Touches
+# nothing else -- no shell rc file, no package repository, no sudo. See
+# docs/src/users/getting-started.md for what this script does and does not
+# do, stated before the command, not only here (RFC-029 D12,
+# what-the-installer-must-not-do.md §1).
 #
 # RFC-029 D9-D12.
 #
