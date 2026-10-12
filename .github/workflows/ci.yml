@@ -1,0 +1,115 @@
+# The blocking build/test gate (RFC-029 D1, D2, D3, PR-029-B).
+#
+# **What this job covers, and only this**: `cargo fmt --check`, `clippy --workspace
+# --all-targets --all-features -- -D warnings`, `cargo test --doc --workspace`, and
+# the full workspace test suite (`--all-targets --no-fail-fast`) against a short,
+# fixed `TMPDIR`, asserting it is empty afterward. This is exactly the local gate
+# `rfcs/handoffs/release-checklist.md`'s own "Required Gates" section runs by hand —
+# a weaker subset here would be a claim about a gate that was not actually run (D2).
+#
+# **What this job does NOT cover, named here so a green badge is never read as more
+# than it is (D4, `what-the-installer-must-not-do.md` §7)**: the Run It gate, the
+# book-against-the-changelog sweep, the release checklist's packaging/publish/audit
+# steps, and anything needing a real display (these all stay human, by design, and
+# none of them run headlessly on a CI runner). A green run here is necessary for a
+# release candidate; it is not sufficient.
+#
+# **D1's own prerequisite**: this job became trustworthy to make blocking only after
+# `rfcs/handoffs/test-process-leak.md`'s every live row carried a verdict
+# (RFC-029 PR-029-A) — a gate that is red when nothing is wrong teaches everyone to
+# ignore red, which is the one thing this project's whole method depends on not
+# happening.
+#
+# **Rust toolchain: the runner's own preinstalled `rustup` is used, updated to the
+# latest `stable` and given the two components this gate needs.** Not pinned to an
+# exact version the way `mdbook` is in `docs.yml`: a bare download has no integrity
+# check of its own, which is what that pin and its checksum exist to supply, but
+# `rustup`'s own installation and update path verifies what it fetches itself, so a
+# second, hand-maintained version pin here would buy nothing `rustup` does not
+# already provide, at the real cost of this gate silently aging behind what `cargo
+# fmt`/`clippy` actually enforce on a contributor's own up-to-date machine. The
+# installed version is printed every run, so a drift is visible in the log, not
+# hidden.
+#
+# **First-party actions only, each pinned to a commit SHA with its tag in a trailing
+# comment** (`docs.yml`'s own rule, inherited unchanged, D3): the single `uses:` step
+# below reuses the identical `actions/checkout` pin `docs.yml` already carries.
+#
+# **No `paths:` filter.** A workspace-wide build/test gate has no subset of the repo
+# it can safely ignore -- the same reasoning `docs.yml`'s own header already gives for
+# itself, reached independently here for a different set of files.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Short and fixed, matching this project's own established convention
+  # (`rfcs/handoffs/test-process-leak.md`, `release-checklist.md`): a long
+  # `TMPDIR` can push a real `AF_UNIX` socket path (the approval channel,
+  # the attention socket) past `sockaddr_un`'s ~108-byte capacity, which is
+  # exactly the failure `0.36.0` shipped a named refusal for rather than
+  # leaving generic -- the same limit applies on a runner, not only on a
+  # developer's own machine.
+  CI_TMPDIR: /tmp/tci
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Rust (rustup's own update path, components added)
+        run: |
+          set -euo pipefail
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+          rustc --version
+          cargo --version
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo test --doc --workspace
+        run: cargo test --doc --workspace
+
+      - name: cargo build --workspace --bins
+        # `release-checklist.md`'s own "Package Smoke" lesson, hit for real on the
+        # first live run of this workflow rather than only read about: several
+        # tests spawn a real `[[bin]]` helper (`reference_adapter`,
+        # `project_process_probe`, `audit_store_create_probe`) as a child process
+        # at runtime via `Command::new`, which is not a linked dependency `cargo
+        # test --all-targets` builds as a side effect on a clean `target/`. A
+        # developer's own machine usually has these already built from earlier
+        # work in the same `target/` directory, which is exactly why this gap
+        # stayed invisible locally and only showed up here, on a fresh runner.
+        run: cargo build --workspace --bins
+
+      - name: cargo test --workspace --all-targets --no-fail-fast
+        run: |
+          set -euo pipefail
+          rm -rf "$CI_TMPDIR"
+          mkdir -p "$CI_TMPDIR"
+          TMPDIR="$CI_TMPDIR" cargo test --workspace --all-targets --no-fail-fast
+
+      - name: Assert 0 fixture entries left
+        run: |
+          set -euo pipefail
+          leftover="$(find "$CI_TMPDIR" -mindepth 1 2>/dev/null || true)"
+          if [ -n "$leftover" ]; then
+            echo "fixture entries left behind under \$TMPDIR ($CI_TMPDIR):"
+            echo "$leftover"
+            exit 1
+          fi
+          echo "0 fixture entries left."
