@@ -84,6 +84,18 @@ jobs:
       - name: cargo test --doc --workspace
         run: cargo test --doc --workspace
 
+      - name: cargo build --workspace --bins
+        # `release-checklist.md`'s own "Package Smoke" lesson, hit for real on the
+        # first live run of this workflow rather than only read about: several
+        # tests spawn a real `[[bin]]` helper (`reference_adapter`,
+        # `project_process_probe`, `audit_store_create_probe`) as a child process
+        # at runtime via `Command::new`, which is not a linked dependency `cargo
+        # test --all-targets` builds as a side effect on a clean `target/`. A
+        # developer's own machine usually has these already built from earlier
+        # work in the same `target/` directory, which is exactly why this gap
+        # stayed invisible locally and only showed up here, on a fresh runner.
+        run: cargo build --workspace --bins
+
       - name: cargo test --workspace --all-targets --no-fail-fast
         run: |
           set -euo pipefail
