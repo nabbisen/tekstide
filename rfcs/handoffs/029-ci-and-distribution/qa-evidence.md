@@ -107,3 +107,76 @@ opened now carries exactly one verdict.
 `cargo test --doc --workspace` (2 passed), `rfc_docs_invariants` (22/22, unaffected — this slice
 touches no RFC document): all clean. Three consecutive full-workspace runs, fresh short `/dev/shm`
 `TMPDIR` each: `782 + 22 + 1140`, 0 failed, 0 fixture entries.
+
+## PR-029-B — the blocking CI job
+
+### What it runs, and what it states it does not cover
+
+`.github/workflows/ci.yml`: `cargo fmt --check`, `clippy --workspace --all-targets --all-features
+-- -D warnings`, `cargo test --doc --workspace`, then `cargo build --workspace --bins` before the
+full workspace suite (`--all-targets --no-fail-fast`) against a short fixed `TMPDIR`
+(`/tmp/tci`), with a final step asserting it is empty afterward (D2). The workflow's own header
+comment states plainly what it does **not** cover — the Run It gate, the book-against-the-
+changelog sweep, the release checklist's packaging/publish/audit steps, anything needing a real
+display — so a green badge cannot be read as more than it is (D4, §7).
+
+Triggers on `push` to `main`, on every `pull_request`, and `workflow_dispatch`. No `paths:` filter
+— the identical reasoning `docs.yml`'s own header already gives for itself (a workspace-wide
+build/test gate has no subset of the repo it can safely ignore), reached independently here for a
+different file set. `actions/checkout` reuses the exact pinned commit SHA `docs.yml` already
+carries; no other `uses:` step exists. Rust itself is installed via the runner's own preinstalled
+`rustup`, updated to `stable` and given the `rustfmt`/`clippy` components — not pinned to an exact
+version the way `mdbook` is, since `rustup`'s own install/update path already verifies what it
+fetches, documented in the workflow's own comment rather than left implicit.
+
+### A genuine first-run failure, found by actually running it — not a planned part of the proof
+
+The **first** real run (a throwaway verification PR, never merged) failed for real, before any
+deliberate breakage was introduced: `cargo test --workspace --all-targets` on a clean runner does
+not build the `[[bin]]` helper binaries (`reference_adapter`, `project_process_probe`,
+`audit_store_create_probe`) several tests spawn as real child processes via `Command::new` at
+runtime — exactly the lesson `release-checklist.md`'s own "Package Smoke" section already
+documents for an unpacked package, hit here for the first time against a genuinely clean `target/`
+rather than a developer's own machine, where these binaries are normally already built as a side
+effect of earlier work in the same directory. 14 tests failed with *"the `[[bin]]` target may not
+have built."* Fixed by adding a `cargo build --workspace --bins` step before the test step, with
+the workflow's own comment naming why the gap stayed invisible locally. Disclosed here rather than
+quietly folded into the final diff, the same discipline this project's flake register already
+holds itself to.
+
+### Proven failing on a deliberately broken commit, then proven green again
+
+Per the task breakdown's own required proof (not reading the file and agreeing it looks right):
+
+1. **Green**, with the bin-build fix in place: [run 38315443311](https://github.com/nabbisen/tekstide/actions/runs/38315443311).
+2. **Red**: a one-line `cargo fmt --check` violation committed and pushed to the same branch —
+   [run 38315885701](https://github.com/nabbisen/tekstide/actions/runs/38315885701), stopped at
+   the `cargo fmt --check` step exactly, every later step skipped.
+3. **Green again**: the breakage reverted (`git revert`, not a hand-edit back) —
+   [run 38315927629](https://github.com/nabbisen/tekstide/actions/runs/38315927629).
+4. **Green on the real `push`-to-`main` trigger**, not only `pull_request` —
+   [run 38316323302](https://github.com/nabbisen/tekstide/actions/runs/38316323302), after the
+   workflow landed on `main` for real.
+
+All four runs driven through a real, throwaway verification PR (`nabbisen/tekstide#1`, opened and
+closed without merging, title and body stating it was verification-only) against a disposable
+branch (`ci-pr-029-b-verify`, deleted after). `main`'s own `crates/tekstide-core/src/lib.rs` was
+never touched by the deliberate breakage — it only ever existed on the throwaway branch, reverted
+there before that branch was deleted.
+
+### What this slice deliberately leaves to the owner
+
+**Branch protection — making this check actually required before a merge — is a repository
+security setting, not a line in the workflow file, and is not configured here.** `gh api
+repos/nabbisen/tekstide/branches/main/protection` returns `404` (unprotected) as of this slice.
+Configuring who can bypass a required check, and which checks are required, is the kind of
+account-level decision this project's own standing practice leaves to the human owner rather than
+an implementer deciding unilaterally. Flagged explicitly in the review request rather than left
+implicit.
+
+### Gate
+
+Workflow-only change; no Rust source touched on `main` by this slice (the deliberate-breakage
+commit and its revert both lived and died on the throwaway branch). The real CI job's own four
+runs above are the evidence this slice's "gate" actually consists of — a local re-run of
+`cargo fmt`/`clippy`/the full suite would exercise nothing this slice itself changed.
