@@ -1,14 +1,14 @@
 ---
 title: "RFC-060 handoff — Command Approval A User Can Reach"
-status: "**Accepted 2026-10-12; not started.** `0.36.0`, **a 1.0 blocker**. D1–D9 decided on acceptance; no real-CLI adapter this release (that is RFC-069)."
-source_rfc: "../../accepted/060-command-approval-a-user-can-reach.md"
-source_rfc_status: "Accepted by the human owner 2026-10-12"
+status: "**Implemented and closed 2026-10-12** — `0.36.0` candidate, not yet published. All four slices and the Whole-RFC checklist closed."
+source_rfc: "../../done/060-command-approval-a-user-can-reach.md"
+source_rfc_status: "Implemented and closed 2026-10-12; `0.36.0` candidate, not yet published."
 target_release: "0.36.0"
 ---
 
 # RFC-060 — Command Approval A User Can Reach
 
-Read [the RFC](../../accepted/060-command-approval-a-user-can-reach.md) first, and then read
+Read [the RFC](../../done/060-command-approval-a-user-can-reach.md) first, and then read
 **RFC-022's own risk document**,
 [`what-the-dialog-must-not-lie-about.md`](../022-adapter-spawn-and-command-approval-surface/what-the-dialog-must-not-lie-about.md).
 That document is not background; it is the bar this release is judged against, and this pack's own

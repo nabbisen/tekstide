@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.36.0 - Command Approval A User Can Reach
+
+Status: **candidate, not yet published.** RFC-060's four slices and its Whole-RFC checklist are
+all implemented, gated and closed. This entry was written incrementally as slices closed, then
+re-read against the finished set at the candidate; see
+`rfcs/handoffs/060-command-approval-reachable/` for the full handoff pack.
+
+**For nearly every user, this release changes nothing.** The command-approval UI and API were
+finished and proven end to end as of RFC-021/RFC-022, and no configuration could ever produce a
+`Managed` profile — the dialog existed and no user could reach it. This release makes the pathway
+reachable for a profile that declares an adapter; it does not ship an adapter for any real AI CLI,
+and as of this writing none that ship with any AI CLI speak Tekstide's own protocol. Declaring
+`adapter = true` on an ordinary AI CLI's profile does not make Tekstide supervise, sandbox, or
+intercept anything it runs — it only makes Tekstide wait for a proposal that will never arrive.
+
+**`adapter = true` on a profile is the one key that requests `Managed` mode, and the only one** —
+`ConfiguredAiCliProfile` is structurally incapable of representing `Managed` without it, not merely
+refused when asked (`ConfiguredAiCliAdapter`, a two-variant enum one match derives both
+`compatibility_level` and `structured_action_approval` from, so a third variant could not
+half-decide the pair even by a future mistake). `REQ-AGENT-012`, `REQ-SEC-012` and `REQ-SEC-013`
+are met **for a profile that declares an adapter** — a reachable pathway, not a property every
+profile now has.
+
+**Rejecting a proposal does not prevent execution, and this release is where that sentence first
+reaches a real user**, not only the book. The dialog states it directly, in words read before the
+decision: approving does not make a command safe, and rejecting cannot stop the AI CLI from running
+it anyway — the model is cooperative, not enforced, and nothing about this release changes that.
+`REQ-AGENT-013` is met by what the product does not say: no surface, book page or changelog entry
+anywhere describes this as command-level enforcement.
+
+**The whole path was demonstrated once, for real** — a configured profile, a real (test-and-proof-
+only) reference adapter process, a real proposal, the real dialog, a real decision, and the
+resulting `command_approval` audit records read back through `0.35.0`'s own audit view, not by a
+direct store query. A real failure mode was found and named while doing it: a `Managed` launch's
+approval socket binds under `$XDG_STATE_HOME`, whose path shares the small, fixed budget a Unix
+domain socket's path is capped to — an unusually long `XDG_STATE_HOME` can now fail a launch with a
+named reason and a fix, instead of the previous generic refusal.
+
 ## 0.35.0 - Seeing The Audit
 
 Status: **released 2026-10-12.** RFC-059's three slices and its Whole-RFC checklist are

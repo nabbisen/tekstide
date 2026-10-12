@@ -1,6 +1,7 @@
 # RFC-060: Command Approval A User Can Reach
 
-Status: **Accepted by the human owner 2026-10-12.** D1–D7 as written; **the open question
+Status: **Implemented and closed 2026-10-12; `0.36.0` candidate, not yet published.** See the
+*Closed* section. **Accepted by the human owner 2026-10-12.** D1–D7 as written; **the open question
 answered by the acceptance itself** — see *Decided on acceptance*. Proposed 2026-10-12. `0.36.0`,
 pre-1.0, **a 1.0 blocker**. `REQ-AGENT-012`, `REQ-AGENT-013`, `REQ-SEC-012`, `REQ-SEC-013`. Builds
 on RFC-021 (the protocol) and RFC-022 (the spawn path and the dialog).
@@ -156,3 +157,68 @@ nothing undecided is that the recommendation stands:
 its highest-consequence sentence — that rejecting does not prevent execution — finally has to
 appear in front of a real user, and D4 makes `REQ-AGENT-013` a sweep of what the product may not
 say rather than a feature to build.
+
+## Closed (2026-10-12)
+
+Four slices and the Whole-RFC checklist are done. **`0.36.0` candidate, not yet published** — see
+`CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
+
+**PR-060-A (the way in)** gave `ConfiguredAiCliProfile` the field D1/D2 ask for:
+`adapter: ConfiguredAiCliAdapter`, a two-variant enum (`None | Managed`) replacing what had been
+three independently-settable facts — `compatibility_level`, `structured_action_approval`, and
+whether an adapter was declared at all — with the single field that decides all of them.
+`to_ai_cli_profile` reads it through one tuple-returning match, not two independent reads that a
+future third variant could half-decide; an earlier draft had exactly that shape and the reviewer's
+own worktree ablation showed the half-decided arm failing to compile once a third variant was
+added, proving the property rather than only the absence of a current bug. TOML gained
+`adapter = true`/`false` (default) under `[agent.profile.<id>]`. `Managed` without a declared
+adapter is now structurally unrepresentable, not merely rejected, demonstrated three ways: an
+exhaustive enumeration test over the whole two-value domain, a pair of tests proving each arm's own
+negative, and a worktree ablation proving the compiler — not a runtime check — refuses a
+half-decided future variant.
+
+**PR-060-B (the sentence and the sweep)** found that D3's own sentence already existed —
+`approval-dialog-cooperative-notice` shipped under RFC-022 PR-022-E, two months before this RFC was
+proposed, found by reading `en.ftl` directly rather than inferred from "no user has ever seen this
+dialog." No redundant key was added; one test was added for the half of D3 that had no test of its
+own (the dialog answers a request, carried by its title/body rather than the notice). The D4 sweep
+found the real staleness was not enforcement-claim risk — every existing sentence already stated
+the cooperative-not-enforced model correctly — but two **reachability** claims
+(`README.md`/`what-works-today.md` both said the pathway was unreachable) that PR-060-A had just
+made false. `configuration.md`'s own `## Declaring an adapter` section, deferred from PR-060-A
+deliberately so the cooperative-not-enforced caveat could sit beside the key from the start, was
+written here.
+
+**PR-060-C (the whole path, once, for real)** closed the loop no earlier test had closed: a real
+`Managed` launch of `reference_adapter` — this project's own test-and-proof artifact, named as
+such wherever it appears, proving nothing about any real AI CLI — through a real proposal, a real
+decision via the production `update()` route, with the resulting `command_approval` audit records
+read back **through `0.35.0`'s own audit view**, not by an independent store query beside it. Live-
+captured against a real throwaway project and state root: the promoted dialog with D3's cooperative
+notice fully in frame, the decided state, and the real audit view showing the resulting records. A
+real packaging lesson surfaced while capturing it, not invented afterward: a long throwaway
+`$XDG_STATE_HOME` made the real approval socket's path exceed `sockaddr_un`'s capacity, failing the
+launch with an unnamed generic refusal — recorded and then fixed in the next slice rather than
+patched around.
+
+**PR-060-D (naming the refusal)** closed that finding. `ApprovalChannelDirectory::bind()` already
+distinguished `SocketPathTooLong` (response 113 Required 1, predating this RFC); nothing above it
+carried the reason to the surface, so a real, now-reachable failure fell into a generic `*[error]`
+catch-all. A new, specific refusal branch names what to change — a shorter `XDG_STATE_HOME` — and
+states no byte number, since `sockaddr_un`'s real capacity differs by platform and the budget also
+depends on the run's own id. Proven by a test reusing the exact deep-path recipe
+`tekstide-core`'s own channel test already uses, ablated in a disposable worktree to confirm it
+fails without the fix. Documented in `docs/src/users/local-data-and-privacy.md`'s new
+`## The approval socket` section, cross-linked from `configuration.md`'s own `## Declaring an
+adapter` — found missing on the first attempt at review 539, verified present on the second by
+building the book and grepping the actual output rather than the source alone.
+
+**D8/D9 held throughout**: no adapter for any real AI CLI was added in this release (RFC-069 is
+reserved, not started), and RFC-021's protocol was not touched by any of the four slices.
+
+**`REQ-AGENT-012`, `REQ-SEC-012` and `REQ-SEC-013`** are met for a profile that declares an
+adapter — a reachable pathway, not a property every profile now has. **`REQ-AGENT-013`** is met by
+what the product does not say, swept across every surface, book page and changelog entry this
+release touches. **`REQ-SEC-014`**'s `command_approval` family already audited; this release is
+the first in which those records are reachable in practice, both through direct query and through
+the real audit view.

@@ -1,7 +1,7 @@
 ---
 title: "RFC-060 acceptance and QA checklist"
-source_rfc: "../../accepted/060-command-approval-a-user-can-reach.md"
-source_rfc_status: "Accepted by the human owner 2026-10-12"
+source_rfc: "../../done/060-command-approval-a-user-can-reach.md"
+source_rfc_status: "Implemented and closed 2026-10-12; `0.36.0` candidate, not yet published."
 ---
 
 # RFC-060 — acceptance and QA checklist

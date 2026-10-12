@@ -1,6 +1,6 @@
 ---
 title: "RFC-060 task breakdown and PR plan"
-source_rfc: "../../accepted/060-command-approval-a-user-can-reach.md"
+source_rfc: "../../done/060-command-approval-a-user-can-reach.md"
 ---
 
 # RFC-060 — task breakdown and PR plan

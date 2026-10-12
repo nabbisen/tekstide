@@ -1,6 +1,6 @@
 ---
 title: "What the configuration must not allow"
-source_rfc: "../../accepted/060-command-approval-a-user-can-reach.md"
+source_rfc: "../../done/060-command-approval-a-user-can-reach.md"
 ---
 
 # What the configuration must not allow
