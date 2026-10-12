@@ -270,7 +270,10 @@ applies immediately.
 protocol — it is the one key that makes that profile `Managed` rather than `Supervised`, and the
 only key that does: there is nowhere else in the file to ask for `Managed`, and no way to get the
 approval machinery (a real socket, a real dialog) without this exact declaration. Omit it, or write
-`adapter = false` (the default either way), and the profile behaves exactly as it always has.
+`adapter = false` (the default either way), and the profile behaves exactly as it always has. See
+[Local data and privacy](./local-data-and-privacy.md#the-approval-socket) for that socket's path
+and the length constraint it inherits from the OS — an unusually long `XDG_STATE_HOME` can stop a
+`Managed` launch from starting, and it is worth knowing before turning this on, not after.
 
 **This is a claim the file makes, not a fact Tekstide checks.** Nothing verifies that the program
 named in `command` actually speaks the protocol — the model is cooperative, so a program that
