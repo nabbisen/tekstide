@@ -99,7 +99,23 @@ analysis recorded at the time pushed back, and it still holds: a one-liner **exe
 with the user's privileges**, which sits badly beside a product whose posture is local-first,
 trust-gated and audited, and whose own dialogs refuse to overclaim safety. What costs an unskilled
 user today is the toolchain and the compile — and **prebuilt binaries remove that whether or not a
-one-liner exists**. The one-liner saves three lines of typing, not the hard part.
+one-liner exists**.
+
+**The saving, counted rather than asserted — one line against four.** The verified form reads:
+
+```sh
+curl -LO https://github.com/nabbisen/tekstide/releases/download/<version>/tekstide-x86_64-linux
+curl -LO https://github.com/nabbisen/tekstide/releases/download/<version>/tekstide-x86_64-linux.sha256
+sha256sum -c tekstide-x86_64-linux.sha256
+install -m 755 tekstide-x86_64-linux ~/.local/bin/tekstide
+```
+
+**And one wrinkle that argues against my own recommendation, so it is stated here rather than
+left out:** that fourth line assumes `~/.local/bin` is on `PATH`, which for the unskilled user this
+RFC exists to serve is exactly the sort of thing that is not true and not obvious. A one-liner
+handles it silently. So the honest comparison is four lines plus a `PATH` caveat against one line —
+not four against one. The recommendation below still stands, but it stands on what the form
+*executes*, not on how much typing it saves.
 
 Three options:
 
