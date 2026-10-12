@@ -466,14 +466,18 @@ fn real_output_wraps_at_the_new_column_count_not_the_old_one() {
     scratch
         .pane
         .write_input(format!("printf '{marker_line}\\n'\n").as_bytes());
-    // Poll until the *second* occurrence has rendered, not merely a
-    // fresh call returning true on scrollback from the first -- the
-    // longest-run measurement below already only cares about the
-    // present grid, but the write must have actually landed first.
+    // `test-process-leak.md`'s own documented Fix for this family: the
+    // wait must poll the *exact* condition the assertion below checks,
+    // not a weaker stand-in for it. The first draft broke on `<= 20`
+    // (count >= 1 and longest run not yet past the new width), which a
+    // transient, not-yet-fully-landed render of the second occurrence
+    // can satisfy -- a shorter run (seen as 18 in one real recurrence)
+    // reads as "already narrow enough" and lets the loop stop before
+    // the grid has actually settled to the real new wrap.
     for _ in 0..200 {
         scratch.pane.poll();
         if scratch.rendered_text().matches(&marker_line).count() >= 1
-            && scratch.longest_run_in_any_row('Q') <= 20
+            && scratch.longest_run_in_any_row('Q') == 20
         {
             break;
         }

@@ -127,14 +127,31 @@ impl Fixture {
     /// verbatim after the marker `touch`, for scripts that must still
     /// behave like a real filter (a clean filter must echo its stdin back,
     /// or git treats the "filtered" content as empty).
+    ///
+    /// review 507 / `test-process-leak.md`: `fake_git_with_config` already
+    /// warms its own generated script up with [`wait_until_executable`]
+    /// before handing it out, to close the real `ETXTBSY` window a freshly
+    /// written, freshly `chmod`ed script has while another thread in this
+    /// same parallel test binary may still hold it open for writing. This
+    /// constructor produced the same shape of script with no equivalent
+    /// guard — the gap `a_second_call_with_the_same_verified_executable_
+    /// does_not_respawn_version` (review 507) hit. The warmup-guard line
+    /// matches `fake_git_with_config`'s own script template exactly, so
+    /// the warmup call exits before `touch` or `body` ever run — it must
+    /// not perturb a marker or a counter the real invocations below are
+    /// counted by.
     fn marker_script(&self, name: &str, body: &str) -> PathBuf {
         let path = self.root.join(format!("{name}.sh"));
         let marker = self.markers.join(name);
-        let script = format!("#!/bin/sh\ntouch '{}'\n{body}\n", marker.display());
+        let script = format!(
+            "#!/bin/sh\n[ \"$1\" = --tekstide-warmup ] && exit 0\ntouch '{}'\n{body}\n",
+            marker.display()
+        );
         fs::write(&path, script).unwrap();
         let mut permissions = fs::metadata(&path).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&path, permissions).unwrap();
+        wait_until_executable(&path);
         path
     }
 

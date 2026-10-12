@@ -1775,9 +1775,10 @@ a child forked by another thread while this one holds the script open for writin
 descriptor until it execs — `Text file busy` in the window between. Same module, same
 write-then-exec shape, same parallel binary.
 
-**Disposition: the same verdict as its sibling, whatever that turns out to be.** It belongs to that
-row's family and should be decided with it rather than separately; the disposition pass closed with
-`every_failure_to_answer_…` verdicted, so this one inherits the reasoning. **Owner: the dev team.**
+**Verdict: Fix.** Not, as speculated here, an inheritance of its sibling's verdict — checked
+directly at the RFC-029 PR-029-A disposition below, and the inheritance assumption turned out to
+be wrong: the sibling's own mitigation does not reach this test's actual code path at all. See
+that entry for what was actually found and fixed.
 
 ## New row, 2026-10-10 — RFC-058 PR-058-B: a second `flock`-outlives-its-drop flake, same cause and same fix as the `transcript` row above
 
@@ -1847,8 +1848,7 @@ exactly what the five-then-three failures were. The disposition is therefore a r
 than a bug hunt: either the test synchronises on something that makes the strong assertion true, or
 it is asserting more than RFC-058 ever claimed.
 
-**Verdict: none yet.** Open, awaiting disposition per `test-flake-disposition.md`'s own rule that a
-live row needs a verdict — fix, quarantine, or accept with a reason.
+**Verdict: Accept.** See the PR-029-A disposition entry below.
 
 ## New row, 2026-10-12 — RFC-060 PR-060-C gate, third of three: `real_output_wraps_at_the_new_column_count_not_the_old_one`, 1 failure then 5 passes
 
@@ -1883,6 +1883,96 @@ passed. Consistent with a full-workspace-load-only timing gap, not a per-test de
 resize timing), and `test-flake-disposition.md`'s own rule 4 forbids reporting an unablated fix.
 Disclosed per this register's own standing rule that a disclosure is not complete without a row.
 
-**Verdict: none yet.** Open, awaiting disposition. The fix shape, if taken, is the same one
-category A's already-fixed rows used: poll the exact condition the assertion checks (`== 20`), not
-a weaker stand-in for it.
+**Verdict: Fix.** See the PR-029-A disposition entry below — the fix shape taken is exactly the one
+predicted here: poll the exact condition the assertion checks (`== 20`), not a weaker stand-in
+for it.
+
+## Disposition, 2026-10-13 — RFC-029 PR-029-A: the three rows live since the last disposition pass
+
+**D1's own prerequisite**: `test-flake-disposition.md`'s open verdicts land before PR-029-B's
+blocking CI job. Three rows were live going into this pass — the two "Verdict: none yet" rows
+above, plus one (review 507's `runtime::git` row) whose own text speculated a verdict rather than
+stating one. Each is read against the real, current code below, not against this document's own
+prior account of it, matching the 2026-10-09 pass's own discipline.
+
+### Fix — `a_second_call_with_the_same_verified_executable_does_not_respawn_version`
+
+**Review 507's own note guessed the existing `wait_until_executable` mitigation already covered
+this test**, "almost certainly the `ETXTBSY` cause... same module, same write-then-exec shape."
+**That guess was checked, not inherited, and it was wrong.** `fake_git_with_config`
+(`runtime/git/tests.rs`) calls `wait_until_executable(&path)` right after writing and `chmod`ing
+its script, and its script's own template begins `[ "$1" = --tekstide-warmup ] && exit 0` so that
+warmup call is side-effect-free. `marker_script` — the constructor this test actually calls,
+through `Fixture::marker_script` — writes and `chmod`s an equivalent script with **no warmup guard
+and no call to `wait_until_executable` at all**. The two constructors only look alike; the
+mitigation review 507 pointed at does not reach the one this test uses.
+
+**Fixed**: `marker_script`'s generated script gained the identical warmup-guard first line
+`fake_git_with_config`'s already has, and `marker_script` now calls `wait_until_executable(&path)`
+before returning, exactly mirroring its sibling constructor. The guard matters specifically for
+this test: its own script body (`echo x >> counter; echo 'git version 2.99.0'`) is not idempotent
+— without the guard, a bare warmup invocation would have appended an extra line to the same
+counter file the test's own assertion counts, corrupting the property under test rather than only
+closing the race. Verified directly: `cargo test -p tekstide-core --lib
+runtime::git::tests::a_second_call_with_the_same_verified_executable_does_not_respawn_version`
+still asserts exactly one counted invocation after the change, and the whole `runtime::git::tests`
+module (62 tests) passes unchanged. Re-run 15 times under synthetic load (16 `yes` spinners, load
+~19–28): 15 of 15 clean.
+
+### Accept — `a_blocked_second_process_names_the_real_holder_and_its_knock_is_received`
+
+**Re-investigated, not merely re-read.** Review 527's own measurement already ruled out a
+bind-after-announce race by reading `app.rs`; this pass confirmed the same thing independently by
+reading `add_project_from_path_protected` directly — `bind_attention_listener` is called and
+returns before `ACQUIRED` is printed, synchronously, on the holder's own main thread, so the
+attention socket is genuinely already listening by the time a second process can start at all.
+`UnixStream::connect` to an already-`listen()`ing Unix socket succeeds independent of whether
+`accept()` has been called yet (the connection queues), so the accept-side thread's own timing —
+spawned by `project_process_probe` *after* its two status lines print — cannot be what makes
+`request_attention`'s `connect()` itself fail, which is the specific call the test's own `KNOCKED`
+assertion depends on.
+
+**No plausible mechanism was found**, the same conclusion review 527 reached. This pass added its
+own fresh measurement rather than resting on that one: 10 of 10 clean in plain isolation, 5 of 5
+clean under synthetic load (16 `yes` spinners, load ~46–50), run today against the current tree —
+**20 additional clean runs, 0 recurrence**, on top of review 527's own 10/10 and 10/10-under-load.
+The only failures on record for this row are the two from before PR-059-A existed (`5 of 5` and
+`3 of 3`, both on a now-stale commit), never reproduced since on either machine.
+
+**Accept.** Same shape as row 1 (`bind_recovers_from_a_stale_socket_file`): sustained attention
+from two independent investigators found no actionable cause, and the rate — two failures, both on
+a single now-superseded commit, zero since across 30+ combined runs — has not moved. Re-opens if
+it recurs.
+
+### Fix — `real_output_wraps_at_the_new_column_count_not_the_old_one`
+
+Disclosed above (PR-060-C gate), diagnosed there as category A — the loop's own break condition
+(`longest_run_in_any_row('Q') <= 20`) is weaker than the assertion it leads into (`== 20`), so a
+transient render of the second marker line (partially landed, read as a shorter run — 18 in the
+one real recurrence) satisfies the wait and lets the assertion run against a grid that has not
+actually finished settling.
+
+**Fixed**: the loop's own break condition now requires `== 20` — the identical value the assertion
+checks — so the wait and the assertion can no longer disagree about what "done" means. **Ablation
+was attempted and, as with this family's three prior members (the 2026-10-09 disposition pass's
+own "Fix — one shared defect behind four tests" section), did not reproduce the failure under
+synthetic load either before or after the change** (16 `yes` spinners, 15 runs each). The same
+reasoning that pass already used applies here without modification: the new condition is strictly
+*stronger* than the old one (`== 20` implies `<= 20`, never the reverse), so the fixed wait can
+only wait at least as long as the old one for the identical final correctness property — there is
+no condition under which it returns earlier. A wait that only ever waits at least as long cannot
+be the cause of a new failure; it can only remove the old one. Verified directly: 15 of 15 clean
+under the same synthetic load this document's own precedent used to justify accepting reasoning
+over a forced reproduction.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
+Three consecutive full-workspace runs, fresh short `/dev/shm` `TMPDIR` each — recorded in
+`rfcs/handoffs/029-ci-and-distribution/qa-evidence.md`'s own PR-029-A section, not repeated here.
+
+**Live rows remaining after this pass: zero.** Every row this register has ever opened now carries
+exactly one verdict — fixed (with its fix verified, and ablated where the family's own precedent
+showed ablation could reproduce anything at all), quarantined with a reason, or accepted with a
+reason that is not scheduling. RFC-029's own D1 — the prerequisite PR-029-B's blocking job depends
+on — is satisfied.
