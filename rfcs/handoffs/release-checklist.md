@@ -388,3 +388,23 @@ Checked every release, because a watch that depends on someone remembering is no
 - [ ] Tag name matches the release version.
 - [ ] Tag points at the reviewed release commit.
 - [ ] Post-publish/post-tag package or artifact verification is recorded.
+
+## Release Artifacts
+
+RFC-029 PR-029-C, D5: every published artifact has a published checksum. `.github/workflows/
+release.yml` runs automatically on the version tag pushed above — nothing here is a manual step
+unless the workflow itself failed.
+
+- [ ] `.github/workflows/release.yml` ran for this tag and succeeded — checked in the Actions tab,
+      not assumed from the tag existing.
+- [ ] The GitHub Release for this tag carries exactly two new assets:
+      `tekstide-x86_64-linux` and `tekstide-x86_64-linux.sha256`.
+- [ ] **Downloaded, not just listed**: `gh release download <version> && sha256sum -c
+      tekstide-x86_64-linux.sha256` reports `OK` against the actual downloaded file.
+- [ ] `./tekstide-x86_64-linux --version` reports this release's own version.
+- [ ] **The checksum is described only as what it is** (`what-the-installer-must-not-do.md` §3):
+      *verified against its published checksum*, in the release notes and anywhere else it is
+      mentioned. Never *secure*, *safe*, *signed*, or unqualified *verified* — this binary is not
+      byte-reproducible from a fresh clone (measured at the `0.36.0` tag: two independent
+      `--locked` builds of the identical source produced different SHA-256 sums), so the checksum
+      proves the download arrived intact, not that the release can be independently rebuilt.

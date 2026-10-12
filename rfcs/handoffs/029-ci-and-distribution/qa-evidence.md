@@ -187,3 +187,84 @@ Workflow-only change; no Rust source touched on `main` by this slice (the delibe
 commit and its revert both lived and died on the throwaway branch). The real CI job's own four
 runs above are the evidence this slice's "gate" actually consists of — a local re-run of
 `cargo fmt`/`clippy`/the full suite would exercise nothing this slice itself changed.
+
+## PR-029-C — release artifacts and checksums
+
+### Reproducibility, measured rather than assumed
+
+Task breakdown item 2 requires recording whether the build is actually byte-reproducible from a
+fresh clone of the tag, not implying it either way. Measured directly: two independent `--locked`
+release builds of the identical `0.36.0` tagged source, in two separate `git clone`d directories,
+same machine, same toolchain —
+
+```
+20cd652f4c924ef20fd1d67960620c463e2cb3f22fef15b27fd362ef8c0a2bd5  clone-a/target/release/tekstide
+521014b788a61a0aa61ec0ea7ed7b2739e4b9e4d4e149bd33eeb7dd4cf02d167  clone-b/target/release/tekstide
+```
+
+Different checksums, and different file sizes (29889344 vs 29889264 bytes). **Not
+byte-reproducible.** The general cause is already documented upstream in the Rust ecosystem:
+`file!()`/panic-location strings and other build-path-derived debug info embed the absolute
+checkout path, which differs between any two independent clones — achieving true reproducibility
+needs `--remap-path-prefix` and related flags, not attempted here, out of this slice's own scope.
+Stated plainly in `release.yml`'s own header and in `release-checklist.md`'s new section, both
+times with the correct consequence: **the published checksum proves the download arrived intact,
+not that the release can be independently rebuilt** — exactly the distinction
+`what-the-installer-must-not-do.md` §3 already draws for the installer script, carried here to the
+artifact itself.
+
+### `.github/workflows/release.yml`
+
+Triggers on a version tag (`*.*.*`, matching this repository's own existing tag shape with no `v`
+prefix) or `workflow_dispatch` with an explicit tag input, for a re-run without re-tagging. A
+guard step refuses any tag that is not exactly `x.y.z` numeric before building or publishing
+anything under its name. Builds `--locked` from the tag's own ref (not whatever `main` happens to
+be at run time), names the artifact `tekstide-x86_64-linux` matching the RFC's own example
+naming, computes its SHA-256, and publishes both to the GitHub Release for that tag — creating a
+minimal release if none exists yet, uploading with `--clobber` if one does, so a re-run replaces
+stale assets rather than failing. Reuses the identical `actions/checkout` pin and the identical
+`rustup update stable` approach `ci.yml` already carries (same reasoning, not re-derived); no
+other `uses:` step — the release itself is created and uploaded to through `gh`, preinstalled and
+pre-authenticated on every GitHub-hosted runner, which is a more first-party path than any
+third-party release-upload action would be. States plainly in its own header that it does not
+publish to crates.io, write `release-0.X.0.md`, or decide release notes — that stays the owner's
+own step, per this project's own standing practice throughout every candidate-cut review.
+
+### What was verified live, and what was not
+
+**Verified live, against the real repository, using a `--draft` release so nothing was publicly
+visible or triggered a release notification**: built the real binary (`cargo build --release
+--locked`), staged and named it exactly as the workflow does, computed its checksum, created a
+throwaway draft release (`gh release create --draft`), uploaded both assets (`gh release upload
+--clobber`, including a second upload proving the idempotent re-run path), confirmed both assets
+present with the right sizes via the API, **downloaded the asset back and verified it against its
+own published checksum** (`sha256sum -c` reported `OK`) — the full publish-then-verify loop closes
+— then deleted the draft release, confirmed no release and no stray tag remain on the real repo.
+
+**Not exercised: the actual `on: push: tags` trigger, through a real tag matching this project's
+own `x.y.z` version shape.** Pushing such a tag to this public repository would create a real,
+non-draft GitHub Release and (depending on default notification settings) could notify watchers —
+a more consequential, harder-to-cleanly-undo action than the throwaway branch-plus-PR RFC PR-029-B
+used, and not one taken unilaterally here. Every individual mechanism this workflow depends on has
+now been verified live by one slice or the other (`actions/checkout` and the `rustup` steps by
+`ci.yml`'s own four runs; the `gh release` create/upload/download/verify/delete cycle by the draft
+release above); what has not been proven live is their composition as one triggered Actions job.
+Flagged explicitly in the review request rather than claimed equivalent to PR-029-B's own full
+live-run proof — the owner's own next real tag (`0.37.0`, this RFC's own target version) is the
+first opportunity to see it run for real, unless the reviewer would rather a throwaway numeric tag
+be pushed and cleaned up first.
+
+### `release-checklist.md` grows the publish-and-verify step
+
+New `## Release Artifacts` section, placed after `## Tagging` (since the artifacts publish only
+once the tag exists): confirms the workflow actually ran and succeeded (not assumed from the tag's
+own existence), both assets are attached, the asset is **downloaded and verified**, not only
+listed, the binary reports the right version, and the checksum wording rule from §3 is carried
+into the release notes explicitly, with the measured non-reproducibility stated as the reason.
+
+### Gate
+
+`release.yml` is YAML, parsed and confirmed valid (`python3 -c "import yaml; ..."`); its
+`actions/checkout`/`rustup` steps are byte-identical to `ci.yml`'s own already-live-verified ones.
+`rfc_docs_invariants`: 22/22, unaffected (no RFC document edited; `release-checklist.md` is a
+handoff doc, not an RFC itself). No Rust source changed.

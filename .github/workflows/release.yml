@@ -1,0 +1,122 @@
+# Release artifacts and checksums (RFC-029 D5, PR-029-C).
+#
+# On a version tag, builds the Linux `x86_64` release binary `--locked` and
+# publishes it, and its SHA-256, as assets on the GitHub Release for that tag
+# -- creating a minimal release if the tag does not have one yet, uploading to
+# it (with `--clobber`, so a re-run from `workflow_dispatch` replaces stale
+# assets rather than failing) if it already does.
+#
+# **This workflow does not publish to crates.io, write `release-0.X.0.md`, or
+# decide release notes.** The tag, the `cargo publish`, and the real release
+# narrative are the owner's own step, per this project's own standing
+# practice (every candidate-cut review in `rfcs/handoffs/` says so); this
+# workflow's only job is the binary and its checksum actually landing on
+# whatever release accompanies that tag, with no human needing to build and
+# upload it by hand.
+#
+# **Reproducibility, measured and stated rather than assumed (task breakdown
+# item 2): the build is NOT byte-reproducible from a fresh clone.** Two
+# independent `--locked` release builds of the identical tagged source, same
+# machine and toolchain, in two different checkout directories, produced
+# different SHA-256 sums and slightly different file sizes (29889344 vs
+# 29889264 bytes, measured against `0.36.0`). The general cause is already
+# documented upstream: `file!()`/panic-location strings and other
+# build-path-derived debug info embed the absolute checkout path, which
+# differs between any two independent clones. The published checksum
+# therefore proves the download arrived intact -- not that it can be
+# independently rebuilt byte-for-byte from source, which `what-the-
+# installer-must-not-do.md` §3 already distinguishes for exactly this
+# reason. Achieving true reproducibility (`--remap-path-prefix`, pinned
+# codegen-unit count, `SOURCE_DATE_EPOCH`) is not attempted here -- out of
+# this slice's own scope, and worth its own decision if ever wanted.
+#
+# **First-party actions only, pinned to a commit SHA** (`docs.yml`'s rule,
+# D3): the same `actions/checkout` pin every workflow in this repository
+# already carries. No other `uses:` step -- the release itself is created
+# and uploaded to through the `gh` CLI, preinstalled on every GitHub-hosted
+# runner and already authenticated with the job's own `GITHUB_TOKEN`, which
+# is a more first-party path than any third-party release-upload action.
+#
+# **No `paths:` filter**: a tag push is already a deliberate, infrequent,
+# human-initiated act naming an exact commit to release -- there is no
+# subset of the repository a tag-triggered build could safely ignore.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re-)build and (re-)publish artifacts for"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the tag this run is for
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          # The only shape a release tag may have in this project: three
+          # dot-separated numeric components, no `v` prefix (matching every
+          # tag already in this repository's own history). A tag that does
+          # not match this is refused rather than silently built and
+          # published under a name nothing else expects.
+          if ! echo "$tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$tag' is not a plain x.y.z version tag -- refusing to build or publish."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Install Rust (rustup's own update path, see ci.yml for why no pin)
+        run: |
+          set -euo pipefail
+          rustup update stable
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: cargo build --release --locked
+        run: cargo build --release --locked
+
+      - name: Name, checksum, and stage the artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          name="tekstide-x86_64-linux"
+          mkdir -p staging
+          cp target/release/tekstide "staging/${name}"
+          ( cd staging && sha256sum "${name}" > "${name}.sha256" )
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to the GitHub Release for this tag (create if missing)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          ARTIFACT: ${{ steps.artifact.outputs.name }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "No release exists yet for $TAG -- creating a minimal one."
+            gh release create "$TAG" --repo "${{ github.repository }}" \
+              --title "$TAG" \
+              --notes "See CHANGELOG.md for this release's own notes."
+          fi
+          gh release upload "$TAG" "staging/${ARTIFACT}" "staging/${ARTIFACT}.sha256" \
+            --repo "${{ github.repository }}" --clobber
