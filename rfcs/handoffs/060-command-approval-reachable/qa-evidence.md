@@ -327,3 +327,76 @@ Six full-workspace runs total this slice (one new test added, `780 → 781`): ru
 not count a gate run that failed" — run 3 resets the streak, it does not contribute toward the
 three). 0 failed in every clean run, 0 fixture entries in a fresh short `/dev/shm` `TMPDIR` each
 time.
+
+## PR-060-D — review 538's required item: name the socket-path refusal
+
+### What PR-060-C's own live capture walked into
+
+`ApprovalChannelDirectory::bind()` already distinguishes
+`ApprovalChannelErrorReason::SocketPathTooLong` (response 113 Required 1, RFC-047's own cycle) —
+diagnosed loudly at `bind()` specifically so a too-long `sun_path` could not instead bind
+successfully and fail later, unreadably, at `connect()`. But before RFC-060 no configuration could
+ever reach `Managed` at all, so a real launch could never exercise this reason, and nothing above
+`bind()` carried it to the surface. `agent_run_launch_refusal_symbol`
+(`crates/tekstide/src/shell.rs`) had exactly four branches — `limit`, `not-found`,
+`workspace-blocked`, and a catch-all `*[error]` — and `Runtime(_)` (which wraps this reason, four
+layers down: `AgentRunLaunchRefusal::Runtime(ProjectAgentRuntimeLaunchError::AdapterApproval(
+AgentAdapterApprovalError::Bind(ApprovalChannelErrorReason::SocketPathTooLong)))`) fell straight
+into the catch-all. PR-060-C's own live capture hit exactly this on its first attempt, reasoned
+its way from "Couldn't start an agent run." back to a long `$XDG_STATE_HOME`, and recorded that as
+a one-off lesson rather than a defect to fix — review 538 named it correctly as RFC-060's own
+business: the release that makes `SocketPathTooLong` reachable in production is the release that
+owes it a message.
+
+### The fix
+
+A new, specific match arm in `agent_run_launch_refusal_symbol`, matched before the generic
+`Runtime(_)` catch-all, producing `"approval-socket-path-too-long"`. A new `en.ftl` branch under
+`agent-run-launch-refused` names what to change — set `XDG_STATE_HOME` to a shorter path — and
+deliberately states no byte number: `sockaddr_un`'s real capacity differs by platform, and the
+exact budget left for the state directory also depends on the agent run's own id and the fixed
+`approval/` segment, so a number correct on this machine would be wrong on another.
+
+### The test, and the ablation that proves it
+
+`a_managed_launch_whose_state_root_is_too_deep_for_the_approval_socket_names_the_reason`
+(`crates/tekstide/src/shell/tests.rs`) reuses the identical deep-path recipe
+`bind_rejects_a_state_root_deep_enough_to_exceed_sun_path`
+(`tekstide-core`'s own approval-channel test) already uses — six 40-character path components,
+confirmed by assertion to push the real socket path past 107 bytes — to drive a real `Managed`
+launch through `attempt_agent_run_launch_with_profile_state_root_and_capture` and assert both the
+exact nested refusal shape and that the catalog text actually renders the new, named message
+rather than the generic one.
+
+**Ablated in a disposable worktree** (`git worktree add`, never a hand `git checkout` on the main
+tree): removed the new match arm, rebuilt `tekstide`'s bins and `tekstide-core`'s
+`reference_adapter` bin (the test spawns a real adapter process; the first ablation attempt
+without the second build failed with "expected the reference_adapter binary... the `[[bin]]`
+target may not have built" — a different failure than the one being proven, caught and rebuilt
+before trusting the result), re-ran the one test. It failed, correctly, on the exact assertion the
+fix exists for:
+
+```
+the rendered refusal must name the state directory and XDG_STATE_HOME, not fall through to the
+unnamed generic message: "Couldn't start an agent run."
+```
+
+Worktree removed after (`git worktree remove --force`); the main tree was never dirty during the
+ablation.
+
+### The doc, where a user or packager would find it before hitting it live
+
+New `## The approval socket` section in `docs/src/users/local-data-and-privacy.md`, alongside the
+file's existing project-lock/attention-socket section (the nearest sibling — same shape, a local
+Unix socket under `$XDG_STATE_HOME/tekstide/`). States the path, that `Managed` is what creates it,
+that its length is capped by the OS and shared between the state directory, the fixed `approval/`
+segment, and the run's own id, and that a too-long `XDG_STATE_HOME` is named directly rather than
+failing silently — again, no byte number, same reasoning as the catalog text. Cross-linked from
+`configuration.md`'s own `## Declaring an adapter` section (the anchor `#declaring-an-adapter`,
+matching the link-style convention already used throughout this file).
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
+One new test added, `781 → 782`. Three consecutive full-workspace runs, fresh short `/dev/shm`
+`TMPDIR` each: `782 + 22 + 1140`, 0 failed, 0 fixture entries.
