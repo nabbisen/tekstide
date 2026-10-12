@@ -31,3 +31,6 @@ pub mod transcript;
 /// reduce concurrent forks *across* modules.
 #[cfg(test)]
 pub(crate) mod test_support;
+
+#[allow(dead_code)]
+const   DELIBERATELY_BROKEN_FORMATTING  :  u8   =    1 ; // PR-029-B verification only, reverted next commit
