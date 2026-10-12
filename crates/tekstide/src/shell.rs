@@ -3821,7 +3821,9 @@ enum AgentRunLaunchRefusal {
 /// same division of labour `terminal_launch_refusal_symbol` already
 /// uses.
 fn agent_run_launch_refusal_symbol(refusal: &AgentRunLaunchRefusal) -> &'static str {
-    use tekstide_core::agent::AgentRunLaunchValidationError;
+    use tekstide_core::agent::{AgentAdapterApprovalError, AgentRunLaunchValidationError};
+    use tekstide_core::approval::ApprovalChannelErrorReason;
+    use tekstide_core::project::ProjectAgentRuntimeLaunchError;
     match refusal {
         AgentRunLaunchRefusal::RunLimitExceeded { .. } => "limit",
         AgentRunLaunchRefusal::Validation(
@@ -3830,6 +3832,16 @@ fn agent_run_launch_refusal_symbol(refusal: &AgentRunLaunchRefusal) -> &'static 
         AgentRunLaunchRefusal::Validation(
             AgentRunLaunchValidationError::WorkspaceDiscoveryBlocked { .. },
         ) => "workspace-blocked",
+        // RFC-060 PR-060-D: `bind()` already distinguishes this reason
+        // (response 113 Required 1) specifically so it would not have to
+        // be diagnosed from a generic refusal -- before RFC-060 no
+        // configuration could reach `Managed` at all, so this arm was
+        // unreachable in production until PR-060-A made it reachable.
+        // Named here rather than left to fall into the `error` catch-all
+        // below, which is what PR-060-C's own live capture actually hit.
+        AgentRunLaunchRefusal::Runtime(ProjectAgentRuntimeLaunchError::AdapterApproval(
+            AgentAdapterApprovalError::Bind(ApprovalChannelErrorReason::SocketPathTooLong),
+        )) => "approval-socket-path-too-long",
         AgentRunLaunchRefusal::Validation(_)
         | AgentRunLaunchRefusal::PlanTransition(_)
         | AgentRunLaunchRefusal::Runtime(_)

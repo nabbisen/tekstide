@@ -522,10 +522,18 @@ terminal-launch-refused = { $reason ->
 # around (response 218). `workspace-blocked` is the correctly-refused
 # case for an untrusted project (the profile may discover workspace
 # files, so a Restricted project refuses until trust is granted).
+# RFC-060 PR-060-D: `approval-socket-path-too-long` names what
+# `bind()` already distinguishes internally -- what to change (a
+# shorter `XDG_STATE_HOME`), never an arithmetic byte limit, since
+# `sockaddr_un`'s real capacity differs by platform and the exact
+# budget left for the state directory also depends on the agent run's
+# own id and the `approval/` segment -- stating a number here would be
+# wrong on another machine even when it was right on this one.
 agent-run-launch-refused = { $reason ->
     [limit] Agent run limit reached ({ $limit } running) — close one to start another.
     [not-found] No AI CLI found. Install one and try again.
     [workspace-blocked] This project isn't trusted yet — grant trust to start an agent run.
+    [approval-socket-path-too-long] Couldn't start: your state directory's path is too long for the approval socket. Set XDG_STATE_HOME to a shorter path and try again.
    *[error] Couldn't start an agent run.
 }
 

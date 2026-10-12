@@ -272,6 +272,23 @@ protection gap in an abnormal environment, not a product that stops working in o
 every Tekstide window closed. Nothing beyond the next open depends on it: a missing directory is
 recreated the next time a project is opened.
 
+## The approval socket
+
+**A `Managed` AI CLI session (see [Configuration](./configuration.md#declaring-an-adapter)) talks
+to Tekstide over a local socket** at
+`$XDG_STATE_HOME/tekstide/approval/<agent-run-id>.sock`
+(`~/.local/state/tekstide/approval/` if `XDG_STATE_HOME` is unset), created when the session
+starts and removed when it ends. Nothing is written to disk through it; it only carries the
+proposal-and-decision exchange a command approval dialog is built from.
+
+**Its path has a real length limit, inherited from the operating system.** A Unix domain socket's
+path is capped at a small, fixed size (on the order of 100 bytes on Linux), and that budget is
+shared with the rest of the path — the state directory, the fixed `approval/` segment, and the
+run's own id. **If `XDG_STATE_HOME` points somewhere with an unusually long or deeply nested
+path, a `Managed` launch can fail to start, naming this directly rather than failing silently.**
+Pointing `XDG_STATE_HOME` at a shorter path resolves it; nothing else about the installation needs
+to change.
+
 ## Where the full policies live
 
 The retention and purge policies, and the audit store's own retention rules, are specified in the

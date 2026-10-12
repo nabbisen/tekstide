@@ -6558,6 +6558,108 @@ fn a_managed_launch_with_capture_disabled_still_binds_its_approval_channel() {
     );
 }
 
+/// RFC-060 PR-060-D, review 538's own required item: `bind()` already
+/// distinguishes `ApprovalChannelErrorReason::SocketPathTooLong`
+/// (response 113 Required 1) -- before RFC-060 no configuration could
+/// reach `Managed` at all, so a real launch could never exercise it;
+/// PR-060-A made it reachable, and PR-060-C's own live capture walked
+/// straight into it with no named message at the surface, just the
+/// generic `*[error]` catch-all. This proves the fix end to end: a
+/// real `Managed` launch whose `state_root` is deliberately deep enough
+/// to push the real socket path (`<state_root>/approval/<agent_run_id>.sock`)
+/// past `sockaddr_un`'s ~108-byte capacity (the identical recipe
+/// `bind_rejects_a_state_root_deep_enough_to_exceed_sun_path`,
+/// `tekstide-core`'s own approval-channel test, uses) must be refused
+/// with the new `approval-socket-path-too-long` reason, and the
+/// catalog text actually rendered from that refusal must name the
+/// state directory and `XDG_STATE_HOME`, not fall through to the
+/// unnamed generic message.
+#[test]
+fn a_managed_launch_whose_state_root_is_too_deep_for_the_approval_socket_names_the_reason() {
+    let mut app_shell = ApplicationShell::new();
+    let project_dir = fresh_project_dir("approval-socket-path-too-long");
+    app_shell
+        .add_project_from_path(&project_dir)
+        .expect("a freshly created directory is a valid project root");
+    let mut state = state_with(app_shell);
+
+    let mut deep_state_root = std::env::temp_dir();
+    for _ in 0..6 {
+        deep_state_root.push("a".repeat(40));
+    }
+    std::fs::create_dir_all(&deep_state_root).expect("create the deep temp state root");
+    let deep_state_root = super::scratch_for_this_test(
+        deep_state_root
+            .canonicalize()
+            .expect("canonicalize the deep temp state root"),
+    );
+    assert!(
+        deep_state_root
+            .join("approval")
+            .join("agent-run-00000000-0000-0000-0000-000000000000.sock")
+            .as_os_str()
+            .len()
+            > 107,
+        "test precondition: the real socket path under this state root must actually exceed \
+         sun_path's capacity"
+    );
+
+    let mut profile = tekstide_core::agent::AiCliProfile::new(
+        "reference-adapter",
+        "Reference Adapter (test-only)",
+        tekstide_core::agent::AiCliProfileSource::BuiltIn,
+        tekstide_core::agent::AiCliExecutable::Absolute {
+            path: reference_adapter_binary_path(),
+            provenance: tekstide_core::agent::AiCliExecutableProvenance::SystemPathReviewed,
+        },
+        tekstide_core::domain::AgentCompatibilityLevel::Managed,
+    );
+    profile.adapter_capabilities = tekstide_core::agent::AiCliAdapterCapabilities {
+        structured_action_approval: true,
+    };
+    profile.workspace_discovery_policy =
+        tekstide_core::agent::AiCliWorkspaceDiscoveryPolicy::DisabledByLaunch {
+            evidence: "test: bypasses the trust gate the same way tekstide-core's own \
+                       built_in_profile test helper does"
+                .to_owned(),
+        };
+
+    let refusal = attempt_agent_run_launch_with_profile_state_root_and_capture(
+        &mut state,
+        profile,
+        Some(deep_state_root),
+        true,
+    )
+    .expect_err("a state root too deep for the approval socket must refuse the launch");
+
+    assert!(
+        matches!(
+            refusal,
+            AgentRunLaunchRefusal::Runtime(
+                tekstide_core::project::ProjectAgentRuntimeLaunchError::AdapterApproval(
+                    tekstide_core::agent::AgentAdapterApprovalError::Bind(
+                        tekstide_core::approval::ApprovalChannelErrorReason::SocketPathTooLong
+                    )
+                )
+            )
+        ),
+        "expected Runtime(AdapterApproval(Bind(SocketPathTooLong))), got {refusal:?}"
+    );
+
+    let notice_text = agent_run_launch_refusal_text(&state.catalog, &refusal);
+    let lower = notice_text.to_lowercase();
+    assert!(
+        lower.contains("state directory") && lower.contains("xdg_state_home"),
+        "the rendered refusal must name the state directory and XDG_STATE_HOME, not fall \
+         through to the unnamed generic message: {notice_text:?}"
+    );
+    assert!(
+        !lower.contains("couldn't start an agent run."),
+        "this refusal has a named reason now -- it must not render the generic catch-all \
+         text: {notice_text:?}"
+    );
+}
+
 /// Response 228 Required 1: the production launch path never appends
 /// arguments to the profile's executable (`spawn_adapter` in
 /// `tekstide-core`'s `runtime/terminal/launch.rs` calls
