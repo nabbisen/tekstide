@@ -25,9 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
-folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 029 | [Documentation, CI, and Release Automation](./proposed/029-documentation-ci-and-release-automation.md) | **Proposed 2026-10-12.** `0.37.0`, M14. D1–D8 and one open question for the owner, on acceptance |
 
 
 
@@ -51,7 +49,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | RFC | Title | Milestone |
 | --- | --- | --- |
 | 028 | Cross-Platform Support | M14 |
-| 029 | Documentation, CI, and Release Automation | M14 |
 | 061 | A Bound On Combining Marks Per Cell | terminal boundary |
 | 062 | Honouring `core.excludesFile` | explorer ignore tail |
 | 063 | Querying The Live UI (`iced_selector`) | GUI verification |
