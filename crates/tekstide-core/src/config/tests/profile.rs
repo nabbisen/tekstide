@@ -310,8 +310,16 @@ fn a_configured_managed_profile_reaches_prepare_adapter_approval_and_gets_a_real
     let root = test_root("rfc060-way-in-root");
     let bin = test_root("rfc060-way-in-bin");
     let executable = executable_file(&bin, "ai-cli");
-    let state_root = std::env::temp_dir().join(format!("ta-060a-{}", std::process::id()));
-    std::fs::create_dir_all(&state_root).expect("approval state root should be creatable");
+    // Review 535 Required 1: this path used to be `create_dir_all`-ed
+    // with no drop guard at all, so it leaked on *every* passing run,
+    // not only a failing one -- worse than the two prior fixture-leak
+    // findings (review 524, 527), both of which were failure-only.
+    // `CleanupOnDrop` already exists in this crate for exactly this
+    // (`runtime::terminal::tests`, `pub(crate)` since review 528).
+    let state_root = crate::runtime::terminal::tests::CleanupOnDrop(
+        std::env::temp_dir().join(format!("ta-060a-{}", std::process::id())),
+    );
+    std::fs::create_dir_all(&*state_root).expect("approval state root should be creatable");
     let mut project = restricted_project(&root);
 
     let profile = to_ai_cli_profile(
@@ -319,7 +327,7 @@ fn a_configured_managed_profile_reaches_prepare_adapter_approval_and_gets_a_real
         &managed_configured_profile(executable.to_str().unwrap()),
     );
     let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "prompt")
-        .with_local_bounded_transcript(state_root.clone());
+        .with_local_bounded_transcript(state_root.to_path_buf());
     let validation = AgentRunLaunchValidator
         .validate(&project, &profile, &request)
         .expect("a real configuration-defined Managed profile should validate for launch");

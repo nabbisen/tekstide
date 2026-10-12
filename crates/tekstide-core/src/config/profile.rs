@@ -67,9 +67,18 @@ use super::model::{ConfiguredAiCliAdapter, ConfiguredAiCliProfile};
 /// invented for this translation, and now not a value a file can ask to
 /// change without the code to honour the request.
 pub fn to_ai_cli_profile(id: &str, configured: &ConfiguredAiCliProfile) -> AiCliProfile {
-    let compatibility_level = match configured.adapter {
-        ConfiguredAiCliAdapter::None => AgentCompatibilityLevel::Supervised,
-        ConfiguredAiCliAdapter::Managed => AgentCompatibilityLevel::Managed,
+    // Review 535 Required 2: one match producing both answers at once,
+    // not two independent reads of `configured.adapter` -- the first
+    // draft had a no-wildcard `match` for `compatibility_level` and a
+    // separate `if matches!(..., Managed)` for
+    // `structured_action_approval`, which a third `ConfiguredAiCliAdapter`
+    // variant could pass through one and fall through the other (the
+    // `if` has no "and nothing else" arm to force a decision). This
+    // tuple match cannot half-decide: the compiler demands both answers
+    // for every variant in the same place they are produced.
+    let (compatibility_level, structured_action_approval) = match configured.adapter {
+        ConfiguredAiCliAdapter::None => (AgentCompatibilityLevel::Supervised, false),
+        ConfiguredAiCliAdapter::Managed => (AgentCompatibilityLevel::Managed, true),
     };
     let mut profile = AiCliProfile::new(
         id,
@@ -82,9 +91,7 @@ pub fn to_ai_cli_profile(id: &str, configured: &ConfiguredAiCliProfile) -> AiCli
     profile.workspace_discovery_policy = AiCliWorkspaceDiscoveryPolicy::NoKnownWorkspaceDiscovery {
         evidence: "configuration-defined profile: no workspace discovery declared".to_owned(),
     };
-    if matches!(configured.adapter, ConfiguredAiCliAdapter::Managed) {
-        profile.adapter_capabilities.structured_action_approval = true;
-    }
+    profile.adapter_capabilities.structured_action_approval = structured_action_approval;
     profile
 }
 
