@@ -108,7 +108,7 @@ opened now carries exactly one verdict.
 touches no RFC document): all clean. Three consecutive full-workspace runs, fresh short `/dev/shm`
 `TMPDIR` each: `782 + 22 + 1140`, 0 failed, 0 fixture entries.
 
-## PR-029-B — the blocking CI job
+## PR-029-B — the CI job (not yet actually blocking, see below)
 
 ### What it runs, and what it states it does not cover
 
@@ -164,15 +164,22 @@ branch (`ci-pr-029-b-verify`, deleted after). `main`'s own `crates/tekstide-core
 never touched by the deliberate breakage — it only ever existed on the throwaway branch, reverted
 there before that branch was deleted.
 
-### What this slice deliberately leaves to the owner
+### Required correction, review 544: this job is advisory, not actually blocking
+
+**D1 and D2 both speak of a *blocking* job. What exists after this slice is not one.** The check
+runs correctly, on every push and PR — but `gh api repos/nabbisen/tekstide/branches/main/protection`
+still returns `404` (unprotected) as of this slice, which means nothing in GitHub itself stops a
+merge when this job is red. Confirmed independently by the reviewer too, same result. **The job
+and the gate it is meant to be are two different things until branch protection is enabled**, and
+this section's own earlier heading ("the blocking CI job") was the unqualified claim review 544
+caught.
 
 **Branch protection — making this check actually required before a merge — is a repository
-security setting, not a line in the workflow file, and is not configured here.** `gh api
-repos/nabbisen/tekstide/branches/main/protection` returns `404` (unprotected) as of this slice.
-Configuring who can bypass a required check, and which checks are required, is the kind of
-account-level decision this project's own standing practice leaves to the human owner rather than
-an implementer deciding unilaterally. Flagged explicitly in the review request rather than left
-implicit.
+security setting, not a line in the workflow file, and is not configured here.** Configuring who
+can bypass a required check, and which checks are required, is the kind of account-level decision
+this project's own standing practice leaves to the human owner rather than an implementer deciding
+unilaterally. Flagged in the review request rather than left implicit; the reviewer is raising the
+setting with the owner separately.
 
 ### Gate
 

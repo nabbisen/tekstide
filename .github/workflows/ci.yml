@@ -29,7 +29,12 @@
 # already provide, at the real cost of this gate silently aging behind what `cargo
 # fmt`/`clippy` actually enforce on a contributor's own up-to-date machine. The
 # installed version is printed every run, so a drift is visible in the log, not
-# hidden.
+# hidden. **This means the toolchain floats deliberately**: Rust ships a new
+# `stable` roughly every six weeks, and a new release can start failing `cargo
+# fmt --check` or `clippy -D warnings` on code this repository never changed. A
+# red run here with no corresponding diff is that, not a regression -- the fix
+# is to adopt the new lint (or, rarely, file it upstream), not to go hunting for
+# what broke.
 #
 # **First-party actions only, each pinned to a commit SHA with its tag in a trailing
 # comment** (`docs.yml`'s own rule, inherited unchanged, D3): the single `uses:` step
