@@ -400,3 +400,99 @@ matching the link-style convention already used throughout this file).
 `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
 One new test added, `781 → 782`. Three consecutive full-workspace runs, fresh short `/dev/shm`
 `TMPDIR` each: `782 + 22 + 1140`, 0 failed, 0 fixture entries.
+
+## Whole-RFC — the `0.36.0` candidate cut (2026-10-12)
+
+All four slices and the Whole-RFC checklist are done. `rfcs/accepted/060-command-approval-a-user-
+can-reach.md` moved to `rfcs/done/`, with a new `## Closed` section; `rfcs/README.md` (the Accepted
+table, now empty again; a new Handoffs row; a new Done row), `rfcs/delivery-plan.md`'s own row, and
+the handoff pack's `README.md`/`acceptance-qa-checklist.md`/`task-breakdown-pr-plan.md`/
+`what-the-configuration-must-not-allow.md` frontmatter pointers all updated in the same commit
+(`6e41567`). `Cargo.toml`/`Cargo.lock` bumped to `0.36.0`; `cargo check --workspace` regenerated
+`Cargo.lock` rather than a hand edit.
+
+### Whole-RFC checklist items, verified directly
+
+- **D8/D9 held**: `git diff e1614af..HEAD -- crates/tekstide-core/src/agent/profile.rs` (the file
+  that would gain a new real-CLI adapter constructor) is empty — `claude_code_linux_default` is
+  the only built-in profile and this RFC never touched the file. The same diff against
+  `crates/tekstide-core/src/approval/protocol.rs` (RFC-021's own wire format) is also empty across
+  all four slices.
+- **`REQ-AGENT-012`, `REQ-SEC-012`, `REQ-SEC-013` met for a profile that declares an adapter** —
+  stated with that qualifier in the RFC's own `Closed` section, `delivery-plan.md`'s row, and
+  `CHANGELOG.md`'s new entry, per review 540's own instruction.
+- **`REQ-AGENT-013` met by what the product does not say** — swept across `README.md`,
+  `docs/src/users/what-works-today.md`, `docs/src/users/local-data-and-privacy.md`,
+  `docs/src/users/configuration.md` and `locales/en.ftl` at PR-060-B, re-grepped here for
+  `unreachable`/`cannot use it`/`cannot be reached` against live docs only (historical `CHANGELOG.md`
+  entries for past releases correctly excluded, since those describe the state at the time they
+  were written): no live hit.
+- **The approval-socket path-length constraint is documented where a user or packager would find
+  it before hitting it live** — `local-data-and-privacy.md`'s new `## The approval socket` section,
+  cross-linked from `configuration.md`'s `## Declaring an adapter` (verified by building the book
+  and grepping the output, review 540).
+- **`rfcs/handoffs/release-checklist.md` run in full for the candidate** — see below.
+
+### The release checklist, run for the candidate (not the publish)
+
+Per RFC-059's own precedent and review 534/538's confirmation of the same split: the candidate cut
+(version bump, changelog, RFC lifecycle move, register rows) is mine; the actual tag, `cargo
+publish`, `release-0.36.0.md` and `post-publish-check.sh` are the owner's own later step, not run
+here.
+
+- `git status --short`: clean (checked after every edit, not only at the end).
+- `git diff --check`: clean.
+- `cargo fmt --check`: clean.
+- `cargo test --doc --workspace`: 2 passed (the `WatchEvents` compile-fail guard included).
+- `cargo test --workspace --all-targets`: three consecutive clean runs, `782 + 22 + 1140`, 0
+  failed, 0 fixture entries.
+- `cargo clippy --workspace --all-targets --all-features -D warnings`: 0 diagnostics.
+- `cargo build --release --locked`: clean. `./target/release/tekstide --version` reports `0.36.0`;
+  `--help` lists `Ctrl+Alt+V  Audit View: every recorded event, filterable and paged` and
+  `Ctrl+Alt+H  Approval History (needs an open project)` — no new chord needed this release, both
+  predate it.
+- `cargo package -p tekstide-core --locked` and `cargo package --workspace --locked`: both clean,
+  against the committed tree (an uncommitted `Cargo.toml` refused packaging by design — hit
+  directly on the first attempt, confirmed rather than assumed, then the candidate commit landed
+  and the retry was clean).
+- `cargo publish --workspace --dry-run --locked`: clean, both crates.
+- **Package Smoke**: no stray `.rs` outside `src/`/`tests/`/`examples/`/`benches/` in either
+  archive; `LICENSE`/`NOTICE`/`README.md`/`Cargo.toml` present in both. Built and tested from the
+  unpacked `tekstide-core-0.36.0` directly (`cargo build --offline --bins`, then `cargo test
+  --offline`): `1139 passed, 1 failed` — the one expected, by-construction failure
+  (`real_repository_filesystem_scan_cost_headless_benchmark`, refusing to benchmark a directory
+  that is not a real repository), exactly the checklist's own documented shape. Did **not** attempt
+  a standalone `cargo build` inside the unpacked `tekstide-0.36.0` directory — the checklist names
+  this exact attempt as failing by construction (`tekstide-core 0.36.0` is not yet on crates.io),
+  and the real pairing gate is the workspace dry-run above, which already passed.
+- `cargo audit`: zero vulnerabilities; three warnings (`paste`, `ttf-parser`, `lru`), matching
+  `dependency-advisories.md`'s own register exactly — no new finding, nothing to retire.
+- **Standing watches**: `cargo tree -p tekstide | grep -i accesskit` — empty (RFC-014 R2 still not
+  reopenable). `README.md:37` still says "No screen-reader support" plainly.
+- **Run It**: the release binary launched as a first-time user, fresh `XDG_STATE_HOME`, no
+  arguments — empty Project Board, "No projects yet," a real path field, "Browse…," and the CLI
+  hint, naming only actions that exist (no Trust Settings button shown either, correctly, since
+  none is scoped to "no project open"). Captured to
+  `.git-exclude/release-evidence/0.36.0/cold-start-empty-board.png` (not committed, per the
+  checklist's own instruction). RFC-060's own feature-level live capture (the dialog, the decision,
+  the audit-view read-back) already lives at
+  `rfcs/handoffs/060-command-approval-reachable/evidence/pr-060-c/`, committed per-RFC evidence a
+  fixture can reproduce — this gate's own job is the first screen, not a second feature demo.
+- **The book against the changelog**: re-swept `what-works-today.md`'s `## Command approval:
+  reachable from configuration, and still unused` section and `local-data-and-privacy.md`'s
+  `## Command approvals` paragraph against the new `0.36.0` changelog entry — both already state
+  the "reachable, cooperative, no shipping AI CLI" shape correctly from PR-060-B/D, nothing stale
+  found. Grepped the full diff's own touched words (`adapter`, `Managed`, `approval-socket-path-
+  too-long`) against `locales/en.ftl` directly, not only the book — all three already consistent
+  with the surfaces that use them.
+
+### Confirmed no document claims the release yet
+
+`grep -rnE "^(Status:|status:).*[Rr]eleased" --include="*.md" rfcs/` was read against this RFC's
+own five status places, all of which say **"candidate, not yet published"**, never "released":
+`CHANGELOG.md`, `rfcs/README.md` (both the Handoffs and Done rows), `rfcs/delivery-plan.md`,
+`rfcs/done/060-command-approval-a-user-can-reach.md`'s own status line, and the handoff pack's
+`README.md` frontmatter. No `rfcs/handoffs/release-0.36.0.md` exists — confirmed directly, not
+assumed — so `the_newest_release_claimed_in_the_changelog_has_a_publish_record` has nothing to
+disagree with. `rfc_docs_invariants`: 22/22, re-run twice (once after the mechanical sweep, once
+after the full gate) rather than trusted from a single pass.
