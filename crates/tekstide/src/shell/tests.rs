@@ -6999,6 +6999,136 @@ fn command_approval_family_produces_real_durable_audit_records_through_the_pipel
     );
 }
 
+/// RFC-060 PR-060-C: the whole path, once, for real, closed end to end --
+/// a real `Managed` launch of `reference_adapter` (this project's own
+/// test-and-proof artifact, named here exactly because it is not, and
+/// proves nothing about, any real AI CLI), a real proposal over a real
+/// socket, a real decision through the real `update()`/`ModalActivate`
+/// route, and the resulting `command_approval` records read back through
+/// the real `audit_view` itself -- not by an independent `AuditStore`
+/// query beside it, which is what
+/// `command_approval_family_produces_real_durable_audit_records_through_the_pipeline`
+/// already proved the producer side with. This test's own job is the
+/// consumer side D7 exists for: a user who opens the audit view after
+/// deciding a real approval must find that decision's own records there,
+/// through the same `AppRoute::AuditView` a real `Ctrl+Alt+V` reaches.
+#[test]
+fn the_decided_approval_is_visible_through_the_real_audit_view() {
+    let _audit_state_dir =
+        test_audit_state_dir(&temp_audit_state_dir("approval-visible-in-audit-view"));
+    let (mut state, project_id) = state_with_a_real_project("approval-visible-in-audit-view");
+    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+
+    let agent_run_id = launch_real_managed_agent_run(&mut state);
+    let received = poll_approval_channels_until(&mut state, |state| {
+        state
+            .app_shell
+            .state()
+            .active_project()
+            .is_some_and(|project| !project.approval_requests().is_empty())
+    });
+    assert!(
+        received,
+        "the real reference adapter should send its default proposal within the poll window"
+    );
+
+    let request = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    let proposal_id = state.approval_proposal_ids[&request.id].clone();
+    state.modal = Some(ModalContent::Approval(Box::new(ApprovalDialog::for_test(
+        request.clone(),
+        proposal_id,
+        ApprovalDialogButton::ApproveOnce,
+    ))));
+    let _ = super::update(&mut state, Message::ModalActivate);
+    let stored = state
+        .app_shell
+        .state()
+        .active_project()
+        .unwrap()
+        .approval_requests()[0]
+        .clone();
+    assert_eq!(
+        stored.decision,
+        tekstide_core::domain::ApprovalDecision::ApprovedOnce,
+        "this test's own audit-view assertions below depend on a real Decided outcome having \
+         happened -- got {stored:?}"
+    );
+
+    let shell_input = crate::input::shell_input_for_test(
+        tekstide_core::navigation::NavigationAction::OpenAuditView,
+    );
+    let _ = super::update(
+        &mut state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+    assert_eq!(
+        state.app_shell.route(),
+        tekstide_core::route::AppRoute::AuditView,
+        "OpenAuditView must land on AppRoute::AuditView"
+    );
+
+    let loaded = state.audit_view.records_for_test();
+    let for_this_run: Vec<_> = loaded
+        .iter()
+        .filter(|sequenced| sequenced.record.agent_run_id.as_ref() == Some(&agent_run_id))
+        .collect();
+    assert!(
+        !for_this_run.is_empty(),
+        "the audit view, opened through a real key event against project {project_id:?}, must \
+         have loaded at least this run's own records -- loaded {} records total: {loaded:?}",
+        loaded.len()
+    );
+
+    let request_record = for_this_run
+        .iter()
+        .find(|sequenced| {
+            sequenced.record.action_kind == tekstide_core::audit::AuditActionKind::CommandRequest
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected the real CommandRequest record to be visible through the audit \
+                 view, not just the store directly: {for_this_run:?}"
+            )
+        });
+    assert_eq!(request_record.record.approval_id, Some(request.id.clone()));
+    assert_eq!(
+        request_record.record.outcome,
+        tekstide_core::audit::AuditOutcome::Requested,
+        "got: {:?}",
+        request_record.record.outcome
+    );
+
+    let approve_records: Vec<_> = for_this_run
+        .iter()
+        .filter(|sequenced| {
+            sequenced.record.action_kind == tekstide_core::audit::AuditActionKind::CommandApprove
+        })
+        .collect();
+    assert!(
+        approve_records.iter().any(|sequenced| {
+            sequenced.record.outcome == tekstide_core::audit::AuditOutcome::Authorized
+                && sequenced.record.approval_id == Some(request.id.clone())
+        }),
+        "expected the real, Authorized CommandApprove record to be visible through the audit \
+         view: {approve_records:?}"
+    );
+    assert!(
+        approve_records.iter().any(|sequenced| {
+            sequenced.record.outcome == tekstide_core::audit::AuditOutcome::Applied
+                && sequenced.record.approval_id == Some(request.id.clone())
+        }),
+        "expected the real, Applied CommandApprove record -- confirming the decision really \
+         reached the real adapter over the real socket -- to be visible through the audit \
+         view: {approve_records:?}"
+    );
+}
+
 /// change-detection-wiring handoff, Slice C: the gate's own required
 /// shape -- a real `ChangeSet`, created in production, from a real
 /// completion. `launch_real_managed_agent_run` reaches the exact same

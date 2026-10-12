@@ -1849,3 +1849,40 @@ it is asserting more than RFC-058 ever claimed.
 
 **Verdict: none yet.** Open, awaiting disposition per `test-flake-disposition.md`'s own rule that a
 live row needs a verdict — fix, quarantine, or accept with a reason.
+
+## New row, 2026-10-12 — RFC-060 PR-060-C gate, third of three: `real_output_wraps_at_the_new_column_count_not_the_old_one`, 1 failure then 5 passes
+
+**Disclosed while gating PR-060-C**, which added one new test
+(`shell::tests::the_decided_approval_is_visible_through_the_real_audit_view`) and nothing else
+touching `surface::terminal`. The first two of three full-workspace runs were clean (`781 + 22 +
+1140`, `781 + 22 + 1140`); the third failed one test, unrelated to this slice's own change:
+
+```
+assertion `left == right` failed: the same 30-character line must now wrap at the new 20-column
+width, not the old 80-column one -- proving the emulator is actually using the resized grid, not a
+stale one
+  left: 18
+ right: 20
+```
+
+**The shape is category A from `test-flake-disposition.md`** ("the wait is weaker than the
+condition it waits for"), not a new cause. The test's own poll loop
+(`crates/tekstide/src/surface/terminal/tests.rs:472`) breaks on
+`longest_run_in_any_row('Q') <= 20`, but the assertion below it demands exactly `== 20` — so a
+transient render state where the 30-character marker has only partly arrived (visible as a shorter
+run, 18 here) satisfies the loop's own weaker condition and lets it proceed to an assertion the
+render had not actually settled into yet. The same family `resize_makes_the_pty_the_emulator_and_
+the_render_path_agree` (disposition doc, category B, "PTY read timing," four prior occurrences) is
+already filed under.
+
+**What was measured:** isolated re-run, `cargo test -p tekstide --bin tekstide
+surface::terminal::tests::real_output_wraps_at_the_new_column_count_not_the_old_one`, 5 of 5
+passed. Consistent with a full-workspace-load-only timing gap, not a per-test defect.
+
+**Not fixed here** — out of PR-060-C's own scope (approval/audit-view reachability, not terminal
+resize timing), and `test-flake-disposition.md`'s own rule 4 forbids reporting an unablated fix.
+Disclosed per this register's own standing rule that a disclosure is not complete without a row.
+
+**Verdict: none yet.** Open, awaiting disposition. The fix shape, if taken, is the same one
+category A's already-fixed rows used: poll the exact condition the assertion checks (`== 20`), not
+a weaker stand-in for it.

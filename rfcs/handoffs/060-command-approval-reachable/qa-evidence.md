@@ -236,3 +236,94 @@ discipline as RFC-059's own cut. Draft, for that round to refine or replace:
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `780 + 22 + 1140`, 0 failed, 0 fixture
 entries.
+
+## PR-060-C — the whole path, once, for real
+
+### The test that closes the loop
+
+`the_decided_approval_is_visible_through_the_real_audit_view`
+(`crates/tekstide/src/shell/tests.rs`, right after
+`command_approval_family_produces_real_durable_audit_records_through_the_pipeline`) is the first
+test in this project to join a real `Managed` launch of `reference_adapter` — **this project's own
+test-and-proof artifact, named here exactly because it is not, and proves nothing about, any real
+AI CLI** (`what-the-dialog-must-not-lie-about.md` §4) — through a real proposal, a real decision via
+the real `update()`/`Message::ModalActivate` route, and then reads the resulting
+`command_approval` records back through the real `audit_view` itself
+(`state.audit_view.records_for_test()`, loaded by a real `Ctrl+Alt+V` key event), **not by an
+independent `AuditStore::query` run beside it**. The pipeline test already proved the producer side
+(a record exists, with the right `outcome`, reachable by direct query); this test's own job is the
+consumer side D7 exists for — a user who opens the audit view after deciding a real approval must
+find that decision's own records there, through the same `AppRoute::AuditView` a real key press
+reaches. Finds the real `CommandRequest`/`Requested` record and both the `Authorized` and `Applied`
+halves of the real `CommandApprove` pair, filtered to this run's own `AgentRunId`, inside the
+view's own loaded page.
+
+### Live capture — the whole path, actually run once
+
+Built `reference_adapter` (`cargo build -p tekstide-core --bin reference_adapter`) and ran the real
+`tekstide` binary against a throwaway `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/project directory —
+nothing committed to the repo, nothing under the developer's real state root. Config declared one
+profile, `command` pointing at a tiny wrapper script that `exec`s the real `reference_adapter`
+binary with a hardcoded `rm -rf <nonexistent marker>` argv (never actually executed — the adapter
+only ever proposes and prints the decision; that claim is pinned by
+`reference_adapter_binary_never_executes_the_argv_it_proposes`,
+`crates/tekstide-core/src/approval/tests/reference_adapter.rs`), and `adapter = true`.
+
+**One real lesson, worth recording because it would bite again:** the first attempt used a longer
+throwaway path (`/dev/shm/tekstide-pr060c-capture-2/...`) and every launch failed with the generic
+`agent-run-launch-refused` catch-all, no specific reason surfaced. The real `approval/` directory
+was never even created — the failure was before the channel bound at all. The cause was the same
+one this project's own test-gate instructions already warn about for `TMPDIR`, just not previously
+connected to a *production* run: `ApprovalChannel`'s real socket path is `<state_root>/approval/
+agent-run-<uuid>.sock`, and `<state_root>` here is `$XDG_STATE_HOME/tekstide`, not a test-only
+value — a long `$XDG_STATE_HOME` for a real GUI launch hits the same ~104-byte `AF_UNIX` path limit
+a long test `TMPDIR` does. Rebuilding the throwaway tree under a short path (`/dev/shm/t60c/...`,
+full socket path 75 bytes) fixed it immediately, no code change involved. Recorded here rather than
+filed as a defect: `resolve_agent_run_state_dir`'s own real branch just reads `$XDG_STATE_HOME`
+as given, which is correct — a short path is this capture's own obligation, not a thing the
+product should paper over by shortening a user's real XDG directories for them.
+
+Three screenshots, committed under
+`rfcs/handoffs/060-command-approval-reachable/evidence/pr-060-c/` (distinct SHA-256 per file,
+confirming each is a genuinely new capture and not `wl-paste` replaying a stale clipboard):
+
+- `pr-060-c-01-approval-dialog-cooperative-notice.png` — the real, promoted dialog, `Risk:
+  Destructive`, focus defaulting to `Reject`, **the full frame**, not cropped to the buttons, so
+  `approval-dialog-cooperative-notice` ("This choice is advisory, not a safeguard...") is fully
+  visible — the reviewer's own ask from review 537, for exactly this capture, the first time
+  anyone outside this project sees that sentence in context.
+- `pr-060-c-02-decided-adapter-exited.png` — after `Approve Once` (Tab from the default `Reject`
+  focus, then Enter): the terminal row reads "Exited", the real adapter process is gone
+  (`pgrep` confirmed no `reference_adapter`/wrapper process survives the decision).
+- `pr-060-c-03-audit-view-command-approval-records.png` — `Ctrl+Alt+V`, the real audit view,
+  showing `Command approval · Requested`, `Command approval · Authorized`, and `Command approval ·
+  Applied` rows for the real project, alongside the launch's own `Managed process lifecycle ·
+  Started`/`Authorized`/`Terminated` rows — the same shape the new test above asserts, now seen
+  through the actual rendered surface rather than only `records_for_test()`.
+
+Process and window state verified before and after: `niri msg -j windows`/`is_focused` checked
+immediately before every `wtype` call (one stray keystroke did land on an unrelated window mid-
+session when another agent's app stole focus between the check and the send — refocused and
+retried rather than guessing what it did there, since that window is not this project's to
+inspect or correct); the real `tekstide` process and all throwaway directories
+(`/dev/shm/t60c`, and the two abandoned longer-path attempts) were killed/removed after capture.
+
+### A flake disclosed, not fixed, in this slice's own gate
+
+The third of three full-workspace runs failed one test unrelated to this slice's own change —
+`surface::terminal::tests::real_output_wraps_at_the_new_column_count_not_the_old_one` — then passed
+5 of 5 in isolation. Disclosed as a new row in `test-process-leak.md` (same file, same
+`test-flake-disposition.md` register this project already tracks these under), not fixed here:
+out of this slice's own scope, and reported as the same shape (category A, "the wait is weaker
+than the condition it waits for") an existing sibling test already carries a live, unverdicted row
+for. Two subsequent full-workspace runs were clean.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
+Six full-workspace runs total this slice (one new test added, `780 → 781`): runs 1–2 clean
+(`781 + 22 + 1140` each), run 3 failed one unrelated test (disclosed above), runs 4–6 clean —
+**three consecutive clean runs, runs 4/5/6**, counted per `test-flake-disposition.md` rule 5 ("do
+not count a gate run that failed" — run 3 resets the streak, it does not contribute toward the
+three). 0 failed in every clean run, 0 fixture entries in a fresh short `/dev/shm` `TMPDIR` each
+time.
