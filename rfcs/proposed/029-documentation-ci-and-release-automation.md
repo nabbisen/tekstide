@@ -156,4 +156,3 @@ rather than reasons to withhold it:
 owner's call: the one-liner (what a beginner should see first), or `cargo install` (what the page
 leads with today and what D7 already says must change). The reviewer recommends leading with the
 one-liner, now that it is being built.
-
