@@ -1935,14 +1935,28 @@ assertion depends on.
 **No plausible mechanism was found**, the same conclusion review 527 reached. This pass added its
 own fresh measurement rather than resting on that one: 10 of 10 clean in plain isolation, 5 of 5
 clean under synthetic load (16 `yes` spinners, load ~46–50), run today against the current tree —
-**20 additional clean runs, 0 recurrence**, on top of review 527's own 10/10 and 10/10-under-load.
-The only failures on record for this row are the two from before PR-059-A existed (`5 of 5` and
-`3 of 3`, both on a now-stale commit), never reproduced since on either machine.
+**20 additional clean runs, 0 recurrence**, on top of review 527's own 10/10 and 10/10-under-load,
+and the reviewer's own 10/10 plus four full-workspace runs at review 542. The only failures on
+record for this row are the two from before PR-059-A existed (`5 of 5` and `3 of 3`).
+
+**Review 542's own check, worth stating plainly rather than letting "before PR-059-A existed" imply
+otherwise**: `git diff --stat 822265f..HEAD -- project_lock.rs project_lock/
+bin/project_process_probe.rs app.rs` is **empty**. Every file in the path under test is unchanged
+since the two failures. **Nothing was superseded, and nothing was fixed sideways — this is a
+genuine unreproducible, not a defect that quietly went away.** A future reader who hits a
+recurrence should know that, not wonder what regressed.
+
+**The `connect()`-queues argument above also answers review 527's own open question directly**:
+whether the test synchronises on something that makes its strong `KNOCKED` assertion true, or
+asserts more than RFC-058 ever claimed. It is the former — `connect()` to an already-`listen()`ing
+socket does not depend on the best-effort, may-do-nothing-visible half of D9 at all (that half
+governs whether the *holder* ever calls `accept()` and reports `ATTENTION_RECEIVED`, a separate
+assertion this test also makes and which the two historical failures did not touch). The `KNOCKED`
+assertion is not over-asserting; the failure, whatever it was, is something else.
 
 **Accept.** Same shape as row 1 (`bind_recovers_from_a_stale_socket_file`): sustained attention
-from two independent investigators found no actionable cause, and the rate — two failures, both on
-a single now-superseded commit, zero since across 30+ combined runs — has not moved. Re-opens if
-it recurs.
+from two independent investigators across two machines found no actionable cause, against code
+that has not changed since the only two failures on record. Re-opens if it recurs.
 
 ### Fix — `real_output_wraps_at_the_new_column_count_not_the_old_one`
 

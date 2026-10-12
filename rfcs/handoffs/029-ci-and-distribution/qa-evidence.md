@@ -74,15 +74,29 @@ their 2026-10-09 reason strings, unchanged; both confirmed to still pass when ru
 `-- --ignored`. PR-029-B's own job is wiring these into a non-blocking job; this pass's job was
 only to confirm neither needed re-verdicting.
 
-### The failure rate, re-measured after the pass
+### The failure rate: what 0 clean runs does and does not establish
 
-**Before** (this register's own repeated sampling, 2026-10-09 pass): ~3 failures in 17 full-
-workspace runs (~18%).
+**Required correction, review 542.** The first draft of this section reported *"0 failures in 10"*
+and leaned on it as evidence a blocking CI job is safe. That claim is weaker than the number looks:
+at the prior rate (~3 in 17, ≈0.176), `P(0 failures in 14 runs) ≈ 0.066` — fourteen clean runs
+(this slice's own 10 plus the reviewer's own 10/10-isolated-plus-4-full-workspace at review 542)
+make the old rate *unlikely*, but the 95% upper bound on the true rate after 0/14 is still
+**≈0.193** — consistent with a rate as high as ~19%, which would still make CI red roughly once in
+five pushes. A 5% upper bound would need **59** clean runs, verified independently here (the exact
+same arithmetic the reviewer's own response gives, reproduced rather than taken on trust:
+`(1 − 0.05^(1/14)) ≈ 0.193`; `ln(0.05)/ln(0.95) ≈ 58.4 → 59`). Reporting 0/10 as *the* rate, with
+no bound stated, was exactly the "a number describing something adjacent to what it is used to
+prove" shape this project has caught elsewhere.
 
-**After this pass, 10 full-workspace runs, `--no-fail-fast`, fresh short `/dev/shm` `TMPDIR` each:
-0 failures, 0 fixture entries left, every run.** Three as this slice's own required gate
-(`782 + 22 + 1140` each), seven more as a dedicated re-measurement. Not assumed to have improved —
-counted.
+**The real argument for D1 does not rest on the count at all.** Two of the three rows closed this
+pass were fixed with an identified, causal mechanism — a missing `ETXTBSY` warmup guard, and a
+poll condition weaker than its own assertion — neither of which depends on how many times the test
+happened to pass afterward. The third (the attention-knock test) is carried as **Accept, genuinely
+unreproducible** — not fixed, and not implied to be fixed by a run count either. **D1's
+prerequisite is satisfied by the dispositions themselves** (every live row has a verdict, two of
+them causal), not by a clean-run tally; the 14 clean runs since are consistent with a large
+reduction and worth recording, but do not by themselves establish a low rate, and PR-029-B's own
+case for blocking should cite the two fixed mechanisms, not this number.
 
 **Live rows in `test-process-leak.md` after this pass: zero.** Every row the register has ever
 opened now carries exactly one verdict.
