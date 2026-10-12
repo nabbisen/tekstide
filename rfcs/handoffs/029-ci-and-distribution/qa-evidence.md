@@ -268,3 +268,67 @@ into the release notes explicitly, with the measured non-reproducibility stated 
 `actions/checkout`/`rustup` steps are byte-identical to `ci.yml`'s own already-live-verified ones.
 `rfc_docs_invariants`: 22/22, unaffected (no RFC document edited; `release-checklist.md` is a
 handoff doc, not an RFC itself). No Rust source changed.
+
+## PR-029-D — the one-liner installer
+
+### `install.sh`
+
+Platform-checked (Linux/`x86_64` only, honest refusal naming RFC-028 otherwise), downloads the
+named asset and its checksum, verifies with `sha256sum -c` before installing anything, installs
+exactly one file (`install -m 755`) to exactly one location (`$HOME/.local/bin/tekstide`), prints
+where it installed and whether that directory is already on `PATH`. No `sudo`, no shell rc edit,
+no repository added — the script has no code path that could do any of those. Wording is only ever
+*"verified against its published checksum"* (D10, §3), with the header stating directly why
+nothing stronger may be claimed: the binary is not byte-reproducible (PR-029-C's own measurement),
+so the checksum proves the download arrived intact, not that the release is untampered or
+rebuildable. `shellcheck -s sh`: 0 findings.
+
+### Proven, not read and agreed it looks right
+
+All tests against a throwaway `$HOME` (`/dev/shm`, removed after) and a local HTTP server serving
+the real release binary built earlier in this session, so nothing depended on a GitHub release
+existing — **see "What was not tested" below for the one thing that gap means**.
+
+- **The real install path, end to end**: downloaded, verified, installed; the installed binary's
+  own SHA-256 matched the source binary exactly, and `tekstide --version` reported `0.36.0` from
+  the installed copy.
+- **Exactly one file, one location**: `find "$HOME" -mindepth 1` before and after showed exactly
+  one new path, `.local/bin/tekstide` — no rc file, no other directory, nothing else present.
+- **Both `PATH` branches**: installed with the target directory absent from `PATH` (correctly
+  reported not-yet-on-`PATH`, with the exact command to add it) and present (correctly reported
+  already-on-`PATH`).
+- **Checksum mismatch refuses, installs nothing**: served an asset paired with a deliberately wrong
+  checksum file; the script exited 1 with the stated reason, and `find "$HOME" -mindepth 1`
+  afterward showed zero entries — no partial or corrupted file left behind.
+- **Truncation safety, proven by truncation (§2, not reading the wrapper and agreeing it looks
+  right) — across eight cutoff points, not one.** Served `install.sh` itself from a local server,
+  truncated to 10%, 25%, 40%, 60%, 75%, 90%, and 99% of its own byte length, piped through
+  `curl | sh` exactly as the real one-liner would be run, against a fresh throwaway `$HOME` each
+  time: **zero files created at every single cutoff.** The two short cutoffs (10%, 25%, comment-
+  only prefixes) parsed as empty-but-valid shell and exited 0 having done nothing; every cutoff at
+  40% or past (inside the function body) failed with a syntax error (*"unexpected EOF while
+  looking for matching `"'"*) before executing anything — the whole-body-function wrapper does
+  exactly what D11 asks.
+
+### What was not tested, flagged rather than glossed
+
+**The script was never run against this repository's own real GitHub release assets, because none
+exist yet** — the same residual PR-029-C's own review left open, pending the owner's word on the
+first `workflow_dispatch`. Once that run lands, the real one-liner
+(`curl -fsSL https://raw.githubusercontent.com/nabbisen/tekstide/main/install.sh | sh`) should be
+run for real against it, not only against the local mock server this slice used.
+
+### Where the scope is stated — a question, not a silent decision
+
+Task breakdown item 3 and the checklist both ask that the scope (§1: one binary, one location,
+nothing else) be *"stated where the command is offered, not only in the script."* `README.md` and
+`getting-started.md` still lead with `cargo install` — rewriting them to lead with the one-liner is
+explicitly PR-029-E's own job (D7, D13, D14), not this slice's. **Not added a one-liner mention to
+either page here**, to avoid half-doing PR-029-E's work ahead of it; the script's own header states
+its scope in full for now. If a minimal pointer is wanted before PR-029-E lands, say so — not
+assumed either way.
+
+### Gate
+
+`sh -n install.sh` and `shellcheck -s sh install.sh`: clean. No Rust source changed;
+`rfc_docs_invariants` unaffected (no RFC document touched this slice).
