@@ -209,25 +209,35 @@ break is still escaped — inside its own bordered container, so a file cannot f
 "Review state: Accepted". The frame, including the "not a diff" label, is pinned outside the
 scroll region so the content cannot scroll it away.
 
-## Command approval, and why you cannot use it
+## Command approval: reachable from configuration, and still unused
 
 Tekstide implements a command-approval protocol a cooperating AI CLI adapter can use: a versioned
 sideband channel over a per-run Unix domain socket, two-layer peer authentication, a structural
 risk classifier, and single-use decisions recorded in the durable audit trail. It is built,
 audited, and proven end to end against production code.
 
-**No shipping AI CLI speaks this protocol.** `Managed` mode, and therefore command approval, can
-only be exercised by this project's own reference adapter, which is a test artifact. The pathway
-is proven; the ecosystem does not exist. Anyone reading "command approval shipped" into this is
+**Declaring `adapter = true` on a configured profile (see [Configuration](./configuration.md)) is
+real and reaches it.** Before this, no configuration field could even ask for `Managed` mode; now
+one can, and a declared profile's launch really does bind a real approval channel and wait for a
+proposal. **It still does nothing useful for almost everyone, because no shipping AI CLI speaks
+this protocol.** Declaring `adapter = true` on an ordinary AI CLI's own command does not change
+what that program does — it only tells Tekstide to expect a protocol conversation that program was
+never written to have, so no proposal ever arrives. Today, only this project's own reference
+adapter — a test artifact, not a product — actually speaks it. The pathway is proven and reachable;
+the ecosystem to use it with does not exist. Anyone reading "command approval shipped" into this is
 reading more than the record says.
 
 `Ctrl+Alt+H` opens the approval-history surface, and a real user opening it today sees it
-**empty** — correctly, not as a bug.
+**empty** — correctly, not as a bug, and not because approval failed to run: nothing ever proposed
+anything.
 
-**It is cooperative, not enforced.** Approval works only if the adapter asks. Tekstide does not
-intercept process execution and has no execution path of its own to withhold, so an adapter that
-ignores a rejection — or never submits a proposal — runs its command regardless. Tekstide does not
-approve commands, and does not control what an AI CLI can run.
+**It is cooperative, not enforced, and declaring an adapter does not change that.** Approval works
+only if the adapter asks. Tekstide does not intercept process execution and has no execution path
+of its own to withhold, so an adapter that ignores a rejection — or never submits a proposal — runs
+its command regardless. Tekstide does not approve commands, and does not control what an AI CLI can
+run. Declaring a profile as an adapter in configuration is **a claim the file makes**, not a fact
+Tekstide can verify about the program `command` names — nothing checks that the declared program
+actually behaves like an adapter, because the protocol is cooperative by design.
 
 ## Dialogs you can trust, and how far that goes
 

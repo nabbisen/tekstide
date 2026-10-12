@@ -11230,6 +11230,42 @@ fn approval_dialog_cooperative_notice_states_all_three_required_non_claims() {
     );
 }
 
+/// RFC-060 D3: "One sentence... that a user reads before approving --
+/// stating that approval is an answer to a request and that Tekstide
+/// does not prevent a rejected command from running." Verified rather
+/// than assumed: reading the wiring found this already shipped, under
+/// RFC-022 PR-022-E / response 222, two months before RFC-060 was even
+/// proposed -- `approval-dialog-cooperative-notice` is the sentence,
+/// and `approval_dialog_cooperative_notice_states_all_three_required_
+/// non_claims` above already proves its own half ("does not prevent
+/// execution"). This test is RFC-060's own proof that the *other* half
+/// ("approval answers a request") is also stated, not merely implied --
+/// carried by the title and body together (the dialog's own framing,
+/// never repeated inside the cooperative notice itself, which would be
+/// redundant with text a reader has already read one line above it).
+#[test]
+fn approval_dialog_states_both_halves_of_rfc_060_d3() {
+    let catalog = state_with(ApplicationShell::new()).catalog;
+    let title = catalog.get("approval-dialog-title");
+    let request = approval_request_fixture(
+        "claude --dangerously-skip-permissions",
+        "/home/user/project",
+        tekstide_core::domain::RiskLevel::Medium,
+    );
+    let body = super::approval_dialog_body(&catalog, &request);
+    let notice = catalog.get("approval-dialog-cooperative-notice");
+
+    assert!(
+        title.to_lowercase().contains("requested") || body.to_lowercase().contains("asking"),
+        "the dialog must frame this as a request Tekstide is relaying an answer to, got title: \
+         {title:?}, body: {body:?}"
+    );
+    assert!(
+        notice.to_lowercase().contains("cannot stop"),
+        "the dialog must say a rejected command is not prevented from running, got: {notice:?}"
+    );
+}
+
 /// Response 233 (`ApprovalHistory`): the same escaping property
 /// `approval_dialog_body_escapes_a_bidi_override_in_the_cwd` proves for
 /// the dialog, proven here for the history surface's own render

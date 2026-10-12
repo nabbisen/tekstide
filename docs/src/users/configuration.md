@@ -17,6 +17,7 @@ transcript_retention_days = 30      # recorded on each run's policy; see the cav
 [agent.profile.my-cli]
 display_name = "My AI CLI"
 command = "/usr/local/bin/my-cli"   # absolute path, or a bare name found on the system path
+adapter = false                     # declares command speaks Tekstide's approval protocol; see below
 
 [resources]
 agent_run_limit = 3                 # per project; omit for no limit
@@ -262,6 +263,27 @@ is text the file itself supplies. Once per session, not once per launch.
 
 A reload that **weakens** a security-relevant setting asks the same way. One that **tightens**
 applies immediately.
+
+## Declaring an adapter
+
+`adapter = true` on a profile declares that `command` speaks Tekstide's own command-approval
+protocol — it is the one key that makes that profile `Managed` rather than `Supervised`, and the
+only key that does: there is nowhere else in the file to ask for `Managed`, and no way to get the
+approval machinery (a real socket, a real dialog) without this exact declaration. Omit it, or write
+`adapter = false` (the default either way), and the profile behaves exactly as it always has.
+
+**This is a claim the file makes, not a fact Tekstide checks.** Nothing verifies that the program
+named in `command` actually speaks the protocol — the model is cooperative, so a program that
+never asks is indistinguishable from one that has nothing to ask about. Declaring `adapter = true`
+on an ordinary AI CLI does not make Tekstide supervise it, sandbox it, or intercept anything it
+runs; it only makes Tekstide wait for a proposal that will never arrive. See
+[What works today](./what-works-today.md) for which programs actually speak this protocol today —
+as of this writing, none that ship with any AI CLI do.
+
+**Approval is cooperative, not enforced, for an adapter-declared profile exactly as it is for every
+other one.** A rejected proposal is not prevented from running; Tekstide has no execution path of
+its own to withhold. See [Local data and privacy](./local-data-and-privacy.md) for what an approval
+decision does and does not record.
 
 ## Three things configuration can never do
 

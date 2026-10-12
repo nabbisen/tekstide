@@ -142,3 +142,97 @@ separately. Worktree removed; main tree never touched.
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `779 + 22 + 1140`, 0 failed, 0 fixture
 entries — matching the reviewer's own count exactly.
+
+## PR-060-B — the sentence and the sweep
+
+### D3's sentence: already shipped, verified rather than assumed
+
+**Finding, not a feature added**: the sentence D3 asks for — "stating that approval is an answer
+to a request and that Tekstide does not prevent a rejected command from running" — already exists.
+`approval-dialog-cooperative-notice` (`locales/en.ftl:908`) was added under **RFC-022 PR-022-E,
+response 222, commit `7e9b553`, 2026-08-16** — about two months before RFC-060 was even proposed.
+Read directly, not taken on a subagent's word: the key, its render wiring
+(`approval_dialog_view`, `shell.rs`), and the existing test
+(`approval_dialog_cooperative_notice_states_all_three_required_non_claims`,
+`shell/tests.rs:11213`) all confirmed. RFC-060's own text is aware of this and is not claiming
+otherwise — its own "Decided on acceptance" section says *"D3 is where its highest-consequence
+sentence ... finally has to appear **in front of a real user**"* — the distinction is reachability
+(no production profile was ever `Managed` until PR-060-A, so nobody had ever seen this dialog),
+not that the wording was missing.
+
+**"Does not prevent execution"** was already directly tested. **"Approval answers a request"** was
+not tested as its own claim — carried by the dialog's title (*"Command Approval Requested"*) and
+body (*"An AI CLI is asking to run..."*), not repeated inside the notice itself (which would be
+redundant with text a reader has already read one line above it). Added
+`approval_dialog_states_both_halves_of_rfc_060_d3` to assert this explicitly, through the same
+catalog calls the view itself makes (`approval_dialog_body`, `catalog.get("approval-dialog-title")`,
+`catalog.get("approval-dialog-cooperative-notice")`) — the wording-guard shape, not a string
+assembled in the test.
+
+**No new catalog key was added.** If review wants the existing sentence's wording tightened, moved,
+or restated for some reason not evident from reading it, that is a real follow-up; as written, it
+already clears §2 of `what-the-dialog-must-not-lie-about.md`'s bar.
+
+### D4, the sweep — recorded even though two findings were stale claims, not new risks
+
+Swept `locales/en.ftl`, `docs/src/users/what-works-today.md`, `docs/src/users/local-data-and-
+privacy.md`, `README.md`, and drafted the changelog language below, per the checklist's own five
+targets. Grepped each for "approval", "approve", "reject", "Managed", "adapter", and separately for
+§6's own list of words that imply enforcement without the word "approval" — *protected*, *blocked*,
+*prevented*, *secured*, *requires approval before running*.
+
+**Two real findings, both staleness, not enforcement-claim risk.** Every existing sentence
+describing approval already stated the cooperative-not-enforced model correctly — the actual defect
+was that two of them claimed the pathway was **unreachable**, which PR-060-A just made false:
+
+- `README.md`: *"Command approval is built but unreachable."* → corrected to name that it is now
+  reachable from configuration, while keeping "no shipping AI CLI speaks its protocol" and
+  "cooperative, not enforced" exactly as they were.
+- `docs/src/users/what-works-today.md`: *"## Command approval, and why you cannot use it"* and its
+  body (*"`Managed` mode... can only be exercised by this project's own reference adapter"*) →
+  retitled and rewritten to say what changed (`adapter = true` reaches it now) and what did not
+  (nothing you would install answers; cooperative, not enforced; the declaration is the file's own
+  unverified claim, not a fact Tekstide checks about the named program).
+
+**`docs/src/users/local-data-and-privacy.md`**: no reachability claim either way in its own
+"Command approvals" paragraph — already accurate, nothing to correct.
+
+**`locales/en.ftl`**: no enforcement-claim or reachability-claim risk found beyond the dialog itself
+(already covered under D3 above). `approval-history-classifier-notice` already correctly disclaims
+risk-level as "not a guarantee"; `change-review-disclosure` already correctly says it is "not a
+review, an approval, or a claim that a change is safe" (a different feature, same discipline).
+
+### `docs/src/users/configuration.md`: the deferred documentation, written now
+
+PR-060-A deferred this deliberately (review 535 confirmed the deferral was correct). Added a new
+`## Declaring an adapter` section and the `adapter = false` line to the schema example. Follows §2
+and §4 of `what-the-configuration-must-not-allow.md` directly: states plainly that declaring
+`adapter = true` is **a claim the file makes, not a fact Tekstide checks** about the named program;
+names that nothing ships that actually speaks the protocol today; repeats the cooperative-not-
+enforced sentence rather than assuming a reader carries it over from elsewhere; cross-links to
+`what-works-today.md` and `local-data-and-privacy.md` rather than re-deriving either page's own
+claims. No mention of the capability token at all (§4: nothing to describe, so nothing to
+upgrade).
+
+### The draft changelog entry
+
+Per the task breakdown's own instruction ("this release's entry is where `REQ-AGENT-013` is
+easiest to breach... write the entry so that a reader who stops after the first sentence has not
+been misled"). Not committed to `CHANGELOG.md` — that happens at the candidate cut, same
+discipline as RFC-059's own cut. Draft, for that round to refine or replace:
+
+> **The command-approval UI and API are reachable from configuration for the first time, for a
+> profile that declares an adapter — and no shipping AI CLI implements the protocol, so for most
+> users nothing changes.** A configuration file can now set `adapter = true` on a profile to
+> request `Managed` mode; before this release, no field existed to ask for it at all, and the
+> impossibility of asking incorrectly was structural, not a validation refusal
+> (`ConfiguredAiCliAdapter`, a two-variant enum one match derives both outputs from). Rejecting a
+> proposal does not prevent execution — nothing in Tekstide intercepts a spawned process — and
+> that has not changed. The one thing an ordinary user will notice: the Audit view (`0.35.0`) can
+> now show real `command_approval` records, if a declared adapter is ever reached.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
+full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `780 + 22 + 1140`, 0 failed, 0 fixture
+entries.

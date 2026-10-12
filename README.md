@@ -37,8 +37,10 @@ It is early. Read these before relying on it:
 - **No screen-reader support**, for the life of the `iced` substrate decision.
 - **The real Claude Code CLI has never been exercised by this project's tests.** Every automated
   proof uses a controlled test executable.
-- **Command approval is built but unreachable.** No shipping AI CLI speaks its protocol, and it is
-  cooperative, not enforced.
+- **Command approval is reachable from configuration, and still not useful to most people.** A
+  profile can declare `adapter = true` to speak Tekstide's own approval protocol, but no shipping
+  AI CLI does — only this project's own test adapter does — and the model is cooperative, not
+  enforced: Tekstide does not intercept execution.
 - **No before/after diff** — the change model exists; nothing renders it yet. Terminal input
   latency is not verified against its target.
 
