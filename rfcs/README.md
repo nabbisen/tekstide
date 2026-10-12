@@ -25,7 +25,10 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 029 | [Documentation, CI, and Release Automation](./proposed/029-documentation-ci-and-release-automation.md) | **Proposed 2026-10-12.** `0.37.0`, M14. D1–D8 and one open question for the owner, on acceptance |
+
+*(An empty `proposed/` is the correct state when nothing is awaiting review — it does not mean a
+folder is missing. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+
 
 
 
@@ -37,8 +40,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is accepted and not yet closed. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 029 | [Documentation, CI, and Release Automation](./accepted/029-documentation-ci-and-release-automation.md) | **Accepted 2026-10-13.** `0.37.0`, first of M14. D1–D14 decided; a one-liner installer is in scope after the owner overturned the reviewer's recommendation. Handoff pack: [`029-ci-and-distribution/`](./handoffs/029-ci-and-distribution/README.md) |
 
 ### Reserved numbers — check this before authoring
 

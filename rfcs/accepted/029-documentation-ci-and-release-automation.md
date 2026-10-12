@@ -1,10 +1,9 @@
 # RFC-029: Documentation, CI, and Release Automation
 
-Status: **Proposed 2026-10-12.** `0.37.0`, M14. Reserved since the plan's first draft; scoped now
-under the owner's M14 direction (2026-10-12): prebuilt binaries, AUR, and install documentation an
-unskilled user can follow. **D1–D13**, of which D9–D13 reverse this RFC's own first recommendation
-against a one-liner installer after the owner challenged it. One question — what the install page
-leads with — remains for the owner, on acceptance.
+Status: **Accepted by the human owner 2026-10-13.** D1–D13 as written; **the remaining question —
+what the install page leads with — answered by the acceptance itself**, see *Decided on acceptance*.
+Proposed 2026-10-12. `0.37.0`, M14, the first RFC of that milestone. D9–D13 reverse this RFC's own
+first recommendation against a one-liner installer, after the owner challenged it.
 
 ## Summary
 
@@ -150,9 +149,27 @@ rather than reasons to withhold it:
   auditing what the script does — presented as the equivalent, not as the safer one, because on the
   same trust root it is not.
 
-### Still open for the owner
+### As it was put to the owner
 
 **Only the headline question.** The installer exists; what the install page *leads* with is the
 owner's call: the one-liner (what a beginner should see first), or `cargo install` (what the page
 leads with today and what D7 already says must change). The reviewer recommends leading with the
 one-liner, now that it is being built.
+
+## Decided on acceptance (2026-10-13)
+
+- **D14. The install page leads with the one-liner.** `README.md`'s *Quick Start* and
+  `docs/src/users/getting-started.md`'s *Install* open with it; `cargo install` and the four-line
+  verified form follow, as equivalents for people who want them. Decided by acceptance of the
+  recommendation, not by a separate instruction — correct this line if that is not what was meant,
+  which costs nothing before PR-029-E.
+
+**What this RFC is really for, restated because the slices can obscure it.** A person who has never
+heard of Rust should be able to get this program running. Everything here — the CI that makes a
+binary trustworthy enough to publish, the artifacts, the script, the AUR package, the rewritten
+pages — exists for that one outcome. A slice that lands its mechanism and leaves that person no
+better off has not finished.
+
+**And the order is a prerequisite, not a preference.** PR-029-A exists because a blocking CI job
+that is red when nothing is wrong destroys the only thing CI is for. Nothing in B–F starts until
+the flake dispositions are done.
