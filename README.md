@@ -17,6 +17,22 @@ Tekst IDE (`tekstide`) is a local-first, multi-project workbench for supervising
 [What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html), which states the limits as plainly as the
 capabilities.
 
+## What it looks like
+
+The Project Board: every project you have opened, what each one is allowed to do, and what it is
+doing right now. A project starts **Restricted** — the chips under it are the automations Tekstide
+refuses to run until you grant trust, named individually rather than summarised.
+
+<img src="https://raw.githubusercontent.com/nabbisen/tekstide/main/assets/screenshots/project-board.png" alt="Tekstide's Project Board, showing one project with its trust state, counts, and the automations blocked until trust is granted" width="860">
+
+Inside a project: the file tree stays beside whatever you are doing, and terminals run in the same
+window. `Ctrl+Alt+M` switches the main area between the editor and the terminals; the explorer does
+not go away when you do.
+
+<img src="https://raw.githubusercontent.com/nabbisen/tekstide/main/assets/screenshots/workspace.png" alt="A Tekstide project open, with the file explorer on the left and a running terminal on the right" width="860">
+
+*Both screenshots are from `0.36.0`, taken against a throwaway demo project.*
+
 ## What it does
 
 - **Several projects at once**, each with root-bound file access, a read-only explorer that
