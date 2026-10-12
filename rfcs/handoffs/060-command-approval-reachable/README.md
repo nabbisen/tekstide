@@ -1,8 +1,8 @@
 ---
 title: "RFC-060 handoff — Command Approval A User Can Reach"
-status: "**Implemented and closed 2026-10-12** — `0.36.0` candidate, not yet published. All four slices and the Whole-RFC checklist closed."
+status: "**Implemented and closed 2026-10-12** — released as `0.36.0` 2026-10-12. All four slices and the Whole-RFC checklist closed."
 source_rfc: "../../done/060-command-approval-a-user-can-reach.md"
-source_rfc_status: "Implemented and closed 2026-10-12; `0.36.0` candidate, not yet published."
+source_rfc_status: "Implemented and closed 2026-10-12; released as `0.36.0` 2026-10-12."
 target_release: "0.36.0"
 ---
 

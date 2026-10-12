@@ -2,7 +2,7 @@
 
 ## 0.36.0 - Command Approval A User Can Reach
 
-Status: **candidate, not yet published.** RFC-060's four slices and its Whole-RFC checklist are
+Status: **released 2026-10-12.** RFC-060's four slices and its Whole-RFC checklist are
 all implemented, gated and closed. This entry was written incrementally as slices closed, then
 re-read against the finished set at the candidate; see
 `rfcs/handoffs/060-command-approval-reachable/` for the full handoff pack.

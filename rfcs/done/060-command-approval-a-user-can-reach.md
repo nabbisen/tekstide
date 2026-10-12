@@ -1,6 +1,6 @@
 # RFC-060: Command Approval A User Can Reach
 
-Status: **Implemented and closed 2026-10-12; `0.36.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-12; released as `0.36.0` 2026-10-12.** See the
 *Closed* section. **Accepted by the human owner 2026-10-12.** D1–D7 as written; **the open question
 answered by the acceptance itself** — see *Decided on acceptance*. Proposed 2026-10-12. `0.36.0`,
 pre-1.0, **a 1.0 blocker**. `REQ-AGENT-012`, `REQ-AGENT-013`, `REQ-SEC-012`, `REQ-SEC-013`. Builds
@@ -160,7 +160,7 @@ say rather than a feature to build.
 
 ## Closed (2026-10-12)
 
-Four slices and the Whole-RFC checklist are done. **`0.36.0` candidate, not yet published** — see
+Four slices and the Whole-RFC checklist are done. **Released as `0.36.0` 2026-10-12** — see `rfcs/handoffs/release-0.36.0.md`, the publish record the invariant reads the changelog against; see
 `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
 
 **PR-060-A (the way in)** gave `ConfiguredAiCliProfile` the field D1/D2 ask for:
