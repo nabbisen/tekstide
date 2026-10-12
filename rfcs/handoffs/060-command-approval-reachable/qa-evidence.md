@@ -101,3 +101,44 @@ anything about `adapter` at all. Writing it once, correctly, there, is safer tha
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
 full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `779 + 22 + 1139`, 0 failed, 0 fixture
 entries.
+
+### Review 535 required fixes
+
+**Required 1 — a fixture leaked on every passing run, not only a failing one.** `a_configured_
+managed_profile_reaches_prepare_adapter_approval_and_gets_a_real_channel`'s own `state_root` was
+`create_dir_all`-ed with no drop guard at all — worse than review 524's and 527's own findings,
+both failure-only. Fixed by reusing `CleanupOnDrop` (`runtime::terminal::tests`, `pub(crate)` since
+review 528). Verified directly: ran the test three times in a row, `ls` for `ta-060a-*` under
+`/tmp` before and after each run — `0` every time, not merely "0 at the end." The reviewer's own
+count discrepancy (`1139` vs their measured `1140`) reconciled on the next run after this fix —
+the gate below reproduces their number exactly.
+
+**Required 2 — the two outputs were derived in two places, not one.** `to_ai_cli_profile`'s first
+draft read `configured.adapter` twice: a no-wildcard `match` for `compatibility_level`, a separate
+`if matches!(..., Managed)` for `structured_action_approval`. A third `ConfiguredAiCliAdapter`
+variant could pass through the `match` (forced) and fall through the `if` (not forced — no `else`
+arm to catch it), landing on `Managed` with `structured_action_approval: false` — exactly the
+inconsistent profile §1 exists to prevent, produced silently. Fixed by deriving both as one tuple
+from one match:
+```rust
+let (compatibility_level, structured_action_approval) = match configured.adapter {
+    ConfiguredAiCliAdapter::None => (AgentCompatibilityLevel::Supervised, false),
+    ConfiguredAiCliAdapter::Managed => (AgentCompatibilityLevel::Managed, true),
+};
+```
+
+**Ablated in a disposable `git worktree`, both halves of the claim**: planted a third variant
+(`ConfiguredAiCliAdapter::Experimental`) — `cargo build -p tekstide-core` failed with
+`error[E0004]: non-exhaustive patterns: 'ConfiguredAiCliAdapter::Experimental' not covered` at the
+tuple match's own line. Added **the one arm the compiler demanded**, supplying both values
+together (`(AgentCompatibilityLevel::Managed, true)`) — `cargo build --tests -p tekstide-core`
+then succeeded, and `cargo test -p tekstide-core --lib config::` reproduced the reviewer's own
+`131 passed; 0 failed` exactly. The shape cannot be fixed by touching only one of the two outputs:
+the compiler error names the missing tuple, not a missing level or a missing capability
+separately. Worktree removed; main tree never touched.
+
+### Gate, re-run after the required fixes
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`: clean. Three consecutive
+full-workspace runs, fresh short `/dev/shm` `TMPDIR` each: `779 + 22 + 1140`, 0 failed, 0 fixture
+entries — matching the reviewer's own count exactly.
