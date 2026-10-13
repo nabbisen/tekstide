@@ -2,6 +2,10 @@
 
 A local-first, multi-project AI-CLI development workbench.
 
+**Linux only.** There is no evidence for any other platform. **No screen-reader support**, for
+the life of the `iced` substrate decision. Both hold for every page in this book; this is the
+one a reader reaches first.
+
 This book is assembled from the repository's canonical documents rather than restating
 them. Where a document already has a canonical home in the repository — `ARCHITECTURE.md`,
 `CHANGELOG.md`, `ROADMAP.md`, the RFC tree — its chapter is an `{{#include}}` of that file,

@@ -383,3 +383,35 @@ so this half is not blocked by the pending `workflow_dispatch` approval the way 
 
 No Rust source touched; `cargo fmt --check` trivially clean. Pushed as `9fcad47`, `ci.yml` green:
 [38380013026](https://github.com/nabbisen/tekstide/actions/runs/38380013026).
+
+## PR-029-F — the landing page (D8)
+
+`docs/src/introduction.md` is the book's own root (`book.toml`'s `src = "src"` and mdbook's own
+convention make it `index.html`), published at `https://nabbisen.github.io/tekstide/` -- the page
+a visitor reaches before any chapter, confirmed by `grep -A3 "No screen-reader" docs/book/index.html`
+against a fresh `mdbook build docs`.
+
+It did not carry the platform statement or the no-screen-reader statement before this slice --
+only chapters it links to did. Added, word-for-word what `README.md:52-53` already says, so there
+is one form of each claim rather than a second one that could drift from it:
+
+```
+**Linux only.** There is no evidence for any other platform. **No screen-reader support**, for
+the life of the `iced` substrate decision.
+```
+
+**§8's command-approval clause needs no fix**: the page never mentions command approval, AI CLI
+runs, or anything `REQ-AGENT-013` binds -- checked by reading the full page rather than grepping
+for the forbidden words, since the clause is a prohibition on what gets added, not a pattern the
+existing text could already be clean of by coincidence.
+
+**Added to the release checklist's sweep, in this same slice** (D8's own condition for landing
+it at all): a new bullet under *The Book Against The Changelog* names `docs/src/introduction.md`
+explicitly, next to the existing `what-works-today.md` bullet; the accessibility Standing Watch
+now names the landing page alongside README and release notes.
+
+### Gate
+
+No Rust source touched. `mdbook build docs` succeeds; the rendered `index.html` carries both
+statements (checked above). `cargo test -p tekstide --test rfc_docs_invariants`: 22/22. `cargo fmt
+--check`: clean (trivially, nothing it covers was touched).

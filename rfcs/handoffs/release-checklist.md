@@ -280,6 +280,12 @@ Two shapes, both found by the implementer rather than by the gate:
 - [ ] For every capability this release's **Added** section names, search
       `docs/src/users/what-works-today.md` for a claim that it does not exist — *"no X"*, *"There is
       no X"*, *"Not built"*.
+- [ ] **`docs/src/introduction.md` — the landing page — joins this sweep.** Added 2026-10-13,
+      RFC-029 PR-029-F, D8: it is published as the book's own root (`index.html`), the first page a
+      visitor reaches, and carries the platform and no-screen-reader statements itself rather than
+      only pointing at pages that do. Read it against the same **Added** section the first bullet
+      above reads `what-works-today.md` against — a stale claim here is the same defect as a stale
+      book page, reaching readers who open neither README nor book chapter.
 - [ ] For every count the book states, check it against the thing that holds the count, not against
       the last edit of the sentence.
 - [ ] Run it in the other direction too, from the diff rather than the changelog: for every
@@ -304,7 +310,7 @@ configuration page carries three, and that asymmetry is why one drifted and the 
 Checked every release, because a watch that depends on someone remembering is not a watch.
 
 - [ ] **Accessibility: has `iced` gained an accessibility bridge?** One command: `cargo tree -p tekstide | grep -i accesskit`. A non-empty result means RFC-014 R2 is reopenable and the owner should be told — screen-reader support is a real social need, not a nice-to-have, and the only reason it is out of scope is that the substrate offers no path to it. If the result is empty, tick this having *run* it, not having assumed it.
-- [ ] **Public accessibility wording unchanged.** README and release notes say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
+- [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
 ## Review
 
