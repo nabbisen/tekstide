@@ -76,10 +76,69 @@ recorded in its review request and in `qa-evidence.md`.
 ## Final Acceptance Decision
 
 - [ ] Accepted.
-- [ ] Accepted with required follow-up.
+- [x] Accepted with required follow-up.
 - [ ] Requires re-review after changes.
 
 Reviewer notes:
 
 ```text
+Reviewer: the high-capability reviewer. Review rounds 530-555; the candidate itself
+was 552, with 553, 554 and 555 carrying required corrections.
+
+ACCEPTED WITH REQUIRED FOLLOW-UP, at 3fee6d8.
+
+What the acceptance rests on, measured rather than reported:
+- Three consecutive full-workspace runs at the candidate commit, mine not the
+  implementer's, TMPDIR=/dev/shm: 0 failed, 0 fixture entries each. The gate was
+  re-run from scratch once, because row 1 of the flake register failed run 2 of
+  an earlier attempt at 9037aee -- three consecutive green, not three attempts.
+- fmt, clippy --workspace --all-targets --all-features -D warnings, doc tests,
+  rfc_docs_invariants 22/22.
+- cargo audit: zero vulnerabilities, and the three unmaintained/unsound warnings
+  match dependency-advisories.md's three rows exactly -- no new row, none retired.
+- Scope: workspace 0.37.0 with the tekstide-core pin moved with it; crates/
+  tekstide-core/README.md read against this release and needs nothing, since no
+  core production code changed; no status line anywhere claims 0.37.0 as released.
+- The book-against-the-changelog sweep, both directions. No locale string changed
+  this release, verified from the diff rather than assumed, so the en.ftl half of
+  that sweep had no target. introduction.md's platform and no-screen-reader
+  statements are word-for-word identical to README.md's, as the entry claims.
+
+Defects found during the candidate's own review, and fixed:
+- The README advertised a 404: the install pages described a prebuilt binary
+  before any tag produced one (review 552, fixed by D15 and a sentence true on
+  both sides of the tag).
+- D1's second sentence -- a quarantined test still runs, in a separate job that
+  is read -- was never built by any slice. Found at 553 after this RFC had
+  already closed. Now stated in CHANGELOG.md, this RFC's own Closed section,
+  both registers and ci.yml's header, and reserved as RFC-072.
+- The flake register blamed "real machine contention" for the quarantined knock
+  test. Ablating the #[ignore] away in a throwaway worktree passed 3 of 3 full
+  workspace runs at the load the row blamed; the trigger is unidentified. The
+  verdict (Quarantine) stands on the record, not on a named cause.
+- Two overclaims corrected: "rules out load" (failing to reproduce is not ruling
+  out) and the changelog's opening "all implemented" while PR-029-A's own
+  checklist box was unmet. Both were partly the reviewer's own wording.
+- RFC-072 was first reserved in a second table below the one rfcs/README.md's
+  heading tells an author to check, and with Headless = no for a CI job.
+- README said "the four-line verified form" above a five-line block -- the
+  review-549 fix added the line to the code and left the sentence. Fixed by
+  dropping the count, since the count is the part that drifts.
+
+Deferred rather than fixed, deliberately:
+- RFC-072. D1's non-blocking job needs a convention separating the three
+  quarantined rows from the nine measurements and diagnostics that -- --ignored
+  also selects; a job reading all twelve would be red for non-findings on day
+  one, which is D1's own failure mode.
+- Row 1 of the flake register (bind_recovers_from_a_stale_socket_file) recurred
+  on this candidate's gate, and its Accept's "no actionable fix" premise no
+  longer holds: source: None narrows it to the two arms of clear_stale_socket
+  that response 231 left indistinguishable. Recorded in test-process-leak.md
+  with the ruling-out work; the fix and the re-verdict are the slice after this
+  release, since the flake predates it and nothing here touches that code.
+- Branch protection on main, which makes ci.yml's job actually blocking, is a
+  repository setting only the owner can make. The job ships advisory and says so.
+- The one-liner run against the real published artifact, on a machine without
+  cargo on PATH, cannot run before the tag exists. It is in the release
+  checklist's Post-Publish Verification, not here.
 ```
