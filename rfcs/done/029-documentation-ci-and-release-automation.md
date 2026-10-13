@@ -1,9 +1,10 @@
 # RFC-029: Documentation, CI, and Release Automation
 
-Status: **Accepted by the human owner 2026-10-13.** D1–D13 as written; **the remaining question —
-what the install page leads with — answered by the acceptance itself**, see *Decided on acceptance*.
-Proposed 2026-10-12. `0.37.0`, M14, the first RFC of that milestone. D9–D13 reverse this RFC's own
-first recommendation against a one-liner installer, after the owner challenged it.
+Status: **Implemented and closed 2026-10-14; `0.37.0` candidate, not yet published.** See the
+*Closed* section. **Accepted by the human owner 2026-10-13.** D1–D13 as written; **the remaining
+question — what the install page leads with — answered by the acceptance itself**, see *Decided on
+acceptance*. Proposed 2026-10-12. `0.37.0`, M14, the first RFC of that milestone. D9–D13 reverse
+this RFC's own first recommendation against a one-liner installer, after the owner challenged it.
 
 ## Summary
 
@@ -194,3 +195,56 @@ Consequences, recorded where they bind:
   for.
 - `release.yml`'s first live run is the `0.37.0` tag. Its blast radius there is bounded: it touches
   neither crates.io nor the release notes, and `workflow_dispatch` remains as the re-run path.
+
+## Closed (2026-10-14)
+
+Six slices and the Whole-RFC checklist are done. **`0.37.0` candidate, not yet published** — see
+`CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
+
+**PR-029-A (the flake dispositions)** closed three live rows, not the two the task breakdown
+named: a third (review 507's own guessed-rather-than-verified entry) was found still unverdicted.
+Two were fixed with an identified causal mechanism — a missing `ETXTBSY` warmup guard, and a poll
+condition weaker than its own assertion — and one accepted as genuinely unreproducible after a
+second independent investigation found no actionable cause. `test-process-leak.md` carries zero
+live rows after this pass.
+
+**PR-029-B (the CI job)** built `.github/workflows/ci.yml`, proven failing on a deliberately broken
+commit and green again after a revert, through a real throwaway PR rather than read and agreed to
+look right — and found a genuine first-run failure before any deliberate breakage: a clean
+`target/` does not build the `[[bin]]` helper binaries several tests spawn at runtime. **It is
+advisory, not blocking**: branch protection remains an unconfigured repository setting, left to the
+owner rather than decided unilaterally here.
+
+**PR-029-C (release artifacts and checksums)** built `.github/workflows/release.yml`, verified live
+against a throwaway draft release — built, staged, uploaded, downloaded back, checked against its
+own checksum, then deleted. **Measured, not assumed, non-reproducible**: two independent `--locked`
+builds of the same tagged source produced two different binaries, byte-for-byte, which is why every
+surface naming the checksum says only *verified against its published checksum*.
+
+**PR-029-D (the one-liner installer)** built `install.sh`, with its truncation safety proven by
+truncating it at eight separate cutoff points — zero files created at any of them — and a checksum
+mismatch proven to refuse and install nothing. A required correction (review 547) found the
+script's own header overstated "one path" when it meant "one binary": `mkdir -p` on the destination
+directory is part of installing to one location, not a second path.
+
+**PR-029-E (AUR and the install rewrite)** packaged a `PKGBUILD` building from the published crate,
+and found a real, 100%-reproducible-under-`makepkg` defect while doing it: this distro's global
+`-flto=auto` reaches the `cc` crate's bundled-`sqlite3.c` build, producing LTO-bytecode objects
+`rust-lld` cannot resolve. Fixed by scoping the `CFLAGS` strip to that one build. `README.md`'s
+*Quick Start* and `getting-started.md`'s *Install* both now lead with the one-liner, with
+`cargo install` and a five-line verified form following as stated equivalents. **Held off `main`
+until the first real asset existed, per review 548**, then released under D15 below.
+
+**PR-029-F (the landing page)** added the platform and no-screen-reader statements to
+`docs/src/introduction.md` — the book's own root, published as `index.html` — word for word what
+`README.md` already says, and added the page to the release checklist's book-against-the-changelog
+sweep in the same slice that created it.
+
+**D15, decided after acceptance**, replaced the plan of authorising a one-off `workflow_dispatch`
+against `0.36.0` to produce an asset for PR-029-E's pages to point at: that sequencing error is
+removed rather than granted authorisation, and `0.37.0`'s own tag produces the first artifact
+instead. One consequence the decision did not itself state: merging the held pages into `main`
+*before* the candidate existed (rather than with it, as D15 intended) left `main`'s README
+advertising a working install for a window longer than the "minutes" D15 accepted. Fixed by adding
+one sentence to both pages stating the prebuilt binary is published from `0.37.0` onward — true
+before the tag and true after it, so nothing needs removing later.

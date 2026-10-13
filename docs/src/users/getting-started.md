@@ -10,6 +10,10 @@ installs **one binary** to `$HOME/.local/bin/tekstide` — plus the directory it
 does not already exist. Touches nothing else: no shell rc edit, no `sudo`, no repository added. If
 a future version needs to do more than that, it will say so before doing it, not after.
 
+**The prebuilt binary is published from `0.37.0` onward.** Running this before that release is
+tagged fails cleanly with a 404 and installs nothing; `cargo install` below works against any
+published version in the meantime.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nabbisen/tekstide/main/install.sh | sh
 tekstide /path/to/project

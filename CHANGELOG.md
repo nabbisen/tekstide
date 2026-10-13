@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.37.0 - Documentation, CI, and Release Automation
+
+Status: **candidate, not yet published.** RFC-029's six slices and its Whole-RFC checklist are
+all implemented, gated and closed. This entry was written incrementally as slices closed, then
+re-read against the finished set at the candidate; see `rfcs/handoffs/029-ci-and-distribution/`
+for the full handoff pack.
+
+**Installing no longer needs a Rust toolchain.** `cargo install tekstide` was the only documented
+way to get this program; this release adds a prebuilt `x86_64` Linux binary, a one-liner installer,
+and an Arch Linux `PKGBUILD`, and rewrites `README.md`'s *Quick Start* and the book's *Install* page
+to lead with the one-liner. `cargo install` and a four-line (now five-line) manually-verified form
+stay documented beside it as **equivalents**, never as the safer choice, since every form here
+fetches code from the same server. **The prebuilt binary is published from this release onward**:
+a reader reaching these pages before `0.37.0`'s own tag exists will see the installer fail with a
+clean 404, not a broken program.
+
+**This project's first build/test CI job, shown failing before it was trusted.** `ci.yml` runs
+`fmt`, `clippy --workspace --all-targets --all-features -D warnings`, `cargo test --doc --workspace`
+and the full workspace suite with `--all-targets --no-fail-fast` against a short fixed `TMPDIR`,
+asserting zero fixture entries left. Proven on a real, deliberately broken commit — red at exactly
+the `fmt` step, then green again after a revert — on a throwaway PR, not reasoned about from reading
+the YAML. **It is advisory, not yet a required check**: branch protection is a repository setting
+the owner has not configured, left to them rather than decided unilaterally here.
+
+**Every published artifact carries a published SHA-256**, verified live end to end — built,
+staged, uploaded to a throwaway draft release, downloaded back, and checked against its own
+checksum. **Measured, not assumed, to be unreproducible**: two independent `--locked` builds of the
+same source produced two different binaries, byte-for-byte, so every surface that mentions the
+checksum — the installer, the release notes, this entry — says only *verified against its published
+checksum*, never *secure*, *safe*, or *signed*.
+
+**The one-liner's truncation safety was proven by truncating it**, at eight separate cutoff points
+from 10% to 99% of the script's own length, piped exactly as a real `curl | sh` would run it:
+**zero files created at every cutoff.** A checksum mismatch refuses and installs nothing. The
+installed binary ends up at exactly one location, `$HOME/.local/bin/tekstide`, plus the directory
+chain leading to it when that does not already exist — a required correction after the first
+draft's own header overstated "one path" and meant "one binary."
+
+**A real, 100%-reproducible-under-`makepkg` packaging defect was found and fixed while building the
+AUR package**: this distro's global `-flto=auto` reaches the `cc` crate's build of rusqlite's
+bundled `sqlite3.c`, producing GCC LTO-bytecode objects `rust-lld` cannot resolve — every symbol
+comes back undefined, every time, under a real `makepkg` run. Fixed by stripping `-flto=auto` from
+`$CFLAGS` for that one build invocation only. The package is not published to the AUR itself; that
+remains the owner's own account and action.
+
+**The book's own front page — `docs/src/introduction.md`, published as `index.html` — now states
+the platform and no-screen-reader limits itself**, rather than only linking to pages that do,
+matching `README.md` word for word so there is one form of each claim rather than a second that
+could drift from it.
+
+**Still Linux-only.** The artifacts this release adds are `x86_64` Linux only, same as the
+product itself; nothing here implies otherwise, and that stays true until RFC-028.
+
 ## 0.36.0 - Command Approval A User Can Reach
 
 Status: **released 2026-10-12.** RFC-060's four slices and its Whole-RFC checklist are

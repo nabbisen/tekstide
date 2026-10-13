@@ -1,6 +1,6 @@
 ---
 title: "RFC-029 task breakdown and PR plan"
-source_rfc: "../../accepted/029-documentation-ci-and-release-automation.md"
+source_rfc: "../../done/029-documentation-ci-and-release-automation.md"
 ---
 
 # RFC-029 — task breakdown and PR plan

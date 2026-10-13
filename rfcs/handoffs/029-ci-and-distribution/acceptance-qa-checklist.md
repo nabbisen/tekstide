@@ -1,7 +1,7 @@
 ---
 title: "RFC-029 acceptance and QA checklist"
-source_rfc: "../../accepted/029-documentation-ci-and-release-automation.md"
-source_rfc_status: "Accepted by the human owner 2026-10-13"
+source_rfc: "../../done/029-documentation-ci-and-release-automation.md"
+source_rfc_status: "Implemented and closed 2026-10-14; `0.37.0` candidate, not yet published."
 ---
 
 # RFC-029 — acceptance and QA checklist

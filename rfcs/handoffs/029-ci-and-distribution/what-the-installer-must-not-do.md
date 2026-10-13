@@ -1,6 +1,6 @@
 ---
 title: "What the installer, the CI job and the landing page must not do"
-source_rfc: "../../accepted/029-documentation-ci-and-release-automation.md"
+source_rfc: "../../done/029-documentation-ci-and-release-automation.md"
 ---
 
 # What the installer, the CI job and the landing page must not do
