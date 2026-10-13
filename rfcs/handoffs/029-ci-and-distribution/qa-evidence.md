@@ -383,3 +383,30 @@ so this half is not blocked by the pending `workflow_dispatch` approval the way 
 
 No Rust source touched; `cargo fmt --check` trivially clean. Pushed as `9fcad47`, `ci.yml` green:
 [38380013026](https://github.com/nabbisen/tekstide/actions/runs/38380013026).
+
+## PR-029-E — the install rewrite (D7, D13, D14)
+
+`README.md`'s *Quick Start* and `getting-started.md`'s *Install* both now lead with the
+one-liner. `cargo install` and the four-line verified form follow, worded as **equivalents**,
+never as the safer choice -- both still fetch code from the same server the one-liner does. AUR
+is named in both pages, with the not-yet-published caveat stated plainly rather than implied.
+
+- `getting-started.md`'s *"It runs on Linux; there is no cross-platform evidence beyond it"*
+  is untouched -- confirmed by diff, not by memory.
+- `mdbook build docs`, then grepped the actual HTML output (not the markdown source) for the
+  one-liner, the AUR link, and the untouched Linux-only sentence: all three present, exactly
+  where expected, following the discipline review 540 asked for after the D3 miss at review 537.
+- `cargo test -p tekstide --test rfc_docs_invariants` **caught a real mistake**: the first draft
+  linked `packaging/aur/` with a relative path, which `the_readme_has_no_relative_links` exists
+  specifically to catch -- crates.io rewrites relative README links against the crate's own
+  directory, where `packaging/` does not exist, breaking the link for every registry reader.
+  Fixed to an absolute `github.com/.../tree/main/...` URL; all 22 invariants pass clean after.
+- No Rust source touched; `cargo fmt --check` and `cargo clippy` both trivially clean (nothing
+  for them to see).
+
+### Held, not pushed
+
+Review 548 (PR-029-D): the pages must not reach `main` describing a working install before the
+first real release asset exists, and both the one-liner and the four-line form here name a
+GitHub release asset that does not exist yet. This commit stays local only -- push it once the
+first real asset exists, alongside the real one-liner run still owed from PR-029-D.
