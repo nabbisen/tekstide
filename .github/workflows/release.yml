@@ -118,9 +118,11 @@ jobs:
           cp target/release/tekstide "staging/${name}"
           ( cd staging && sha256sum "${name}" > "${name}.sha256" )
           # Workspace-root copies, not a crate-local one: both are the same
-          # file (kept in sync, `no_crate_notice_or_license_drifts_from_the_
-          # workspace_root`), and the root is unambiguous regardless of
-          # which crate's checkout this ever runs from.
+          # file (kept in sync by
+          # `the_crate_local_notice_and_license_do_not_drift_from_the_
+          # workspace_root` in `crates/tekstide/tests/rfc_docs_invariants.rs`),
+          # and the root is unambiguous regardless of which crate's checkout
+          # this ever runs from.
           cp NOTICE staging/NOTICE
           cp LICENSE staging/LICENSE
           echo "name=${name}" >> "$GITHUB_OUTPUT"

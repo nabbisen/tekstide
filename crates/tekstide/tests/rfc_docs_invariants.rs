@@ -1755,19 +1755,31 @@ fn the_crate_local_notice_and_license_do_not_drift_from_the_workspace_root() {
     let root_license = std::fs::read_to_string(repo_root().join("LICENSE"))
         .expect("workspace root LICENSE exists alongside NOTICE");
 
-    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let crate_notice = std::fs::read_to_string(crate_dir.join("NOTICE"))
-        .expect("crates/tekstide/NOTICE exists -- main.rs embeds it with include_str!");
-    let crate_license =
-        std::fs::read_to_string(crate_dir.join("LICENSE")).expect("crates/tekstide/LICENSE exists");
+    // Both crate directories carry their own hand-maintained copies --
+    // `release-checklist.md`'s own Package Smoke item names both, not only
+    // `crates/tekstide/` (the one `main.rs` actually embeds via
+    // `include_str!`). Review 556: the first draft of this test checked
+    // four of the six files and missed `tekstide-core`'s pair silently.
+    let tekstide_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tekstide_core_dir = tekstide_dir.join("../tekstide-core");
+    for (label, crate_dir) in [
+        ("crates/tekstide", tekstide_dir.to_path_buf()),
+        ("crates/tekstide-core", tekstide_core_dir),
+    ] {
+        let crate_notice = std::fs::read_to_string(crate_dir.join("NOTICE"))
+            .unwrap_or_else(|_| panic!("{label}/NOTICE exists"));
+        let crate_license = std::fs::read_to_string(crate_dir.join("LICENSE"))
+            .unwrap_or_else(|_| panic!("{label}/LICENSE exists"));
 
-    assert_eq!(
-        crate_notice, root_notice,
-        "crates/tekstide/NOTICE has drifted from the workspace root -- main.rs's `--licenses` \
-         flag embeds the crate-local copy, so a stale one ships a stale notice"
-    );
-    assert_eq!(
-        crate_license, root_license,
-        "crates/tekstide/LICENSE has drifted from the workspace root"
-    );
+        assert_eq!(
+            crate_notice, root_notice,
+            "{label}/NOTICE has drifted from the workspace root -- a stale copy ships at that \
+             crate's own package root on crates.io, and `tekstide`'s copy is also what the \
+             `--licenses` flag embeds"
+        );
+        assert_eq!(
+            crate_license, root_license,
+            "{label}/LICENSE has drifted from the workspace root"
+        );
+    }
 }

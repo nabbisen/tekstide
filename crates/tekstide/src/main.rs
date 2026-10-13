@@ -54,8 +54,9 @@ fn timed_view(state: &shell::State) -> iced::Element<'_, shell::Message> {
 
 /// Byte-identical to the workspace root's own `NOTICE` -- both are
 /// published verbatim (crates.io renders the workspace copy; this one
-/// ships inside the binary itself). `no_crate_notice_or_license_drifts_
-/// from_the_workspace_root` in `tests.rs` keeps the two from silently
+/// ships inside the binary itself).
+/// `the_crate_local_notice_and_license_do_not_drift_from_the_workspace_root`
+/// in `tests/rfc_docs_invariants.rs` keeps the two from silently
 /// disagreeing.
 const NOTICE_TEXT: &str = include_str!("../NOTICE");
 

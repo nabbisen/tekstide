@@ -2178,3 +2178,11 @@ pass rules out a logic defect this specific run introduced. **Accept, carried as
 machine shown contended at the time, consistent with this register's existing pattern for
 real-process-spawning tests under genuine (not synthetic) load -- re-opens if either recurs with
 enough frequency to investigate.
+
+**Review 556's own correction, worth carrying forward rather than filing this as noise-shaped and
+leaving it there**: load explains *a* failure, but these two failed together, in the same run, and
+both spawn a real `reference_adapter` child process -- that correlation is not noise-shaped, it
+points at a shared mechanism (process-spawn limits, the shared `RealProcessLimiter`, fd or PID
+pressure), the same way the shared-audit-store cause this register already resolved once looked
+"exactly this shape before isolation." A future occurrence should start from that correlation, not
+from re-checking `uptime`.
