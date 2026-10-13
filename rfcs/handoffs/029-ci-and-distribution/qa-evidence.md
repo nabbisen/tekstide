@@ -339,3 +339,47 @@ assumed either way.
 
 `sh -n install.sh` and `shellcheck -s sh install.sh`: clean. No Rust source changed;
 `rfc_docs_invariants` unaffected (no RFC document touched this slice).
+
+## PR-029-E — AUR packaging (D6)
+
+`packaging/aur/PKGBUILD` builds from the `tekstide` crate's own crates.io tarball (version
+0.36.0, the latest actually published), not from the still-nonexistent GitHub release asset --
+so this half is not blocked by the pending `workflow_dispatch` approval the way D5/D9-D12 are.
+
+**A real, 100%-reproducible build defect, found and fixed, not just read about:**
+
+- Plain `makepkg --noconfirm -f`, fresh every time: **2/2 failures** before the fix, each
+  `rust-lld: error: undefined symbol: sqlite3_*` -- the binary never links.
+- Root cause, confirmed by instrumenting `build()` to dump its own environment: this distro's
+  global `makepkg.conf` sets `CFLAGS` with `-flto=auto`. The `cc` crate reads `$CFLAGS` when it
+  compiles rusqlite's bundled `sqlite3.c`, producing GCC LTO-bytecode objects. `rust-lld` (the
+  linker rustc has used by default since well before this toolchain) has no GCC LTO plugin and
+  cannot resolve them -- every sqlite3 symbol comes back undefined, every time, under a real
+  `makepkg` run.
+- **Fix measured, not assumed**: stripping `-flto=auto` from `$CFLAGS` for this one build only
+  (`CFLAGS="${CFLAGS//-flto=auto/}" cargo build --release --locked`) --
+  **3/3 clean `makepkg` runs after**, same machine, same `makepkg.conf`.
+- A plain `cargo build --release --locked` run *outside* `makepkg` (no distro `CFLAGS` in that
+  shell) does not carry this defect -- 11/12 such runs succeeded during the investigation, the
+  one failure unexplained and not reproduced since. That outlier is disclosed rather than
+  dropped, but it is not the defect this fix addresses: the `makepkg`-specific failure was 2/2
+  before the `CFLAGS` fix and 0/3 after, which is the comparison that matters for a package a
+  real AUR user builds with real `makepkg.conf` settings.
+- Building from *inside this repo's own checkout* separately made Cargo walk up and find the
+  workspace root, refusing to build a package not listed in it -- harmless for a real AUR build
+  (never run inside this tree), but a real failure for anyone verifying the PKGBUILD from a
+  clone, which is exactly what the above testing did. Fixed by appending an empty `[workspace]`
+  table to the extracted manifest inside `build()`, matching Cargo's own suggested fix.
+- `namcap PKGBUILD` and `namcap <built package>`: PKGBUILD clean; package warnings are only the
+  implicitly-satisfied-glibc/gcc-libs ones every Rust binary package gets from `namcap`.
+- Packaged binary extracted and run directly: `tekstide --version` reports `0.36.0`.
+- `release-checklist.md` gains an **AUR Package** section: bump `pkgver`/`pkgrel`, resum, and
+  regenerate `.SRCINFO` after each `cargo publish --workspace`, and rebuild with real `makepkg`
+  (not bare `cargo build`) so this exact defect class gets caught again if it ever recurs.
+- **Not published to the real AUR.** That is the owner's own account and action; nothing here
+  does it or asks to.
+
+### Gate
+
+No Rust source touched; `cargo fmt --check` trivially clean. Pushed as `9fcad47`, `ci.yml` green:
+[38380013026](https://github.com/nabbisen/tekstide/actions/runs/38380013026).
