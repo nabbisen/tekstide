@@ -404,9 +404,23 @@ is named in both pages, with the not-yet-published caveat stated plainly rather 
 - No Rust source touched; `cargo fmt --check` and `cargo clippy` both trivially clean (nothing
   for them to see).
 
-### Held, not pushed
+### Required fix, review 549 — the four-line form was missing a line
+
+The documented four-line form omitted `mkdir -p ~/.local/bin`, which `install.sh` itself runs
+(line 72) because `~/.local/bin` often does not exist. On a genuinely fresh `$HOME`, the four-line
+form failed with `install: cannot create regular file ... No such file or directory` while being
+labelled *verified* -- the equivalent form was not actually equivalent. Re-verified myself against
+a fresh `$HOME` and a local mock server after adding the line: `sha256sum -c` reports `OK`, the
+install succeeds, `find "$HOME" -mindepth 1` shows exactly the expected paths, and the installed
+binary reports `0.36.0`. Both pages now carry the corrected five-line form; "four-line form" in
+prose elsewhere in this pack refers to what RFC-029 itself names it, not the current line count.
+
+### Held, not pushed -- now parked on its own branch
 
 Review 548 (PR-029-D): the pages must not reach `main` describing a working install before the
 first real release asset exists, and both the one-liner and the four-line form here name a
-GitHub release asset that does not exist yet. This commit stays local only -- push it once the
-first real asset exists, alongside the real one-liner run still owed from PR-029-D.
+GitHub release asset that does not exist yet. Review 549 flagged that the first attempt at
+holding this left the commit as the tip of the shared `main` -- one unrelated `git push` away
+from publishing it by accident. Moved to `held/pr-029-e-install-rewrite`, with `main` reset back
+to the last pushed commit. Push the branch's tip once the first real asset exists, alongside the
+real one-liner run still owed from PR-029-D.

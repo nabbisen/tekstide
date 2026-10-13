@@ -89,6 +89,7 @@ cargo install tekstide
 curl -LO https://github.com/nabbisen/tekstide/releases/latest/download/tekstide-x86_64-linux
 curl -LO https://github.com/nabbisen/tekstide/releases/latest/download/tekstide-x86_64-linux.sha256
 sha256sum -c tekstide-x86_64-linux.sha256
+mkdir -p ~/.local/bin
 install -m 755 tekstide-x86_64-linux ~/.local/bin/tekstide
 ```
 
