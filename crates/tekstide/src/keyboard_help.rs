@@ -642,7 +642,8 @@ pub fn usage_text(catalog: &Catalog, executable: &str) -> String {
     out.push_str("same field once a project is already open).\n\n");
     out.push_str("OPTIONS:\n");
     out.push_str("    -h, --help       Print this help\n");
-    out.push_str("    -V, --version    Print version\n\n");
+    out.push_str("    -V, --version    Print version\n");
+    out.push_str("    --licenses       Print third-party licence notices\n\n");
     out.push_str("KEYBOARD:\n");
     // `--help` runs before the configuration is read, so it prints the chords
     // Tekstide ships with; the Help modal (`Ctrl+Alt+K`) prints the ones in

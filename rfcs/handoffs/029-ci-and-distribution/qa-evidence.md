@@ -462,3 +462,53 @@ now names the landing page alongside README and release notes.
 No Rust source touched. `mdbook build docs` succeeds; the rendered `index.html` carries both
 statements (checked above). `cargo test -p tekstide --test rfc_docs_invariants`: 22/22. `cargo fmt
 --check`: clean (trivially, nothing it covers was touched).
+
+## Found at the release step, after acceptance: the bare binary shipped without `NOTICE`
+
+The architect held the tag rather than running it: `release.yml` uploads exactly two files, the
+binary and its checksum, and `release-checklist.md`'s own Package Smoke item says plainly that a
+bare binary uploaded on its own does not satisfy the obligation a project-structure tarball meets
+automatically. `rusqlite`/`libsqlite3-sys` are linked in as a normal, non-dev dependency with the
+`bundled` feature (`cargo tree -e normal -i rusqlite`), so every copy of the binary is a copy of
+MIT-licensed software whose notice must travel with it -- and the one-liner and the GitHub Release
+asset were the two channels that did not carry it. `cargo install` and the AUR `PKGBUILD` already
+did (the `.crate` carries `NOTICE`/`LICENSE` at its own root; the `PKGBUILD` installs both
+explicitly).
+
+**Fixed by embedding, not by teaching every channel a second file to fetch.**
+`crates/tekstide/src/main.rs` gains `--licenses`, printing `include_str!("../NOTICE")` verbatim and
+exiting -- the same `crates/tekstide/NOTICE` copy the `.crate` already ships, read directly rather
+than the workspace root, so it resolves identically whether built from this checkout, a `cargo
+install`, or the AUR package. Deliberately plain `println!`, not `i18n::Catalog`: a licence notice
+must be reproduced verbatim, and `--version`'s own string and all of `keyboard_help::usage_text`
+already bypass the catalog for CLI/stdout output on exactly that basis -- not a new exemption, the
+same one this crate's own `--help`/`--version` already use. `i18n::enforcement`'s scan covers
+`text(...)` calls the GUI renders; CLI output has never gone through it.
+
+**Also, for the reader who wants the file rather than the flag**: `release.yml` now stages and
+uploads `NOTICE` and `LICENSE` beside the binary and its checksum, from the workspace root (not a
+crate-local copy, since the workflow checks out the tagged commit directly and the root is
+unambiguous).
+
+**A new invariant keeps the embedding from going stale silently**:
+`the_crate_local_notice_and_license_do_not_drift_from_the_workspace_root`
+(`rfc_docs_invariants.rs`) fails if `crates/tekstide/NOTICE`/`LICENSE` ever diverge from the
+workspace root's own copies -- the two were already supposed to be kept in sync by hand (the
+Package Smoke item says so) with nothing that checked it. A second test,
+`the_embedded_notice_still_carries_the_mit_inclusion_clause`, fails if a future edit to `NOTICE`
+drops the one sentence that makes it a licence rather than only a copyright line.
+
+**Verified live**, not only by the new tests: built the real binary, ran `./target/debug/tekstide
+--licenses` directly, confirmed the full notice (including the bundled-SQLite public-domain text)
+prints verbatim with exit code 0; confirmed `--help`'s own `OPTIONS` block now lists it;
+`cargo package --list -p tekstide` confirms `NOTICE`/`LICENSE` still ship at the package root, so
+`include_str!`'s relative path resolves the same way in the published tarball it did before this
+change.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`:
+clean. `rfc_docs_invariants`: 23/23 (one new). Full `crates/tekstide` bin suite: 783/783 (one new).
+Three consecutive full-workspace runs, fresh `TMPDIR` each: 0 failed, 4 ignored, 0 fixture entries,
+every time. `release.yml` validated as YAML; not run live (that is the tag itself, still held
+pending this fix's review).

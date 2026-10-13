@@ -373,3 +373,23 @@ fn trigger_git_summary_refresh_is_called_from_every_expected_site() {
         );
     }
 }
+
+/// `--licenses` exists so the MIT clause `rusqlite`/`libsqlite3-sys` require
+/// travelling with every copy of the software reaches a reader of any
+/// distribution channel, including the bare GitHub Release binary. This
+/// does not re-prove `--licenses` itself prints `NOTICE_TEXT` (that is one
+/// line in `handle_informational_flags`, read directly rather than through
+/// a subprocess, matching how `--help`/`--version` are proven via their own
+/// content-producing functions rather than a spawned binary) -- it proves
+/// the embedded text still carries the one sentence that makes it a licence
+/// rather than only a copyright line, so a future edit to `NOTICE` that
+/// drops it is caught here rather than discovered by someone who needed it.
+#[test]
+fn the_embedded_notice_still_carries_the_mit_inclusion_clause() {
+    assert!(
+        super::NOTICE_TEXT
+            .contains("The above copyright notice and this permission notice shall be included in"),
+        "NOTICE no longer carries the MIT inclusion clause -- `--licenses` would ship a \
+         copyright line without the permission notice it is required to accompany"
+    );
+}

@@ -1,10 +1,24 @@
 # Release artifacts and checksums (RFC-029 D5, PR-029-C).
 #
 # On a version tag, builds the Linux `x86_64` release binary `--locked` and
-# publishes it, and its SHA-256, as assets on the GitHub Release for that tag
-# -- creating a minimal release if the tag does not have one yet, uploading to
-# it (with `--clobber`, so a re-run from `workflow_dispatch` replaces stale
-# assets rather than failing) if it already does.
+# publishes it, its SHA-256, `NOTICE` and `LICENSE` as assets on the GitHub
+# Release for that tag -- creating a minimal release if the tag does not have
+# one yet, uploading to it (with `--clobber`, so a re-run from
+# `workflow_dispatch` replaces stale assets rather than failing) if it
+# already does.
+#
+# **`NOTICE`/`LICENSE` ship beside the binary, found missing at the first
+# real release attempt.** A bare binary uploaded on its own -- which is what
+# this workflow did before this line existed -- has nowhere a reader sees the
+# MIT notice `rusqlite`/`libsqlite3-sys` require travelling with every copy
+# of the software they are statically linked into (`cargo tree -e normal -i
+# rusqlite` shows a normal, non-dev dependency with the `bundled` feature).
+# `cargo install` and the AUR `PKGBUILD` already carry both files; this
+# workflow did not. The binary itself also now answers `--licenses` with
+# `NOTICE`'s own text (`crates/tekstide/src/main.rs`), which is the part that
+# travels through every channel, present or future -- these two assets are
+# the free, no-reason-not-to half of the same fix, for the reader who wants
+# the file rather than the flag.
 #
 # **This workflow does not publish to crates.io, write `release-0.X.0.md`, or
 # decide release notes.** The tag, the `cargo publish`, and the real release
@@ -103,6 +117,12 @@ jobs:
           mkdir -p staging
           cp target/release/tekstide "staging/${name}"
           ( cd staging && sha256sum "${name}" > "${name}.sha256" )
+          # Workspace-root copies, not a crate-local one: both are the same
+          # file (kept in sync, `no_crate_notice_or_license_drifts_from_the_
+          # workspace_root`), and the root is unambiguous regardless of
+          # which crate's checkout this ever runs from.
+          cp NOTICE staging/NOTICE
+          cp LICENSE staging/LICENSE
           echo "name=${name}" >> "$GITHUB_OUTPUT"
 
       - name: Publish to the GitHub Release for this tag (create if missing)
@@ -119,4 +139,5 @@ jobs:
               --notes "See CHANGELOG.md for this release's own notes."
           fi
           gh release upload "$TAG" "staging/${ARTIFACT}" "staging/${ARTIFACT}.sha256" \
+            "staging/NOTICE" "staging/LICENSE" \
             --repo "${{ github.repository }}" --clobber

@@ -2158,3 +2158,23 @@ for `SocketPathTooLong`.
 release touches that code, and the measured rate has not moved. Recorded so the next occurrence is
 evidence rather than one more tally mark, and so the Accept is re-decided against what is now known
 rather than left standing on a premise this entry contradicts.
+
+## New row, 2026-10-14 — gating the `--licenses`/NOTICE fix: two `reference_adapter` tests, 1 failure each, not since
+
+Disclosed rather than silently redone. Gating the NOTICE-embedding fix (`main.rs`, `release.yml`,
+two new invariants; no change anywhere near `approval::tests`), one full-workspace run at load
+~21.9 (this shared machine, heavily contended at the time — `uptime` read `21.94, 10.08, 7.84`)
+failed two tests together: `approval::tests::reference_adapter::deciding_a_proposal_whose_real_
+adapter_process_has_already_exited_is_undeliverable` and `approval::tests::reference_adapter::
+a_real_adapter_process_refuses_to_run_without_a_token`. Both spawn a real `reference_adapter`
+child process.
+
+**Not reproduced since.** Both, isolated immediately after alongside their five siblings in
+`reference_adapter::tests`: 7 of 7 passed. Three further full-workspace redos, same commit: 2 of 3
+clean (the third hit row 1 above, `bind_recovers_from_a_stale_socket_file`, already an open Accept
+— not these two). No cause investigated beyond confirming they are not a regression from the
+commit being gated: neither test nor anything it calls was touched by this change, and the isolated
+pass rules out a logic defect this specific run introduced. **Accept, carried as load noise** on a
+machine shown contended at the time, consistent with this register's existing pattern for
+real-process-spawning tests under genuine (not synthetic) load -- re-opens if either recurs with
+enough frequency to investigate.

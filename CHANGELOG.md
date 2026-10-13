@@ -48,6 +48,15 @@ comes back undefined, every time, under a real `makepkg` run. Fixed by stripping
 `$CFLAGS` for that one build invocation only. The package is not published to the AUR itself; that
 remains the owner's own account and action.
 
+**`tekstide --licenses` prints the MIT notice `rusqlite`/`libsqlite3-sys` require travelling with
+every copy of the software, found missing at the release step for the two channels that ship a bare
+binary.** `cargo install` and the AUR package already carried `NOTICE` (it sits at the `.crate`'s
+own root, and the `PKGBUILD` installs it explicitly); the one-liner and the GitHub Release asset did
+not, because a bare binary has nowhere else for a reader to see it. Embedded in the binary itself
+rather than taught to every channel individually, so it travels through all of them, present or
+future. The GitHub Release also now carries `NOTICE` and `LICENSE` as their own assets, beside the
+binary and its checksum.
+
 **The book's own front page — `docs/src/introduction.md`, published as `index.html` — now states
 the platform and no-screen-reader limits itself**, rather than only linking to pages that do,
 matching `README.md` word for word so there is one form of each claim rather than a second that

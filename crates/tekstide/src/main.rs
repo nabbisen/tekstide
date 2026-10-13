@@ -52,7 +52,15 @@ fn timed_view(state: &shell::State) -> iced::Element<'_, shell::Message> {
     }
 }
 
-/// `-h`/`--help`/`-V`/`--version`, handled before any window opens.
+/// Byte-identical to the workspace root's own `NOTICE` -- both are
+/// published verbatim (crates.io renders the workspace copy; this one
+/// ships inside the binary itself). `no_crate_notice_or_license_drifts_
+/// from_the_workspace_root` in `tests.rs` keeps the two from silently
+/// disagreeing.
+const NOTICE_TEXT: &str = include_str!("../NOTICE");
+
+/// `-h`/`--help`/`-V`/`--version`/`--licenses`, handled before any window
+/// opens.
 ///
 /// Until `0.12.1` every argument was treated as a project path, so
 /// `tekstide --help` printed `folder does not exist: --help` -- the
@@ -61,16 +69,43 @@ fn timed_view(state: &shell::State) -> iced::Element<'_, shell::Message> {
 /// unrecognised `-`-prefixed argument is still passed through as a path,
 /// because a real file really can begin with a dash and silently
 /// refusing one would trade this defect for a subtler one.
+///
+/// **`--licenses` prints [`NOTICE_TEXT`] verbatim and exits.** Found
+/// missing at the `0.37.0` release step: this release first distributes
+/// *binaries* (the one-liner, the GitHub Release asset, the AUR package),
+/// and a bare binary has nowhere a reader would see the MIT notice
+/// `rusqlite`/`libsqlite3-sys` require travelling with every copy of the
+/// software -- `cargo install` and the AUR `PKGBUILD` already carry it
+/// (the `.crate` and the package's own `LICENSE`/`NOTICE` install steps),
+/// but the one-liner and the bare release asset did not. Embedding it in
+/// the binary itself, rather than teaching every distribution channel to
+/// remember a second file, means it travels through all of them,
+/// including ones this project has not built yet (RFC-028, RFC-071).
+///
+/// **Deliberately plain `println!`, not `i18n::Catalog`/`text(...)`.**
+/// A licence notice must be reproduced verbatim -- translating it would
+/// be the one case where RFC-016's own policy (every user-facing string
+/// goes through the catalog so it *can* vary by locale) would make the
+/// text wrong rather than merely untranslated. This is not a new
+/// exemption: `--version`'s own string two lines below, and all of
+/// `keyboard_help::usage_text`'s output, already bypass the catalog for
+/// the same reason -- CLI/stdout text has never gone through it here, as
+/// distinct from anything the GUI renders via `text(...)`, which is what
+/// `i18n::enforcement`'s scan actually covers.
 fn handle_informational_flags() {
     let flags: Vec<String> = std::env::args().skip(1).collect();
     let wants_help = flags.iter().any(|arg| arg == "-h" || arg == "--help");
     let wants_version = flags.iter().any(|arg| arg == "-V" || arg == "--version");
-    if !wants_help && !wants_version {
+    let wants_licenses = flags.iter().any(|arg| arg == "--licenses");
+    if !wants_help && !wants_version && !wants_licenses {
         return;
     }
 
     if wants_version {
         println!("tekstide {}", env!("CARGO_PKG_VERSION"));
+    }
+    if wants_licenses {
+        print!("{NOTICE_TEXT}");
     }
     if wants_help {
         let catalog =

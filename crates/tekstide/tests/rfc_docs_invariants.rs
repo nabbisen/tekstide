@@ -1735,3 +1735,39 @@ fn the_workspace_pins_tekstide_core_to_its_own_version() {
         "the pin keeps its path for the workspace build"
     );
 }
+
+/// RFC-029 release-step finding, 2026-10-14: a bare prebuilt binary ships
+/// without `NOTICE` (the MIT text `rusqlite`/`libsqlite3-sys` require
+/// travelling with every copy) unless something carries it along.
+/// `main.rs` embeds `crates/tekstide/NOTICE` via `include_str!` so
+/// `--licenses` works from any channel; this crate-local copy exists
+/// only so that embedding has something to read without reaching above
+/// the crate root (which a `cargo install`/crates.io build cannot do).
+/// Both it and `LICENSE` are meant to be byte-identical to the
+/// workspace root's own copies -- this is what keeps that true rather
+/// than assuming a human updates three files together.
+#[test]
+fn the_crate_local_notice_and_license_do_not_drift_from_the_workspace_root() {
+    let Ok(root_notice) = std::fs::read_to_string(repo_root().join("NOTICE")) else {
+        eprintln!("skipped: the workspace root is not packaged with this crate");
+        return;
+    };
+    let root_license = std::fs::read_to_string(repo_root().join("LICENSE"))
+        .expect("workspace root LICENSE exists alongside NOTICE");
+
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let crate_notice = std::fs::read_to_string(crate_dir.join("NOTICE"))
+        .expect("crates/tekstide/NOTICE exists -- main.rs embeds it with include_str!");
+    let crate_license =
+        std::fs::read_to_string(crate_dir.join("LICENSE")).expect("crates/tekstide/LICENSE exists");
+
+    assert_eq!(
+        crate_notice, root_notice,
+        "crates/tekstide/NOTICE has drifted from the workspace root -- main.rs's `--licenses` \
+         flag embeds the crate-local copy, so a stale one ships a stale notice"
+    );
+    assert_eq!(
+        crate_license, root_license,
+        "crates/tekstide/LICENSE has drifted from the workspace root"
+    );
+}
