@@ -2049,3 +2049,38 @@ under real contention.
 `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
 `cargo test -p tekstide-core --lib` with the attribute in place: the test is skipped by default and
 passes under `-- --ignored` (1 of 1). No other test's behavior changed.
+
+### Correction, same day — "real contention" was the wrong variable too
+
+**The reviewer did not take the row above on trust, and found it names the wrong cause.** Four
+distinct reproduction attempts now on record, two of them new:
+
+| condition | runs | result |
+| --- | --- | --- |
+| 16 synthetic spinners (review 527) | 15 | green |
+| 96 synthetic spinners, 32 cores, load 14.7 (this row, above) | 10 | green |
+| isolated, real load 18.39 — real concurrent builds and other sessions, no synthetic load | 8 | green |
+| **in-suite, `#[ignore]` ablated away in a throwaway `git worktree`, real load 15.02/11.40/8.84** | **3** | **green — passed all three, full workspace** |
+
+The last row is the one that matters: the reviewer removed the attribute this row just added, in a
+disposable worktree, and ran the full suite three times across the middle of the load range my own
+three failures sat in (3.63–10.33). **It passed 3 of 3 under the condition this row names as the
+cause.** Contention — real or synthetic — is therefore not the variable; nor is suite-context, the
+reviewer's own next hypothesis, which that same ablation also killed.
+
+**The trigger is unidentified, not "real machine contention."** This row's own framing above is
+wrong and is left in place rather than rewritten, per this register's standing rule — read it as
+superseded by this section, not as the current account. A future reader checking the load and
+finding it low must not conclude the test is fine: eighteen isolated runs and three in-suite runs
+with the attribute ablated away all passed, at loads spanning the entire range this register has on
+record, which rules out load (real or synthetic) as the explanation rather than confirming it.
+
+**This strengthens the quarantine rather than weakening it.** A test that failed 8 consecutive times
+in one session and 3 consecutive in another, with no identified trigger after four attempts, is
+exactly what must not sit in a blocking gate — the verdict stands; only the stated reason changes.
+
+**One more thing the reason string got wrong, now fixed alongside it**: "run with `-- --ignored` for
+its own number" implied that number describes the property that broke. It does not — eighteen
+isolated runs have never once failed, which is the one condition on record under which this test has
+never been seen to fail at all. The `#[ignore]` attribute's text is corrected to say so, so a clean
+`-- --ignored` run is not misread as the row being closed.

@@ -22,7 +22,10 @@ and the full workspace suite with `--all-targets --no-fail-fast` against a short
 asserting zero fixture entries left. Proven on a real, deliberately broken commit — red at exactly
 the `fmt` step, then green again after a revert — on a throwaway PR, not reasoned about from reading
 the YAML. **It is advisory, not yet a required check**: branch protection is a repository setting
-the owner has not configured, left to them rather than decided unilaterally here.
+the owner has not configured, left to them rather than decided unilaterally here. **Its own second
+half is unbuilt**: a quarantined test is meant to run in a separate job that is read, not only
+skipped, and no slice built that job — three tests are `#[ignore]`d with a reason and run only when
+asked for by name, found at review 553 and reserved as RFC-072.
 
 **Every published artifact carries a published SHA-256**, verified live end to end — built,
 staged, uploaded to a throwaway draft release, downloaded back, and checked against its own

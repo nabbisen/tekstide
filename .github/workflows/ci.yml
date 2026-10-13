@@ -14,6 +14,15 @@
 # none of them run headlessly on a CI runner). A green run here is necessary for a
 # release candidate; it is not sufficient.
 #
+# **Nor does it run anything `#[ignore]`d.** `test --all-targets` skips those tests
+# by default, which is exactly what keeps a quarantined flake out of this blocking
+# gate -- but D1's own second sentence asks for a *separate, non-blocking* job that
+# runs them anyway and is read, not ignored, and no such job exists here. Found at
+# review 553, after this RFC had already closed; reserved as RFC-072, which is also
+# where the real question lives -- most of this workspace's `--ignored` tests are
+# measurements and hand-run diagnostics, not flake quarantines, and a job reading
+# all of them would be red for reasons that are not findings on its first day.
+#
 # **D1's own prerequisite**: this job became trustworthy to make blocking only after
 # `rfcs/handoffs/test-process-leak.md`'s every live row carried a verdict
 # (RFC-029 PR-029-A) — a gate that is red when nothing is wrong teaches everyone to

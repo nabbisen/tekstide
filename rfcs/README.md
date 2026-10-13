@@ -65,6 +65,15 @@ Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Title
 audit's findings, not guesses; each row's scope is in the release schedule in
 [`delivery-plan.md`](./delivery-plan.md).
 
+| RFC | Title | Milestone |
+| --- | --- | --- |
+| 072 | A Non-Blocking Job For Quarantined Tests | M14 |
+
+Reserved 2026-10-14, review 553, on RFC-029's own D1: `ci.yml` shipped one job, and the
+non-blocking job D1's second sentence requires — where a quarantined test still runs and is
+*read*, not only skipped — was never built by any of RFC-029's six slices. Its own release
+schedule entry is in [`delivery-plan.md`](./delivery-plan.md).
+
 Added 2026-08-12 after a real collision: RFC-024 was authored just-in-time as
 *Diff Preview Policy* and took a number the delivery plan had already reserved for Git
 Integration. Nothing connected the two files, so the clash went unnoticed until the plan

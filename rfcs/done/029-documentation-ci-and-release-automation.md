@@ -248,3 +248,15 @@ instead. One consequence the decision did not itself state: merging the held pag
 advertising a working install for a window longer than the "minutes" D15 accepted. Fixed by adding
 one sentence to both pages stating the prebuilt binary is published from `0.37.0` onward — true
 before the tag and true after it, so nothing needs removing later.
+
+**D1's own second sentence was never built, found at review 553 after this RFC had already
+closed.** "A quarantined test still runs — in a separate, non-blocking job that is read, not
+ignored" describes a job PR-029-B did not ship: `ci.yml` has exactly one job, and nothing runs the
+tests `test-process-leak.md` quarantines except a developer asking for them by name with
+`-- --ignored`. PR-029-A's own evidence deferred the job to PR-029-B explicitly; PR-029-B's
+evidence never mentions it again, and the acceptance checklist's own box for it
+(`acceptance-qa-checklist.md:16`) was ticked against by neither slice before the candidate review
+caught it. **Not a slice of this RFC to build now** — the population question (most of this
+workspace's dozen `--ignored` tests are measurements, not flake quarantines, and reading all of
+them would recreate D1's own failure mode on the job's first day) is real design work, reserved as
+**RFC-072**, not a patch to land under a closed RFC's own number.
