@@ -38,6 +38,18 @@
 # The `--bins` step is not optional: a test that spawns a helper binary fails
 # with "expected the <name> binary at .../target/debug/<name>" when it was not
 # built, which looks exactly like the defect failing and is not.
+#
+# **Keep the invocation narrow in a worktree, and never read a workspace-wide
+# run there as clean or dirty evidence** (added 2026-10-14, RFC-029 review 553).
+# A linked worktree's own `.git` is a *file* (`gitdir: ...`), not a directory, so
+# `real_repository_filesystem_scan_cost_headless_benchmark` -- which asserts it
+# is measuring a real repository before it will report a number -- fails there
+# **3 of 3, deterministically**, exactly as `release-checklist.md` already
+# records it failing from an unpacked package. That is the test doing its job in
+# both places. But it means `cargo test --workspace` inside a worktree always
+# reports one failure that is the instrument, not the ablation, and a summary
+# that counts failures rather than naming them reads it as the ablated check
+# failing. Name the failing tests; the count is not the finding.
 # ---------------------------------------------------------------------------
 set -u
 label=$1; file=$2; old=$3; new=$4; shift 4
