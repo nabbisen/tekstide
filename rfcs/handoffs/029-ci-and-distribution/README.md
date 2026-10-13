@@ -33,6 +33,33 @@ beginner is a ritual resting on the same trust root as the thing it verifies —
 `what-the-dialog-must-not-lie-about.md` §2 forbids. What survived is two properties of the
 **script**, now D10–D12, not an argument against offering it.
 
+## Where the first artifact comes from — decided 2026-10-13 (owner, option B)
+
+**`0.37.0`'s own tag produces it. There is no pre-emptive dispatch and no retrofit onto
+`0.36.0`.** The release that introduces the distribution channel is the release that first uses
+it: the candidate is cut, the architect tags, `release.yml` fires on that tag, and the artifact
+exists.
+
+This matters for how the slices land:
+
+- **The install pages go into the candidate**, like the version bump and the changelog's own
+  *"candidate, not yet published"* line. Between the candidate cut and the tag, `main` briefly
+  describes an install whose artifact is minutes away — the same short, documented window every
+  candidate already has. **No hold, and no branch**:
+  `held/pr-029-e-install-rewrite` merges into `main` with the candidate and is then deleted.
+- **The end-to-end install demonstration is a post-publish step**, not an acceptance item. It is in
+  the release checklist's *Post-Publish Verification*, beside the `cargo install` check, because
+  both need an artifact that acceptance precedes.
+- **`release.yml`'s first live run happens at that tag.** If it fails there, the cost is bounded:
+  it touches neither crates.io nor the release notes, so the fix is to repair the workflow and
+  re-run it with `workflow_dispatch` against the same tag.
+
+**How this came about is worth keeping**, since the fault was the architect's: RFC-029's slice
+order put the documentation ahead of the channel it documents, which turned "the channel has no
+first output yet" into an authorisation the owner had to grant, which blocked three slices, which
+produced a parked branch, which broke the project's trunk-only workflow. Each step answered the one
+before it. The order was the error.
+
 ## Slices
 
 | Slice | What it is | Done when |

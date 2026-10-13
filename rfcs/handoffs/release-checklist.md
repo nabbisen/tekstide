@@ -368,6 +368,14 @@ Checked every release, because a watch that depends on someone remembering is no
       metadata points one commit later. **Publish from the tagged commit if you want them to
       agree**, or accept it knowingly — but do not discover it after the fact twice.
 
+- [ ] **Install it the way a beginner would, on a machine without `cargo` on `PATH`.** Added
+      2026-10-13 (RFC-029). The one-liner the README leads with, run for real against the artifact
+      this release just published — not a local mock, not the four-line form, and not read from the
+      page and assumed. Then run the installed binary and check `--version` reports this release.
+      **This is the check that the release actually reaches a user who has no Rust toolchain**,
+      which is the whole point of RFC-029; every other step here verifies something narrower. It
+      sits after publishing for the same reason `cargo install` does: the artifact has to exist
+      first.
 - [ ] **Run `rfcs/handoffs/post-publish-check.sh <version>` for the release just published AND for the previous
       one** (`--no-install` for the two structural checks alone; without it the script also builds the release
       with `cargo install tekstide --version <v>` into a temporary root, which is a full build). Added by

@@ -60,8 +60,13 @@ recorded in its review request and in `qa-evidence.md`.
 
 ## Whole-RFC
 
-- [ ] A person without a Rust toolchain can install and run Tekstide by following the first thing
-      the README shows them. **Demonstrated, on a machine without `cargo` on `PATH`.**
+- [ ] The first thing the README shows a reader is an install that needs no Rust toolchain, and
+      every claim on that page is true of the release being cut. **The end-to-end demonstration
+      itself is NOT a candidate-acceptance item** — it needs a published artifact, which only
+      exists once this release is tagged. It lives in the release checklist's *Post-Publish
+      Verification*, beside the `cargo install` check that is already done after publishing rather
+      than before. Corrected 2026-10-13: the original wording required an artifact that acceptance
+      itself precedes.
 - [ ] No artifact, page or script implies a platform that does not exist, or a guarantee the
       checksum does not give.
 - [ ] The release checklist gained steps and lost none; the Run It gate and the book sweep are

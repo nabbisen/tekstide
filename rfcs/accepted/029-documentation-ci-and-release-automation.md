@@ -173,3 +173,24 @@ better off has not finished.
 **And the order is a prerequisite, not a preference.** PR-029-A exists because a blocking CI job
 that is red when nothing is wrong destroys the only thing CI is for. Nothing in B–F starts until
 the flake dispositions are done.
+
+## Sequencing decided after acceptance (2026-10-13)
+
+**D15. The first release artifact comes from `0.37.0`'s own tag — this RFC's own release — not
+from a manual dispatch beforehand.** Owner's decision, option B of three put to them.
+
+The architect had ordered the documentation slice (PR-029-E) ahead of the channel it documents,
+and then asked the owner to authorise a one-off `workflow_dispatch` against `0.36.0` to produce
+something for those pages to point at. That turned a sequencing error into a standing decision for
+the owner, blocked three slices behind it, and produced a parked branch that broke the project's
+trunk-only workflow. The decision removes the authorisation rather than granting it.
+
+Consequences, recorded where they bind:
+
+- The install pages land **in the candidate**; `held/pr-029-e-install-rewrite` merges and is
+  deleted. No branch is carried.
+- **The end-to-end install demonstration moves to post-publish verification** — it needs an
+  artifact that acceptance precedes, which the Whole-RFC checklist's first draft did not account
+  for.
+- `release.yml`'s first live run is the `0.37.0` tag. Its blast radius there is bounded: it touches
+  neither crates.io nor the release notes, and `workflow_dispatch` remains as the re-run path.
