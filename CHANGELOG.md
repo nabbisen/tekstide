@@ -3,9 +3,9 @@
 ## 0.37.0 - Documentation, CI, and Release Automation
 
 Status: **candidate, not yet published.** RFC-029's six slices and its Whole-RFC checklist are
-all implemented, gated and closed. This entry was written incrementally as slices closed, then
-re-read against the finished set at the candidate; see `rfcs/handoffs/029-ci-and-distribution/`
-for the full handoff pack.
+all implemented, gated and closed, with one exception named below. This entry was written
+incrementally as slices closed, then re-read against the finished set at the candidate; see
+`rfcs/handoffs/029-ci-and-distribution/` for the full handoff pack.
 
 **Installing no longer needs a Rust toolchain.** `cargo install tekstide` was the only documented
 way to get this program; this release adds a prebuilt `x86_64` Linux binary, a one-liner installer,

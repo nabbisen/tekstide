@@ -2065,15 +2065,20 @@ distinct reproduction attempts now on record, two of them new:
 The last row is the one that matters: the reviewer removed the attribute this row just added, in a
 disposable worktree, and ran the full suite three times across the middle of the load range my own
 three failures sat in (3.63–10.33). **It passed 3 of 3 under the condition this row names as the
-cause.** Contention — real or synthetic — is therefore not the variable; nor is suite-context, the
-reviewer's own next hypothesis, which that same ablation also killed.
+cause.** Contention — real or synthetic — is therefore **not sufficient on its own**, and remains
+unreproduced by every attempt on record; nor does suite-context alone reproduce it, the reviewer's
+own next hypothesis, killed by that same ablation. Neither is shown irrelevant — only that neither
+alone is the trigger.
 
 **The trigger is unidentified, not "real machine contention."** This row's own framing above is
 wrong and is left in place rather than rewritten, per this register's standing rule — read it as
 superseded by this section, not as the current account. A future reader checking the load and
 finding it low must not conclude the test is fine: eighteen isolated runs and three in-suite runs
 with the attribute ablated away all passed, at loads spanning the entire range this register has on
-record, which rules out load (real or synthetic) as the explanation rather than confirming it.
+record. **That shows load is not sufficient, and so far unreproduced — not that it is ruled out.**
+The three failures on record all occurred under load; what the ablation establishes is that load
+alone does not reproduce them, not that load is irrelevant. Whether load is a necessary condition
+remains untested either way.
 
 **This strengthens the quarantine rather than weakening it.** A test that failed 8 consecutive times
 in one session and 3 consecutive in another, with no identified trigger after four attempts, is
