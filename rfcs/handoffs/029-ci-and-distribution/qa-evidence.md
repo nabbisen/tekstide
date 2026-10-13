@@ -384,6 +384,53 @@ so this half is not blocked by the pending `workflow_dispatch` approval the way 
 No Rust source touched; `cargo fmt --check` trivially clean. Pushed as `9fcad47`, `ci.yml` green:
 [38380013026](https://github.com/nabbisen/tekstide/actions/runs/38380013026).
 
+## PR-029-E — the install rewrite (D7, D13, D14)
+
+`README.md`'s *Quick Start* and `getting-started.md`'s *Install* both now lead with the
+one-liner. `cargo install` and the four-line verified form follow, worded as **equivalents**,
+never as the safer choice -- both still fetch code from the same server the one-liner does. AUR
+is named in both pages, with the not-yet-published caveat stated plainly rather than implied.
+
+- `getting-started.md`'s *"It runs on Linux; there is no cross-platform evidence beyond it"*
+  is untouched -- confirmed by diff, not by memory.
+- `mdbook build docs`, then grepped the actual HTML output (not the markdown source) for the
+  one-liner, the AUR link, and the untouched Linux-only sentence: all three present, exactly
+  where expected, following the discipline review 540 asked for after the D3 miss at review 537.
+- `cargo test -p tekstide --test rfc_docs_invariants` **caught a real mistake**: the first draft
+  linked `packaging/aur/` with a relative path, which `the_readme_has_no_relative_links` exists
+  specifically to catch -- crates.io rewrites relative README links against the crate's own
+  directory, where `packaging/` does not exist, breaking the link for every registry reader.
+  Fixed to an absolute `github.com/.../tree/main/...` URL; all 22 invariants pass clean after.
+- No Rust source touched; `cargo fmt --check` and `cargo clippy` both trivially clean (nothing
+  for them to see).
+
+### Required fix, review 549 — the four-line form was missing a line
+
+The documented four-line form omitted `mkdir -p ~/.local/bin`, which `install.sh` itself runs
+(line 72) because `~/.local/bin` often does not exist. On a genuinely fresh `$HOME`, the four-line
+form failed with `install: cannot create regular file ... No such file or directory` while being
+labelled *verified* -- the equivalent form was not actually equivalent. Re-verified myself against
+a fresh `$HOME` and a local mock server after adding the line: `sha256sum -c` reports `OK`, the
+install succeeds, `find "$HOME" -mindepth 1` shows exactly the expected paths, and the installed
+binary reports `0.36.0`. Both pages now carry the corrected five-line form; "four-line form" in
+prose elsewhere in this pack refers to what RFC-029 itself names it, not the current line count.
+
+### Held, then merged under D15
+
+Review 548 (PR-029-D): the pages must not reach `main` describing a working install before the
+first real release asset exists, and both the one-liner and the four-line form here name a
+GitHub release asset that did not exist yet. Review 549 flagged that the first attempt at holding
+this left the commit as the tip of the shared `main` -- one unrelated `git push` away from
+publishing it by accident. Moved to `held/pr-029-e-install-rewrite`, with `main` reset back to the
+last pushed commit, and the branch itself pushed to `origin` once review 550 noted a local-only
+branch defeats the point of holding it.
+
+**Superseded by the owner's D15 decision (`ed43541`, 2026-10-13):** `0.37.0`'s own tag produces
+the first release artifact, removing the reason to hold these pages at all -- the asset they
+describe is minutes away by the time the candidate carries them. Merged into `main` here, and
+`held/pr-029-e-install-rewrite` is deleted; nothing in this section describes a hold still in
+effect.
+
 ## PR-029-F — the landing page (D8)
 
 `docs/src/introduction.md` is the book's own root (`book.toml`'s `src = "src"` and mdbook's own

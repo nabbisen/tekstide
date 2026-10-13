@@ -65,9 +65,32 @@ work is tracked in [Deferred work](https://nabbisen.github.io/tekstide/contribut
 
 ## Quick Start
 
+The installer below installs one binary to `$HOME/.local/bin/tekstide` and touches nothing else —
+no shell rc edit, no `sudo`, no repository added. Linux x86_64 only; see
+[What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html) for every
+other platform's status.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nabbisen/tekstide/main/install.sh | sh
+tekstide /path/to/project
+```
+
+Arch Linux users can build the `PKGBUILD` in
+[`packaging/aur/`](https://github.com/nabbisen/tekstide/tree/main/packaging/aur) (not yet
+published to the AUR itself). `cargo install` and
+the four-line verified form are documented **equivalents**, not a safer choice, since every form
+here fetches code from the same server:
+
 ```sh
 cargo install tekstide
-tekstide /path/to/project
+```
+
+```sh
+curl -LO https://github.com/nabbisen/tekstide/releases/latest/download/tekstide-x86_64-linux
+curl -LO https://github.com/nabbisen/tekstide/releases/latest/download/tekstide-x86_64-linux.sha256
+sha256sum -c tekstide-x86_64-linux.sha256
+mkdir -p ~/.local/bin
+install -m 755 tekstide-x86_64-linux ~/.local/bin/tekstide
 ```
 
 `tekstide` with no argument opens an empty Project Board with a field to type or paste a path into,
