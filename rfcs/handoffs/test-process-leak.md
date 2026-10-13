@@ -2084,3 +2084,72 @@ its own number" implied that number describes the property that broke. It does n
 isolated runs have never once failed, which is the one condition on record under which this test has
 never been seen to fail at all. The `#[ignore]` attribute's text is corrected to say so, so a clean
 `-- --ignored` run is not misread as the row being closed.
+
+## Cost tally, 2026-10-14 — review 554: row 1 again, and its "no actionable fix" is no longer true
+
+**Row 1** (`approval::tests::channel::bind_recovers_from_a_stale_socket_file`, verdict **Accept**)
+failed run 2 of the reviewer's own three-run gate on the `0.37.0` candidate at `9037aee`, at load
+5.03, with 0 fixture entries left. Runs 1 and 3 were clean, and a fresh three-run gate on the same
+commit was **3 of 3 green** (loads 0.93 / 2.81 / 2.83) — so the candidate's gate is satisfied, and
+this is the fourth re-run spent on this row since review 497 started counting.
+
+**The panic, in full:**
+
+```text
+panicked at crates/tekstide-core/src/approval/tests/channel.rs:170:10:
+second bind must clear the stale file and succeed: ApprovalChannelError { reason: Io, source: None }
+```
+
+### What `source: None` now narrows this to — and why that contradicts the Accept
+
+The Accept above reads: *"never isolated to a more specific cause despite sustained attention … the
+shape offers no actionable fix."* **`source: None` is a specific cause, or rather it excludes
+almost everything else.** `clear_stale_socket` (`approval/channel.rs`) has exactly three failure
+arms, and response 231 already fixed the third one to preserve its `io::Error` — with a comment
+naming *this test's own flake panic* as the reason for that fix:
+
+| arm | error | can produce `source: None`? |
+| --- | --- | --- |
+| the path exists and is **not a socket** | `new(Io)` | **yes** |
+| `connect()` returns **`Ok`** — something is really listening | `new(Io)` | **yes** |
+| any other `connect()` error (`EPERM`, `EMFILE`, …) | `io(error)`, response 231 | no — carries errno |
+
+Every other `Io` in `bind()`'s chain goes through the source-preserving `::io` as well. **So this
+occurrence came from one of the two arms response 231 left indistinguishable from each other**, and
+the fix that was made specifically so a future occurrence of this flake would carry evidence
+produced an occurrence carrying none.
+
+**Three mundane explanations were checked and ruled out** rather than assumed:
+
+- *Two tests colliding on one socket path.* No: `rand_seed()` is a process-wide monotonic
+  `AtomicU64` counter, and `temp_state_root` already includes the pid, so every test's directory and
+  socket path are unique.
+- *An errno-bearing failure whose source was dropped.* No: that is the arm response 231 fixed, and
+  it would print `source: Some(..)`.
+- *`/proc/self/fd/<n>` resolving into another thread's directory after fd reuse.* No: `bind()` holds
+  `dir_fd` as an `OwnedFd` across the whole `clear_stale_socket` call, so that fd number cannot be
+  reused while the magic path is in use.
+
+What is left is two conditions that should both be impossible in this test — a staged socket file
+that is not a socket, and a dropped raw listener that still accepts a connection — and a panic that
+cannot say which one happened.
+
+### The actionable step the Accept said did not exist
+
+**Give those two arms their own `ApprovalChannelErrorReason` variants.** `SocketPathTooLong` and
+`ProcMagicPathUnavailable` are already in that enum for exactly this reason, both distinguished from
+a bare `Io` on the argument that an identifiable condition must not be indistinguishable from any
+other bind failure — and both are in this same function's own call path. The two arms here are the
+remaining exception.
+
+This is **core-only and needs no user-facing string**: the test's panic prints the error's `Debug`,
+so distinct variants alone make the next occurrence self-diagnosing. Whether either condition also
+deserves its own refusal symbol in `agent_run_launch_refusal_symbol` is a separate question for
+whoever takes it — today both fall into the `Runtime(_) => "error"` catch-all, so a user who hits
+either sees the generic *"Couldn't start an agent run."*, which is the same shape RFC-060 D4 fixed
+for `SocketPathTooLong`.
+
+**Not done here, and not a `0.37.0` blocker**: the flake predates this release, nothing in the
+release touches that code, and the measured rate has not moved. Recorded so the next occurrence is
+evidence rather than one more tally mark, and so the Accept is re-decided against what is now known
+rather than left standing on a premise this entry contradicts.
