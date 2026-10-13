@@ -80,7 +80,7 @@ tekstide /path/to/project
 Arch Linux users can build the `PKGBUILD` in
 [`packaging/aur/`](https://github.com/nabbisen/tekstide/tree/main/packaging/aur) (not yet
 published to the AUR itself). `cargo install` and
-the four-line verified form are documented **equivalents**, not a safer choice, since every form
+the step-by-step verified form are documented **equivalents**, not a safer choice, since every form
 here fetches code from the same server:
 
 ```sh
