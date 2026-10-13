@@ -1,0 +1,37 @@
+# Maintainer: nabbisen <nabbisen@reflerd.com>
+pkgname=tekstide
+pkgver=0.36.0
+pkgrel=1
+pkgdesc="Local-first, multi-project workbench for supervising terminal-based AI development workflows"
+arch=('x86_64')
+url="https://github.com/nabbisen/tekstide"
+license=('Apache-2.0')
+depends=('gcc-libs')
+makedepends=('cargo')
+source=("$pkgname-$pkgver.crate::https://crates.io/api/v1/crates/$pkgname/$pkgver/download")
+sha256sums=('3d895befa61c1540cb6f2092540d2fb578f6963e080c10c226c7924bb8cac766')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  # Building from inside a checkout of this repo (not where a real `makepkg` run ever
+  # does its work) makes Cargo walk up and find the repo's own workspace Cargo.toml,
+  # which refuses to build a package it does not list. An empty `[workspace]` table
+  # stops that walk at this directory, matching Cargo's own suggested fix. Harmless
+  # outside the repo too, since there is nothing above to walk into there.
+  printf '\n[workspace]\n' >> Cargo.toml
+  # makepkg.conf's global -flto=auto in CFLAGS reaches the `cc` crate, which uses it to
+  # compile rusqlite's bundled sqlite3.c -- producing GCC LTO-bytecode objects that
+  # rust-lld (the default linker since 1.9x) cannot resolve, every time: measured as a
+  # 100% reproducible "undefined symbol: sqlite3_*" link failure under a real `makepkg`
+  # build with this distro's stock CFLAGS. Stripping -flto from CFLAGS for this build
+  # only avoids it; the final Rust binary gets no LTO either way, since rustc does not
+  # consume $CFLAGS for its own codegen.
+  CFLAGS="${CFLAGS//-flto=auto/}" cargo build --release --locked
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}

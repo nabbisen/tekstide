@@ -408,3 +408,22 @@ unless the workflow itself failed.
       byte-reproducible from a fresh clone (measured at the `0.36.0` tag: two independent
       `--locked` builds of the identical source produced different SHA-256 sums), so the checksum
       proves the download arrived intact, not that the release can be independently rebuilt.
+
+## AUR Package
+
+RFC-029 PR-029-E, D6: `packaging/aur/PKGBUILD` builds from the `tekstide` crate's own crates.io
+tarball, not from a GitHub release asset — it is not blocked by anything above, but it does go
+stale every release, since `pkgver` is pinned, not tracked.
+
+- [ ] After `cargo publish --workspace` above has actually landed the new version on crates.io:
+      bump `pkgver` to match, reset `pkgrel` to `1`, replace `sha256sums` with the new tarball's own
+      sum (`curl .../api/v1/crates/tekstide/<v>/download | sha256sum`), and regenerate `.SRCINFO`
+      (`makepkg --printsrcinfo > .SRCINFO`).
+- [ ] `makepkg --noconfirm -f` builds clean from the bumped `PKGBUILD`, and the packaged
+      `usr/bin/tekstide --version` reports the new version. Run this for real, from a real
+      `makepkg` invocation — not a bare `cargo build`, which does not see this distro's
+      `makepkg.conf` and will not catch the `CFLAGS`/`-flto` defect the build already carries a
+      fix for.
+- [ ] `namcap PKGBUILD` and `namcap <built package>` both clean of anything beyond the
+      implicitly-satisfied-glibc/gcc-libs warnings every Rust package gets.
+- [ ] Nothing here publishes to the real AUR. That is the owner's own account and action.
