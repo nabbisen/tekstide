@@ -1382,6 +1382,9 @@ fn two_real_processes_opening_the_same_root_share_an_id_but_the_second_is_blocke
 /// separate claims taken on trust, but one real round trip between two
 /// real processes, each piece checked against what the other one did.
 #[test]
+#[ignore = "bimodal under real machine contention, not CPU load as such -- quarantined by \
+            the RFC-029 candidate-cut gate 2026-10-14 (test-process-leak.md); run with \
+            `-- --ignored` for its own number"]
 fn a_blocked_second_process_names_the_real_holder_and_its_knock_is_received() {
     let sandbox = TestSandbox::new_short("r58att");
     let state_root = sandbox.create_dir("state");

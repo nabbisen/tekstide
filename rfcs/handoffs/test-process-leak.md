@@ -1990,3 +1990,62 @@ exactly one verdict — fixed (with its fix verified, and ablated where the fami
 showed ablation could reproduce anything at all), quarantined with a reason, or accepted with a
 reason that is not scheduling. RFC-029's own D1 — the prerequisite PR-029-B's blocking job depends
 on — is satisfied.
+
+**Corrected below, 2026-10-14: this is no longer true for one row.** The Accept two sections above
+recurred, and is re-verdicted to Quarantine. Nothing above this note is rewritten, per this
+register's own rule against deleting a row's history — read the row below for the current state.
+
+## Re-opened, 2026-10-14 — RFC-029 candidate-cut gate: `a_blocked_second_process_names_the_real_holder_and_its_knock_is_received`, 3 of 3 failed
+
+**The Accept above says "Re-opens if it recurs." It recurred — 3 of 3**, on three fresh
+full-workspace runs gating the `0.37.0` candidate cut, disclosed rather than re-run to green.
+
+**What was added to the picture, not just the recurrence itself:**
+
+| condition | result |
+| --- | --- |
+| full-workspace runs, real contention (load 3.63/5.61/10.33; a CPU-pinned `qemu-system-riscv64`; six other sessions on this shared desktop) | **3 of 3 failed** |
+| the same test, run alone (`-- --exact`), same machine, same moment | passed |
+| full-workspace runs, moderate load (~1.1) | 3 of 3 green |
+| the same test alone, under **96 `yes` spinners on 32 cores** (load 14.7) | 10 of 10 green |
+
+**Synthetic CPU load does not reproduce it — now established twice**, by this pass's own 96
+spinners and by review 527's original 16. So the trigger is not CPU contention as such, which the
+Accept's own investigation had already suggested by ruling out a bind-after-announce race; what is
+new here is that *real* machine contention (whatever its actual shape — six concurrent sessions,
+not a synthetic spinner load) produces a result synthetic load of either size does not.
+
+**The shape is the finding, not the rate.** Across every measurement on record — review 527's own
+8 consecutive failures, then 40-plus clean runs since, now this pass's 3 consecutive failures — this
+is not well modeled as a per-run probability. It reads as **bimodal**: under some machine state it
+fails deterministically for the whole session, and otherwise it does not fail at all. A test with a
+small constant failure rate and a test that is reliably red for an entire sitting look identical to
+whoever reads one CI run, but they are different things to act on, and only the second one is
+indistinguishable from a real regression to that reader.
+
+### Quarantine — supersedes the Accept above
+
+**D1 is RFC-029's own premise: a gate is trustworthy only once every live row has a verdict that
+holds up under blocking use**, not under the looser standard of a human occasionally re-running a
+local gate by hand. Accept was written and defensible against the latter. It does not survive the
+former: `test-flake-disposition.md`'s own quarantine criterion is "the test does not belong in a
+correctness gate," and a test that can run red for an entire session is exactly that gate's failure
+mode from the outside — indistinguishable from the thing D1 exists to make trustworthy again.
+
+**Moved out of the three-run gate.** `#[ignore]`d in
+`crates/tekstide-core/src/app/tests.rs`, with the reason recorded in the attribute itself, matching
+the convention this register's own category-C quarantines (`terminal_poll_handler_cost_under_a_
+real_wake_driven_flood_headless_benchmark` and its sibling) already use. Still runs with
+`-- --ignored`; its coverage of RFC-058 D10 (the real knock, over a real socket, between two real
+processes) is not deleted, only taken out of the blocking set.
+
+**No cause is claimed.** This disposition is about where the test runs, not why it sometimes fails
+— the Accept's own investigation (the `connect()`-queues argument, ruling out a bind-after-announce
+race) stands unchanged; nothing here contradicts it or claims to have found what actually happened
+under real contention.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
+`cargo test -p tekstide-core --lib` with the attribute in place: the test is skipped by default and
+passes under `-- --ignored` (1 of 1). No other test's behavior changed.
