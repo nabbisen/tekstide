@@ -249,6 +249,16 @@ advertising a working install for a window longer than the "minutes" D15 accepte
 one sentence to both pages stating the prebuilt binary is published from `0.37.0` onward — true
 before the tag and true after it, so nothing needs removing later.
 
+**That sentence was removed anyway, at review 558, once `0.37.0`'s asset went live** — found
+while reviewing `future-work.md`'s own app-id entry, not while re-reading this RFC. D15's claim
+was about the sentence's *truth*: it would stay true both before and after the tag, so nothing
+would need removing later on that axis. What changed was its *usefulness*, a different axis D15
+did not address — once the asset exists, a hedge against a 404 that can no longer happen no
+longer explains anything a reader could hit; it only makes the first install instruction a new
+visitor sees sound provisional for no reason. The review that asked for the removal did not note
+that it was reversing a decision this RFC had taken on purpose and recorded with its own
+reasoning; this paragraph is that note, added after the fact rather than never.
+
 **D1's own second sentence was never built, found at review 553 after this RFC had already
 closed.** "A quarantined test still runs — in a separate, non-blocking job that is read, not
 ignored" describes a job PR-029-B did not ship: `ci.yml` has exactly one job, and nothing runs the
