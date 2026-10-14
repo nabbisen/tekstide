@@ -1,7 +1,7 @@
 ---
 title: "RFC-029 acceptance and QA checklist"
 source_rfc: "../../done/029-documentation-ci-and-release-automation.md"
-source_rfc_status: "Implemented and closed 2026-10-14; `0.37.0` candidate, not yet published."
+source_rfc_status: "Implemented and closed 2026-10-14; released as `0.37.0` 2026-10-14."
 ---
 
 # RFC-029 — acceptance and QA checklist
@@ -141,4 +141,26 @@ Deferred rather than fixed, deliberately:
 - The one-liner run against the real published artifact, on a machine without
   cargo on PATH, cannot run before the tag exists. It is in the release
   checklist's Post-Publish Verification, not here.
+
+AMENDED AT THE RELEASE STEP, same day. The acceptance above was written, and then
+the release was HELD before tagging -- so this record would otherwise show a clean
+acceptance with the hold missing from the only account the repository keeps.
+
+What was found after acceptance, at the first step of the release run:
+release.yml would have published a BARE BINARY, and NOTICE carries the full MIT
+text for rusqlite/libsqlite3-sys, whose terms require it to travel with every
+copy of the software they are statically linked into. cargo install and the AUR
+PKGBUILD already carried it; the one-liner and the release asset did not. The
+release checklist's own last Package Smoke item had said so in advance.
+
+Fixed under reviews 556 and 557, before the tag: tekstide --licenses embeds
+NOTICE via include_str!, NOTICE and LICENSE ship as release assets, and two
+invariants guard the copies. Reviews 556 and 557 also corrected a cross-reference
+naming a test that did not exist -- in published source crates.io freezes -- and
+an invariant that guarded four of the six licence copies.
+
+Verified in the released artifact, not the description: the one-liner run on a
+machine resolving neither cargo nor rustc installed exactly three entries, its
+SHA-256 equalled the published checksum, and --licenses printed NOTICE byte for
+byte. See rfcs/handoffs/release-0.37.0.md.
 ```

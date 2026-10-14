@@ -1,8 +1,8 @@
 ---
 title: "RFC-029 handoff — Documentation, CI, and Release Automation"
-status: "**Implemented and closed 2026-10-14** — `0.37.0` candidate, not yet published. All six slices and the Whole-RFC checklist closed."
+status: "**Implemented and closed 2026-10-14** — released as `0.37.0` 2026-10-14. All six slices and the Whole-RFC checklist closed."
 source_rfc: "../../done/029-documentation-ci-and-release-automation.md"
-source_rfc_status: "Implemented and closed 2026-10-14; `0.37.0` candidate, not yet published."
+source_rfc_status: "Implemented and closed 2026-10-14; released as `0.37.0` 2026-10-14."
 target_release: "0.37.0"
 ---
 

@@ -2,7 +2,7 @@
 
 ## 0.37.0 - Documentation, CI, and Release Automation
 
-Status: **candidate, not yet published.** RFC-029's six slices and its Whole-RFC checklist are
+Status: **released 2026-10-14.** RFC-029's six slices and its Whole-RFC checklist are
 all implemented, gated and closed, with one exception named below. This entry was written
 incrementally as slices closed, then re-read against the finished set at the candidate; see
 `rfcs/handoffs/029-ci-and-distribution/` for the full handoff pack.

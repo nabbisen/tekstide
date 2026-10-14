@@ -1,6 +1,6 @@
 # RFC-029: Documentation, CI, and Release Automation
 
-Status: **Implemented and closed 2026-10-14; `0.37.0` candidate, not yet published.** See the
+Status: **Implemented and closed 2026-10-14; released as `0.37.0` 2026-10-14.** See the
 *Closed* section. **Accepted by the human owner 2026-10-13.** D1–D13 as written; **the remaining
 question — what the install page leads with — answered by the acceptance itself**, see *Decided on
 acceptance*. Proposed 2026-10-12. `0.37.0`, M14, the first RFC of that milestone. D9–D13 reverse
@@ -198,7 +198,7 @@ Consequences, recorded where they bind:
 
 ## Closed (2026-10-14)
 
-Six slices and the Whole-RFC checklist are done. **`0.37.0` candidate, not yet published** — see
+Six slices and the Whole-RFC checklist are done. **Released as `0.37.0` 2026-10-14** — see
 `CHANGELOG.md`'s own status line, which does not claim "released" ahead of the actual publish.
 
 **PR-029-A (the flake dispositions)** closed three live rows, not the two the task breakdown
