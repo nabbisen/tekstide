@@ -112,10 +112,18 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
     `project/session.rs`, named in `transcript/writer.rs`'s docs) names the concrete type D5
     replaces mechanisms *inside*. Landing macOS code in a type called `Linux…` is exactly the
     label-that-means-nothing this decision exists to abolish, one layer down. **Renamed to
-    `UnixTerminalRuntime` in D5's own slice** — a plain rename, not a trait split: Windows is out of
-    scope (D1), so there is no second concrete implementation to abstract over yet, and introducing
-    a trait for one implementation would be exactly the kind of abstraction this project's own
-    convention avoids building ahead of a real second caller.
+    `TerminalRuntime`, not `UnixTerminalRuntime`** — required correction, review 568: `Unix` claims
+    the BSDs and Solaris too, the same over-claim D3's and D4's own three-way `linux`/`macos`/other
+    splits exist to avoid, just in a type name rather than a `cfg`. No platform adjective at all is
+    the honest name for a type whose actual coverage is whatever its internal `cfg`s say — and it
+    sits correctly beside the module's other exports (`TerminalRuntimeEvent`,
+    `TerminalRuntimeError`, `TerminalLaunchError`), with no existing `TerminalRuntime` anywhere in
+    the tree to collide with. **This decision owns the rename; PR-028-B performs it** — the
+    dispatch-convention slice, where the convention is being written anyway and before D5 starts
+    editing the type's internals. Not a trait split: Windows is out of scope (D1), so there is no
+    second concrete implementation to abstract over yet, and introducing a trait for one
+    implementation would be exactly the kind of abstraction this project's own convention avoids
+    building ahead of a real second caller.
   - **Five `linux_mvp()` constructors** (`navigation.rs:348`, `content/open.rs:15`,
     `project/diff.rs:96`, `project/root/explorer.rs:28`, `transcript/reader.rs:106`) hold byte
     limits, directory-ignore lists and keybinding rules — **nothing platform-specific**, confirmed
@@ -187,8 +195,10 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   rules table (`"Ctrl+Shift+P"`, `"Ctrl+Alt+P"`, the full `Ctrl+Alt+<letter>` set this crate mints),
   matched by 7 call sites across `shell.rs`, `shell/run_report.rs`, `input.rs` and
   `input/terminal_surface.rs` (`key.modifiers.control()`/`press.modifiers.control()` — corrected
-  from the review's own count of 8 after a tree-wide re-check; one of the seven sites tests both
-  `control()` and `alt()` together, which may be where the count diverged). **No dependency
+  from the review's own count of 8, read line by line rather than counted: the eighth hit its own
+  `grep -rn "control()" | wc -l` matched was a **test function name**,
+  `activating_a_row_whose_file_has_changed_surfaces_the_reload_control()` — a pattern match inside
+  an identifier, not a call site. The 7 named here are read, not counted. **No dependency
   translates this**: grepped the whole tree for `logo()`, `Modifiers::LOGO` and `.command()` and
   found zero hits — the Command/⌘ modifier is not handled in any form. `winit` reports ⌘ as `LOGO`,
   not `control()`, so a macOS build with this table unchanged requires the physical Control key for
@@ -257,24 +267,25 @@ platform and not the other is not evidence either way about the other platform's
 register must be able to say so rather than silently conflating two populations the way review
 556 corrected for load earlier this release.
 
-**The Run It gate — proposed, not decided here.** Run It is a human, display-attached gate; a CI
-runner cannot perform it, and nobody on this project currently has macOS hardware to run it on.
-Two honest shapes, matching `what-the-installer-must-not-do.md` §3's own discipline of never
-claiming more than what was actually verified:
+**The Run It gate — decided.** Run It is a human, display-attached gate; a CI runner cannot
+perform it, and nobody on this project currently has macOS hardware to run it on. **No macOS
+artifact ships without either a real-hardware Run It or an explicit label saying it never had
+one** — those are the only two shapes, matching `what-the-installer-must-not-do.md` §3's own
+discipline of never claiming more than what was actually verified:
 
 1. The owner runs Run It on real Apple hardware before the first macOS artifact tags, the same
-   gate every Linux release already requires.
+   gate every Linux release already requires. **Preferred**: a GUI product's first release on a
+   platform is exactly the release most likely to carry a defect only a real screen would show
+   (window chrome, font rendering, the D9 keybinding sweep's own correctness), the same reasoning
+   that makes Run It a required gate at all on Linux.
 2. The artifact ships, explicitly labelled in its own release notes as *not yet run on real
-   hardware* — true, rather than silently implying parity with the Linux release's own Run It
-   history.
+   hardware* — true, in the same register the checksum wording already uses so a reader can see it
+   without knowing what to ask, rather than silently implying parity with the Linux release's own
+   Run It history. **The stated fallback, not deleted once (1) is confirmed** — a fallback
+   considered and rejected is more useful to a future reader than one never named.
 
-**Recommendation: (1).** A GUI product's first release on a platform is exactly the release most
-likely to carry a defect only a real screen would show (window chrome, font rendering, the D9
-keybinding sweep's own correctness) — the same reasoning that makes Run It a required gate at all
-on Linux. Shipping unlabelled parity we do not have would be the quieter failure; shipping
-explicitly labelled as unverified is honest but ships a known-weaker artifact as the default rather
-than the exception. If the owner cannot run it before the first tag, (2) is the fallback, not a
-silent default.
+Whether the owner has Apple hardware to run (1) on before the first tag is a factual question
+reserved to the owner, needed by PR-028-F and not before — it blocks nothing in PR-028-A through E.
 
 ## Slices
 
@@ -287,9 +298,12 @@ silent default.
 - **PR-028-B — the platform-dispatch convention** (D3). `ConfigPathProvider`'s and
   `AppStatePathProvider`'s host dispatch, `AppStatePathProvider::macos_default()` written and
   tested from scratch, the convention documented once as a review-gate rule for future providers.
+  `LinuxTerminalRuntime` → `TerminalRuntime` (D3's own rename, performed here — before D5 starts
+  editing the type's internals, not inside D5's own slice).
 - **PR-028-C — the IPC replacements** (D4). `LOCAL_PEERCRED`/`xucred` with its version check; the
-  `/dev/fd` bind-path question resolved on a real macOS machine before being written as a decision,
-  not assumed from BSD heritage.
+  `/dev/fd` bind-path question resolved on PR-028-A's own `macos-latest` runner — the only macOS
+  machine this project has — via a test asserting `fstat`'s `st_dev`/`st_ino` identity (or a
+  write-then-read round trip) through the bind path, not assumed from BSD heritage.
 - **PR-028-D — the process/PTY replacements** (D5), and the macOS job starts running tests. `/proc`
   enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe or
   kqueue `EVFILT_USER`; `SYS_gettid` → `pthread_threadid_np`; `openpty`'s macOS link target
