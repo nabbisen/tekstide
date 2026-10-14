@@ -6,7 +6,8 @@
 //! of core state to a widget tree, no interior mutable state), **input
 //! interest** (`None`, `Keyboard`, or `TextStream`), **focus zones**, and
 //! **status contribution**. This slice deliberately implements that
-//! shape as concrete methods on [`board::ProjectBoard`] rather than a
+//! shape as concrete functions in `board` (no single `ProjectBoard` type
+//! exists; the surface is the module's own function set) rather than a
 //! `trait Surface` -- with exactly one implementor, a trait would be
 //! abstraction with no second case to generalize from (this codebase's
 //! own precedent: `Theme::border_focused`, PR-015-B, was cut for the

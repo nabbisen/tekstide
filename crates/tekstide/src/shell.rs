@@ -867,7 +867,7 @@ pub(crate) enum RecoveryOfferRefusalReason {
 /// RFC-027 PR-027-C, Amendment 1: the restart offer -- see [`ModalContent::RecoveryOffer`]
 /// and [`offer_recovery_for_opened_project`] for the trigger and the "stays open across
 /// more than one row" shape. `project_display_name` is read once, at the moment the offer
-/// opens, from the same [`ProjectSession::display_name`] every other per-project surface
+/// opens, from the same `ProjectSession::display_name` every other per-project surface
 /// already reads -- not re-read live, since nothing on this modal can rename the project
 /// while it is open.
 #[derive(Debug, Clone)]
@@ -1816,7 +1816,7 @@ pub enum Message {
     /// all" convention, the same class of pre-existing muscle memory `Ctrl+S`/
     /// `Ctrl+Z`/`Ctrl+Shift+Z`/`Ctrl+Shift+V` already are, not a
     /// `Ctrl+Alt+<letter>` this crate mints. Both converge on
-    /// [`save_all_active_project_documents`].
+    /// [`tekstide_core::shell::ApplicationShell::save_all_active_project_text_documents`].
     SaveAllDocumentsButtonPressed,
     /// RFC-040 PR-040-C: `TrustSettings`'s own real "Launch AI CLI Run"
     /// button -- D2's "agent run where a trusted project's actions
@@ -2158,10 +2158,10 @@ pub enum Message {
 /// click's own `Message` carries -- never neither, for any message a
 /// `.on_press` anywhere in this crate can actually produce.
 ///
-/// **Not `#[cfg(test)]`**, unlike [`keyboard_help::ControlCoverage`]:
+/// **Not `#[cfg(test)]`**, unlike `keyboard_help::ControlCoverage`:
 /// `update`'s own central guard (below) is now this type's real
 /// production caller, the same "has a real caller, not just a test's
-/// own question" distinction [`keyboard_help::action_catalog_key`]
+/// own question" distinction `keyboard_help::action_catalog_key`
 /// already draws against `control_coverage`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClickMessageKind {
@@ -2181,7 +2181,7 @@ pub(crate) enum ClickMessageKind {
 }
 
 /// Exhaustive over every `Message` variant, the same discipline
-/// [`keyboard_help::control_coverage`] already established for
+/// `keyboard_help::control_coverage` already established for
 /// `NavigationAction`: a new variant fails to *compile* here until
 /// someone decides whether it is a background control, a modal
 /// decision, or (the common case -- most of `Message` is keyboard
@@ -4387,7 +4387,7 @@ fn attempt_agent_run_launch_with_profile_and_state_root(
 /// (RFC-022 PR-022-C response 216) was never wrong -- this call site
 /// simply never took up the escape hatch response 216 built.
 /// RFC-045 PR-045-B: the launch plan production builds, split out of
-/// [`attempt_agent_run_launch_with_profile_state_root_and_capture`] --
+/// `attempt_agent_run_launch_with_profile_state_root_and_capture` --
 /// the fourth testability split that function has had, and for the
 /// familiar reason: **the value D9 configures is not readable back from
 /// a launched run.**
@@ -7346,8 +7346,8 @@ pub(crate) fn load_configuration_at_boot(
 /// `parse_and_validate` hands over only what met them). What only this side can
 /// know is whether the configured family is **installed**: `installed_family`
 /// asks the renderer's own font database, and a name it does not answer to is a
-/// [`FallbackReason::FamilyUnavailable`] on the board with the default face
-/// standing. `lookup` is a parameter so that answer can be tested without
+/// [`tekstide_core::config::FallbackReason::FamilyUnavailable`] on the board with
+/// the default face standing. `lookup` is a parameter so that answer can be tested without
 /// depending on which fonts a machine has.
 fn appearance_in_force(
     store: &tekstide_core::config::ConfigStore,
@@ -7478,15 +7478,18 @@ pub(crate) fn open_audit_store_recording_failure(
 
 /// RFC-047 PR-047-B response 358 R2: split out of
 /// [`open_audit_store_recording_failure`] so a test can drive this half
-/// -- the part that decides what an [`AuditRecoveryOutcome`] means for
-/// [`AuditHealth`] and the board -- against an outcome built by the
-/// `test-support` seam
-/// ([`tekstide_core::audit::AuditRecovery::recover_and_reopen_forcing_unrecorded_event_for_test`]),
-/// which is the only way to reach `recovery_event_recorded: false` on a
-/// *successful* recovery from outside `tekstide-core` (see that
-/// function's own doc comment for why). Production calls this with a
-/// real [`tekstide_core::audit::AuditRecoveryOutcome`]; the R2 test calls
-/// it with the same real match arms fed a forced value.
+/// -- the part that decides what an [`tekstide_core::audit::AuditRecoveryOutcome`]
+/// means for [`tekstide_core::audit::AuditHealth`] and the board -- against an
+/// outcome built by the `test-support` seam
+/// (`tekstide_core::audit::recover_and_reopen_forcing_unrecorded_event_for_test`,
+/// a free function re-exported from `audit::recovery` only under
+/// `#[cfg(any(test, feature = "test-support"))]` -- not linkable from a
+/// plain `cargo doc` build, and not a method on `AuditRecovery`), which is
+/// the only way to reach
+/// `recovery_event_recorded: false` on a *successful* recovery from outside
+/// `tekstide-core` (see that function's own doc comment for why). Production
+/// calls this with a real [`tekstide_core::audit::AuditRecoveryOutcome`]; the
+/// R2 test calls it with the same real match arms fed a forced value.
 fn apply_recovery_outcome(
     outcome: tekstide_core::audit::AuditRecoveryOutcome,
     reason: tekstide_core::audit::AuditStoreErrorReason,
@@ -7884,8 +7887,8 @@ impl std::hash::Hash for TerminalWakeSource {
 }
 
 /// The bridging stream itself: spawns one dedicated OS thread that
-/// blocks on [`WakeNotifier::block_until_woken`] (a real `poll(2)` park,
-/// not a timer) and forwards exactly the terminal's own id into `iced`'s
+/// blocks on [`tekstide_core::runtime::terminal::WakeNotifier::block_until_woken`]
+/// (a real `poll(2)` park, not a timer) and forwards exactly the terminal's own id into `iced`'s
 /// async world each time -- **response 205's first constraint**: the
 /// message carries a `TerminalId` and nothing else, never bytes, so
 /// terminal content can never become `Debug`-formattable or `Clone`-able
@@ -8072,7 +8075,8 @@ fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::projec
 
 /// RFC-026 D3, B2 step 3: one notice from a project's watcher, recorded into its batcher.
 /// A notice whose generation is not the project's current one is from a watcher that has
-/// since closed, and is dropped. The feed itself is in [`ProjectWatcher::record_changed_paths`],
+/// since closed, and is dropped. The feed itself is in
+/// [`tekstide_core::project::watch::ProjectWatcher::record_changed_paths`],
 /// which records only directories the project watches.
 fn record_project_watch_notice(
     state: &mut State,
@@ -9005,9 +9009,10 @@ fn top_bar(state: &State) -> Element<'_, Message> {
 /// app-wide, so "Audit" has the same no-active-project-required shape
 /// `Help` already does, not `Trust Settings`'s own conditional one.
 /// Factored out of [`top_bar_title_and_actions_row`] for the same
-/// testability reason [`main_area_label`]/[`sidebar_label`] already are
-/// -- an `Element` is not directly inspectable, so the decision itself is
-/// a plain function a test can call.
+/// testability reason [`main_area_label`]/`sidebar_label` already are
+/// (the latter no longer exists under that name) -- an `Element` is not
+/// directly inspectable, so the decision itself is a plain function a
+/// test can call.
 fn top_bar_offers_trust_settings(state: &State) -> bool {
     state.app_shell.state().active_project().is_some()
 }
@@ -9256,8 +9261,10 @@ pub(crate) fn project_tab_label(
 /// project session the home tab is not.
 ///
 /// Response 308's own follow-on finding: dropping that symbol left
-/// "you are on the board" carried by [`tab_active_style`]'s background
-/// fill alone -- a colour-only channel (`border` there varies with
+/// "you are on the board" carried by `tab_active_style`'s background
+/// fill alone (no function of that name exists any more; likely folded
+/// into `tab_container_style`/`tab_inner_button_style` since, not
+/// re-derived here) -- a colour-only channel (`border` there varies with
 /// `focused`, not `active`), and measured well under the 3:1 WCAG 2.1
 /// SC 1.4.11 floor this project has already corrected twice (`0.11.0`'s
 /// unfocused-pane border, `0.12.0`'s modal scrim). Square brackets
@@ -10292,7 +10299,7 @@ fn main_area_key(mode: Option<ProjectMode>) -> &'static str {
 }
 
 /// Factored out from [`main_area_view`] for the same reason as
-/// [`sidebar_label`].
+/// `sidebar_label` (no function of that name exists any more).
 pub(crate) fn main_area_label(state: &State, mode: Option<ProjectMode>) -> String {
     let focused = state.focus == FocusZone::MainArea;
     format!(
@@ -12195,7 +12202,7 @@ fn recovery_record_for(
 
 /// RFC-027 PR-027-C: `Enter`/a row click's own real handler -- recovers the highlighted
 /// item into the open set, makes it visible the same way every other file-open path
-/// already does (see [`ProjectSession::recover_text_document`]'s own doc for why that
+/// already does (see `ProjectSession::recover_text_document`'s own doc for why that
 /// chain, not a copy of its mode-switching logic, is what this calls), and records what
 /// happened on the row itself rather than closing the modal (there is more than one row
 /// here, and D4 means every row is its own decision). Already-recovered rows
@@ -13883,7 +13890,7 @@ fn change_review_decision_panel(
 /// RFC-042 D2, closed per response 332 Required 3: a real module
 /// boundary, not a same-module scan. `ChangeReviewContentLine`'s inner
 /// field and its `as_str` accessor are private to this module -- only
-/// [`render_content_body`] can read a line's own text, and it always
+/// `render_content_body` can read a line's own text, and it always
 /// returns the bordered container in the same step. Rendering content
 /// outside its container is now a **privacy error**, not a convention
 /// a source-scan test hopes to catch: `shell`'s own code (including
@@ -14467,7 +14474,7 @@ mod audit_view {
     }
 
     /// Factored out the same testable-without-`Element` way
-    /// [`transcript_purge_dialog_body`] already is.
+    /// `transcript_purge_dialog_body` already is.
     pub(super) fn purge_dialog_body(
         catalog: &super::Catalog,
         modal: &super::AuditPurgeModal,
@@ -14693,7 +14700,7 @@ mod audit_view {
     }
 
     /// One record's own row text -- factored out the same testable-
-    /// without-`Element` way [`approval_history_entry_body`] already is,
+    /// without-`Element` way `approval_history_entry_body` already is,
     /// since a row mixes a compile-time family/outcome symbol with a
     /// dynamic, trusted-but-not-`'static` timestamp and id, which
     /// `CatalogArgs` only carries via `.untrusted` (quoting an id is

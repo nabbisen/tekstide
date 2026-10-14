@@ -108,7 +108,8 @@ pub enum FallbackReason {
 }
 
 /// A configuration-defined AI CLI profile, as the config document itself
-/// represents it -- **not** [`crate::agent::profile::AiCliProfile`].
+/// represents it -- **not** [`crate::agent::AiCliProfile`] (re-exported
+/// from the private `profile` submodule, not `agent::profile::` itself).
 /// Translating one into the other is [`super::to_ai_cli_profile`].
 ///
 /// **RFC-045 D3': `args` and `environment_policy` are gone.** `AiCliProfile`

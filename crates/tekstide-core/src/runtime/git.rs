@@ -29,7 +29,7 @@
 //! the configuration it read was the configuration `git` would use, which
 //! is false wherever `git` consults *another* repository's configuration
 //! -- a submodule's gitdir is untouched by anything read here, yet
-//! `git status` in the parent consults it. [`worktree_names_a_content_driver`]'s
+//! `git status` in the parent consults it. `worktree_names_a_content_driver`'s
 //! doc comment covers the fix (R1) and three narrower fail-open bugs found
 //! alongside it in the attributes walk (R2 budget exhaustion, R3 symlink
 //! following, R4 `.git`-as-pointer-file) and the attributes read (R5,
@@ -40,12 +40,12 @@
 //! being read.** R6 -- the developer's own global/system git
 //! configuration was being forwarded into every read, so a personal
 //! `user.signingkey` or `commit.gpgsign` refused *every* repository on
-//! that machine, forever; [`spawn_git_command`] now hardcodes
+//! that machine, forever; `spawn_git_command` now hardcodes
 //! `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` to `/dev/null` instead of
 //! forwarding them, so only the repository's own effective configuration
 //! is ever read. R7 -- an unrecognised key (including `include`/
 //! `includeIf`) used to refuse the repository outright; it now withholds
-//! only the content answer ([`GitGateOutcome::AcceptedBranchOnly`]), since
+//! only the content answer (`GitGateOutcome::AcceptedBranchOnly`), since
 //! nothing a repository names is ever executed by the scan itself either
 //! way, and real repositories accumulate ordinary tool-written keys
 //! (an editor's `branch.*.vscode-merge-base`, the GitHub CLI's
@@ -53,7 +53,7 @@
 //!
 //! RFC-012's *Git Detector Safety* gate, item by item:
 //!
-//! 1. **Reviewed non-project-local executable** -- [`resolve_git_executable`]
+//! 1. **Reviewed non-project-local executable** -- `resolve_git_executable`
 //!    (PR-030-D) resolves an absolute path from a fixed, reviewed
 //!    directory list or a filtered inherited `PATH`, never a path
 //!    influenced by the repository being read; `POSIX exec` never
@@ -61,7 +61,7 @@
 //!    still inject `GIT_EXECUTABLE`, a bare name against the child
 //!    process's own fixed `PATH` (item 4), bypassing resolution
 //!    entirely -- see that constant's own doc comment.
-//! 2. **Invoked directly, no shell** -- [`spawn_git_command`] builds a
+//! 2. **Invoked directly, no shell** -- `spawn_git_command` builds a
 //!    `std::process::Command` argument vector; nothing is ever passed to
 //!    `sh -c`.
 //! 3. **Deterministic argument vector, not aliases** -- every call site
@@ -74,7 +74,7 @@
 //!    `.env_clear()`, never the inherited or repository-influenced
 //!    value, for whatever `git` itself might consult. Locating which
 //!    `git` binary *Tekstide* invokes is item 1's concern, not this
-//!    one -- [`resolve_git_executable`]'s inherited-`PATH` fallback
+//!    one -- `resolve_git_executable`'s inherited-`PATH` fallback
 //!    (when the reviewed directories have nothing) drops every relative
 //!    entry and every entry inside the project root, so this guarantee
 //!    holds there too.
@@ -90,8 +90,8 @@
 //!    gate's entire purpose: an unrecognised configuration key withholds
 //!    the content answer (R7), before any command that could act on it
 //!    runs.
-//! 7. **Bounded execution time and output** -- [`run_bounded`] enforces
-//!    [`SUBPROCESS_TIMEOUT`] and [`MAX_OUTPUT_BYTES`] on every call.
+//! 7. **Bounded execution time and output** -- `run_bounded` enforces
+//!    `SUBPROCESS_TIMEOUT` and `MAX_OUTPUT_BYTES` on every call.
 //! 8. **Bounded diagnostics** -- `Refused`'s reason carries only a
 //!    `git --version` string or a fixed enum tag, never a configuration
 //!    key, file contents, diff output, or captured stderr text (R7:
@@ -110,9 +110,9 @@
 //! fixed `/usr/bin:/bin`-only search (the original item 4, before this
 //! RFC) left `git` silently unreachable on a distribution that installs
 //! it elsewhere entirely -- NixOS and Guix put it in a per-user or
-//! per-system profile, not a rare setup. [`resolve_git_executable`] runs
+//! per-system profile, not a rare setup. `resolve_git_executable` runs
 //! once, in [`compute_summary`], before anything else. The same slice
-//! also caches [`check_git_available`]'s `--version` spawn (success
+//! also caches `check_git_available`'s `--version` spawn (success
 //! only, keyed by the exact executable string, process-wide) -- see that
 //! function's own doc comment for why a keyed cache cannot leak state
 //! between this module's own tests.
@@ -128,17 +128,17 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// Test-only (PR-030-D: `pub fn compute_summary`, the one production
-/// caller, now resolves its own executable via [`resolve_git_executable`]
+/// caller, now resolves its own executable via `resolve_git_executable`
 /// instead of using this bare name directly). Tests inject this, or a
 /// deliberately-bogus name, straight into `compute_summary_with_environment`/
 /// `evaluate_with_environment`, bypassing resolution entirely -- exactly
 /// what lets `Fixture`'s own bare `"git"` and each failure-mode test's
-/// distinct bogus string coexist with [`check_git_available`]'s
+/// distinct bogus string coexist with `check_git_available`'s
 /// per-string cache without any of them observing each other's state.
 #[cfg(test)]
 const GIT_EXECUTABLE: &str = "git";
 
-/// Tried first, in order, before [`resolve_git_executable`] ever touches
+/// Tried first, in order, before `resolve_git_executable` ever touches
 /// the inherited `PATH`. `/usr/bin` and `/bin` are D1' item 4's original
 /// fixed pair; `/usr/local/bin` and `/opt/homebrew/bin` (Homebrew's own
 /// prefix on Apple Silicon) are added here because neither is
@@ -306,7 +306,7 @@ pub(crate) enum GitUnavailableReason {
 ///
 /// Deliberately **not** `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` (R6,
 /// review 407): those are hardcoded to `/dev/null` in
-/// [`spawn_git_command`] instead of being forwarded from wherever
+/// `spawn_git_command` instead of being forwarded from wherever
 /// Tekstide happens to run. D1' names *repository-supplied* configuration
 /// as the threat; the developer's own global config is not the attacker
 /// and must not be the judge either -- measured against a real
@@ -380,7 +380,7 @@ fn evaluate_with_environment_and_walk_budget(
 /// nothing the configuration names is a program; `Err` carries the outcome
 /// [`evaluate_with_environment_and_walk_budget`] returns for it, unchanged.
 ///
-/// Split out because the *other* half -- [`worktree_names_a_content_driver`]'s
+/// Split out because the *other* half -- `worktree_names_a_content_driver`'s
 /// gitlink check and its walk of every `.gitattributes` in the worktree -- is
 /// about whether a **content comparison** can be trusted, which the module
 /// doc says in so many words is "not a safety problem". A question that reads
@@ -440,10 +440,10 @@ fn vet_configuration(
 /// are read only when `Accepted` -- the one outcome where content
 /// comparison was actually vetted.
 ///
-/// PR-030-D: [`resolve_git_executable`] runs first. When it finds
+/// PR-030-D: `resolve_git_executable` runs first. When it finds
 /// nothing -- `git` is genuinely absent from every reviewed and every
 /// inherited-`PATH` location -- this goes straight to
-/// [`branch_only_summary`] rather than calling into the gate with a name
+/// `branch_only_summary` rather than calling into the gate with a name
 /// known not to resolve: `branch_only_summary` already handles both "not
 /// a repository" and "a repository with no invocable `git`" correctly on
 /// its own, using only the filesystem, so nothing here needs to invent a
@@ -559,16 +559,16 @@ const _: () = assert!(MAX_IGNORE_QUERY_ENTRIES * (MAX_ENTRY_NAME_BYTES + 3) < MA
 /// reasoning).
 ///
 /// **The gate runs first, every call, and is not cached (RFC-055 D9)** -- but
-/// only [`vet_configuration`], the half that decides whether `git` may run at
+/// only `vet_configuration`, the half that decides whether `git` may run at
 /// all. That is required, not conservative: measured, `git check-ignore` **does**
 /// run a repository's `core.fsmonitor` program (it reads the index), so a
 /// repository the gate does not accept must not be asked anything. What it
 /// does not run is a submodule's own configuration, or a clean filter -- it
 /// reads no content -- so the gitlink check and the attributes walk that guard
-/// `git status` are not repeated here (~86 ms on this repository; see [`vet_configuration`]).
+/// `git status` are not repeated here (~86 ms on this repository; see `vet_configuration`).
 ///
 /// Every entry goes to git as `./<name>` and comes back through the same
-/// type ([`IgnoreQueryInput`]), the only way to build a query, so a filename
+/// type (`IgnoreQueryInput`), the only way to build a query, so a filename
 /// like `:(glob)evil.log` cannot abort the batch for its siblings (measured:
 /// exit 128, no answer for anything) -- and no caller can hand git a raw path.
 pub fn ignored_entries(directory: &Path, names: &[std::ffi::OsString]) -> IgnoreReport {
@@ -1029,7 +1029,7 @@ fn branch_only_summary(repository_root: &Path) -> ProjectGitSummary {
 /// Resolves `.git` entirely from the filesystem: a directory (the common
 /// case), or a pointer file (`gitdir: <path>`, a linked worktree or a
 /// submodule checkout) parsed directly. Unlike [`resolve_git_common_dir`],
-/// this never spawns `git` -- it is what makes [`branch_only_summary`]
+/// this never spawns `git` -- it is what makes `branch_only_summary`
 /// usable even when `git` itself is `Refused` as missing or too old.
 /// **Deliberately the *private* per-worktree dir, not the common dir**:
 /// `HEAD` is one of the files that differs per linked worktree (each

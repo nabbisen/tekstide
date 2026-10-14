@@ -246,8 +246,8 @@ impl AppState {
     /// simply with no entry in `project_protections`. **`HeldByAnother`
     /// undoes the add** (D8): a second instance does not keep a duplicate
     /// session around for a project it does not own, so
-    /// [`Self::remove_active_project_session`] removes exactly what
-    /// [`Self::add_project_session`] just pushed, leaving `self.projects`
+    /// `Self::remove_active_project_session` removes exactly what
+    /// `Self::add_project_session` just pushed, leaving `self.projects`
     /// as if the open had never been attempted.
     pub fn add_project_from_path_protected(
         &mut self,

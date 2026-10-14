@@ -823,7 +823,7 @@ pub(crate) fn navigate_cursor(
 
 /// RFC-040 PR-040-C: `on_save` is the one real click message this view
 /// now has an interest in -- the same "surface renders, `shell.rs`
-/// supplies the message" split [`crate::surface::board::empty_state_view`]'s
+/// supplies the message" split `crate::surface::board::empty_state_view`'s
 /// own `open_browser_message` parameter already established. Only used
 /// in the `Some(document)` branch (there is nothing to save with no
 /// document open), but taken unconditionally rather than as an

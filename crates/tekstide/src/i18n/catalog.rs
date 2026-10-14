@@ -33,7 +33,8 @@ pub(crate) enum CatalogError {
 
 /// Builds the compiled-in source-locale bundle. Infallible in practice:
 /// the source catalog is checked into the repository and covered by
-/// [`super::tests::source_locale_catalog_parses`], so a build with a
+/// `super::tests::source_locale_catalog_parses` (a `#[cfg(test)]` item,
+/// not linkable from a normal `cargo doc` build), so a build with a
 /// broken `en.ftl` fails in CI/tests before it ever reaches this
 /// `expect`, not at a user's runtime.
 pub(crate) fn source_locale_bundle() -> Bundle {

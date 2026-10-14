@@ -94,9 +94,9 @@ impl ConfigPathProvider {
 /// only at the loader (PR-023-C). What this **does** check, whenever
 /// something exists to check: the configuration directory and file
 /// never resolve, via a symlink, outside the platform configuration
-/// root they were computed under -- the same discipline
-/// [`crate::audit::path`] applies to `audit_dir`/`database_file` under
-/// `state_root`.
+/// root they were computed under -- the same discipline `audit::path`
+/// (private; this crate's own module, not a public link target) applies
+/// to `audit_dir`/`database_file` under `state_root`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigStoragePath {
     config_dir: PathBuf,

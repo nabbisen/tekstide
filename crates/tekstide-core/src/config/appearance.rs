@@ -462,7 +462,7 @@ pub(super) fn extract_theme(
     Ok(ThemeSettings { overrides })
 }
 
-/// The contrast half of [`extract_theme`], on its own so it can be held to its
+/// The contrast half of `extract_theme`, on its own so it can be held to its
 /// invariant over generated palettes.
 pub fn enforce_contrast(
     mut kept: BTreeMap<ThemeRole, Colour>,

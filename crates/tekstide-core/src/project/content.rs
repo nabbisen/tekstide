@@ -293,7 +293,7 @@ impl ProjectContentWorkspace {
     /// dedup switch then resolves with no further disk read.
     ///
     /// Returns the new entry's own index in the open set on success, so the caller can read
-    /// back [`TextDocument::state`] and [`FileAccessTarget::canonical_path`]'s existence to
+    /// back [`TextDocument::state`] and `FileAccessTarget::canonical_path`'s existence to
     /// learn which of the three disk outcomes (D5) resulted, the same two facts
     /// [`Self::refresh_document_by_canonical_path`] already reads to tell `Conflict` from
     /// `ExternalDeleted` -- this method mints no separate outcome type for it.

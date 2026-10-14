@@ -1589,3 +1589,18 @@ actually fixed, not added to the gate pre-broken. **Two-step shape, in order**: 
 warnings in a slice of their own first (re-point each link at a real public item, or drop the ones
 that cannot have one), then add the `RUSTDOCFLAGS="-D warnings"` gate step once the count is
 genuinely zero, so it cannot silently regrow afterward.
+
+**Closed, 2026-10-14, review 572's own follow-up.** Both steps done. Every warning was read
+individually, not pattern-matched: genuine renames got the correct path re-pointed (e.g.
+`config::model.rs`'s stale `crate::agent::profile::AiCliProfile` corrected to its real re-exported
+location, `crate::agent::AiCliProfile`; `shell.rs`'s `save_all_active_project_documents` corrected
+to the real `save_all_active_project_text_documents`); links to genuinely private (`pub(crate)`,
+`pub(super)`, or bare-private) items had their brackets stripped to plain backtick text, since no
+public target exists for them to reach; and four references (`ExplorerRow`, `visible_rows`,
+`sidebar_label`, `tab_active_style`) named functions or types that no longer exist under those
+names at all — said so in place rather than guessing a replacement, per this entry's own
+instruction not to invent a target. `cargo doc -p tekstide-core --no-deps` and
+`cargo doc -p tekstide --no-deps` both confirmed at **0 warnings**, from a clean `target/doc`, not
+a cached one. `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` added to `ci.yml` as its
+own step, and ablated before trusting it: reintroduced one of the original broken links, confirmed
+the step fails naming the exact file and line, reverted, confirmed green again.

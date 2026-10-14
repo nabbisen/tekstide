@@ -35,7 +35,7 @@ pub struct TextViewport {
 }
 
 /// RFC-027 PR-027-C: the fields [`TextDocument::recover`] takes from a recovery record,
-/// bundled so the constructor (and [`crate::project::content::ProjectContentWorkspace::recover_text_document`],
+/// bundled so the constructor (and [`crate::project::ProjectContentWorkspace::recover_text_document`],
 /// which forwards it) stay under clippy's argument-count lint without an `#[allow]` --
 /// every field here comes from the same `RecoveryRecord`, so grouping them loses no
 /// caller-side clarity the way bundling unrelated parameters would.

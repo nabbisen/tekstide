@@ -138,7 +138,7 @@ pub(crate) fn node_line(
     node_line_with(catalog, node, expanded, false, git_summary)
 }
 
-/// [`node_line`] plus whether this row's own path is a member of the open set (RFC-065
+/// `node_line` plus whether this row's own path is a member of the open set (RFC-065
 /// PR-065-B: every open document, not only the active one -- a project with three documents
 /// open marks all three rows). **That membership is a word**: `[open]`, because the keyboard
 /// highlight (`> `) and what is open are two different things a user must tell apart, and
@@ -230,7 +230,7 @@ fn expansion_marker(expandable: bool, expanded: bool) -> &'static str {
 /// This is the one function that decides what a row says, so the
 /// escaping and i18n tests hold the same properties they held when a row
 /// was one Fluent string (RFC-052 §7): every name reaches the screen
-/// through [`node_line`]'s `quote_untrusted`, whoever calls this.
+/// through `node_line`'s `quote_untrusted`, whoever calls this.
 pub(crate) fn row_text(
     catalog: &Catalog,
     row: &ExplorerTreeRow<'_>,
@@ -340,7 +340,7 @@ pub(crate) fn window_for(total: usize, highlight: usize, top: usize, capacity: u
 /// windowed rows with their focus marker, and -- **whenever rows are not
 /// all on screen -- a line saying which ones are** (RFC-052: nothing is
 /// hidden silently). Factored out from [`view`] for the same testability
-/// reason as [`node_line`].
+/// reason as `node_line`.
 pub(crate) fn tree_lines(
     catalog: &Catalog,
     tree: &ExplorerTree,
@@ -610,7 +610,7 @@ pub fn view<'a, Message: 'a>(
 }
 
 /// RFC-038 PR-038-G: the folder browser's own rows -- the direct
-/// analogue of [`ExplorerRow`], for
+/// analogue of `ExplorerRow` (no type of that name exists any more), for
 /// `tekstide_core::project::root::DirectoryBrowseScan` rather than
 /// `ExplorerDirectoryScan` (see that type's own doc for why the two are
 /// genuinely different scans, not one reused as two).
@@ -620,7 +620,8 @@ pub(crate) enum BrowseRow<'a> {
     Node(&'a BrowseNode),
 }
 
-/// The direct analogue of [`visible_rows`]: `Parent` shows whenever
+/// The direct analogue of `visible_rows` (no function of that name
+/// exists any more): `Parent` shows whenever
 /// there is anywhere to go up to (`scan.parent_dir.is_some()`), unlike
 /// the project explorer's "not yet at the project root" rule -- a
 /// folder browser has no fixed root to stop climbing at short of the
@@ -643,7 +644,7 @@ fn browse_node_state_symbol(state: BrowseNodeState) -> &'static str {
     }
 }
 
-/// The direct analogue of [`node_line`]: `node.name` is untrusted
+/// The direct analogue of `node_line`: `node.name` is untrusted
 /// (a real directory can be named anything, including a bidi-override
 /// sequence) and escaped before it reaches the catalog, same discipline,
 /// same reason.
@@ -666,7 +667,7 @@ pub(crate) fn browse_row_line(catalog: &Catalog, row: BrowseRow<'_>) -> String {
 
 /// RFC-040 PR-040-B: each row is now a real, clickable button --
 /// `on_row_click` is the same "surface renders the data, `shell.rs`
-/// supplies the message" split [`crate::surface::board::row_view`]'s
+/// supplies the message" split `crate::surface::board::row_view`'s
 /// own `open_message` parameter already established, generalized to a
 /// closure since a row's message carries *which* row (its index),
 /// unlike that single-button case. Navigation itself is still driven

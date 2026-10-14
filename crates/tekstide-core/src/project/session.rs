@@ -329,7 +329,7 @@ impl ProjectSession {
     /// RFC-033 PR-033-C: real bytes on disk, read directly via
     /// `fs::metadata` on each non-tombstone transcript's own real
     /// `storage_path` -- the same real-filesystem source of truth
-    /// [`Self::purge_transcript_at`]'s own `remove_transcript_file` call
+    /// `Self::purge_transcript_at`'s own `remove_transcript_file` call
     /// already uses at delete time.
     ///
     /// **Deliberately not [`Self::transcript_local_data_summary`]'s own
@@ -591,7 +591,7 @@ impl ProjectSession {
     }
 
     /// RFC-032 PR-032-C, response 245: the audit-store-authoritative
-    /// half of [`Self::restore_trust_state`] -- the recent-projects
+    /// half of `Self::restore_trust_state` -- the recent-projects
     /// cache is ordinary user-writable state, so a `Trusted` restored
     /// from it must still be confirmed against a real, applied
     /// `TrustGrant` in the durable audit store before it means anything

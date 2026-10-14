@@ -26,7 +26,7 @@ pub struct ConfigDiagnostic {
     /// *contents*, just the well-known location RFC-023 §Format and
     /// Location already resolves. `None` from [`parse_and_validate`]
     /// itself, which validates source text with no path of its own;
-    /// [`ConfigStore`] fills this in (via [`ConfigDiagnostic::with_path`])
+    /// [`ConfigStore`] fills this in (via `ConfigDiagnostic::with_path`)
     /// on every diagnostic it returns, since it is the one thing in
     /// this module that actually knows a path.
     pub path: Option<PathBuf>,
@@ -95,7 +95,7 @@ pub(super) fn bound_key_segment(raw: &str) -> String {
 /// and this build has no consumer for is a [`ConfigDiagnostic`] instead:
 /// the user wrote something the schema documents, and telling them
 /// "unknown key" would be false while telling them nothing at all is the
-/// failure §1 of the risk document names. See [`WITHDRAWN_KEYS`].
+/// failure §1 of the risk document names. See `WITHDRAWN_KEYS`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigWarning {
     pub key: String,
@@ -279,8 +279,8 @@ pub struct ConfigLoadOutcome {
 /// **RFC-045 D3': this function accepts exactly the keys with a
 /// consumer.** Four, plus `[agent.profile.<id>]`'s `display_name`,
 /// `command`, and (RFC-060 D1/D2) `adapter`. Everything else RFC-023's
-/// schema defined is refused by name -- see [`WITHDRAWN_KEYS`] for why
-/// that is a refusal and not a warning, and [`PERMANENTLY_REFUSED_KEYS`]
+/// schema defined is refused by name -- see `WITHDRAWN_KEYS` for why
+/// that is a refusal and not a warning, and `PERMANENTLY_REFUSED_KEYS`
 /// for the three whose refusal is not waiting on anything.
 pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagnostic> {
     let mut root: toml::Table =

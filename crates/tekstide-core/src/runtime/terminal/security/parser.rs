@@ -510,7 +510,7 @@ fn classify_private_mode(body: &[u8]) -> TerminalSequenceFamily {
 
 /// The mouse/focus-vs-ordinary-private-mode distinction, keyed on an
 /// already-parsed raw mode number. Two entry points share it:
-/// [`classify_private_mode`] (this module's own byte-level parser) and
+/// `classify_private_mode` (this module's own byte-level parser) and
 /// `crates/tekstide`'s `vte::ansi::Handler` interposition filter (RFC-017
 /// PR-017-B), which receives a parsed `PrivateMode`/`NamedPrivateMode`
 /// value from `vte` and never sees the raw bytes this byte-level parser

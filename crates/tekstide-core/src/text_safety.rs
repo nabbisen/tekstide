@@ -33,7 +33,7 @@
 //!    or left to render invisibly. `Default_Ignorable_Code_Point` is the
 //!    standard Unicode concept for exactly this (response 118: the
 //!    earlier `Cc` + `Cf` rule left several genuine invisible shapes
-//!    unescaped -- see [`is_default_ignorable_extra`]'s doc for the
+//!    unescaped -- see `is_default_ignorable_extra`'s doc for the
 //!    probe that found them, all of which sit outside `Cf`). Stripping
 //!    instead of escaping was considered and rejected (RFC-016
 //!    Requirement 1): a stripped display still differs from the real
@@ -139,7 +139,7 @@ fn is_format_char(c: char) -> bool {
 }
 
 /// The rest of Unicode's **`Default_Ignorable_Code_Point`** property --
-/// everything in that set not already covered by [`is_format_char`]'s
+/// everything in that set not already covered by `is_format_char`'s
 /// `Cf` table. Added in response 118: probing the original `Cc` + `Cf`
 /// rule against a small set of genuinely invisible-rendering characters
 /// found five it did not cover, all outside `Cf`:
@@ -162,7 +162,7 @@ fn is_format_char(c: char) -> bool {
 ///
 /// Hand-transcribed against **Unicode 15.0**'s `DerivedCoreProperties.txt`
 /// for `Default_Ignorable_Code_Point`, with the same not-mechanically-
-/// verified caveat as [`is_format_char`]. Deliberately **not** attempting
+/// verified caveat as `is_format_char`. Deliberately **not** attempting
 /// full `Cn` (every unassigned codepoint) coverage here -- see the
 /// module doc's note on why that is a dependency decision for PR-016-B,
 /// not a hand-rolled addition. `U+2065` is included explicitly because
@@ -198,8 +198,8 @@ fn is_default_ignorable_extra(c: char) -> bool {
 /// Any character this module escapes to a visible `<U+XXXX>` marker
 /// rather than passing through raw: every Unicode **Control (`Cc`)**
 /// character (`char::is_control`) plus every character with the
-/// **`Default_Ignorable_Code_Point`** property ([`is_format_char`]'s
-/// `Cf` table plus [`is_default_ignorable_extra`]'s remainder).
+/// **`Default_Ignorable_Code_Point`** property (`is_format_char`'s
+/// `Cf` table plus `is_default_ignorable_extra`'s remainder).
 ///
 /// This is a documented *policy* -- a specific, version-pinned snapshot
 /// of Unicode data chosen to cover the invisible-character shapes found

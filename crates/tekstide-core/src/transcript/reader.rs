@@ -238,7 +238,7 @@ impl std::error::Error for TranscriptReadError {}
 ///
 /// **Always scans from byte 0, never seeks to the requested tail --
 /// this is load-bearing, not an unoptimized read.** Resynchronization
-/// (see [`resynchronize`]) walks tokens forward from a position
+/// (see `resynchronize`) walks tokens forward from a position
 /// *guaranteed* to be a sound parse origin; the file's true start is the
 /// only position with that guarantee. Seeking to somewhere near the
 /// requested tail before scanning would put the scan's own starting

@@ -53,7 +53,7 @@
 //! private to `tekstide-core::runtime::terminal::reader`, reachable only
 //! from `TerminalReader`'s own `Drop`. **RFC-017 Amendment 1, PR-A1-C**:
 //! the reader's *second* `eventfd` (the wake signal) is different --
-//! [`Self::wake_notifier`] is a real, new call site in this crate that
+//! [`TerminalPane::wake_notifier`] is a real, new call site in this crate that
 //! reaches it, so it needs its own enumeration rather than inheriting
 //! the shutdown fd's "unreachable" claim. `shell.rs`'s
 //! `terminal_wake_subscriptions` is the one production caller of
@@ -69,7 +69,7 @@
 //!
 //! **Modal exclusivity is unchanged by PR-A1-B, and that is the point.**
 //! The reader thread changes how *output* reaches this pane; it does not
-//! touch [`Self::write_input`] or its one caller
+//! touch [`TerminalPane::write_input`] or its one caller
 //! (`shell.rs`'s `write_terminal_input`, gated on `state.modal.is_some()`).
 //! Output continuing to flow (and being drawn) while a modal is open is
 //! not itself wrong -- a terminal rendering behind a dialog is normal.

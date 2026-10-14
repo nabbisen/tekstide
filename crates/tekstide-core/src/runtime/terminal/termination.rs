@@ -56,8 +56,8 @@ impl LinuxTerminalRuntime {
     ///
     /// RFC-043 D1's own disjunction, response 342: closes the PTY master
     /// (`RunningTerminal::close_master`) before the `SIGHUP` below, the
-    /// same half of the disjunction [`super::launch::RunningTerminal::drop`]
-    /// already applies. Response 341 found this alone would not have
+    /// same half of the disjunction `super::launch::RunningTerminal`'s own
+    /// `Drop` already applies. Response 341 found this alone would not have
     /// been *effective* here: this function's real caller
     /// (`crates/tekstide/src/shell.rs`'s project-close path,
     /// `TerminalPane::request_terminate`) used to leave `TerminalPane`'s

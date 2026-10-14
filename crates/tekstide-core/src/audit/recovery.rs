@@ -118,7 +118,7 @@ impl AuditRecovery {
     /// RFC-047 PR-047-B, D2: [`Self::recover`] plus the two things a
     /// caller actually needs afterward -- a real, opened `AuditStore`
     /// (recovery itself leaves the store closed; `finish_recovery`'s own
-    /// internal open, inside [`initialize_fresh_database`], is for the
+    /// internal open, inside `initialize_fresh_database`, is for the
     /// atomic-install step only and does not outlive it) and the
     /// directory the unreadable original was quarantined into, since
     /// D2's whole justification for auto-recovering without asking is
@@ -127,7 +127,7 @@ impl AuditRecovery {
     ///
     /// The quarantine directory is reconstructed from public data only
     /// (`storage_path.recovery_dir()`, `receipt.recovery_id.as_str()`),
-    /// the same path [`quarantine_artifacts`] itself writes to -- no
+    /// the same path `quarantine_artifacts` itself writes to -- no
     /// schema change, nothing added to [`AuditRecoveryReceipt`] itself.
     ///
     /// `original_reason` is what `AuditStore::open` reported before this
