@@ -512,3 +512,40 @@ clean. `rfc_docs_invariants`: 23/23 (one new). Full `crates/tekstide` bin suite:
 Three consecutive full-workspace runs, fresh `TMPDIR` each: 0 failed, 4 ignored, 0 fixture entries,
 every time. `release.yml` validated as YAML; not run live (that is the tag itself, still held
 pending this fix's review).
+
+## Post-publish: the AUR package bumped to `0.37.0`
+
+Left at `0.36.0` through the actual release — a gap in release execution, not in this RFC's own
+slices, found at review 558 while checking a `PKGBUILD` claim and handed back as the next slice.
+`release-checklist.md`'s own **AUR Package** section, followed exactly:
+
+- **Checksum verified independently, not taken on trust.** Downloaded `tekstide-0.37.0` from
+  crates.io myself: `cd11c82f72543097a2e47412110220b47c1dec71e61cb9b6b6eb451ce5f645af`, matching
+  the figure review 558 gave. `pkgver=0.37.0`, `pkgrel=1`.
+- **`.SRCINFO` regenerated**, confirmed byte-identical to a second fresh regeneration immediately
+  after (the exact check this section exists to make routine).
+- **A real `makepkg --noconfirm -f` build, from a clean `src`/`pkg`**, against the current
+  toolchain (`rustc 1.99.0`, newer than PR-029-E's own measurement): succeeded. Packaged
+  `usr/bin/tekstide --version` reports `0.37.0`, extracted from the built `.pkg.tar.zst` and run
+  directly, not assumed from the build log.
+- **The `CFLAGS`/`rust-lld` workaround re-confirmed load-bearing, not inherited lore**: removed
+  the `CFLAGS="${CFLAGS//-flto=auto/}"` strip, rebuilt from clean — failed identically,
+  `rust-lld: error: undefined symbol: sqlite3_*`, the same shape PR-029-E first found. Restored
+  the fix, rebuilt from clean — succeeded again. 1 fail → 1 clean, same machine, same
+  `/etc/makepkg.conf` (`OPTIONS` carries `lto`, which is what appends `LTOFLAGS="-flto=auto"` to
+  `CFLAGS` at build time — confirmed by reading the file directly rather than assuming the
+  mechanism).
+- **`namcap PKGBUILD`**: clean. **`namcap` on the built package**: only the standard
+  implicitly-satisfied-glibc/gcc-libs warnings every Rust binary package gets, same as PR-029-E.
+- **New, not previously disclosed**: `makepkg`'s own packaging-issue check warns `usr/bin/tekstide`
+  "contains reference to `$srcdir`" — the build path leaking into the binary via debug/panic-
+  location strings, the same general cause `release-checklist.md` already documents for the
+  GitHub release binary's own non-reproducibility (`file!()`/panic-location strings embed the
+  absolute checkout path). Cosmetic: it means a panic message could show this build's own
+  directory path, nothing more, and it says nothing about correctness. Not fixed here — out of
+  this slice's own scope — disclosed rather than silently present.
+- **Build artifacts confirmed gitignored**: `git status` after the build showed only
+  `.SRCINFO`/`PKGBUILD` as tracked changes; `src/`, `pkg/`, and the built package/crate were all
+  untracked, matching `.gitignore`'s existing `packaging/aur/` entries.
+- **Not published to the real AUR** — the owner's own account and action, as every prior slice of
+  this work has said.

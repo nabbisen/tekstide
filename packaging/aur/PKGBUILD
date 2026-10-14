@@ -1,6 +1,6 @@
 # Maintainer: nabbisen <nabbisen@reflerd.com>
 pkgname=tekstide
-pkgver=0.36.0
+pkgver=0.37.0
 pkgrel=1
 pkgdesc="Local-first, multi-project workbench for supervising terminal-based AI development workflows"
 arch=('x86_64')
@@ -9,7 +9,7 @@ license=('Apache-2.0')
 depends=('gcc-libs')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.crate::https://crates.io/api/v1/crates/$pkgname/$pkgver/download")
-sha256sums=('3d895befa61c1540cb6f2092540d2fb578f6963e080c10c226c7924bb8cac766')
+sha256sums=('cd11c82f72543097a2e47412110220b47c1dec71e61cb9b6b6eb451ce5f645af')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
