@@ -388,6 +388,20 @@ pub fn inject_token_into_environment(
 
 // --- The endpoint --------------------------------------------------
 
+/// **Deliberately not `#[non_exhaustive]`, unlike this crate's own
+/// `LocalePreference`** -- review 570. Adding `BindTargetNotASocket`/
+/// `BindTargetAlreadyListening` is a breaking change for any exhaustive
+/// `match` over this enum in a downstream crate (see `CHANGELOG.md`'s
+/// `Unreleased` entry), and marking it `#[non_exhaustive]` now would make
+/// the *next* addition non-breaking at the cost of permanently removing
+/// the compiler's ability to force a choice at every call site that
+/// matches a reason. That matters concretely here: whether either new
+/// variant deserves its own refusal symbol in `agent_run_launch_refusal_
+/// symbol` (`shell.rs`) is an open, later question, and today both fall
+/// into that match's own `Runtime(_) => "error"` catch-all. Keeping this
+/// enum exhaustive-capable means the fix, when that question is taken up,
+/// is *removing* the catch-all and letting the compiler enumerate every
+/// site that needs a decision -- `#[non_exhaustive]` would foreclose that.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApprovalChannelErrorReason {
     Io,

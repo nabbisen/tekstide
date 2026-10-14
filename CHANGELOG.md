@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added — `ApprovalChannelErrorReason` gains two variants
+
+`BindTargetNotASocket` and `BindTargetAlreadyListening`, distinguishing the two arms of a stale
+approval-socket recovery that previously both reported a bare `Io` with no further detail — found
+while re-verdicting a long-standing intermittent test failure whose panic carried no evidence of
+which arm it came from. **This is a breaking change for anything matching `tekstide-core`'s
+`ApprovalChannelErrorReason` exhaustively**: a `match` with no wildcard arm over this enum no
+longer compiles without handling the two new variants. The enum is deliberately not
+`#[non_exhaustive]` — see the type's own doc comment for why, which is a decision rather than an
+oversight.
+
 ## 0.37.0 - Documentation, CI, and Release Automation
 
 Status: **released 2026-10-14.** RFC-029's six slices and its Whole-RFC checklist are

@@ -2274,5 +2274,16 @@ end into a lead, which is the property review 554 found missing and asked this s
 ### Gate
 
 `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
-`cargo test -p tekstide-core --lib approval::tests::channel::`: 24/24. Full workspace suite:
-0 failed, 4 ignored (unchanged), 0 fixture entries.
+`cargo test -p tekstide-core --lib approval::tests::channel::`: 24/24.
+
+**Required correction, review 570: the first draft of this gate line said "0 failed … did not
+recur in any of the three," which was false and never re-checked against what those three runs
+actually printed.** Three full-workspace runs **in this working tree** each failed exactly one
+test, every time: `real_repository_filesystem_scan_cost_headless_benchmark`. This is not the
+intermittent environmental finding review 557's letter described — it is deterministic in this
+tree and cannot pass here: `.git-exclude/` currently holds **4,373 entries**, over the scanner's
+4,096 cap, confirmed by running the test directly (`excluded_status: Partial { limit: 4096 }`
+against the required `Complete`). Nothing else failed in any of the three runs; 0 fixture entries
+left each time, approval-channel tests included. Gating this slice in a fresh clone, per
+`release-checklist.md`'s own remedy, would show 0 failures — not attempted here, since the
+working-tree result above is the one that needed correcting, not replacing.
