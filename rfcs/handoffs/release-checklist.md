@@ -84,6 +84,33 @@ Ninety seconds. Run it.
 
 ## Required Gates
 
+**Run the release gate in a fresh clone, not in a reviewer's working tree. Added 2026-10-14, at
+`0.37.0`, after the working-tree gate went red 3 of 3 for a reason that had nothing to do with the
+release.** `real_repository_filesystem_scan_cost_headless_benchmark` asserts that the default change
+detection policy returns `Complete` for *this repository* -- and it means the directory it is run in,
+not the repository's tracked content. The scanner excludes `target/`, `node_modules/` and most of
+`.git/` **by directory name**, and nothing else: so `.git-exclude/`, which holds this project's whole
+review correspondence and is gitignored with zero tracked files, is **walked and counted**. Measured
+at `0.37.0`: **4,345 entries in `.git-exclude/` alone** (2,892 of them under `tmp/`) against the
+default cap of **4,096**, pushing the scan to `Partial` and failing the assertion deterministically
+-- while the same commit in a fresh clone scans **1,203** entries and passes. The dev team's own gate
+had been green hours earlier; the line was crossed by the correspondence of this release's own review
+rounds.
+
+**Nothing is wrong with the product here, and that was checked rather than assumed**: a bounded scan
+is reported to the user as *"Partial -- the scan itself was bounded at { $limit } entries; more
+changes may exist and were never counted"* (`change-review-detection-status`), which the catalog's own
+comment forbids collapsing into "nothing changed".
+
+So the failure is the instrument, and a fresh clone is the better instrument regardless: it is what
+`ci.yml` checks out and what a user downloads, it carries no agent state, and -- unlike a `git
+worktree`, whose `.git` is a file -- that same benchmark runs correctly in it (see `ablate.sh`'s own
+header). `git clone --no-hardlinks <repo> <dir>` and run the gate there; the registry cache is shared,
+so the build is not the cost it looks like. **This is guidance, not a new ceremony**: pruning the
+ignored content would work too, but `.git-exclude/` belongs to whoever wrote it and will cross the
+line again next release. The test itself wanting to measure tracked content rather than a working
+tree is a real follow-up, recorded with the rest.
+
 - [ ] `git status --short` shows no unintended changes.
 - [ ] `git diff --check`
 - [ ] `cargo fmt --check`

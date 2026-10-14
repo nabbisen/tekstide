@@ -2186,3 +2186,54 @@ points at a shared mechanism (process-spawn limits, the shared `RealProcessLimit
 pressure), the same way the shared-audit-store cause this register already resolved once looked
 "exactly this shape before isolation." A future occurrence should start from that correlation, not
 from re-checking `uptime`.
+
+## New row, 2026-10-14 — the `0.37.0` release gate: `linux_runtime_terminates_session_leader_with_sighup`, 1 in 6
+
+**A new disclosure, not previously in this register.** Found by the reviewer's own release gate for
+`0.37.0`, run in a **fresh clone** (see `release-checklist.md`'s own new note on why the gate ran
+there), at commit `96cdc94`, load 16.25:
+
+```text
+panicked at crates/tekstide-core/src/runtime/terminal/tests.rs:365:5:
+assertion `left == right` failed
+  left:  Some(Terminated { ..., outcome: Exited { exit_status: 1 } })
+  right: Some(Terminated { ..., outcome: TerminatedBySignal { signal: Sighup } })
+```
+
+**The shape**: the test asserts `request_terminate` reports the session leader as *killed by
+SIGHUP*. It reported a *normal exit with status 1* instead. The product did terminate the leader
+either way — what differed is which of the two ways `waitpid` saw it end, which is a race between
+the signal arriving and the shell exiting of its own accord under load.
+
+**1 failure in 6 runs** at the same commit: run 3 of the first clone gate failed; the three-run gate
+re-run immediately after was **3 of 3 green at loads 27.11 / 28.53 / 26.94** — every one of them
+*higher* than the 16.25 the failure occurred at, which is the second time today that a higher load
+has failed to reproduce a contention-correlated failure. That failing run also left **1 fixture
+entry**, consistent with this register's established pattern that a failing run leaks one; the three
+green runs left 0.
+
+**Verdict: Accept, as a first occurrence, with the family named.** No investigation beyond
+establishing it is not a regression from anything in `0.37.0`: the release's own diff touches
+`main.rs`, `release.yml`, two invariants and documentation — nothing in `runtime::terminal` or
+anything it calls. Re-opens if it recurs.
+
+### The family is now worth more than any of its rows
+
+**Three distinct real-process tests failed today, each under genuine multi-agent contention on this
+shared desktop, and none of them under synthetic load**: the knock test (the dev team's gate, 3 of
+3, quarantined), the `reference_adapter` pair (the `--licenses` gate, failing *together* in one
+run), and this one. Against that, every synthetic reproduction attempt on record has failed — 16
+spinners at review 527, 96 spinners on 32 cores at review 552, and the in-suite ablation at review
+553 that passed 3 of 3 at the load its row blamed.
+
+What distinguishes the real condition from the synthetic one is **not CPU load** — the numbers above
+rule that out directly, with failures at 16 and clean runs at 28. The untested variable is what
+*other* processes on this machine are doing to the resources these tests actually contend for:
+process-spawn slots, PTY devices, fds, PID pressure, scheduler latency on a signal delivery. Six
+concurrent agent sessions building and testing different projects is a different load *shape* from
+96 spinning CPUs, not merely a different magnitude.
+
+**That is the one hypothesis this register has never tested**, and it is cheaper to test than another
+spinner run: measure what the machine's `/dev/pts` occupancy, fd count and fork rate are doing during
+a failing run, rather than its load average. Recorded here as the next thing to try for any member of
+this family, in place of a fourth synthetic-load attempt that the first three predict will be green.
