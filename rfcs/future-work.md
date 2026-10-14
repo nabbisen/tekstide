@@ -238,7 +238,8 @@ Text contrast is excellent — comfortably past AAA. **`border_default` fails WC
 
 - **`snora_design::contrast` — genuinely useful, and it already proved itself**: the math in it is what found the `border_default` defect above. 81 LOC, three functions. The piece worth copying deliberately is **`composite_over`**: a translucent colour must be composited over its backdrop *before* its ratio is computed, which is exactly the case our `scrim` (alpha `0.55`) presents and the case a naive contrast test silently gets wrong.
 - **`FocusTokens` — no, and snora documents why itself.** iced 0.14's `button::Status` has no `Focused` variant and `container` has no interaction status at all, so snora records its own focus ring as `BLOCKED (iced 0.14)`. **Tekstide is ahead of it here**, because it never delegated focus to iced: it owns `FocusZone`, and `zone_style` draws from its own `focused` boolean using **two channels — colour *and* border width (2.0 vs 1.0)** — which is what satisfies `NFR-UX-002`'s non-colour-only rule. Adopting `FocusTokens` would mean importing an API its own author marks inert. The same holds for **modal focus trapping**, which snora defers ("out of v0.20 scope") and RFC-018 already built here as security machinery with a positive control.
-- **`Edge::Start` / `Edge::End` / `LayoutDirection` (their "ABDD" discipline) — the one genuinely novel API, and latent rather than live for us.** It replaces hardcoded Left/Right so layout mirrors correctly under RTL. Tekstide has **no layout-direction concept at all**, and ships `en` + `pl`, both LTR. Note this is a *different axis* from the bidi work already done here: `text_safety`'s escaping and i18n's First Strong Isolate/Pop Directional Isolate wrapping are about untrusted **text**, not layout mirroring. **Trigger to revisit: the first RTL locale.** Adding one against hardcoded edges would be a real gap; there is nothing to do before then.
+- **`Edge::Start` / `Edge::End` / `LayoutDirection` (their "ABDD" discipline) — the one genuinely novel API, and latent rather than live for us.** It replaces hardcoded Left/Right so layout mirrors correctly under RTL. Tekstide has **no layout-direction concept at all**, and ships `en` + `pl`, both LTR — "ships" is
+imprecise for `pl` outside `cargo install`; see the locale-loading entry below. Note this is a *different axis* from the bidi work already done here: `text_safety`'s escaping and i18n's First Strong Isolate/Pop Directional Isolate wrapping are about untrusted **text**, not layout mirroring. **Trigger to revisit: the first RTL locale.** Adding one against hardcoded edges would be a real gap; there is nothing to do before then.
 
 **The most transferable thing snora has is not an API — it is the review gate**, and it is free. `accessibility-checklist.md` contains items this project would fail today: contrast asserted against real thresholds, translucent colours composited before measuring, rendering verified under a high-contrast preset, a minimum 24×24 pointer target, and a typography floor. **The `border_default` defect existed precisely because no such gate exists here.** An adapted checklist, run per surface, is the cheapest item in this whole evaluation.
 
@@ -1474,3 +1475,60 @@ a packaging-file line.
 `README.md:1`), **but it is 8-bit RGB with no alpha channel** — fine for a README image, wrong for
 a desktop icon, which wants transparency and a 16/32/48/128/256 hicolor set. Worth knowing before
 writing the `.desktop` file, not after.
+
+## Non-`en` locales silently fail to load outside `cargo install` — found 2026-10-14, review 561
+
+Found while re-running `namcap` during the AUR package's `0.37.0` bump: `makepkg`'s own
+packaging-issue check warned `usr/bin/tekstide` "contains reference to `$srcdir`" — a real
+runtime dependency, not debug-info leakage (the packaged binary is stripped, and the reference
+occurs exactly once, immediately followed by the literal `locales`). The cause: `main.rs`'s
+`locales_dir()` is `Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")`, a path baked in at
+**build time**. `en` is unaffected — `i18n/catalog.rs` compiles it in with `include_str!`, and
+`i18n.rs`'s own `load` returns the compiled-in bundle directly for `SOURCE_LOCALE` without
+touching disk — but every other locale goes through `catalog::load_locale_from_disk(locales_dir,
+locale)`, so it only resolves if the build directory `locales_dir()` points at still exists on
+the machine running the binary.
+
+**Proven, not reasoned — reproduced independently of the finding, not taken on trust.** Built the
+AUR package fresh, appended a probe string to the build tree's own `locales/pl.ftl`, and ran the
+packaged binary headlessly (`--help` resolves the catalog without opening a window):
+
+```
+$ LANG=pl_PL.UTF-8 ./pkg/tekstide/usr/bin/tekstide --help | grep Ctrl+Alt+P
+    Ctrl+Alt+P     PROBE-PL-TABLICA
+$ mv src src.away   # what a user's machine actually looks like
+$ LANG=pl_PL.UTF-8 ./pkg/tekstide/usr/bin/tekstide --help | grep Ctrl+Alt+P
+    Ctrl+Alt+P     Project Board
+```
+
+The probe is confirmed live while the build directory exists and silently falls back to English
+the moment it does not — `resolve_fallback_chain`'s fallback-to-source-bundle behaviour is correct
+for a genuinely corrupt locale file, and is the wrong thing to be depending on for every installed
+copy of a non-`en` locale.
+
+**This varies by distribution channel, and the channel `README.md` now leads with is the one that
+never works:**
+
+| Channel | `locales_dir()` points at | Non-`en` locale |
+| --- | --- | --- |
+| `cargo install tekstide` | `~/.cargo/registry/src/…/tekstide-0.37.0/locales` — persists after install | works |
+| GitHub release binary / the one-liner | CI's own `/home/runner/work/…`, which never exists on a user's machine | silently never loads |
+| AUR package | the user's own `makepkg` `srcdir` | works only until they clean their build directory |
+
+**How bad, honestly: not very, today.** `pl.ftl`'s own header says it exists "purely to prove the
+pluralization machinery works — not a real translation effort", so no real translation is lost by
+this. What is wrong today is the record above (this file, old text, now struck through in spirit
+rather than edited per this file's own no-history-rewriting rule): "ships `en` + `pl`" is false
+for two of the three channels a user might actually have installed from. What would be wrong
+*tomorrow* is the first real second locale, which would ship into the exact same hole — silently,
+since the fallback never surfaces as an error.
+
+**The fix is not a second file-fetch, the same lesson the `NOTICE` embedding fix already
+taught.** Compile every `locales/*.ftl` the way `en` already is (`include_str!`, selected at
+runtime by name rather than read from disk) removes the runtime path entirely — which also
+removes the `$srcdir` reference `namcap`/`makepkg` flagged, for free.
+
+**One slice with [the queued `--locale`/CLI-parsing item](#cli-entry-point) above, not two**: a
+future `--locale pl` flag on a release binary would let a user select a catalog they structurally
+cannot have under the current disk-loading design. Not fixed here — scoped, not patched, matching
+this slice's own instruction not to fix it in passing.

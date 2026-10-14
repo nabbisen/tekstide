@@ -213,6 +213,17 @@ not that the release can be independently rebuilt** — exactly the distinction
 `what-the-installer-must-not-do.md` §3 already draws for the installer script, carried here to the
 artifact itself.
 
+**Correction, review 561: the stated cause above does not survive this slice's own measurement.**
+`clone-a` and `clone-b` are paths of **identical length**, and identical-length strings embedded
+at build time cannot change a binary's size — yet the two builds differed by 80 bytes (29889344
+vs 29889264). Dependency paths are also identical between the clones (both resolve through the
+same `~/.cargo/registry/…`). So build-path-derived debug info is not what produced this
+particular difference, and `--remap-path-prefix` alone would not make these two builds match.
+Something else in the build is nondeterministic; what, is not identified here. The user-facing
+consequence this section states is unaffected either way — the checksum proves the download
+arrived intact, not that the release can be rebuilt — so this is a note on the stated cause, not a
+correction of anything published to a user.
+
 ### `.github/workflows/release.yml`
 
 Triggers on a version tag (`*.*.*`, matching this repository's own existing tag shape with no `v`
@@ -535,15 +546,36 @@ slices, found at review 558 while checking a `PKGBUILD` claim and handed back as
   `/etc/makepkg.conf` (`OPTIONS` carries `lto`, which is what appends `LTOFLAGS="-flto=auto"` to
   `CFLAGS` at build time — confirmed by reading the file directly rather than assuming the
   mechanism).
-- **`namcap PKGBUILD`**: clean. **`namcap` on the built package**: only the standard
-  implicitly-satisfied-glibc/gcc-libs warnings every Rust binary package gets, same as PR-029-E.
-- **New, not previously disclosed**: `makepkg`'s own packaging-issue check warns `usr/bin/tekstide`
-  "contains reference to `$srcdir`" — the build path leaking into the binary via debug/panic-
-  location strings, the same general cause `release-checklist.md` already documents for the
-  GitHub release binary's own non-reproducibility (`file!()`/panic-location strings embed the
-  absolute checkout path). Cosmetic: it means a panic message could show this build's own
-  directory path, nothing more, and it says nothing about correctness. Not fixed here — out of
-  this slice's own scope — disclosed rather than silently present.
+- **`namcap PKGBUILD`**: clean, exit 0. **`namcap` on the built package**, recorded verbatim
+  rather than summarised (review 561 Required 3: a curated summary cannot tell a later reviewer
+  whether a *new* warning appeared):
+
+  ```
+  tekstide W: Unused shared library '/usr/lib64/ld-linux-x86-64.so.2' by file ('usr/bin/tekstide')
+  tekstide W: Dependency glibc detected and implicitly satisfied (libraries ['usr/lib/ld-linux-x86-64.so.2', 'usr/lib/libc.so.6', 'usr/lib/libm.so.6'] needed in files ['usr/bin/tekstide'])
+  tekstide W: Dependency libgcc detected and implicitly satisfied (libraries ['usr/lib/libgcc_s.so.1'] needed in files ['usr/bin/tekstide'])
+  tekstide W: Dependency included, but may not be needed ('gcc-libs')
+  ```
+
+  All four benign for a Rust binary package; the same shape PR-029-E's own run produced (that
+  section's "only the standard … warnings" phrasing is inherited loose wording, not corrected
+  there per review 561 — noted here instead).
+- **A real product defect, not a cosmetic one: `makepkg`'s packaging-issue check ("contains
+  reference to `$srcdir`") correctly flags a functional runtime dependency, not debug-info
+  leakage.** The first draft of this section misattributed the warning to `file!()`/panic-location
+  debug strings; **required correction, review 561**. The packaged binary is stripped (`OPTIONS`
+  carries `strip`, confirmed with `file`), and the build path occurs **exactly once** in it,
+  immediately followed by the literal `locales` — not the scattered occurrences debug info would
+  leave. The one occurrence is `main.rs`'s `locales_dir()`
+  (`Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")`), a path baked in at build time and
+  read from disk at runtime by every locale except `en` (which `i18n/catalog.rs` compiles in via
+  `include_str!` and never touches disk for). **Reproduced independently, not taken on trust**:
+  built the package fresh, appended a probe string to the build tree's own `locales/pl.ftl`, ran
+  the packaged binary (`LANG=pl_PL.UTF-8 ./pkg/tekstide/usr/bin/tekstide --help`) and saw the
+  probe string; moved the build tree away (`mv src src.away`, what a user's machine actually looks
+  like) and reran the identical command — silently fell back to English. Written up as its own
+  entry in `future-work.md` (the channel table, the fix shape, linked to the queued
+  `--locale`/CLI-parsing item), not fixed in this slice.
 - **Build artifacts confirmed gitignored**: `git status` after the build showed only
   `.SRCINFO`/`PKGBUILD` as tracked changes; `src/`, `pkg/`, and the built package/crate were all
   untracked, matching `.gitignore`'s existing `packaging/aur/` entries.
