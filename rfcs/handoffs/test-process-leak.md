@@ -2299,3 +2299,57 @@ the cap stopped being a real concern; the margin itself is why `release-checklis
 clone eventually, not only for this one. Gating this slice in a fresh clone, per that section's own
 remedy, would show 0 failures today — not attempted here, since the working-tree result above is
 the one that needed correcting, not replacing.
+
+## Recurrence, 2026-10-14 — `linux_runtime_terminates_session_leader_with_sighup`, 2nd occurrence, and the first with a *different* outcome value
+
+**Its own row said "re-opens if it recurs." It recurred, in the reviewer's own verification run for
+review 575**, a single full-workspace run in the working tree at `df6a405`
+(`TMPDIR=/dev/shm/tk575`, `--workspace --all-targets --all-features --no-fail-fast`):
+
+```text
+panicked at crates/tekstide-core/src/runtime/terminal/tests.rs:365:5:
+assertion `left == right` failed
+  left:  Some(Terminated { ..., outcome: Exited { exit_status: 0 } })
+ right: Some(Terminated { ..., outcome: TerminatedBySignal { signal: Sighup } })
+```
+
+`1140 passed; 1 failed; 4 ignored` — this test and nothing else.
+
+**What is new, and it is the first real discriminator this row has had**: the first occurrence
+showed `Exited { exit_status: 1 }`; this one shows `Exited { exit_status: 0 }`. The shell did not
+merely lose a race against `SIGHUP` in the same way twice — in one case it ended with a failure
+status, in the other it exited **cleanly**. A clean exit is much harder to explain as "the signal
+arrived a moment late and `waitpid` saw the other ending first": `exit_status: 0` is what a shell
+reports when it reached end-of-input and left of its own accord, which points at the PTY master
+side being closed (or the shell seeing EOF) before the signal was ever delivered, not at signal
+timing alone. Two occurrences, two different exit statuses, is the shape that argues the row's own
+"race between the signal arriving and the shell exiting of its own accord" has **two distinct
+causes** behind it rather than one.
+
+**Load context, since this row's family note turns on load shape rather than magnitude**:
+`/proc/loadavg` immediately after the run read `2.15 10.90 17.63` on 32 cores — so the run itself
+sat in the 11-18 range, in the same band as the first occurrence's 16.25 and well below the 27-29
+at which three consecutive runs were green. Nothing new for the shape hypothesis: it was still not
+instrumented, which is this family's standing next step and remains untested. **Said plainly: a
+second occurrence happened under direct observation and the `/dev/pts`/fd/fork-rate measurement
+the family note asks for was not attached, so that hypothesis is no better tested than it was this
+morning.**
+
+**One fixture entry left behind, and it is this test's own**:
+`/dev/shm/tk575/tekstide-terminate-sighup-1435340-1791988447183316779`, an empty directory named
+for the fixture the failing test creates. Consistent with this register's established
+one-leak-per-failing-run pattern, and worth stating explicitly so a future reader does not read
+the non-zero fixture count as an independent leak: when this row fires, the `0 fixture entries`
+gate assertion fails with it, for this reason.
+
+**Rate, updated: 2 failures in 7 recorded runs** at two different commits (`96cdc94`, `df6a405`),
+all in the 11-18 load band, none reproduced under synthetic load.
+
+**Verdict: Accept stands, re-opened as predicted, and promoted to the family's primary subject.**
+No cause claimed. What changed is that this row now has two observations that differ in a way the
+single-cause explanation does not cover, which makes it the cheapest member of the family to
+investigate next: the next occurrence should capture the *child's* own exit path (whether the PTY
+master was closed before the signal was sent) rather than only the load average. That is a
+narrower, more answerable question than the family note's own `/dev/pts` measurement, and it does
+not need the failure to be reproducible on demand — only for the next run that fails to carry the
+instrumentation.
