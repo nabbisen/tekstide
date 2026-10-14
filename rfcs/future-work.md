@@ -1432,3 +1432,29 @@ declaration list `family_symbol`'s match already enumerates would close this pro
 two four-to-twelve-variant enums felt like more machinery than the gap's own consequence (a filter
 button briefly missing an option) justified against this slice's own scope. Worth revisiting if a
 13th family or 11th outcome is ever added and this array is not the first thing touched.
+
+## The window sets no Wayland `app_id` — found 2026-10-14, RFC-029's `0.37.0` Run It
+
+`main.rs`'s `iced::application(boot, shell::update, timed_view).title(...).subscription(...)`
+builds the window with no `.window(iced::window::Settings { .. })` call at all, so nothing sets
+`platform_specific.application_id` (the field Wayland's `xdg_toplevel` surfaces as `app_id`).
+Confirmed live during the `0.37.0` release's Run It: `App ID: ""`, window title `Tekstide`.
+
+**Consequence**: no desktop environment or compositor can match the running window to a
+`.desktop` entry. Concretely, that means no custom taskbar/dock icon (falls back to a generic
+one), no window-manager rule keyed on the app (workspace assignment, floating/tiling exceptions),
+and no "pin to taskbar"/"group windows" behaviour a `.desktop`-aware shell would otherwise offer.
+Cosmetic, not functional — the application runs identically either way — but it is the kind of
+first-impression polish a GUI-first product should not be missing indefinitely.
+
+**True of every release so far, not a regression of `0.37.0`** — Run It is simply the first time
+anyone looked at this specific field. Not fixed here: `0.37.0` was already candidate-accepted and
+this is new scope, not a correction of anything that release claimed.
+
+**The fix, when someone picks this up**: `iced::window::Settings`'s `platform_specific` field
+(`iced::window::settings::PlatformSpecific` on Linux) carries `application_id: String`, set via
+`.window(iced::window::Settings { platform_specific: ..., ..Default::default() })` on the
+`iced::application(...)` builder in `main.rs`. The value conventionally matches whatever
+`.desktop` file ships the product (none exists yet either — AUR's `PKGBUILD` installs only the
+binary and the licence files, no `.desktop` entry, no icon). Both belong together: an `app_id`
+with no matching `.desktop` file is half the fix.
