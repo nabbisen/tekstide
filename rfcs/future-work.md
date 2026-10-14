@@ -725,6 +725,15 @@ Status: recorded 2026-08-08 during `0.5.0`'s post-publish verification — found
 
 **`tekstide --version` does not work**, and the failure is actively misleading rather than merely absent. `main.rs`'s `boot()` treats every argument as a project path (`std::env::args_os().skip(1)`, feeding each straight to `add_project_from_path`), so the most reflexive command after installing a CLI tool produces `folder does not exist: --version` — telling the user their flag was read as a path, a worse first impression than an "unrecognised option" error would be. Not a regression; the binary has behaved this way since it existed, and nothing in `0.5.0` changed it. But `0.5.0` is the first release whose headline feature (`Ctrl+Alt+T`) invites people to actually install and run it, so the gap is newly worth fixing rather than newly introduced.
 
+**Corrected 2026-10-14, review 562.** `--version` does work, has since `0.12.1`
+(`handle_informational_flags`, `main.rs`), and the locale-loading entry above was linking a reader
+here as though the gap above were still live. Verified against the `0.37.0` AUR package's own
+binary: `--version` prints `tekstide 0.37.0`, `--help` prints the usage and keyboard list,
+`--licenses` prints the notice. What is still true, and still worth the entry existing for: this
+is an ad-hoc scan of `args()` for three literals (`-h`/`--help`/`-V`/`--version`/`--licenses`), not
+a real argument parser, and `i18n.rs`'s `LocalePreference::cli_flag` still has no production
+caller — a future `--locale` flag has nowhere to plug in without one.
+
 **One change closes two gaps.** `i18n.rs`'s `LocalePreference::cli_flag` has existed since RFC-016 PR-016-D with no production caller — the doc comment says so plainly ("no CLI flag parsing exists yet in `main.rs`"). Real argument parsing in `boot()`/`main()` (distinguishing `--version`/`--help`/a future `--locale`/`--config` from positional project paths) is the same piece of work `cli_flag` has been waiting for and what `--version` needs, and RFC-023's configuration system will need argument parsing regardless. Do them together rather than adding a one-off `--version` special case ahead of the real parser.
 
 ### File Workflow Follow-Up
@@ -1517,11 +1526,11 @@ never works:**
 
 **How bad, honestly: not very, today.** `pl.ftl`'s own header says it exists "purely to prove the
 pluralization machinery works — not a real translation effort", so no real translation is lost by
-this. What is wrong today is the record above (this file, old text, now struck through in spirit
-rather than edited per this file's own no-history-rewriting rule): "ships `en` + `pl`" is false
-for two of the three channels a user might actually have installed from. What would be wrong
-*tomorrow* is the first real second locale, which would ship into the exact same hole — silently,
-since the fallback never surfaces as an error.
+this. What is true is narrower than "ships": `pl` exists in the repository and in the published
+crate, and resolves at runtime only where the build tree still exists — true for two of the three
+channels a user might actually have installed from, and not for the one `README.md` now leads
+with. What would be wrong *tomorrow* is the first real second locale, which would ship into the
+exact same hole — silently, since the fallback never surfaces as an error.
 
 **The fix is not a second file-fetch, the same lesson the `NOTICE` embedding fix already
 taught.** Compile every `locales/*.ftl` the way `en` already is (`include_str!`, selected at

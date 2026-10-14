@@ -16,8 +16,11 @@
 //! switching is out of scope for M8):
 //!
 //! 1. Explicit CLI flag
-//! 2. Configuration setting (RFC-023 supplies this; not available yet,
-//!    so [`LocalePreference::configured`] is always `None` until then)
+//! 2. Configuration setting ([`LocalePreference::configured`] is always
+//!    `None` today: RFC-023 shipped a real configuration system, but no
+//!    slice has ever added a locale setting to it -- corrected
+//!    2026-10-14, review 562; `future-work.md`'s *CLI Entry Point*
+//!    entry has the same correction)
 //! 3. OS locale (via `sys_locale::get_locale`)
 //! 4. Source locale (`en`)
 //!
@@ -167,10 +170,13 @@ impl<'a> CatalogArgs<'a> {
 }
 
 /// Locale preference inputs above OS-locale detection, in precedence
-/// order. Both fields are `None` today (no CLI flag parsing exists yet
-/// in `main.rs`, and RFC-023's configuration setting does not exist) --
-/// the fields exist so [`Catalog::resolve`]'s signature does not need to
-/// change when those callers arrive.
+/// order. Both fields are `None` today -- `main.rs` has flag parsing
+/// since `0.12.1`, but only an ad-hoc scan for `-h`/`--help`/`-V`/
+/// `--version`/`--licenses`, not a real parser `cli_flag` could plug
+/// into; RFC-023 shipped a configuration system that never gained a
+/// locale setting. Corrected 2026-10-14, review 562 -- this used to say
+/// neither existed at all. The fields exist so [`Catalog::resolve`]'s
+/// signature does not need to change when those callers arrive.
 ///
 /// `#[non_exhaustive]` (response 122 Q2 recommended): a future
 /// precedence level -- an environment variable, a per-project override
