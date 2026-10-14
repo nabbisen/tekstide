@@ -97,14 +97,24 @@ Ninety seconds. Run it.
 `0.37.0`, after the working-tree gate went red 3 of 3 for a reason that had nothing to do with the
 release.** `real_repository_filesystem_scan_cost_headless_benchmark` asserts that the default change
 detection policy returns `Complete` for *this repository* -- and it means the directory it is run in,
-not the repository's tracked content. The scanner excludes `target/`, `node_modules/` and most of
-`.git/` **by directory name**, and nothing else: so `.git-exclude/`, which holds this project's whole
-review correspondence and is gitignored with zero tracked files, is **walked and counted**. Measured
-at `0.37.0`: **4,345 entries in `.git-exclude/` alone** (2,892 of them under `tmp/`) against the
-default cap of **4,096**, pushing the scan to `Partial` and failing the assertion deterministically
--- while the same commit in a fresh clone scans **1,203** entries and passes. The dev team's own gate
-had been green hours earlier; the line was crossed by the correspondence of this release's own review
-rounds.
+not the repository's tracked content. The scanner excludes exactly `.git/`, `node_modules/`
+and `target/` **by directory name at any depth** (`IGNORED_DIRECTORY_NAMES`), and nothing else: so
+`.git-exclude/`, which holds this project's whole review correspondence and is gitignored with zero
+tracked files, is **walked and counted**.
+
+**Corrected 2026-10-14, review 572 -- this paragraph originally blamed the wrong set, and the dev
+team inherited the error from it.** It said "4,345 entries in `.git-exclude/` alone against the
+default cap of 4,096," which is a raw `find` count, not what the scanner sees: roughly 1,450 of
+those entries sit inside two stray `target/` directories (`.git-exclude/tmp/audit-open-probe/
+target`, `.git-exclude/tmp/pubcheck/target`) that the exclusion list skips by name. `.git-exclude/`'s
+own scanner-visible share is about **2,900 -- under the cap on its own**. What crosses the cap is
+**the whole tree, and only just**: measured the same day, **4,067** scanner-visible entries against
+the limit of **4,096**, about 1% over. The correspondence is what pushes it over, but the margin is
+tens of entries, not thousands -- so this failure **comes and goes with a few dozen files**, and a
+later reader whose tree happens to pass has not found that the cap stopped mattering. The same
+commit in a fresh clone scans **1,203** entries by the same count and passes. The dev team's own
+gate had been green hours earlier; the line was crossed by the correspondence of this release's own
+review rounds.
 
 **Nothing is wrong with the product here, and that was checked rather than assumed**: a bounded scan
 is reported to the user as *"Partial -- the scan itself was bounded at { $limit } entries; more
