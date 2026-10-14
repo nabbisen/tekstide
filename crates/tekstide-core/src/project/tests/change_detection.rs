@@ -553,11 +553,18 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
     // regardless of how much correspondence happens to be on disk.
     let max_entries = GeneratedChangeDetectionPolicy::default().max_entries;
     match excluded_baseline.status {
+        // Review 575: `<=`, not `<` -- `scan_directory`'s own `entries.len()
+        // >= policy.max_entries` check sits at the *head* of each
+        // directory's iteration, so a walk that pushes exactly the
+        // 4096th entry and then simply has no further iteration above it
+        // anywhere in the recursion ends `Ok(false)` -> `Complete` with
+        // `entries.len() == max_entries`. That is not a lie; `< max_entries`
+        // would have called it one.
         ChangeDetectionStatus::Complete => assert!(
-            excluded_baseline.entries.len() < max_entries,
-            "status says Complete but the entry count ({}) already reached the cap ({max_entries}) \
-             -- a scan that reports Complete while having truncated is exactly the defect this \
-             check exists to catch",
+            excluded_baseline.entries.len() <= max_entries,
+            "status says Complete but the entry count ({}) exceeds the cap ({max_entries}) -- a \
+             scan that reports Complete while having truncated is exactly the defect this check \
+             exists to catch",
             excluded_baseline.entries.len()
         ),
         ChangeDetectionStatus::Partial { limit } => assert_eq!(
@@ -588,10 +595,12 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
 /// size?" -- is about what a *clone* holds, because that is what every
 /// user and every CI run actually has, not this working tree's own
 /// correspondence. Measured against `git ls-files` (tracked content
-/// only) plus the distinct immediate parent directories those files
-/// imply, the same `IGNORED_DIRECTORY_NAMES` exclusion applied as the
-/// scanner itself uses -- a tracked file sitting inside a directory
-/// literally named `.git`/`node_modules`/`target` (not a real build
+/// only) plus every distinct ancestor directory those files imply --
+/// not just immediate parents, since `scan_directory`'s own recursion
+/// walks and counts every directory on the way to a file, not only the
+/// one directly containing it -- the same `IGNORED_DIRECTORY_NAMES`
+/// exclusion applied as the scanner itself uses -- a tracked file sitting
+/// inside a directory literally named `.git`/`node_modules`/`target` (not a real build
 /// artifact, just an unlucky name) does not count, matching
 /// `scan_directory`'s own name-only, any-depth rule.
 ///

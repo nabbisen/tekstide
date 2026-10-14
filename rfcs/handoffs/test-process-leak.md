@@ -2353,3 +2353,37 @@ master was closed before the signal was sent) rather than only the load average.
 narrower, more answerable question than the family note's own `/dev/pts` measurement, and it does
 not need the failure to be reproducible on demand — only for the next run that fails to carry the
 instrumentation.
+
+## Recurrence, 2026-10-15 — row 1, the first real occurrence since instrumentation, and it names an arm
+
+**Row 1** (`approval::tests::channel::bind_recovers_from_a_stale_socket_file`) fired again, in my
+own gate for review 575's two required edits, the third of three full-workspace runs
+(`cargo test --workspace --no-fail-fast`) in this working tree at the new follow-up commit:
+
+```text
+thread 'approval::tests::channel::bind_recovers_from_a_stale_socket_file' panicked at
+crates/tekstide-core/src/approval/tests/channel.rs:170:10:
+second bind must clear the stale file and succeed: ApprovalChannelError { reason:
+BindTargetAlreadyListening, source: None }
+```
+
+`1140 passed; 1 failed; 4 ignored` — this test and nothing else. Load at the time: `2.23 1.49 1.86`
+on this machine, far below every load figure recorded for the SIGHUP-race family above — this row's
+own race is not sharing that family's load sensitivity, at least not on this one occurrence.
+
+**This is the first time the instrumentation added for the row-1 re-verdict above has actually
+fired**, and it answers the question that re-verdict left open: the arm is
+**`BindTargetAlreadyListening`** — `clear_stale_socket`'s connect probe against the staged bind path
+returned `Ok`, i.e. something looked like a live listener, immediately after the raw listener that
+was staged there had already been dropped. Not `BindTargetNotASocket`. That rules out one of the
+two previously-indistinguishable arms outright, for this occurrence, and narrows the open question
+from "which of two arms" to "why does a dropped `UnixListener`'s socket still answer `connect()`" —
+a kernel-timing question (socket backlog/`SO_REUSEADDR`-shaped), not a file-type question.
+
+No fixture leak: `temp_state_root`'s `remove_when_this_test_ends` guard ran despite the panic;
+checked directly (`find /tmp -maxdepth 1 -name 't*-*'`) immediately after, nothing left.
+
+**Verdict: Accept stands.** No fix attempted or claimed here — recording the first real data point
+the instrumentation was built to produce is the whole contribution of this entry. The next
+occurrence should capture whether `SO_REUSEADDR` or an in-flight (not yet accepted) connection on
+the old listener's backlog explains a dropped listener still answering `connect()`.
