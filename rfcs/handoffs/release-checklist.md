@@ -31,6 +31,15 @@ This checklist applies before creating a tag or package for a Tekstide release.
       and was amended retroactively.
 - [ ] If the correction concerns data on a user's disk, say **where it is** and **what removes
       it**, in the entry itself — not only in the README it points at.
+- [ ] **A published release section's wording may be clarified after the fact; its claims may
+      not change.** Added 2026-10-14, review 567, after `0.37.0`'s own entry was edited post-publish
+      for the first time in this changelog's history (`c43384b`, reworking a forward reference to
+      RFC-028 that an invariant test correctly flagged once that RFC had a real file to check
+      against). The edit was the right call there — the words changed, not the fact they described
+      — but the distinction is easy to blur under a green-check pressure to "just fix it." If a
+      claim turns out to have been wrong, it gets a **dated correction underneath**, the same shape
+      `future-work.md` and the RFCs already use for exactly this. A quiet edit to what a release
+      actually claimed is never the remedy, no matter how small the diff looks.
 
 ## Run It
 

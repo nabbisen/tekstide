@@ -3,24 +3,28 @@
 Status: **Proposed 2026-10-14.** Scoped against what the current code actually assumes, not a
 hypothetical platform matrix — found by a four-part investigation (process/PTY, IPC/sockets,
 filesystem/paths/watcher, GUI/clipboard/packaging) whose load-bearing claims were independently
-re-derived against vendored dependency sources, not taken on report alone. D5 was returned once
-(review 566) for an incomplete inventory and re-scoped against a full `libc::`/`/proc`/`SYS_`
-sweep before this draft. `0.37.0` was first of M14; this is the second. Reserved 2026-09-24 from
-the requirements/roadmap/GUI audit of 2026-09-23.
+re-derived against vendored dependency sources, not taken on report alone. Returned twice before
+this draft: review 566 found D5's inventory incomplete (re-scoped against a full
+`libc::`/`/proc`/`SYS_` sweep); review 567 found the keybinding layer missing entirely (D9) and no
+acceptance story for a platform nobody here can run Run It on. `0.37.0` was first of M14; this is
+the second. Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23.
 
 ## Summary
 
 **Tekstide is Linux-only today, and not by a thin margin.** Every subsystem that touches a
 process, a PTY, or an IPC channel is unconditionally Unix-coded with no `cfg` gate at all — code
-that will not *compile* on a non-Linux target, not merely behave differently on one. GUI,
-clipboard, fonts, and locale resolution are the opposite: already fully cross-platform, entirely
-through dependencies (`iced`, `cosmic-text`, `sys-locale`) Tekstide never had to write
-platform-specific code for. This RFC closes the gap for **macOS only**. Windows is reserved as its
-own future RFC (D1) — not because the individual primitives are harder, but because Windows has
-no design to port *to*: no process groups, no POSIX signals, no `AF_UNIX`. macOS has all three, so
-RFC-043's containment model (session leader → enumerate members → escalate) ports as the same
-model with different system calls underneath, which is a materially different, and materially
-smaller, kind of work.
+that will not *compile* on a non-Linux target, not merely behave differently on one. Clipboard,
+fonts, and locale resolution are the opposite: already fully cross-platform, entirely through
+dependencies (`iced`, `cosmic-text`, `sys-locale`) Tekstide never had to write platform-specific
+code for. **The one real GUI-layer gap is keybindings** (D9): a Tekstide-authored, Ctrl-shaped
+rules table with zero handling of the Command/⌘ modifier anywhere, found only on a second review
+pass — the primary interaction surface of a GUI-first product, not a dependency's problem to have
+already solved. This RFC closes the gap for **macOS only**. Windows is reserved as its own future
+RFC (D1) — not because the individual primitives are harder, but because Windows has no design to
+port *to*: no process groups, no POSIX signals, no `AF_UNIX`. macOS has all three, so RFC-043's
+containment model (session leader → enumerate members → escalate) ports as the same model with
+different system calls underneath, which is a materially different, and materially smaller, kind
+of work.
 
 ## What the current code actually assumes
 
@@ -100,6 +104,29 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   (D4/D5 below, `linux`/`macos`/other, deliberately not a blanket `cfg(unix)`, which would
   silently claim the BSDs and Solaris too) and states that choice once, as the convention: adding a
   future provider without a host dispatch is a review-gate failure, not a style preference.
+
+  **The convention also has to say which existing `linux_*` names are a dispatch point and which
+  are not, since the tree has more of them than the two providers above.** Read all six:
+
+  - **`LinuxTerminalRuntime`** (`runtime/terminal/launch.rs:26`, threaded through `app.rs`,
+    `project/session.rs`, named in `transcript/writer.rs`'s docs) names the concrete type D5
+    replaces mechanisms *inside*. Landing macOS code in a type called `Linux…` is exactly the
+    label-that-means-nothing this decision exists to abolish, one layer down. **Renamed to
+    `UnixTerminalRuntime` in D5's own slice** — a plain rename, not a trait split: Windows is out of
+    scope (D1), so there is no second concrete implementation to abstract over yet, and introducing
+    a trait for one implementation would be exactly the kind of abstraction this project's own
+    convention avoids building ahead of a real second caller.
+  - **Five `linux_mvp()` constructors** (`navigation.rs:348`, `content/open.rs:15`,
+    `project/diff.rs:96`, `project/root/explorer.rs:28`, `transcript/reader.rs:106`) hold byte
+    limits, directory-ignore lists and keybinding rules — **nothing platform-specific**, confirmed
+    by reading all five. "linux" there names the *Linux MVP profile*, not a platform. They are
+    **not** wired into the host dispatch this decision establishes, and a reader must be able to
+    tell the two kinds apart without opening every file — so this RFC states the distinction once,
+    here, rather than leaving it to be rediscovered. One exception: `navigation.rs:348`'s
+    `KeybindingPolicy::linux_mvp()` is also the exact table D9 below has to make platform-aware.
+    D9's own slice is where this one constructor graduates from "legacy label, pure data" to a real
+    dispatch point — consistent with this convention, not an exception to it, since D9 gives it the
+    same host-dispatch shape D3 requires of anything that actually varies by platform.
 - **D4. The approval channel's two Linux-specific mechanisms get macOS-specific replacements, not a
   shared abstraction.** `SO_PEERCRED` → `LOCAL_PEERCRED`/`xucred` (option level `SOL_LOCAL`, not
   `SOL_SOCKET`; `peer_uid` only reads `cred.uid`, so `xucred`'s `cr_uid` suffices and macOS's
@@ -107,10 +134,13 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   `XUCRED_VERSION` before trusting the rest of the struct — an unchecked version field on a
   security boundary is exactly the shape this codebase already catches in review, so it is built in
   from the start, not added after). The `/proc/self/fd` TOCTOU bind path's macOS replacement is an
-  **open question with a named check**, not a decision: `/dev/fd/<fd>` is the plausible analogue,
-  verified on a real macOS machine before this RFC commits to it, specifically checking that
-  binding through it is the same open file rather than a re-open by name (the property the Linux
-  mechanism actually depends on, not merely that the path exists).
+  **open question with a named venue, not an abstract "real machine"**: there is no macOS hardware
+  on this project outside PR-028-A's own `macos-latest` CI runner, so that runner is where it gets
+  answered. The check: a test that binds through `/dev/fd/<fd>` (the plausible BSD-heritage
+  analogue) and asserts it is the same open file rather than a re-open by name — comparing
+  `fstat`'s `st_dev`/`st_ino` before and after, or a write-then-read round trip, not merely that the
+  path resolves. `/dev/fd` is written into this RFC only once that assertion passes on the runner;
+  until then it is a hypothesis, not D4's decision.
 - **D5. Process/PTY: six Linux-only mechanisms, re-scoped against a full sweep rather than the
   three files expected to hold them (review 566's own correction).** Four replaced in-kind
   (`/proc` enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe
@@ -120,8 +150,10 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   subsystem — `kill`, the three termination signals, `fcntl`, `poll`, the `ioctl` calls, `setsid`,
   `waitpid`, the `openat` TOCTOU chain, `geteuid`, `recv` with `MSG_PEEK`\|`MSG_DONTWAIT`,
   `sockaddr_un` sizing — is POSIX and lands unchanged.
-- **D6. No GUI-layer work is in scope.** Clipboard, fonts and locale resolution are already fully
-  cross-platform through dependencies; stated explicitly so this is not rediscovered as a gap.
+- **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
+  fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
+  gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real
+  GUI-layer scope this decision does not cover.
 - **D7. The macOS CI job is added early and non-blocking, not at the end once everything already
   compiles.** A red macOS job here is not noise — it is a live, continuous measurement of distance
   from compiling, replacing this scoping document's one-time snapshot, and it catches the next
@@ -149,6 +181,32 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   spawn at launch or boot, with its own timeout/failure/security questions on a boundary this
   project treats carefully) and deserves its own slice-level scrutiny rather than riding in on a
   path-literal list.
+- **D9. Keybindings are Tekstide-authored data in Linux/Windows convention, with zero handling of
+  the Command/⌘ modifier anywhere — required review correction, review 567: this was missing from
+  the first draft entirely.** `KeybindingPolicy::linux_mvp()` (`navigation.rs:348`) is a literal
+  rules table (`"Ctrl+Shift+P"`, `"Ctrl+Alt+P"`, the full `Ctrl+Alt+<letter>` set this crate mints),
+  matched by 7 call sites across `shell.rs`, `shell/run_report.rs`, `input.rs` and
+  `input/terminal_surface.rs` (`key.modifiers.control()`/`press.modifiers.control()` — corrected
+  from the review's own count of 8 after a tree-wide re-check; one of the seven sites tests both
+  `control()` and `alt()` together, which may be where the count diverged). **No dependency
+  translates this**: grepped the whole tree for `logo()`, `Modifiers::LOGO` and `.command()` and
+  found zero hits — the Command/⌘ modifier is not handled in any form. `winit` reports ⌘ as `LOGO`,
+  not `control()`, so a macOS build with this table unchanged requires the physical Control key for
+  every shortcut (not what a Mac user presses) and makes `Ctrl+click` collide with the platform's
+  own secondary-click convention. 15 strings in `locales/en.ftl` name `Ctrl` directly; 99 lines
+  across `README.md` and `docs/src` combined do too (8 + 91, both counted directly).
+
+  **This is the primary interaction surface of a GUI-first product, not polish, and it stays inside
+  RFC-028 as its own slice before the first artifact ships** — "users must not be able to
+  misunderstand" applies hardest at first contact. Bounded scope: one modifier abstraction (the
+  rules table stops holding a literal, OS-agnostic modifier name and gains a platform-resolved
+  one — this is the slice `KeybindingPolicy::linux_mvp()` graduates into a real D3 dispatch point,
+  per that decision's own note), the 7 call sites, the 15 catalog strings, and the documentation
+  sweep `release-checklist.md`'s own Book Against The Changelog section already knows how to run.
+  **Also checked in this slice**: whether any binding collides with a macOS system shortcut once
+  translated to ⌘ (`⌘Q`, `⌘W`, `⌘H`, `⌘M`, `⌘Space` are all claimed by the OS) — a real finding if
+  one exists, and cheaper to learn here than from a user. If the bounded scope above prices out
+  larger once started, it is split deliberately at that point rather than discovered mid-slice.
 
 ## Non-goals
 
@@ -163,9 +221,10 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   Tekstide's own code never imports — confirmed by grepping every `alacritty_terminal::` call site
   in this tree, which reaches only the VTE/terminal-emulator pieces (`Term`, `vte::ansi::Processor`,
   `grid::Dimensions`), never `alacritty_terminal::tty`. RFC-043's own containment model (session-
-  leader enumeration, a named `LinuxTerminalRuntime` type) is specific, deliberate and already
-  proven; swapping to a library's own PTY layer is a separate, much larger decision with its own
-  review, not a side-effect of scoping macOS. Recorded here only because it bears on future cost —
+  leader enumeration, a concrete runtime type renamed by D3 but not restructured) is specific,
+  deliberate and already proven; swapping to a library's own PTY layer is a separate, much larger
+  decision with its own review, not a side-effect of scoping macOS. Recorded here only because it
+  bears on future cost —
   Windows support, whenever its own RFC is written, would not need to build PTY handling from
   nothing if that swap were ever made — which is one more reason D1's split is the right shape,
   not a reason to make the swap now.
@@ -173,6 +232,49 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   correctness, a `future-work.md` note if this RFC does not pick it up.
 - **Reading the user's login-shell `PATH`** — D8; deferred to `future-work.md` as a known partial
   mitigation beyond this RFC's own scope.
+
+## Acceptance — required correction, review 567: the first draft had no answer for this at all
+
+**What the macOS job runs, by slice.** PR-028-A: `cargo build --workspace` only
+(`continue-on-error`) — the measurement slice has nothing to test yet. From PR-028-D onward (once
+the six D5 mechanisms are replaced and the tree plausibly compiles end to end), the job adds
+`cargo test --workspace --no-fail-fast`, still non-blocking. It flips to blocking, both build and
+test, in PR-028-F once genuinely green. **Tests expected to need per-platform gating, named rather
+than discovered at the first macOS test run**: `reader.rs`'s own unit tests for
+`create_eventfd`/`block_on_eventfd` and the thread-id helper `SYS_gettid` backs; `launch.rs`'s and
+`termination.rs`'s process-group-enumeration tests (anything asserting against `/proc/<pid>/stat`
+output shape); `channel.rs`'s `SO_PEERCRED`/`peer_uid` tests. Each gets a `#[cfg(target_os =
+"linux")]`/`#[cfg(target_os = "macos")]` split testing the same behavioural contract against each
+platform's own mechanism, not a shared test disabled on one side.
+
+**The flake register's own answer, decided before it is needed rather than after.**
+`test-process-leak.md`'s rows currently carry no platform column because every row has only ever
+meant Linux. Once two platforms run the same suite, a row needs to say which platform(s) it was
+observed failing on — added as a column (or a per-platform disclosure line within the existing row
+format, whichever reads better when the first cross-platform recurrence actually happens) in
+PR-028-D, the slice where macOS first starts running real-process tests at all. A failure on one
+platform and not the other is not evidence either way about the other platform's own rate; the
+register must be able to say so rather than silently conflating two populations the way review
+556 corrected for load earlier this release.
+
+**The Run It gate — proposed, not decided here.** Run It is a human, display-attached gate; a CI
+runner cannot perform it, and nobody on this project currently has macOS hardware to run it on.
+Two honest shapes, matching `what-the-installer-must-not-do.md` §3's own discipline of never
+claiming more than what was actually verified:
+
+1. The owner runs Run It on real Apple hardware before the first macOS artifact tags, the same
+   gate every Linux release already requires.
+2. The artifact ships, explicitly labelled in its own release notes as *not yet run on real
+   hardware* — true, rather than silently implying parity with the Linux release's own Run It
+   history.
+
+**Recommendation: (1).** A GUI product's first release on a platform is exactly the release most
+likely to carry a defect only a real screen would show (window chrome, font rendering, the D9
+keybinding sweep's own correctness) — the same reasoning that makes Run It a required gate at all
+on Linux. Shipping unlabelled parity we do not have would be the quieter failure; shipping
+explicitly labelled as unverified is honest but ships a known-weaker artifact as the default rather
+than the exception. If the owner cannot run it before the first tag, (2) is the fallback, not a
+silent default.
 
 ## Slices
 
@@ -188,13 +290,23 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
 - **PR-028-C — the IPC replacements** (D4). `LOCAL_PEERCRED`/`xucred` with its version check; the
   `/dev/fd` bind-path question resolved on a real macOS machine before being written as a decision,
   not assumed from BSD heritage.
-- **PR-028-D — the process/PTY replacements** (D5). `/proc` enumeration → `sysctl`/`libproc`;
-  `SYS_close_range` → `closefrom`; `eventfd` → self-pipe or kqueue `EVFILT_USER`; `SYS_gettid` →
-  `pthread_threadid_np`; `openpty`'s macOS link target confirmed, not inferred.
-- **PR-028-E — green, and the first artifact.** Flip the macOS CI job to blocking once PR-028-A
-  through D are all landed and it is actually green. `install.sh`'s refusal message updated (it
-  currently names this RFC by number as the reason macOS is refused). First macOS release artifact,
-  `aarch64-apple-darwin` only (D7). `config/profile.rs`'s AI-CLI lookup list gains
-  `/opt/homebrew/bin` (D8).
+- **PR-028-D — the process/PTY replacements** (D5), and the macOS job starts running tests. `/proc`
+  enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe or
+  kqueue `EVFILT_USER`; `SYS_gettid` → `pthread_threadid_np`; `openpty`'s macOS link target
+  confirmed, not inferred. The macOS CI job gains `cargo test --workspace --no-fail-fast`
+  (still non-blocking); the per-platform test splits named in Acceptance land with the mechanisms
+  they test; `test-process-leak.md` gains its platform column in this same slice, since this is the
+  first point a row could ever need one.
+- **PR-028-E — the keybindings** (D9). The modifier abstraction, the 7 call sites, the 15 catalog
+  strings, the documentation sweep, the macOS-system-shortcut collision check. Lands before the
+  first artifact, after the product actually runs on macOS (PR-028-D) so the sweep is checked
+  against real behaviour rather than planned behaviour.
+- **PR-028-F — green, and the first artifact.** Flip the macOS CI job to fully blocking once
+  PR-028-A through E are all landed and it is actually green, build and test both. `install.sh`'s
+  refusal message updated (it currently names this RFC by number as the reason macOS is refused).
+  The Run It gate's own answer (Acceptance) resolved before this slice closes, not assumed. First
+  macOS release artifact, `aarch64-apple-darwin` only (D7). `config/profile.rs`'s AI-CLI lookup
+  list gains `/opt/homebrew/bin` (D8).
 
-PR-028-C and PR-028-D may land in either order; PR-028-A and PR-028-B must land first.
+PR-028-C and PR-028-D may land in either order; PR-028-A and PR-028-B must land first; PR-028-E
+needs PR-028-D's own macOS test run to check its collision sweep against, not just its own code.
