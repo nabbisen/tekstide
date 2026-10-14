@@ -2237,3 +2237,42 @@ concurrent agent sessions building and testing different projects is a different
 spinner run: measure what the machine's `/dev/pts` occupancy, fd count and fork rate are doing during
 a failing run, rather than its load average. Recorded here as the next thing to try for any member of
 this family, in place of a fourth synthetic-load attempt that the first three predict will be green.
+
+## Row 1 re-verdicted, 2026-10-14 — the diagnostic gap review 554 found is closed
+
+**Row 1** (`approval::tests::channel::bind_recovers_from_a_stale_socket_file`, verdict **Accept**)
+had its premise falsified at review 554: *"never isolated to a more specific cause … the shape
+offers no actionable fix"* stopped being true the moment `source: None` narrowed the panic to one
+of two indistinguishable arms in `clear_stale_socket`. That review named the actionable step —
+distinct `ApprovalChannelErrorReason` variants for the two arms — and left it for this slice.
+
+**Done**: `BindTargetNotASocket` (the bind path exists and is not a socket) and
+`BindTargetAlreadyListening` (`connect()` returned `Ok` — something is genuinely listening) added
+to `ApprovalChannelErrorReason`, replacing the bare `Io` both arms of `clear_stale_socket`
+previously returned. Core-only, no user-facing string, exactly as review 554 scoped it — whether
+either arm also deserves its own refusal symbol in `agent_run_launch_refusal_symbol` is left as a
+separate, later question; today both still fall into that match's own `Runtime(_) => "error"`
+catch-all, confirmed by reading the match itself rather than assumed, so adding the variants needed
+no change there.
+
+**Proven by two deterministic tests, not by waiting for the race to recur.** The existing
+`stale_socket_clearing_refuses_a_non_socket_file` gained the `BindTargetNotASocket` assertion (it
+already forced that arm, just never checked which reason it produced); a new
+`a_live_listener_at_the_bind_path_is_refused_as_already_listening` forces the second arm by keeping
+a raw listener alive through the second bind attempt, instead of the original flaky test's
+drop-then-rebind race. **Ablated both**: reverted each new variant back to the bare `Io` both
+replaced, confirmed both tests fail naming the exact mismatch (`left: Io, right:
+BindTarget{NotASocket,AlreadyListening}`), restored, confirmed green again.
+
+**Verdict: Accept stands, now instrumented rather than unactionable.** This does not fix the
+underlying race — what makes the staged "stale" socket sometimes still look like a live listener,
+or sometimes fail the socket-type check, immediately after its raw listener was dropped, remains
+unexplained, and no cause is claimed here. What changes is that the *next* occurrence of this flake
+will panic naming one of these two reasons instead of a bare `Io` with no source — turning a dead
+end into a lead, which is the property review 554 found missing and asked this slice to restore.
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -D warnings`: clean.
+`cargo test -p tekstide-core --lib approval::tests::channel::`: 24/24. Full workspace suite:
+0 failed, 4 ignored (unchanged), 0 fixture entries.

@@ -175,6 +175,45 @@ fn bind_recovers_from_a_stale_socket_file() {
     );
 }
 
+/// Review 554: the recurring flake in the test above always panicked with
+/// `reason: Io, source: None`, which response 231 traced to one of two
+/// arms in `clear_stale_socket` -- "the bind path exists and is not a
+/// socket" (already covered, without asserting its specific reason, by
+/// `stale_socket_clearing_refuses_a_non_socket_file` below) or
+/// "`connect()` succeeded, something is really listening" (new coverage
+/// here) -- left indistinguishable from each other. This test forces the
+/// second arm deterministically (no drop-then-rebind race, the listener
+/// stays alive throughout) and asserts the distinct reason it now
+/// carries, so the next occurrence of that flake is self-diagnosing
+/// instead of reporting `Io` again.
+#[test]
+fn a_live_listener_at_the_bind_path_is_refused_as_already_listening() {
+    let state_root = temp_state_root("listening");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+    let socket_path = directory.socket_path(&agent_run_id);
+
+    std::fs::create_dir_all(directory.channel_dir()).expect("create channel dir for the test");
+    // Kept alive for the whole test, unlike the stale-recovery test above:
+    // this is the genuine-conflict arm, not the stale-leftover one, so the
+    // listener must still be accepting connections when the second bind
+    // runs.
+    let _live_listener =
+        std::os::unix::net::UnixListener::bind(&socket_path).expect("raw bind must succeed");
+
+    let error = ApprovalChannelEndpoint::bind(&directory, &agent_run_id)
+        .expect_err("a live listener at the bind path must be refused, not cleared");
+    assert_eq!(
+        error.reason,
+        ApprovalChannelErrorReason::BindTargetAlreadyListening
+    );
+    assert!(
+        socket_path.exists(),
+        "refused, not removed -- a genuine conflict must not have its socket file deleted out \
+         from under the process still listening on it"
+    );
+}
+
 fn valid_proposal_frame(token: &str, proposal_id: &str) -> Vec<u8> {
     let json = serde_json::json!({
         "protocol_version": 1,
@@ -556,10 +595,14 @@ fn stale_socket_clearing_refuses_a_non_socket_file() {
     std::fs::create_dir_all(directory.channel_dir()).expect("create channel dir for the test");
     std::fs::write(&socket_path, b"not a socket").expect("create a plain regular file");
 
-    let result = ApprovalChannelEndpoint::bind(&directory, &agent_run_id);
-    assert!(
-        result.is_err(),
-        "bind() must refuse when a non-socket file occupies the target path"
+    let error = ApprovalChannelEndpoint::bind(&directory, &agent_run_id)
+        .expect_err("bind() must refuse when a non-socket file occupies the target path");
+    // Review 554: distinguished from a bare `Io` so this arm is
+    // identifiable rather than indistinguishable from the "already
+    // listening" arm this function's other refusal can also produce.
+    assert_eq!(
+        error.reason,
+        ApprovalChannelErrorReason::BindTargetNotASocket
     );
     assert!(
         socket_path.exists(),

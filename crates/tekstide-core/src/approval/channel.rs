@@ -415,6 +415,23 @@ pub enum ApprovalChannelErrorReason {
     /// identifiable rather than indistinguishable from any other bind
     /// failure.
     ProcMagicPathUnavailable,
+    /// `clear_stale_socket` found a file at the bind path that exists but
+    /// is not a socket (`response 112 Q3`'s own refusal: connecting to a
+    /// regular file also yields `ECONNREFUSED`, so this case is refused
+    /// outright rather than risking a silent delete of the wrong thing).
+    /// Distinguished from a bare `Io`, review 554: this and
+    /// [`Self::BindTargetAlreadyListening`] were the two arms response 231
+    /// left indistinguishable from each other, which is exactly the shape
+    /// `bind_recovers_from_a_stale_socket_file`'s own recurring flake
+    /// panic (`reason: Io, source: None`) could never narrow past -- every
+    /// other `Io` in this path already carries its source.
+    BindTargetNotASocket,
+    /// `clear_stale_socket`'s connect probe against the staged bind path
+    /// returned `Ok`: something is genuinely listening, so the path is a
+    /// live conflict, not a stale leftover, and is refused rather than
+    /// removed. Distinguished from a bare `Io` for the same reason as
+    /// [`Self::BindTargetNotASocket`] -- review 554's own row-1 re-count.
+    BindTargetAlreadyListening,
 }
 
 #[derive(Debug)]
@@ -916,10 +933,14 @@ fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), Appro
         // non-socket file at this path was silently deleted. Refuse
         // outright rather than attempt to connect to something that was
         // never a socket in the first place.
-        return Err(ApprovalChannelError::new(ApprovalChannelErrorReason::Io));
+        return Err(ApprovalChannelError::new(
+            ApprovalChannelErrorReason::BindTargetNotASocket,
+        ));
     }
     match UnixStream::connect(bind_path) {
-        Ok(_) => Err(ApprovalChannelError::new(ApprovalChannelErrorReason::Io)),
+        Ok(_) => Err(ApprovalChannelError::new(
+            ApprovalChannelErrorReason::BindTargetAlreadyListening,
+        )),
         Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
             fs::remove_file(removal_path).map_err(ApprovalChannelError::io)
         }
