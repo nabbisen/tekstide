@@ -1559,10 +1559,22 @@ $ cargo doc -p tekstide --no-deps 2>&1 | grep -c '^warning'
 Most of `tekstide-core`'s are the shape *"public documentation for `add_project_from_path_protected`
 links to private item `Self::add_project_session`"* — a doc comment's intra-doc link
 (`` [`Self::add_project_session`] ``) pointing at an item rustdoc will not render a page for, since
-it is private. `tekstide-core` is a published library: `docs.rs/tekstide-core/0.37.0` renders
-exactly this rustdoc, so a reader of the public API sees the name of a method they cannot click
-and cannot find. `tekstide` is `[[bin]]`-only, so its 32 are internal and matter less, but are
-still real broken links in a crate this project's own gate otherwise holds to a high standard.
+it is private (here, `pub(crate)`). `tekstide-core` is a published library:
+`docs.rs/tekstide-core/0.37.0` renders exactly this rustdoc.
+
+**The link is not dead text — it is a dead link, which is worse, and measured rather than
+reasoned about.** Required correction, review 564: the first draft of this entry said the link
+renders as unclickable plain text. It does not. `grep -c 'href="struct.AppState.html#method.add_
+project_session"' target/doc/tekstide_core/app/struct.AppState.html` returns **1**; `grep -c 'id=
+"method.add_project_session"'` on the same page returns **0** — rustdoc emits the anchor `href`
+for a private target regardless, but the page the anchor points into never documents that item, so
+there is no matching `id` to land on. **A reader of the public API docs clicks what looks like a
+normal cross-reference and the page does not move** — no error, no explanation, nothing to
+distinguish a broken reference from a page that silently failed to scroll. Confirmed on the
+published page too, not only the local build: `docs.rs/tekstide-core/0.37.0/tekstide_core/app/
+struct.AppState.html` serves the identical `href` with no matching `id` anywhere on the page.
+`tekstide` is `[[bin]]`-only, so its 32 are internal and matter less, but are still real broken
+links in a crate this project's own gate otherwise holds to a high standard.
 
 **Nothing in the gate has ever checked this class.** `cargo fmt --check`, `clippy -D warnings`,
 `cargo test --doc --workspace` and the invariants all run; `cargo test --doc` executes doctests
@@ -1571,8 +1583,9 @@ pass (`RUSTDOCFLAGS="-D warnings" cargo doc`), never run.
 
 **Not fixed here, and not added to the gate as-is.** Turning link-resolution warnings into gate
 failures with 38 live ones already present would make the very first run red for reasons nobody
-just introduced, which is the exact failure mode `ci.yml`'s own header already warns against for
-a different check. **Two-step shape, in order**: clear the existing warnings in a slice of their
-own first (re-point each link at a real public item, or drop the ones that cannot have one), then
-add the `RUSTDOCFLAGS="-D warnings"` gate step once the count is genuinely zero, so it cannot
-silently regrow afterward.
+just introduced. The adjacent precedent is the quarantine discipline `test-process-leak.md`
+already lives by: a known-failing thing is tracked *outside* the blocking gate until it is
+actually fixed, not added to the gate pre-broken. **Two-step shape, in order**: clear the existing
+warnings in a slice of their own first (re-point each link at a real public item, or drop the ones
+that cannot have one), then add the `RUSTDOCFLAGS="-D warnings"` gate step once the count is
+genuinely zero, so it cannot silently regrow afterward.
