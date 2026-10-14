@@ -2279,11 +2279,23 @@ end into a lead, which is the property review 554 found missing and asked this s
 **Required correction, review 570: the first draft of this gate line said "0 failed … did not
 recur in any of the three," which was false and never re-checked against what those three runs
 actually printed.** Three full-workspace runs **in this working tree** each failed exactly one
-test, every time: `real_repository_filesystem_scan_cost_headless_benchmark`. This is not the
-intermittent environmental finding review 557's letter described — it is deterministic in this
-tree and cannot pass here: `.git-exclude/` currently holds **4,373 entries**, over the scanner's
-4,096 cap, confirmed by running the test directly (`excluded_status: Partial { limit: 4096 }`
-against the required `Complete`). Nothing else failed in any of the three runs; 0 fixture entries
-left each time, approval-channel tests included. Gating this slice in a fresh clone, per
-`release-checklist.md`'s own remedy, would show 0 failures — not attempted here, since the
-working-tree result above is the one that needed correcting, not replacing.
+test, every time: `real_repository_filesystem_scan_cost_headless_benchmark`. Nothing else failed in
+any of the three runs; 0 fixture entries left each time, approval-channel tests included.
+
+**Second correction, review 571: `.git-exclude/` itself was the wrong set to blame.** The first
+correction above named `.git-exclude/`'s own raw entry count (4,373) as what exceeds the 4,096 cap.
+It does not — the scanner excludes `target`/`node_modules`/`.git` by name at any depth, and
+`.git-exclude/`'s own scanner-visible share (after the same exclusion) is **~2,908, well under the
+cap on its own**; most of its raw count sits inside two stray `target/` directories
+(`.git-exclude/tmp/audit-open-probe/target`, `.git-exclude/tmp/pubcheck/target`) the scanner never
+counts at all. **What is actually over the cap is the whole repository tree, and only just**: 4,067
+scanner-visible entries against the 4,096 limit, roughly **1% over**, confirmed by running the test
+directly (`excluded_status: Partial { limit: 4096 }` against the required `Complete`). That margin
+means the right prediction is not "a stable, structural failure" but **"this comes and goes with a
+few dozen files"** — a handful of review letters pushes the tree over; cleaning up unrelated scratch
+files pulls it back under. A future reader measuring a tree that happens to pass is not evidence
+the cap stopped being a real concern; the margin itself is why `release-checklist.md`'s own fix
+(measure the repository's *tracked* content, not the working directory) matters even for a fresh
+clone eventually, not only for this one. Gating this slice in a fresh clone, per that section's own
+remedy, would show 0 failures today — not attempted here, since the working-tree result above is
+the one that needed correcting, not replacing.
