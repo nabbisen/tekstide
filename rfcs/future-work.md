@@ -730,9 +730,9 @@ Status: recorded 2026-08-08 during `0.5.0`'s post-publish verification — found
 here as though the gap above were still live. Verified against the `0.37.0` AUR package's own
 binary: `--version` prints `tekstide 0.37.0`, `--help` prints the usage and keyboard list,
 `--licenses` prints the notice. What is still true, and still worth the entry existing for: this
-is an ad-hoc scan of `args()` for three literals (`-h`/`--help`/`-V`/`--version`/`--licenses`), not
-a real argument parser, and `i18n.rs`'s `LocalePreference::cli_flag` still has no production
-caller — a future `--locale` flag has nowhere to plug in without one.
+is an ad-hoc scan of `args()` for three flags, five literals (`-h`/`--help`, `-V`/`--version`,
+`--licenses`), not a real argument parser, and `i18n.rs`'s `LocalePreference::cli_flag` still has
+no production caller — a future `--locale` flag has nowhere to plug in without one.
 
 **One change closes two gaps.** `i18n.rs`'s `LocalePreference::cli_flag` has existed since RFC-016 PR-016-D with no production caller — the doc comment says so plainly ("no CLI flag parsing exists yet in `main.rs`"). Real argument parsing in `boot()`/`main()` (distinguishing `--version`/`--help`/a future `--locale`/`--config` from positional project paths) is the same piece of work `cli_flag` has been waiting for and what `--version` needs, and RFC-023's configuration system will need argument parsing regardless. Do them together rather than adding a one-off `--version` special case ahead of the real parser.
 
@@ -1527,10 +1527,12 @@ never works:**
 **How bad, honestly: not very, today.** `pl.ftl`'s own header says it exists "purely to prove the
 pluralization machinery works — not a real translation effort", so no real translation is lost by
 this. What is true is narrower than "ships": `pl` exists in the repository and in the published
-crate, and resolves at runtime only where the build tree still exists — true for two of the three
-channels a user might actually have installed from, and not for the one `README.md` now leads
-with. What would be wrong *tomorrow* is the first real second locale, which would ship into the
-exact same hole — silently, since the fallback never surfaces as an error.
+crate, and whether it resolves at runtime depends entirely on the channel — the table above is the
+honest shape, not a count: works under `cargo install`; never from the release binary or the
+one-liner, the channel `README.md` now leads with; from an AUR build only until the build
+directory is cleaned, which `makepkg -c` or any helper's cache cleanup ends. What would be wrong
+*tomorrow* is the first real second locale, which would ship into the exact same hole — silently,
+since the fallback never surfaces as an error.
 
 **The fix is not a second file-fetch, the same lesson the `NOTICE` embedding fix already
 taught.** Compile every `locales/*.ftl` the way `en` already is (`include_str!`, selected at
@@ -1541,3 +1543,36 @@ removes the `$srcdir` reference `namcap`/`makepkg` flagged, for free.
 future `--locale pl` flag on a release binary would let a user select a catalog they structurally
 cannot have under the current disk-loading design. Not fixed here — scoped, not patched, matching
 this slice's own instruction not to fix it in passing.
+
+## `cargo doc` is not in the gate, and 38 warnings already reach docs.rs — found 2026-10-14, review 563
+
+Found while checking a doc-comment edit, not sought out. Measured directly, not assumed from the
+review that first noticed it:
+
+```
+$ cargo doc -p tekstide-core --no-deps 2>&1 | grep -c '^warning'
+38
+$ cargo doc -p tekstide --no-deps 2>&1 | grep -c '^warning'
+32
+```
+
+Most of `tekstide-core`'s are the shape *"public documentation for `add_project_from_path_protected`
+links to private item `Self::add_project_session`"* — a doc comment's intra-doc link
+(`` [`Self::add_project_session`] ``) pointing at an item rustdoc will not render a page for, since
+it is private. `tekstide-core` is a published library: `docs.rs/tekstide-core/0.37.0` renders
+exactly this rustdoc, so a reader of the public API sees the name of a method they cannot click
+and cannot find. `tekstide` is `[[bin]]`-only, so its 32 are internal and matter less, but are
+still real broken links in a crate this project's own gate otherwise holds to a high standard.
+
+**Nothing in the gate has ever checked this class.** `cargo fmt --check`, `clippy -D warnings`,
+`cargo test --doc --workspace` and the invariants all run; `cargo test --doc` executes doctests
+and says nothing about whether an intra-doc link resolves. Link-checking is a separate rustdoc
+pass (`RUSTDOCFLAGS="-D warnings" cargo doc`), never run.
+
+**Not fixed here, and not added to the gate as-is.** Turning link-resolution warnings into gate
+failures with 38 live ones already present would make the very first run red for reasons nobody
+just introduced, which is the exact failure mode `ci.yml`'s own header already warns against for
+a different check. **Two-step shape, in order**: clear the existing warnings in a slice of their
+own first (re-point each link at a real public item, or drop the ones that cannot have one), then
+add the `RUSTDOCFLAGS="-D warnings"` gate step once the count is genuinely zero, so it cannot
+silently regrow afterward.
