@@ -68,9 +68,7 @@ work is tracked in [Deferred work](https://nabbisen.github.io/tekstide/contribut
 The installer below installs one binary to `$HOME/.local/bin/tekstide` and touches nothing else —
 no shell rc edit, no `sudo`, no repository added. Linux x86_64 only; see
 [What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html) for every
-other platform's status. **The prebuilt binary is published from `0.37.0` onward** — if you see a
-404 here, the release that first carries it has not been tagged yet; `cargo install` below still
-works against any published version.
+other platform's status.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nabbisen/tekstide/main/install.sh | sh

@@ -1454,7 +1454,23 @@ this is new scope, not a correction of anything that release claimed.
 **The fix, when someone picks this up**: `iced::window::Settings`'s `platform_specific` field
 (`iced::window::settings::PlatformSpecific` on Linux) carries `application_id: String`, set via
 `.window(iced::window::Settings { platform_specific: ..., ..Default::default() })` on the
-`iced::application(...)` builder in `main.rs`. The value conventionally matches whatever
-`.desktop` file ships the product (none exists yet either — AUR's `PKGBUILD` installs only the
-binary and the licence files, no `.desktop` entry, no icon). Both belong together: an `app_id`
-with no matching `.desktop` file is half the fix.
+`iced::application(...)` builder in `main.rs`. Confirmed in the locked `iced 0.14.0`: the field
+exists at that path, and the plumbing actually reaches Wayland — `iced_winit`'s own conversion
+passes it to winit's `with_name` under `#[cfg(feature = "wayland")]`, which is on here (`iced`'s
+`default` feature list includes it, and the workspace does not disable defaults). Had that feature
+been off, this fix would compile, change nothing, and cost whoever picked it up a day.
+
+**No `.desktop` file exists for either of this product's two distribution channels, and an
+`app_id` with nothing matching it is half the fix.** AUR's `PKGBUILD` installs exactly three
+things (the binary, `LICENSE`, `NOTICE`) — no `.desktop` entry, no icon. The one-liner installer
+is the **harder** case and, since `0.37.0`, the **primary** one: `README.md`'s install section
+leads with it and the release record demonstrates it end to end, and `install.sh` installs
+exactly one file to `$HOME/.local/bin/tekstide` — its own header says so. A packager's
+`install -Dm644` has no equivalent for a user-local install; the installer would need to write a
+`~/.local/share/applications/` entry and a `~/.local/share/icons/` path itself, which is more than
+a packaging-file line.
+
+**An icon source already exists**: `assets/tekstide-logo.png` (320×320, already used by
+`README.md:1`), **but it is 8-bit RGB with no alpha channel** — fine for a README image, wrong for
+a desktop icon, which wants transparency and a 16/32/48/128/256 hicolor set. Worth knowing before
+writing the `.desktop` file, not after.
