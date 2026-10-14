@@ -165,6 +165,20 @@ fn bind_recovers_from_a_stale_socket_file() {
         drop(raw_listener);
     }
     assert!(socket_path.exists(), "precondition: stale file exists");
+    // Review 576's own second instrument: this test's entire premise is
+    // that a dropped `UnixListener` leaves nothing listening at its path.
+    // That has never actually been checked -- if `connect()` here returns
+    // anything other than `ConnectionRefused`, the phenomenon review 576
+    // is chasing lives in *this staging*, not in `clear_stale_socket`,
+    // which would be a different investigation entirely.
+    match UnixStream::connect(&socket_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {}
+        other => panic!(
+            "precondition failed: connecting to the path left by a dropped UnixListener should \
+             be refused, got {other:?} -- the staging itself, not clear_stale_socket, is where \
+             this occurrence's phenomenon lives"
+        ),
+    }
 
     let (second_endpoint, _token) = ApprovalChannelEndpoint::bind(&directory, &agent_run_id)
         .expect("second bind must clear the stale file and succeed");
@@ -211,6 +225,22 @@ fn a_live_listener_at_the_bind_path_is_refused_as_already_listening() {
         socket_path.exists(),
         "refused, not removed -- a genuine conflict must not have its socket file deleted out \
          from under the process still listening on it"
+    );
+    // Review 576's own first instrument: `_live_listener` above is owned by
+    // this same test process, so the peer SO_PEERCRED names when
+    // `clear_stale_socket` connects to it must be this process's own pid
+    // -- confirming the new diagnostic correctly identifies an in-process
+    // answerer, which is exactly what row 1's real, non-deterministic
+    // occurrences need distinguished from "something else."
+    let own_pid = std::process::id();
+    let source_message = error
+        .source()
+        .expect("review 576: BindTargetAlreadyListening must carry the peer's SO_PEERCRED detail")
+        .to_string();
+    assert!(
+        source_message.contains(&format!("pid={own_pid}")),
+        "the peer connecting to its own just-bound listener is this same test process -- the \
+         diagnostic source should name pid={own_pid}, got {source_message:?}"
     );
 }
 

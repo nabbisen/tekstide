@@ -452,6 +452,10 @@ pub enum ApprovalChannelErrorReason {
     /// live conflict, not a stale leftover, and is refused rather than
     /// removed. Distinguished from a bare `Io` for the same reason as
     /// [`Self::BindTargetNotASocket`] -- review 554's own row-1 re-count.
+    /// Review 576: this arm's `source` now also names the peer's
+    /// `SO_PEERCRED` pid/uid/gid, gathered from the connected stream
+    /// before it is dropped -- the refusal is unchanged, only the
+    /// diagnostic detail is new.
     BindTargetAlreadyListening,
 }
 
@@ -469,11 +473,20 @@ impl ApprovalChannelError {
         }
     }
 
-    fn io(error: io::Error) -> Self {
+    /// A non-`Io` reason with a diagnostic `source` attached -- review
+    /// 576's own distinction: the `reason` stays content-free API (the
+    /// refusal itself never changes), while `source`'s message carries
+    /// whatever extra detail this occurrence could gather, the same way
+    /// `Io`'s own source already does for OS errors.
+    fn with_source(reason: ApprovalChannelErrorReason, source: io::Error) -> Self {
         Self {
-            reason: ApprovalChannelErrorReason::Io,
-            source: Some(error),
+            reason,
+            source: Some(source),
         }
+    }
+
+    fn io(error: io::Error) -> Self {
+        Self::with_source(ApprovalChannelErrorReason::Io, error)
     }
 
     /// The underlying OS error, when `reason` is `Io`. OS error messages
@@ -959,9 +972,26 @@ fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), Appro
         ));
     }
     match UnixStream::connect(bind_path) {
-        Ok(_) => Err(ApprovalChannelError::new(
-            ApprovalChannelErrorReason::BindTargetAlreadyListening,
-        )),
+        Ok(stream) => {
+            // Review 576: the refusal itself does not change -- this is
+            // strictly more diagnostic detail on the same reason, naming
+            // *who* answered the connect so the next occurrence can tell
+            // whether the peer is this test process itself (the staging
+            // is suspect) or something else (a pid worth chasing).
+            let diagnostic = match peer_credentials(&stream) {
+                Ok(cred) => io::Error::other(format!(
+                    "connect() succeeded; peer is pid={} uid={} gid={} (SO_PEERCRED)",
+                    cred.pid, cred.uid, cred.gid
+                )),
+                Err(error) => io::Error::other(format!(
+                    "connect() succeeded but SO_PEERCRED failed: {error}"
+                )),
+            };
+            Err(ApprovalChannelError::with_source(
+                ApprovalChannelErrorReason::BindTargetAlreadyListening,
+                diagnostic,
+            ))
+        }
         Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
             fs::remove_file(removal_path).map_err(ApprovalChannelError::io)
         }
@@ -1133,11 +1163,11 @@ fn current_euid() -> u32 {
     unsafe { libc::geteuid() }
 }
 
-/// Reads the connecting process's real, kernel-verified user id via
+/// Reads the connecting process's real, kernel-verified credentials via
 /// `SO_PEERCRED`. This is not something the connecting process can spoof:
 /// the kernel fills in `ucred` from the actual socket peer at `connect()`
 /// time, not from anything the peer transmits.
-fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+fn peer_credentials(stream: &UnixStream) -> io::Result<libc::ucred> {
     let fd = stream.as_raw_fd();
     // SAFETY: `cred` is a plain-old-data struct with no invariants beyond
     // its fields being initialized, which `getsockopt` does on success;
@@ -1157,8 +1187,14 @@ fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
         if result != 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(cred.uid)
+        Ok(cred)
     }
+}
+
+/// Reads just the connecting process's real, kernel-verified user id --
+/// the comparison the token/same-user check above actually needs.
+fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    peer_credentials(stream).map(|cred| cred.uid)
 }
 
 // --- Wire framing --------------------------------------------------

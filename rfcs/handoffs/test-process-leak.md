@@ -2387,3 +2387,105 @@ checked directly (`find /tmp -maxdepth 1 -name 't*-*'`) immediately after, nothi
 the instrumentation was built to produce is the whole contribution of this entry. The next
 occurrence should capture whether `SO_REUSEADDR` or an in-flight (not yet accepted) connection on
 the old listener's backlog explains a dropped listener still answering `connect()`.
+
+### Correction, 2026-10-15, review 576 — neither `SO_REUSEADDR` nor backlog can explain this
+
+The closing line above sent the next investigator at two mechanisms that turn out not to apply:
+
+- **`SO_REUSEADDR` has no meaning for an `AF_UNIX` pathname socket on Linux.** It is not consulted
+  when binding a filesystem socket; rebinding a path that still exists fails with `EADDRINUSE`
+  regardless, which is exactly why `clear_stale_socket` has to `unlink` before binding at all. The
+  option cannot make a `connect()` succeed or fail.
+- **A backlog entry cannot make a *new* `connect()` succeed.** When a listening `AF_UNIX` socket is
+  closed, queued-but-unaccepted connections are reset and subsequent connects to that path get
+  `ECONNREFUSED`. Backlog state affects connections already queued, not the next one.
+
+Two other hypotheses, ruled out in review rather than guessed at, worth recording so nobody
+re-treads them:
+
+- **Path collision between concurrent tests: impossible.** `rand_seed()` is a process-wide
+  `AtomicU64` counter and `temp_state_root` includes `std::process::id()`, so two tests in one
+  binary cannot land on the same socket path, and two binaries cannot share a pid.
+- **`bind()` probing a path it had already bound: impossible.** There is no retry loop —
+  `clear_stale_socket` runs once, strictly before the single `UnixListener::bind`.
+
+That leaves the actual question open: something answered that connect, and neither of the two
+mechanisms first guessed at explains it.
+
+## New instruments, 2026-10-15, review 576 — and the staging-side one fired live, repeatedly, in the gate that added it
+
+Review 576 commissioned two small instruments rather than a fix: capture the peer's `SO_PEERCRED`
+(pid/uid/gid) on `clear_stale_socket`'s `Ok(_)` arm, attached to `BindTargetAlreadyListening`'s
+`source` without changing the refusal itself; and, in `bind_recovers_from_a_stale_socket_file`,
+assert the test's own unverified precondition — that connecting to the path right after
+`drop(raw_listener)` returns `ConnectionRefused` — before the real second `bind()` call runs.
+
+**Both landed and were ablated as specified**: the product-side instrument confirmed against
+`a_live_listener_at_the_bind_path_is_refused_as_already_listening` (a deterministic, same-process
+listener) — the diagnostic source names `pid=<this test process's own pid>`, proving the mechanism
+correctly identifies an in-process answerer. The test-side precondition assert was ablated by
+staging a listener that is deliberately *not* dropped (`std::mem::forget` in place of `drop`,
+reverted immediately after, never committed) — confirmed it panics naming exactly the precondition
+it is supposed to guard, then restored.
+
+**Then, while re-running the gate on the restored, un-ablated file, the precondition assert fired
+for real** — not the ablation, the committed code, run honestly:
+
+```text
+thread 'approval::tests::channel::bind_recovers_from_a_stale_socket_file' panicked at
+crates/tekstide-core/src/approval/tests/channel.rs:176:18:
+precondition failed: connecting to the path left by a dropped UnixListener should be refused, got
+Ok(UnixStream { fd: FileDesc(OwnedFd { fd: 20 }), local: (unnamed), peer: "/tmp/t384545-3/approval/
+agent-run-00000000-0000-0000-0000-000000000006.sock" (pathname) }) -- the staging itself, not
+clear_stale_socket, is where this occurrence's phenomenon lives
+```
+
+**This answers review 576's own framing directly**: *"If it ever fires, the phenomenon lives in the
+staging — a dropped `UnixListener` whose path still answers — and `clear_stale_socket` is merely the
+messenger, which is a different investigation from the one the row currently describes."* It fired.
+The peer in every capture below is a real, successfully-connected `UnixStream` at exactly this
+test's own socket path, confirmed by the `peer:` field each time — not a different test's path, not
+a stale directory collision.
+
+**Measured rate, same afternoon, same machine (32 logical CPUs, `cargo test`'s default thread
+count)**:
+
+| Run shape | Failures | Total runs |
+|---|---|---|
+| `bind_recovers_from_a_stale_socket_file` alone (`--exact`, necessarily single-threaded) | 0 | 30 |
+| Full `approval::tests::channel::` module (24–32 tests concurrently) | 6 | 31 |
+
+Six occurrences, all with the same shape (`Ok(UnixStream { .. })` where `ConnectionRefused` was
+expected), captured across two batches:
+
+```text
+run — pid     — fd  — agent_run_id suffix
+   1 — 384545 — 20  — ...006   (first, found re-running the gate after `cargo fmt`)
+   2 — 387155 — (location captured, message not — grep pattern missed the detail line)
+   3 — 406585 —  5  — ...008
+   4 — 412064 — 21  — ...008
+   5 — 428632 —  7  — ...00b
+   6 — 428811 — 13  — ...005
+```
+
+**Zero reproductions in 30 single-test runs, six in 31 concurrent-module runs — roughly 19%, and it
+took minutes, not months.** This is the opposite experience from every other row in this document:
+this one is cheap to reproduce on demand, which makes it the easiest flake in this entire register
+to actually root-cause, if someone attaches the right instrumentation next. The correlation itself
+is the finding — not a claimed mechanism. A plausible shape (Linux's `AF_UNIX` socket teardown on
+`close()` is not required to be instantaneously visible to a concurrent `connect()` from another
+thread in the same process, under heavy concurrent socket churn from sibling test threads) is
+offered here as a hypothesis worth testing, explicitly **not** as a conclusion — nothing above rules
+out an application-level explanation either, and none was tested.
+
+No fixture leak in any of the runs that failed (same drop-guard mechanism as every other row above;
+checked after each batch).
+
+**Verdict: Accept stands, and row 1 is promoted ahead of the SIGHUP family as the cheapest flake in
+this register to actually solve.** What the next investigator gets for free that no prior row in
+this document has had: a ~1-in-5 reproduction rate, on demand, in under a minute
+(`for i in $(seq 1 20); do cargo test -p tekstide-core --lib approval::tests::channel:: -- --test-threads=24; done`
+— no synthetic load generation needed, unlike every attempt at the SIGHUP family above). The
+product-side instrument (peer pid/uid/gid on the `Ok(_)` arm) has not yet fired on a real
+occurrence — only on the deterministic same-process test — so whether a *real* stale-recovery path
+ever shows a peer pid other than its own test process remains the open half of the question.
