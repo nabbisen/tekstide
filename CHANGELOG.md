@@ -63,7 +63,8 @@ matching `README.md` word for word so there is one form of each claim rather tha
 could drift from it.
 
 **Still Linux-only.** The artifacts this release adds are `x86_64` Linux only, same as the
-product itself; nothing here implies otherwise, and that stays true until RFC-028.
+product itself; nothing here implies otherwise, and that stays true until cross-platform support
+ships in a future release.
 
 ## 0.36.0 - Command Approval A User Can Reach
 
