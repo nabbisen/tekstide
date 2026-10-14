@@ -107,9 +107,10 @@ jobs:
         # only once the count was genuinely zero on both crates (37 + 31
         # warnings found and fixed, review 572's own cleanup) -- added with
         # live warnings already present, this would have turned red on its
-        # first run for reasons nobody introduced that day, the same
-        # failure mode this file's own header already names for a
-        # different check.
+        # first run for reasons nobody introduced that day. The precedent
+        # is `test-process-leak.md`'s own quarantine discipline: a
+        # known-failing thing is tracked outside the blocking gate until
+        # it is actually fixed, not added to the gate pre-broken.
         run: |
           set -euo pipefail
           RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps

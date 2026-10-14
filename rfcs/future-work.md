@@ -1544,17 +1544,22 @@ future `--locale pl` flag on a release binary would let a user select a catalog 
 cannot have under the current disk-loading design. Not fixed here — scoped, not patched, matching
 this slice's own instruction not to fix it in passing.
 
-## `cargo doc` is not in the gate, and 38 warnings already reach docs.rs — found 2026-10-14, review 563
+## `cargo doc` is not in the gate, and 37 warnings already reach docs.rs — found 2026-10-14, review 563
 
 Found while checking a doc-comment edit, not sought out. Measured directly, not assumed from the
 review that first noticed it:
 
 ```
 $ cargo doc -p tekstide-core --no-deps 2>&1 | grep -c '^warning'
-38
+37
 $ cargo doc -p tekstide --no-deps 2>&1 | grep -c '^warning'
-32
+31
 ```
+
+**Corrected, review 573: the first draft said 38 and 32.** `grep -c '^warning'` also matches
+cargo's own trailing summary line (`warning: \`tekstide-core\` (lib doc) generated 37 warnings`),
+which itself starts with `warning:` — overcounting by exactly one per crate. 37 and 31 are the
+real per-site counts.
 
 Most of `tekstide-core`'s are the shape *"public documentation for `add_project_from_path_protected`
 links to private item `Self::add_project_session`"* — a doc comment's intra-doc link
@@ -1573,7 +1578,7 @@ normal cross-reference and the page does not move** — no error, no explanation
 distinguish a broken reference from a page that silently failed to scroll. Confirmed on the
 published page too, not only the local build: `docs.rs/tekstide-core/0.37.0/tekstide_core/app/
 struct.AppState.html` serves the identical `href` with no matching `id` anywhere on the page.
-`tekstide` is `[[bin]]`-only, so its 32 are internal and matter less, but are still real broken
+`tekstide` is `[[bin]]`-only, so its 31 are internal and matter less, but are still real broken
 links in a crate this project's own gate otherwise holds to a high standard.
 
 **Nothing in the gate has ever checked this class.** `cargo fmt --check`, `clippy -D warnings`,
@@ -1582,7 +1587,7 @@ and says nothing about whether an intra-doc link resolves. Link-checking is a se
 pass (`RUSTDOCFLAGS="-D warnings" cargo doc`), never run.
 
 **Not fixed here, and not added to the gate as-is.** Turning link-resolution warnings into gate
-failures with 38 live ones already present would make the very first run red for reasons nobody
+failures with 37 live ones already present would make the very first run red for reasons nobody
 just introduced. The adjacent precedent is the quarantine discipline `test-process-leak.md`
 already lives by: a known-failing thing is tracked *outside* the blocking gate until it is
 actually fixed, not added to the gate pre-broken. **Two-step shape, in order**: clear the existing
