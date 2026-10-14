@@ -6,10 +6,10 @@ use crate::domain::{
 use crate::project::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationErrorReason, DetectedChangedPath,
     DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
-    ProjectChangeSetError, ProjectId, ProjectSession,
+    IGNORED_DIRECTORY_NAMES, ProjectChangeSetError, ProjectId, ProjectSession,
 };
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -470,8 +470,10 @@ fn ablation_without_target_in_the_ignore_list_it_reappears_and_truncates_the_sca
 /// guards -- this is a diagnostic report, not a tight performance
 /// acceptance test, and a tight bound here would be flaky against
 /// ordinary machine noise.
-#[test]
-fn real_repository_filesystem_scan_cost_headless_benchmark() {
+/// Shared by both real-repository tests below: resolves `tekstide-git`'s
+/// own root from `CARGO_MANIFEST_DIR`, not a hardcoded path, so either
+/// test keeps working from a relocated checkout.
+fn this_repository_root() -> PathBuf {
     let repo_root = fs::canonicalize(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -483,6 +485,12 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
         repo_root.join(".git").is_dir(),
         "must be measuring a real repository with a real .git/, found none at {repo_root:?}"
     );
+    repo_root
+}
+
+#[test]
+fn real_repository_filesystem_scan_cost_headless_benchmark() {
+    let repo_root = this_repository_root();
 
     let project = ProjectSession::new(
         ProjectId::for_test(9999),
@@ -530,13 +538,40 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
         detect_elapsed.as_millis(),
     );
 
-    assert_eq!(
-        excluded_baseline.status,
-        ChangeDetectionStatus::Complete,
-        "the default policy's max_entries (4096) must still be comfortably above this \
-         repository's excluded entry count -- if this is Partial, the cap needs revisiting, \
-         not silently tolerated"
-    );
+    // Review 574: this used to assert `Complete` unconditionally, which
+    // made the test measure the *working tree* (every reviewer's own
+    // `.git-exclude/` correspondence included) rather than the thing a
+    // user or CI actually has -- a clone. That question now belongs to
+    // `the_default_scan_cap_has_comfortable_headroom_over_tracked_content`
+    // below, against `git ls-files` rather than this directory's own
+    // current contents. What stays here is the **honesty invariant**:
+    // whatever this working tree's real entry count is, `status` must
+    // not lie about it -- `Complete` only when genuinely under the cap,
+    // `Partial { limit }` only when the count genuinely reached it. That
+    // is the defect a user would actually suffer (a scan reporting
+    // `Complete` while having silently truncated), and it holds
+    // regardless of how much correspondence happens to be on disk.
+    let max_entries = GeneratedChangeDetectionPolicy::default().max_entries;
+    match excluded_baseline.status {
+        ChangeDetectionStatus::Complete => assert!(
+            excluded_baseline.entries.len() < max_entries,
+            "status says Complete but the entry count ({}) already reached the cap ({max_entries}) \
+             -- a scan that reports Complete while having truncated is exactly the defect this \
+             check exists to catch",
+            excluded_baseline.entries.len()
+        ),
+        ChangeDetectionStatus::Partial { limit } => assert_eq!(
+            excluded_baseline.entries.len(),
+            limit,
+            "status says Partial {{ limit }} but the entry count does not match the limit it \
+             claims to have been stopped at"
+        ),
+        other => panic!(
+            "a real scan of this repository's own root should never produce {other:?} -- that \
+             status means the root itself was unreadable, which `this_repository_root`'s own \
+             assertions already rule out"
+        ),
+    }
     assert!(
         excluded_elapsed < std::time::Duration::from_secs(2),
         "a real, excluded-noise repository scan blew past a generous 2s bound: {excluded_elapsed:?}"
@@ -545,6 +580,106 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
         detect_elapsed < std::time::Duration::from_secs(2),
         "detecting changes against an unchanged real repository blew past a generous 2s bound: \
          {detect_elapsed:?}"
+    );
+}
+
+/// Review 574: the question the test above used to answer wrongly --
+/// "does the shipped default cap fit a repository of this product's
+/// size?" -- is about what a *clone* holds, because that is what every
+/// user and every CI run actually has, not this working tree's own
+/// correspondence. Measured against `git ls-files` (tracked content
+/// only) plus the distinct immediate parent directories those files
+/// imply, the same `IGNORED_DIRECTORY_NAMES` exclusion applied as the
+/// scanner itself uses -- a tracked file sitting inside a directory
+/// literally named `.git`/`node_modules`/`target` (not a real build
+/// artifact, just an unlucky name) does not count, matching
+/// `scan_directory`'s own name-only, any-depth rule.
+///
+/// Asserted against **75% of the cap, not merely under it** -- this is
+/// meant to warn while there is still headroom, not at the cliff the
+/// scan-cost benchmark above already covers from the other side.
+#[test]
+fn the_default_scan_cap_has_comfortable_headroom_over_tracked_content() {
+    let repo_root = this_repository_root();
+
+    let output = match std::process::Command::new("git")
+        .args(["ls-files"])
+        .current_dir(&repo_root)
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            eprintln!(
+                "skipped: git ls-files exited non-zero ({:?}); cannot measure tracked content \
+                 without it",
+                output.status.code()
+            );
+            return;
+        }
+        Err(error) => {
+            eprintln!("skipped: git is unavailable ({error}); cannot measure tracked content");
+            return;
+        }
+    };
+    let listing = String::from_utf8(output.stdout)
+        .expect("git ls-files prints UTF-8 paths in this repository");
+
+    let is_ignored_path = |relative_path: &str| {
+        Path::new(relative_path).components().any(|component| {
+            let Component::Normal(name) = component else {
+                return false;
+            };
+            IGNORED_DIRECTORY_NAMES
+                .iter()
+                .any(|ignored| name == std::ffi::OsStr::new(ignored))
+        })
+    };
+
+    let mut parent_directories = std::collections::BTreeSet::new();
+    let mut tracked_file_count = 0usize;
+    for relative_path in listing.lines().filter(|line| !line.is_empty()) {
+        if is_ignored_path(relative_path) {
+            continue;
+        }
+        tracked_file_count += 1;
+        if let Some(parent) = Path::new(relative_path).parent() {
+            // Every ancestor, not just the immediate parent -- a nested
+            // directory with no tracked file directly inside it still
+            // gets walked (and counted as its own entry) on the way to
+            // one that does, the same way `scan_directory`'s own
+            // recursion does.
+            let mut ancestor = parent;
+            loop {
+                if ancestor.as_os_str().is_empty() {
+                    break;
+                }
+                parent_directories.insert(ancestor.to_path_buf());
+                match ancestor.parent() {
+                    Some(next) => ancestor = next,
+                    None => break,
+                }
+            }
+        }
+    }
+
+    let projected_entries = tracked_file_count + parent_directories.len();
+    let max_entries = GeneratedChangeDetectionPolicy::default().max_entries;
+    let warn_at = max_entries * 3 / 4;
+
+    eprintln!(
+        "the_default_scan_cap_has_comfortable_headroom_over_tracked_content \
+         tracked_files={tracked_file_count} distinct_directories={} projected_entries={projected_entries} \
+         max_entries={max_entries} warn_at_75pct={warn_at}",
+        parent_directories.len(),
+    );
+
+    assert!(
+        projected_entries < warn_at,
+        "this repository's tracked content ({tracked_file_count} files + \
+         {} directories = {projected_entries} entries) has crossed 75% of the default scan cap \
+         ({max_entries}) -- the cap needs revisiting before it crosses 100% for every user and \
+         CI run, not after",
+        parent_directories.len(),
     );
 }
 

@@ -130,6 +130,19 @@ ignored content would work too, but `.git-exclude/` belongs to whoever wrote it 
 line again next release. The test itself wanting to measure tracked content rather than a working
 tree is a real follow-up, recorded with the rest.
 
+**Follow-up landed, 2026-10-14, review 574.** `real_repository_filesystem_scan_cost_headless_benchmark`
+no longer asserts `Complete` unconditionally — it now checks the **honesty invariant** (`Complete`
+only when genuinely under the cap, `Partial { limit }` only when the count genuinely reached it),
+which a working tree's own correspondence cannot fail. The tracked-content question this paragraph
+exists to answer moved to its own test,
+`the_default_scan_cap_has_comfortable_headroom_over_tracked_content`, measured against `git
+ls-files` plus every distinct ancestor directory those files imply (975 tracked files, 230
+directories, 1,205 projected entries against the 4,096 cap — comfortably under the 75% warning
+line this test asserts, not merely under the cap itself). **This guidance is no longer required**:
+the working-tree gate no longer fails for this reason, in this tree or any other. Gating in a
+fresh clone remains good practice for the reasons above (no agent state, matches what `ci.yml`
+checks out), just not a requirement this specific failure forces any more.
+
 - [ ] `git status --short` shows no unintended changes.
 - [ ] `git diff --check`
 - [ ] `cargo fmt --check`
