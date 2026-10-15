@@ -2768,3 +2768,83 @@ reader does not re-tighten it back into the same violation.
 **Gate**: `linux_runtime_terminates_session_leader_with_sighup` passes. No product code changed for
 this row -- `request_terminate`'s own ordering is correct as documented; the test was asserting more
 than the contract promises.
+
+## New row, 2026-10-15 -- `no_concurrently_forked_sibling_inherits_a_pty_master_fd` fails in CI, not locally, and the product fix's completeness is genuinely unconfirmed
+
+**This is a new, open flake, logged honestly as unresolved rather than as a settled disposition.**
+The regression test PR-028-A's own first push brought to real CI (`ubuntu-latest`, GitHub Actions)
+failed the blocking `gate` job twice, on two separate pushes, both after the `CLOEXEC` fix above
+had already landed:
+
+```text
+# Run 1 (commit 67c8539, "Complete 690c2a5")
+5 forked sibling(s) inherited a PTY master fd across 11824 iterations against 156 forks:
+["iteration 1682: child pid=13373 fd=\"5\" is /dev/ptmx ...", "iteration 1683: child pid=13373 ...",
+ "iteration 2618: child pid=13422 fd=\"4\" ...", "iteration 2619: ...", "iteration 2620: ..."]
+
+# Run 2 (commit c6b8a87, "PR-028-A")
+15 forked sibling(s) inherited a PTY master fd across 5506 iterations against 150 forks:
+["iteration 668: child pid=13177 fd=\"4\" is /dev/ptmx ...", "iteration 669: ...",
+ "iteration 1660: child pid=13191 ...", "iteration 2058: child pid=13199 ...", "iteration 2059: ..."]
+```
+
+**Never reproduced locally**: many dozens of runs of this exact test, on this exact machine, both
+against the pre-fix and post-fix `pty.rs`, across this entire investigation -- 0 failures outside
+CI, ever.
+
+### The pid-reuse hypothesis, raised and disproven
+
+The test's own `known_child_pids` list was never pruned and carried only bare pids (review 580's
+own flagged, "not worth a commit" cosmetic note). On a 2-4 vCPU CI runner (confirmed via GitHub's
+own published hardware specs for `ubuntu-latest`), scheduling is far tighter than this project's own
+32-core development machine, and a kernel reusing a reaped child's pid for an unrelated, legitimately
+-running process (e.g. a *different*, concurrently-executing test that also opens a real pty) could
+make this test misattribute that process's own entirely legitimate `/dev/ptmx` fd as its own leak.
+
+**Fixed and tested** (commit `719bece`): each spawned child's kernel-assigned start time
+(`/proc/<pid>/stat` field 22) is now recorded at spawn and re-verified to still match before any fd
+scan is trusted -- a reused pid always carries a different start time. Verified the parsing against
+a real `/proc/self/stat` line by hand before trusting it (field 19 after the last `)`, matching
+`proc(5)`'s own recommended parsing discipline). Re-ablated against the real pre-fix `pty.rs`:
+still fails loudly and correctly (4,561 leaks across 30,704 iterations) -- the identity check does
+not hide a real defect, only a reuse-shaped false positive.
+
+**Pushed, and the CI failure recurred anyway** (commit `719bece`'s own CI run), this time *with* the
+recorded start time printed in the failure and matching across all three repeated reports in that
+run (`child pid=13240 (start_time=69279)`, three consecutive iterations). **This disproves the
+pid-reuse theory for this occurrence**: the start time match confirms the leaked fd genuinely
+belongs to the process this test itself spawned, not a different process that reused its pid. The
+identity-verification fix is a real, independent correctness improvement (keep it), but it is not
+what was causing these two failures.
+
+### What remains genuinely unknown
+
+Two possibilities, neither confirmed:
+
+1. **The `posix_openpt`/`O_CLOEXEC` atomicity this fix relies on does not hold in whatever
+   environment GitHub's `ubuntu-latest` runner actually provides.** Checked directly, not assumed,
+   on this project's own development machine: a standalone C program calling
+   `posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC)` and reading the flag back via `fcntl(F_GETFD)`
+   confirms it is honoured atomically here (glibc 2.44). Whether the same holds on the CI runner's
+   own glibc/kernel combination has **not** been verified directly on that runner -- it is the
+   single most important unverified claim in this whole investigation, and the next step is to
+   verify it there, not to assume parity with this machine.
+2. **Some other mechanism, not yet identified**, specific to that runner's environment (lower core
+   count changing scheduling in a way that exposes a window this investigation has not found;
+   something about how GitHub's runner images configure `/dev/pts` or container/VM isolation;
+   something else entirely).
+
+**Quarantined, not Fixed, not Accepted, and not silently weakened**: `#[ignore]`d with a comment
+stating plainly that this is unresolved, pointing back here, and warning explicitly against reading
+the ignore as confirmation the underlying question is settled. `CHANGELOG.md`'s own entry for the
+`CLOEXEC` fix corrected the same way -- it no longer claims the regression test "passes," only that
+it passed in local testing, with the CI-only failure and its unresolved status stated plainly.
+
+### Next step, not yet taken
+
+Verify `O_CLOEXEC`'s atomicity directly on a real `ubuntu-latest` runner -- the same standalone-
+program technique used locally, run as a one-off CI step, or an instrumented version of this test
+that captures richer diagnostics (the exact `fcntl(F_GETFD)` result read back on the master fd
+*inside the window*, not just after the fact) before concluding anything further. Not attempted
+yet, pending review, given two single-mechanism theories have already been proposed and one already
+disproven by direct evidence rather than reasoning alone.
