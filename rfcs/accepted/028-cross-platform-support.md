@@ -231,6 +231,66 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   subsystem — `kill`, the three termination signals, `fcntl`, `poll`, the `ioctl` calls, `setsid`,
   `waitpid`, the `openat` TOCTOU chain, `geteuid`, `recv` with `MSG_PEEK`\|`MSG_DONTWAIT`,
   `sockaddr_un` sizing — is POSIX and lands unchanged.
+
+  **PR-028-D, 2026-10-15: two of six mechanisms done, measured 11 → 6 → 4 on the real runner; two
+  more have a real open question each, found doing this, not assumed going in.**
+
+  **Done, confirmed on `macos-latest` itself, not inferred from a header:**
+  - `TIOCSCTTY`'s own `ioctl` request-type mismatch (found by PR-028-A's measurement, not in D5's
+    original six by name): `ioctl`'s `request` parameter is `c_ulong` on macOS against
+    `TIOCSCTTY`'s own `c_uint` there, the same `Ioctl` alias as Linux everywhere else. Widening
+    only on the platform that needs it (a bare `.into()` compiles on both but fails Linux's own
+    `clippy::useless_conversion` gate, caught by running the gate, not assumed clean).
+  - `SYS_gettid` → `pthread_threadid_np(pthread_self(), &mut tid)`, not a `0`/`NULL` sentinel for
+    "current thread" (documented for Apple's own API, but `pthread_self()` is unambiguous and
+    free). The *only* consumer of this value turned out to be `reader/tests.rs`'s own
+    `thread_cpu_ticks`, which reads `/proc/self/task/<tid>/stat` directly — genuinely Linux-only,
+    not merely untested on macOS, so `reader_thread_does_not_busy_wait_while_idle` (the Acceptance
+    section's own named test) is now `#[cfg(target_os = "linux")]`; a macOS equivalent of the
+    *property* (a real `poll(2)` park, not a busy-wait) is not written and is named here rather
+    than silently dropped.
+
+  **Designed, not yet written: `eventfd`/`EFD_CLOEXEC` → a self-pipe.** Both are a single-fd,
+  bidirectional eventfd today, read and written from several places across `reader.rs` (shutdown
+  signalling, wake notification, `WakeNotifier::try_clone`). A self-pipe needs two genuinely
+  distinct fds (read end, write end) where eventfd needed one, which is a real refactor of this
+  module's own fd-ownership shape, not a drop-in symbol swap — the design (a small
+  `WakeSignal`-style type presenting `write_fd`/`read_fd` uniformly, Linux backing it with one
+  `dup`'d eventfd and macOS with the genuinely distinct pipe ends, so no caller outside that one
+  type needs its own `cfg`) is sound but deliberately not rushed into code in the same slice as two
+  mechanisms with real open questions below.
+
+  **Two genuine open questions, found by checking rather than assumed from D5's own original
+  text:**
+  1. **`SYS_close_range` → `closefrom`, D5's own stated replacement, does not hold on macOS as
+     written.** `closefrom` is not in the vendored `libc` crate for Apple targets at all (checked
+     directly — present for FreeBSD/DragonFly/NetBSD, absent for `apple`), and whether Darwin's own
+     libc exposes a safe, async-signal-safe native `closefrom` the way FreeBSD's is a raw syscall
+     is genuinely unclear from available documentation (even `sudo`'s own portability code emulates
+     it via `proc_pidinfo` on some platforms rather than assume a native one). This call site runs
+     inside `Command::pre_exec` -- the post-`fork`, pre-`exec` child, where only async-signal-safe
+     functions are safe to call at all; `proc_pidinfo`-based emulation is not a safe substitute
+     there, only a plausible-sounding one. The existing Linux comment already frames this mechanism
+     as "a bonus layer... not something this spawn may fail over" (the real, primary defence is
+     `OpenPty::new`'s own `O_CLOEXEC`, already cross-platform and unaffected by this). Not
+     implemented speculatively; an open question for the owner/reviewer rather than a guessed
+     `extern "C"` declaration whose runtime behaviour cannot be verified without real hardware.
+  2. **`ptsname_r` does not exist in the `libc` crate for Apple targets, and Apple's own
+     implementation is not a simple libc wrapper either.** Checked Apple's own open-source `Libc`
+     source: `ptsname_r` there calls the `TIOCPTYGNAME` ioctl directly (not wrapped by the Rust
+     `libc` crate for Apple targets), writes into a 128-byte buffer, then `stat`s the returned path
+     before trusting it. Replicating this would mean declaring the `TIOCPTYGNAME` ioctl's own
+     numeric value myself, which is exactly the kind of unverifiable kernel constant this project's
+     own discipline says not to guess at — a wrong value is undefined behaviour at runtime, not a
+     compile error, and there is no macOS hardware to check it against outside the CI runner's own
+     build step (which cannot catch a wrong *value*, only a wrong *name*).
+
+  **Gate for what landed**: `cargo fmt --check`, `clippy -D warnings`, full workspace test suite,
+  all clean on `ubuntu-latest`. Measured on `macos-latest` itself, the same discipline PR-028-A
+  established: PR-028-A's own 11 errors → 6 after PR-028-C's `LOCAL_PEERCRED`/`xucred` port → 4
+  after this slice's `TIOCSCTTY`/`SYS_gettid` fixes (confirmed: the two that disappeared here were
+  exactly those two mechanisms' own errors, nothing else moved). The four remaining are exactly the
+  `eventfd`/`EFD_CLOEXEC` pair and the two open questions above.
 - **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
   fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
   gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real
