@@ -1175,11 +1175,20 @@ fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
 
     let keep_forking = Arc::new(AtomicBool::new(true));
     let fork_count = Arc::new(AtomicUsize::new(0));
-    let known_child_pids: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+    // `(pid, start_time)`, not a bare pid: a bare pid list is vulnerable to
+    // a kernel reusing a reaped child's pid for an unrelated process
+    // before this test's own scan loop gets back around to it, which
+    // would misreport that unrelated process's own, entirely legitimate
+    // `/dev/ptmx` fd (e.g. a *different*, concurrently-running test's own
+    // real terminal) as this test's leak. `start_time` (the kernel's own
+    // per-process monotonic creation tick, `/proc/<pid>/stat` field 22)
+    // is recorded the instant this test spawns the child and re-checked
+    // at scan time; a mismatch means the pid was recycled, not leaked into.
+    let known_children: Arc<Mutex<Vec<(u32, u64)>>> = Arc::new(Mutex::new(Vec::new()));
 
     let forker_flag = keep_forking.clone();
     let forker_count = fork_count.clone();
-    let forker_pids = known_child_pids.clone();
+    let forker_children = known_children.clone();
     let forker = std::thread::spawn(move || {
         let mut children: Vec<std::process::Child> = Vec::new();
         while forker_flag.load(Ordering::Relaxed) {
@@ -1187,7 +1196,12 @@ fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
             if children.len() < MAX_CONCURRENT_CHILDREN {
                 if let Ok(child) = std::process::Command::new("sleep").arg("0.05").spawn() {
                     forker_count.fetch_add(1, Ordering::Relaxed);
-                    forker_pids.lock().unwrap().push(child.id());
+                    if let Some(start_time) = process_start_time(child.id()) {
+                        forker_children
+                            .lock()
+                            .unwrap()
+                            .push((child.id(), start_time));
+                    }
                     children.push(child);
                 }
             } else {
@@ -1207,8 +1221,15 @@ fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
         let master = pty.into_master();
         let _ = master.as_raw_fd(); // kept alive only to hold the master open briefly
 
-        let candidate_pids: Vec<u32> = known_child_pids.lock().unwrap().clone();
-        for pid in candidate_pids {
+        let candidates: Vec<(u32, u64)> = known_children.lock().unwrap().clone();
+        for (pid, recorded_start_time) in candidates {
+            // Re-verify identity before trusting the fd scan at all: if
+            // the pid no longer exists, or now belongs to a process with
+            // a different start time, it is not the child this test
+            // spawned, regardless of what its `/proc/<pid>/fd` shows.
+            if process_start_time(pid) != Some(recorded_start_time) {
+                continue;
+            }
             let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
                 continue; // already exited
             };
@@ -1217,8 +1238,8 @@ fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
                     .is_ok_and(|link| link.to_string_lossy() == "/dev/ptmx")
                 {
                     leaks.push(format!(
-                        "iteration {iterations}: child pid={pid} fd={:?} is /dev/ptmx -- a \
-                         plain `sleep` binary never opens this itself",
+                        "iteration {iterations}: child pid={pid} (start_time={recorded_start_time}) \
+                         fd={:?} is /dev/ptmx -- a plain `sleep` binary never opens this itself",
                         fd_entry.file_name()
                     ));
                 }
@@ -1238,4 +1259,18 @@ fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
         leaks.len(),
         &leaks[..leaks.len().min(5)]
     );
+}
+
+/// The kernel's own per-process creation tick (`/proc/<pid>/stat` field
+/// 22, "starttime"), used as a cheap, reliable process identity check: a
+/// pid can be recycled by the kernel, but two processes that ever
+/// actually coexisted can never share both the same pid and the same
+/// start time. Parsed past the last `)` rather than by a fixed field
+/// index from the start -- `comm` (field 2) is the one field that can
+/// itself contain spaces or parentheses, and `proc(5)` itself recommends
+/// this as the robust way to skip past it.
+fn process_start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = stat.rsplit_once(')')?.1;
+    after_comm.split_whitespace().nth(19)?.parse().ok()
 }
