@@ -383,7 +383,7 @@ long as it did. Recorded in full at `handoffs/derived-contrast-pairs.md`.
   the path that had it is no longer on the ingress.** Found 2026-08-15 by a scoping question
   from the dev team (review request 206, response 206), not by a failing test — nothing
   fails, and nothing will until it matters.
-  `LinuxTerminalRuntime::read_available_bounded_for` (`runtime/terminal/launch.rs:115`) does
+  `TerminalRuntime::read_available_bounded_for` (`runtime/terminal/launch.rs:115`) does
   two unrelated things in one loop: it returns a capped buffer to its caller, **and it
   appends every byte read to `session.transcript_writer` and flushes it** (`:131-136`,
   `:162-169`). Those are **the only non-test `.append(`/`.flush(` calls on a

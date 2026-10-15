@@ -34,6 +34,16 @@ the figures above come from an experiment built to hit that window deliberately 
 rate anyone would see in normal use. No report of it exists; it was found while investigating an
 unrelated intermittent test failure.
 
+### Changed — `LinuxTerminalRuntime` renamed to `TerminalRuntime`
+
+**This is a breaking change for any downstream crate naming `tekstide_core::runtime::terminal::
+LinuxTerminalRuntime`** — the type no longer exists under that name. Renamed as part of RFC-028's
+own platform-dispatch convention (D3): this type's internals are about to gain macOS-specific
+mechanisms alongside the existing Linux ones, and a type named `Linux…` would have been exactly the
+label-that-means-nothing that convention exists to abolish, one layer below the `cfg` split itself.
+Not renamed to `UnixTerminalRuntime` either — that would overclaim the BSDs and Solaris, which this
+project does not support. No behavior change; every call site updated in the same slice.
+
 ### Added — `ApprovalChannelErrorReason` gains two variants
 
 `BindTargetNotASocket` and `BindTargetAlreadyListening`, distinguishing the two arms of a stale

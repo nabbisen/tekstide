@@ -139,6 +139,16 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
     D9's own slice is where this one constructor graduates from "legacy label, pure data" to a real
     dispatch point — consistent with this convention, not an exception to it, since D9 gives it the
     same host-dispatch shape D3 requires of anything that actually varies by platform.
+  - **A third kind, found at review 585: `AiCliProfile::claude_code_linux_default()`
+    (`agent/profile.rs:79`) is neither of the two above.** Unlike the five `linux_mvp()` labels, it
+    is genuinely platform-coupled, not a mislabelled profile name: `claude_code_from_env`
+    (`:83-91`) hardcodes `/usr/local/bin` and `/usr/bin` as reviewed system lookup paths -- verified
+    directly against the source, not assumed from the name -- which is exactly D8's own
+    AI-CLI-bare-command-`PATH`-lookup concern, one level up from the path-literal list D8 already
+    names. **Not dispatched here.** Recorded as a known future dispatch point with its own
+    resolution deferred to PR-028-F (D8), alongside the `/opt/homebrew/bin` addition that section
+    already scopes, so the sweep this decision performs is complete rather than a fourth
+    platform-named constructor turning up later as a label nobody re-checked.
 - **D4. The approval channel's two Linux-specific mechanisms get macOS-specific replacements, not a
   shared abstraction.** `SO_PEERCRED` → `LOCAL_PEERCRED`/`xucred` (option level `SOL_LOCAL`, not
   `SOL_SOCKET`; `peer_uid` only reads `cred.uid`, so `xucred`'s `cr_uid` suffices and macOS's
@@ -415,7 +425,15 @@ then, not now.
   refusal message updated (it currently names this RFC by number as the reason macOS is refused).
   The Run It gate's own answer (Acceptance) resolved before this slice closes, not assumed. First
   macOS release artifact, `aarch64-apple-darwin` only (D7). `config/profile.rs`'s AI-CLI lookup
-  list gains `/opt/homebrew/bin` (D8).
+  list gains `/opt/homebrew/bin` (D8), and `agent/profile.rs`'s own `claude_code_from_env` gains a
+  macOS dispatch arm alongside it (D3's own third-kind note, above). **Required, found at review
+  585: `docs/src/users/local-data-and-privacy.md` and `docs/src/users/configuration.md` both name
+  only Linux paths** (`$XDG_STATE_HOME`/`$XDG_CONFIG_HOME` and their `~/.local/state`/`~/.config`
+  fallbacks) — every one of them wrong for a macOS user once this RFC's own PR-028-B gave
+  `AppStatePathProvider`/`ConfigPathProvider` a real macOS resolution. Not owed by any earlier
+  slice's own docs sweep (D9's covers the keybinding strings only); update both files to state the
+  macOS path alongside the Linux one before the first macOS artifact ships, not discovered at the
+  release gate.
 
 PR-028-C and PR-028-D may land in either order; PR-028-A and PR-028-B must land first; PR-028-E
 needs PR-028-D's own macOS test run to check its collision sweep against, not just its own code.
