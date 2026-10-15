@@ -2840,11 +2840,33 @@ the ignore as confirmation the underlying question is settled. `CHANGELOG.md`'s 
 `CLOEXEC` fix corrected the same way -- it no longer claims the regression test "passes," only that
 it passed in local testing, with the CI-only failure and its unresolved status stated plainly.
 
-### Next step, not yet taken
+### Resolved, review 583, same day: the CI-only failure was this test's own premise, not the product fix
 
-Verify `O_CLOEXEC`'s atomicity directly on a real `ubuntu-latest` runner -- the same standalone-
-program technique used locally, run as a one-off CI step, or an instrumented version of this test
-that captures richer diagnostics (the exact `fcntl(F_GETFD)` result read back on the master fd
-*inside the window*, not just after the fact) before concluding anything further. Not attempted
-yet, pending review, given two single-mechanism theories have already been proposed and one already
-disproven by direct evidence rather than reasoning alone.
+**`FD_CLOEXEC` is honoured at `execve`, not at `fork`.** A forked-but-not-yet-`exec`ed child's
+`/proc/<pid>/fd` still lists a properly close-on-exec fd, because nothing has reached the point
+where the kernel actually acts on the flag yet. This test's own detection checked fd *presence*
+alone, which cannot distinguish "leaked" from "about to vanish, exactly as the fix intends" -- only
+whether the child has already `exec`ed can tell the two apart. On a 2-4 vCPU CI runner, `fork`-to-
+`exec` is slow enough, relative to this test's own scan cadence, that the scan routinely lands
+inside that window; on this project's own 32-core development machine it almost never did, which is
+why this never reproduced locally across many dozens of runs.
+
+**Fixed**: a new `process_comm` check (`/proc/<pid>/comm`) requires the child to already show
+`sleep`'s own name, not this test binary's, before counting any fd match as a leak -- a process
+still mid-fork carries its *parent's* comm, not the name of whatever it is about to become. The
+pid-reuse identity-verification fix (start time) stays; it is a real, separate correctness property,
+orthogonal to this one, not the thing that was wrong.
+
+**Re-ablated with the comm check in place, against the real pre-fix `pty.rs`**: still fails loudly
+-- 2,974 leaks across 26,299 iterations, every single one explicitly reported with "already exec'd
+into sleep." This does two things at once: proves the new gate did not become vacuous, and
+independently re-confirms the original defect really did persist for the child's *whole life*, not
+only for a fork-to-exec instant -- the severity claim already in this register and in
+`CHANGELOG.md` stands, now re-proven under a corrected test rather than merely restated.
+
+**Un-quarantined** (`#[ignore]` removed) and pushed for the real runner to confirm: a green `gate`
+on `ubuntu-latest` with this test live is both the verification neither of us could do locally and
+the direct `O_CLOEXEC`-on-the-real-runner check this register asked for two sections up -- if the
+fd is gone after `exec` there, the flag genuinely works there. `CHANGELOG.md`'s own wording is held
+until that run is confirmed green, then stated once, per review 583's own instruction not to flip it
+a third time before the ground has actually stopped moving.

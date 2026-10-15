@@ -1163,31 +1163,33 @@ fn a_second_terminals_child_inherits_no_descriptor_for_the_first_terminals_pty_m
 /// identity match would report a "leak" on every single sample
 /// regardless of whether anything actually leaked. A plain `sleep`
 /// binary has no legitimate reason to ever hold a `/dev/ptmx` fd at all,
-/// so any match proves inheritance regardless of which instance.
+/// so any match proves inheritance regardless of which instance --
+/// **once the child has actually `exec`ed into it**, which is its own,
+/// separate check below.
 ///
-/// **`#[ignore]`d 2026-10-15, URGENT and NOT a settled disposition --
-/// this is unresolved, not Accept/Quarantine in this register's own
-/// sense of either word.** This test fails reproducibly in GitHub
-/// Actions CI (2 of 2 runs so far) while never failing locally across
-/// many dozens of runs, pre- and post-fix. A pid-reuse false-positive
-/// theory was raised, tested, and **disproven**: the fix below records
-/// each spawned child's kernel start time and re-verifies it before
-/// trusting a match, and the CI failure recurred anyway with the
-/// recorded start time matching across all three reports in the same
-/// failure -- confirming the leaked fd genuinely belongs to the process
-/// this test itself spawned, not a reused pid. That means either the
-/// `posix_openpt`/`O_CLOEXEC` fix this test exists to verify does not
-/// hold atomically in whatever environment CI's `ubuntu-latest` runner
-/// provides (a real, unresolved product concern, since that environment
-/// is not exotic), or some other mechanism neither locally reproduced nor
-/// yet identified is at work. Quarantined here, not deleted and not
-/// weakened, so the blocking gate is not held red by an unresolved
-/// question while that question is investigated -- see
-/// `rfcs/handoffs/test-process-leak.md`'s own dated entry for the full
-/// investigation and what was ruled out.
+/// **Quarantined and un-quarantined the same day, review 583: the CI-only
+/// failure was this test's own premise, not the product fix.**
+/// `FD_CLOEXEC` is honoured at `execve`, not at `fork` -- a forked-but-
+/// not-yet-`exec`ed child's `/proc/<pid>/fd` still lists a properly
+/// close-on-exec fd, because nothing has reached the point where the
+/// kernel acts on the flag yet. Checking fd presence alone could not tell
+/// "leaked" apart from "about to vanish, exactly as intended"; only
+/// whether the child has already `exec`ed can, which is what
+/// `process_comm` below checks. On a 2-4 vCPU CI runner the fork-to-exec
+/// window is wide enough, relative to this test's own scan cadence, to
+/// land inside it routinely; on this project's own 32-core development
+/// machine it almost never did, which is why this never reproduced
+/// locally. The pid-reuse theory raised first was independently
+/// disproven (the recorded start time matched across every report), and
+/// stays fixed below since it is a real, separate correctness property,
+/// orthogonal to this one. **Re-ablated with the comm check in place**,
+/// against the real pre-fix `pty.rs`: still fails loudly (2,974 leaks,
+/// every one explicitly past its own `exec`), confirming the new gate
+/// did not become vacuous and independently re-confirming the original
+/// defect really did persist for the child's whole life, not only for a
+/// fork-to-exec instant. Full account in
+/// `rfcs/handoffs/test-process-leak.md`'s own dated entry.
 #[test]
-#[ignore = "unresolved, reproducible-in-CI-only PTY-master leak, not a settled disposition -- \
-            see test-process-leak.md; do not treat this ignore as the fix being confirmed"]
 fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
     use std::os::fd::AsRawFd;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1253,6 +1255,18 @@ fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
             if process_start_time(pid) != Some(recorded_start_time) {
                 continue;
             }
+            // Review 583: `FD_CLOEXEC` is honoured at `execve`, not at
+            // `fork` -- a forked-but-not-yet-`exec`ed child's `/proc/
+            // <pid>/fd` still lists a properly close-on-exec fd, because
+            // nothing has reached the point where the kernel actually
+            // acts on the flag yet. Checking fd presence alone cannot
+            // tell "leaked" apart from "about to vanish, exactly as
+            // intended" -- only whether the child has *already* exec'd
+            // can. `/proc/<pid>/comm` says so directly: a child still
+            // mid-fork carries this test binary's own name, not `sleep`.
+            if process_comm(pid).as_deref() != Some("sleep") {
+                continue;
+            }
             let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
                 continue; // already exited
             };
@@ -1261,8 +1275,9 @@ fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
                     .is_ok_and(|link| link.to_string_lossy() == "/dev/ptmx")
                 {
                     leaks.push(format!(
-                        "iteration {iterations}: child pid={pid} (start_time={recorded_start_time}) \
-                         fd={:?} is /dev/ptmx -- a plain `sleep` binary never opens this itself",
+                        "iteration {iterations}: child pid={pid} (start_time={recorded_start_time}, \
+                         already exec'd into sleep) fd={:?} is /dev/ptmx -- a plain `sleep` binary \
+                         never opens this itself",
                         fd_entry.file_name()
                     ));
                 }
@@ -1296,4 +1311,15 @@ fn process_start_time(pid: u32) -> Option<u64> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_comm = stat.rsplit_once(')')?.1;
     after_comm.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// `/proc/<pid>/comm` -- the kernel's own record of the executable
+/// currently running as `pid`, already trimmed of its own trailing
+/// newline by the kernel. Review 583's own discriminator: a process that
+/// has `fork`ed but not yet `exec`ed still carries its *parent's* comm,
+/// not the name of whatever it is about to become.
+fn process_comm(pid: u32) -> Option<String> {
+    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+        .ok()
+        .map(|comm| comm.trim().to_string())
 }
