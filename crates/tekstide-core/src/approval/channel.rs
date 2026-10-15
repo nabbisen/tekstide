@@ -935,6 +935,15 @@ impl ApprovalChannelEndpoint {
     pub(crate) fn set_owner_uid_for_test(&mut self, uid: u32) {
         self.owner_uid = uid;
     }
+
+    /// Review 577's part 3: lets a test verify the listening socket's
+    /// `FD_CLOEXEC` flag directly against the kernel, rather than trusting
+    /// that `std::os::unix::net::UnixListener` sets it (it does, but
+    /// nothing in this codebase had verified that for RFC-022's own trust
+    /// boundary until this).
+    pub(crate) fn listener_raw_fd_for_test(&self) -> RawFd {
+        self.listener.as_raw_fd()
+    }
 }
 
 impl Drop for ApprovalChannelEndpoint {

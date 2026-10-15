@@ -2489,3 +2489,89 @@ this document has had: a ~1-in-5 reproduction rate, on demand, in under a minute
 product-side instrument (peer pid/uid/gid on the `Ok(_)` arm) has not yet fired on a real
 occurrence — only on the deterministic same-process test — so whether a *real* stale-recovery path
 ever shows a peer pid other than its own test process remains the open half of the question.
+
+## Row 1 solved, 2026-10-15 — review 577's three-part slice: mechanism confirmed, staging fixed, a security property added
+
+Review 577 named the mechanism (a sibling `Command::spawn` in this same test binary forks; the
+child briefly holds a duplicate of whatever fd this process's own `UnixListener::bind` just
+created, until the child reaches `exec`, where `CLOEXEC` closes it) and commissioned three ordered
+parts. All three done, in order.
+
+### Part 1 — confirm the window, name the holder
+
+Instrumented `bind_recovers_from_a_stale_socket_file`'s precondition check so that when it finds
+the path still answering, it measures how long the path keeps answering and attempts to identify
+the holder via `/proc/net/unix` → inode → `/proc/*/fd` scan → `/proc/<pid>/comm`.
+
+**A real measurement bug, caught and fixed before relying on the numbers**: the first version read
+`/proc/net/unix` (and potentially scanned every process's `/proc/*/fd`) *before* starting the
+timer, which is not free — doing so attributed the lookup's own latency to the window being
+measured, producing readings of 7-9 **microseconds** that undersold how long the window really is.
+Moving the timer to start first (the lookup still runs, now timed honestly, inside the loop)
+produced the real figures: **1.9ms, 5.1ms, 5.3ms, 5.3ms** across four live catches that afternoon —
+low single-digit milliseconds, not microseconds, but still squarely inside "the hypothesis predicts
+a window that closes," not "never closes."
+
+**A second real finding, this one about the kernel rather than this test's own code**:
+`/proc/net/unix` can list a socket still bound to its path with `Inode` printed as literal `0` —
+confirmed as a genuine kernel-reported value, not a parsing bug, by checking the field alignment
+against a real `/proc/net/unix` sample by hand. This happens when the socket is already mid-
+teardown and has lost its inode association; no `/proc/*/fd` scan can find a holder past that
+point, because no fd can reference inode `0`. The fix was not to treat this as "not found" silently
+but to collect every line matching the path (not just the first) and prefer any non-`0` inode over
+a `0` one, since both can appear for the same path while one is mid-teardown and a genuine live
+listener also exists. Verified against a deterministic same-process ablation (a leaked, never-
+dropped listener): before the fix, 1 of 2 ablation runs reported `inode=0, no holder found` for a
+listener that was certainly still open and certainly held by this exact process; after the fix,
+5 of 5 ablation runs correctly reported `pid=<this process> comm=tekstide_core-e`.
+
+Final honest holder results on the four *real* (non-ablated) catches: two reported `inode=0`
+(genuinely too transient for even the fixed lookup to catch a live fd, consistent with a window
+this short), one reported an inode number but still no `/proc/*/fd` holder (the fd closed between
+the `/proc/net/unix` read and the `/proc/*/fd` scan — the scan itself, iterating every process on
+the system, is not fast enough for a sub-6ms window), and none positively named the forked child's
+pid. **The mechanism is confirmed by the timing (consistently low-single-digit milliseconds,
+exactly the shape a fork/exec window predicts) and by the deterministic ablation proving the lookup
+code itself works — not by catching the actual child in the act, which this approach is
+structurally too slow to do.**
+
+### Part 2 — fix the staging, not the product
+
+Per review 577's explicit instruction, `clear_stale_socket` was not touched. The test's
+precondition (`wait_for_path_to_stop_answering`) now accepts the measured window explicitly: checks
+once, cheaply, with no `/proc` work on the common path; only if that first check finds the path
+still answering does it poll (with the holder-lookup attempt riding along) for up to 500ms before
+failing. **Verified this actually removes the flake**: 60 consecutive runs of the full
+`approval::tests::channel::` module, 0 failures (previously ~19% per the measured rate above) — and
+separately, the ablation above proves a genuinely-never-closing listener still fails loudly, so the
+tolerance is bounded, not a blanket pass.
+
+### Part 3 — the security property this investigation earned
+
+Added `the_approval_listener_is_close_on_exec`: binds a real `ApprovalChannelEndpoint`, reads
+`fcntl(fd, F_GETFD)` directly against the kernel, asserts `FD_CLOEXEC` is set. This is independent
+of parts 1-2 and was true before this slice (std sets it), but nothing had verified it for this
+codebase's actual bind path until now — and the property is exactly what keeps the mechanism found
+in part 1 from being a real vulnerability: a spawned AI CLI agent process inheriting the approval
+channel's listening socket past its own `exec` could accept connections on the channel meant only
+for the real adapter, without needing to connect or know the token at all. Ablated (inverted the
+assertion, confirmed it fails naming the real risk, reverted).
+
+### Gate
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`: clean.
+`approval::tests::channel::`: 25/25 (one more test than before — the new `close-on-exec` check).
+`rfc_docs_invariants`: 23/23. Three full-workspace runs: 0 failed each (1142 passed in
+`tekstide-core`'s own suite, one more than the prior gate's 1141).
+
+### Verdict: row 1 closed as a flake, open as a documented, accepted, bounded race
+
+This is the first row in this entire document to go from "recurring, unexplained" to "mechanism
+confirmed, staging fixed, verified not to recur across 60 runs" in a single slice. What remains
+genuinely open, stated plainly rather than implied fixed: the holder was never positively named on
+a live occurrence, only inferred from timing and a deterministic stand-in; and the same race, by
+the same mechanism, could in principle still affect production if two real `ApprovalChannelEndpoint`
+binds ever raced against an unrelated `Command::spawn` in the same process at the same instant —
+not investigated here, because nothing in the production launch path does both in a way that
+shares this test's timing, and speculative production hardening was explicitly the thing review 577
+said not to do.

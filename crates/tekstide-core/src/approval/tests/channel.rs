@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -141,6 +141,162 @@ fn dropping_the_endpoint_removes_the_socket_file() {
     );
 }
 
+/// What `wait_for_path_to_stop_answering` found.
+struct ListenerSettleResult {
+    /// `true` once `connect()` against the path returned `ConnectionRefused`;
+    /// `false` if `budget` ran out first.
+    closed: bool,
+    /// Human-readable detail for a panic message when `closed` is `false`
+    /// (or for a log line even when it's `true`, if a caller wants one) --
+    /// timing and, best-effort, who was holding the socket open.
+    diagnosis: String,
+}
+
+/// Review 576's second instrument (verify the test's own precondition),
+/// refined by review 577's parts 1 and 2 once the hypothesis was
+/// confirmed live: this process forks real child processes elsewhere in
+/// this module (`cross_process_impersonation_with_wrong_token_is_rejected`,
+/// `inject_token_into_environment_sets_the_sanctioned_variable_on_a_real_child_process`),
+/// and a sibling thread's `Command::spawn` can duplicate this test's
+/// listening fd into the forked child's table an instant before
+/// `drop(raw_listener)` runs here -- the child's own copy keeps the
+/// socket answering `connect()` until the child reaches `exec` (std sets
+/// `CLOEXEC`, so the window closes there, not at the child's eventual
+/// exit). Measured live, repeatedly, on 2026-10-15: closes within
+/// 1.9ms-5.3ms every time it was caught. This function accepts that
+/// window explicitly -- polls until the path refuses or `budget` elapses
+/// -- rather than letting the test fail on a race already understood and
+/// bounded. The common case (no sibling fork in flight) is checked first,
+/// cheaply, with no polling or `/proc` work at all.
+fn wait_for_path_to_stop_answering(socket_path: &Path, budget: Duration) -> ListenerSettleResult {
+    let start = std::time::Instant::now();
+    if matches!(
+        UnixStream::connect(socket_path),
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused
+    ) {
+        return ListenerSettleResult {
+            closed: true,
+            diagnosis: format!("refused on the first attempt, after {:?}", start.elapsed()),
+        };
+    }
+
+    // Still open: attempt best-effort holder identification on the way,
+    // its only real chance before the window closes. The timer keeps
+    // running from the very first attempt above, not from here, so this
+    // lookup's own latency (a `/proc/net/unix` read and potentially a
+    // scan of every process's `/proc/*/fd`) is not mistaken for part of
+    // the window being measured.
+    let mut holder_while_open = None;
+    let closed = loop {
+        if holder_while_open.is_none() {
+            holder_while_open = holder_of_unix_socket_path(socket_path);
+        }
+        if matches!(
+            UnixStream::connect(socket_path),
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused
+        ) {
+            break true;
+        }
+        if start.elapsed() >= budget {
+            break false;
+        }
+        std::thread::sleep(Duration::from_micros(200));
+    };
+    let elapsed = start.elapsed();
+    let holder_while_open = holder_while_open.unwrap_or_else(|| {
+        "unidentified -- /proc/net/unix had no matching entry by the time it was read, which \
+         itself means the window closed faster than a /proc/net/unix read, string-parsed, \
+         completes"
+            .to_string()
+    });
+    let diagnosis = if closed {
+        format!(
+            "the path stopped answering after {elapsed:?} (closed, consistent with the measured \
+             fork/exec window rather than a permanent leak). Holder while it was open: \
+             {holder_while_open}"
+        )
+    } else {
+        format!(
+            "the path never stopped answering within the {budget:?} budget -- longer than any \
+             fork/exec window measured for this process (1.9ms-5.3ms); something else is holding \
+             this socket open. Holder: {holder_while_open}"
+        )
+    };
+    ListenerSettleResult { closed, diagnosis }
+}
+
+/// Reads `/proc/net/unix` to find the kernel inode bound at `socket_path`,
+/// then scans `/proc/*/fd` for whichever process holds a `socket:[<inode>]`
+/// descriptor open, and reads that process's `/proc/<pid>/comm`. Best
+/// effort: any read failure along the way (permissions, the process
+/// having already exited and closed it, a parse mismatch) yields `None`
+/// rather than panicking -- this exists only to enrich a diagnostic
+/// message, never to gate a result.
+fn holder_of_unix_socket_path(socket_path: &Path) -> Option<String> {
+    let unix_table = std::fs::read_to_string("/proc/net/unix").ok()?;
+    // Collects every matching line rather than stopping at the first:
+    // `/proc/net/unix` can list more than one entry for the same bound
+    // path while a socket is being torn down (one with a real `Inode`,
+    // another already showing `0`), and bucket order in the table is not
+    // time order. Preferring any non-"0" match over a "0" one is strictly
+    // more informative regardless of why both exist.
+    let candidates: Vec<String> = unix_table
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let inode_field = fields.nth(6)?;
+            let path_field = fields.next()?;
+            (Path::new(path_field) == socket_path).then(|| inode_field.to_string())
+        })
+        .collect();
+    let inode = candidates
+        .iter()
+        .find(|inode| inode.as_str() != "0")
+        .or(candidates.first())?
+        .clone();
+
+    if inode == "0" {
+        // A real, observed kernel value, not a parse failure: `/proc/net/
+        // unix` can list a socket still bound to its path with `Inode`
+        // printed as `0` while the socket is already mid-teardown and has
+        // lost its inode association -- no process's `/proc/*/fd` can
+        // meaningfully reference inode 0, so there is nothing to scan for.
+        return Some(
+            "kernel reports this path's socket already has Inode=0 (mid-teardown, inode already \
+             detached) -- no fd scan can identify a holder past this point"
+                .to_string(),
+        );
+    }
+
+    let needle = format!("socket:[{inode}]");
+    for proc_entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let pid = proc_entry.file_name();
+        let Some(pid) = pid
+            .to_str()
+            .filter(|pid| pid.bytes().all(|byte| byte.is_ascii_digit()))
+        else {
+            continue;
+        };
+        let Ok(fds) = std::fs::read_dir(proc_entry.path().join("fd")) else {
+            continue;
+        };
+        for fd_entry in fds.flatten() {
+            if std::fs::read_link(fd_entry.path())
+                .is_ok_and(|link| link.to_string_lossy() == needle)
+            {
+                let comm = std::fs::read_to_string(proc_entry.path().join("comm"))
+                    .unwrap_or_else(|_| "<unreadable>".to_string());
+                return Some(format!("pid={pid} comm={}", comm.trim()));
+            }
+        }
+    }
+    Some(format!(
+        "inode={inode}, no /proc/*/fd holder found (closed between the /proc/net/unix read and \
+         the /proc scan)"
+    ))
+}
+
 #[test]
 fn bind_recovers_from_a_stale_socket_file() {
     let state_root = temp_state_root("stale");
@@ -167,18 +323,21 @@ fn bind_recovers_from_a_stale_socket_file() {
     assert!(socket_path.exists(), "precondition: stale file exists");
     // Review 576's own second instrument: this test's entire premise is
     // that a dropped `UnixListener` leaves nothing listening at its path.
-    // That has never actually been checked -- if `connect()` here returns
-    // anything other than `ConnectionRefused`, the phenomenon review 576
-    // is chasing lives in *this staging*, not in `clear_stale_socket`,
-    // which would be a different investigation entirely.
-    match UnixStream::connect(&socket_path) {
-        Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {}
-        other => panic!(
-            "precondition failed: connecting to the path left by a dropped UnixListener should \
-             be refused, got {other:?} -- the staging itself, not clear_stale_socket, is where \
-             this occurrence's phenomenon lives"
-        ),
-    }
+    // Review 577 parts 1-2: that premise is not quite true in *this*
+    // process -- it forks real children elsewhere in this module, and a
+    // sibling fork can transiently duplicate this listener's fd across
+    // `drop()` until the child reaches `exec`. Rather than fail on a race
+    // already measured and understood, accept it within a bounded
+    // settling window; only a path that is *still* answering well past
+    // that window is the different, worse finding worth failing loudly
+    // over.
+    let settle = wait_for_path_to_stop_answering(&socket_path, Duration::from_millis(500));
+    assert!(
+        settle.closed,
+        "precondition failed: connecting to the path left by a dropped UnixListener never \
+         settled to refused -- {}",
+        settle.diagnosis
+    );
 
     let (second_endpoint, _token) = ApprovalChannelEndpoint::bind(&directory, &agent_run_id)
         .expect("second bind must clear the stale file and succeed");
@@ -241,6 +400,44 @@ fn a_live_listener_at_the_bind_path_is_refused_as_already_listening() {
         source_message.contains(&format!("pid={own_pid}")),
         "the peer connecting to its own just-bound listener is this same test process -- the \
          diagnostic source should name pid={own_pid}, got {source_message:?}"
+    );
+}
+
+/// Review 577's part 3: RFC-022's trust boundary names peer credentials
+/// and a per-run token as the two layers that keep an unauthorized
+/// process from submitting proposals, but neither layer matters if a
+/// **spawned AI CLI agent itself** inherits the listening socket past its
+/// own `exec` -- it would not need to connect at all, it could `accept()`
+/// directly. `std::os::unix::net::UnixListener` is documented to set
+/// close-on-exec, but nothing in this codebase had verified that for the
+/// actual bind path this channel uses until review 577's own
+/// fork/exec-window investigation into row 1 surfaced the question.
+/// Verified against the kernel flag directly rather than trusted from
+/// std's docs.
+#[test]
+fn the_approval_listener_is_close_on_exec() {
+    let state_root = temp_state_root("cloexec");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let (endpoint, _token) =
+        ApprovalChannelEndpoint::bind(&directory, &agent_run_id).expect("bind must succeed");
+
+    // SAFETY: `fd` is the listener's own raw fd, valid for the lifetime of
+    // `endpoint`, which outlives this call; `F_GETFD` reads flags and
+    // performs no action that could invalidate it.
+    let flags = unsafe { libc::fcntl(endpoint.listener_raw_fd_for_test(), libc::F_GETFD) };
+    assert!(
+        flags >= 0,
+        "fcntl(F_GETFD) on the approval listener failed: {}",
+        std::io::Error::last_os_error()
+    );
+    assert!(
+        flags & libc::FD_CLOEXEC != 0,
+        "the approval channel's listening socket is NOT close-on-exec -- a spawned AI CLI agent \
+         process would inherit it past exec and could accept connections on the channel meant \
+         only for the real adapter, defeating both the peer-credential and token checks by never \
+         needing to connect at all"
     );
 }
 
