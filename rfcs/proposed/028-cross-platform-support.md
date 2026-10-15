@@ -41,7 +41,8 @@ and not:**
 | `SO_PEERCRED`/`libc::ucred` peer-credential check | `approval/channel.rs:1106-1120` | No | `LOCAL_PEERCRED`/`xucred` — different option level (`SOL_LOCAL`, not `SOL_SOCKET`) and a `cr_version` field that must be checked against `XUCRED_VERSION` |
 | `/proc/self/fd/<fd>` TOCTOU-safe bind path | `approval/channel.rs:170,402` | No (`/proc` does not exist on macOS) | `/dev/fd/<fd>` is the plausible BSD-heritage analogue — **must be verified on a real macOS machine that `bind()` through it is still TOCTOU-safe (the same open file, not a re-open by name) before this RFC commits to it; this is an open question, not a decision** |
 | `/proc/meminfo` | `measurement.rs:506` | No, already self-labelled "Linux-only... fails silently elsewhere" | Out of this RFC's scope — memory-pressure measurement is not required for correctness on macOS |
-| `kill`, `SIGHUP`/`SIGKILL`/`SIGTERM`, `fcntl`, `poll`/`pollfd`/`POLLIN`, `ioctl`/`TIOCSCTTY`/`TIOCSWINSZ`/`winsize`, `openpty`, `setsid`, `waitpid`, `openat`/`O_NOFOLLOW`/`O_DIRECTORY`/`O_CLOEXEC`, `geteuid`, `recv` w/ `MSG_PEEK`\|`MSG_DONTWAIT`, `sockaddr_un` | throughout `runtime/terminal/`, `approval/channel.rs`, `project_lock/` | **Yes, unchanged** | — (one check owed, not assumed: `openpty` lives in `libutil` on glibc and `libSystem` on macOS — confirm the link succeeds, don't infer it from the matching signature) |
+| `kill`, `SIGHUP`/`SIGKILL`/`SIGTERM`, `fcntl`, `poll`/`pollfd`/`POLLIN`, `ioctl`/`TIOCSCTTY`/`TIOCSWINSZ`/`winsize`, `setsid`, `waitpid`, `openat`/`O_NOFOLLOW`/`O_DIRECTORY`/`O_CLOEXEC`, `geteuid`, `recv` w/ `MSG_PEEK`\|`MSG_DONTWAIT`, `sockaddr_un` | throughout `runtime/terminal/`, `approval/channel.rs`, `project_lock/` | **Yes, unchanged** | — |
+| `posix_openpt`/`grantpt`/`unlockpt`/`ptsname_r` with `O_CLOEXEC` requested atomically at each `open()` (review 579's fix, replacing `openpty`'s own non-atomic two-step `fcntl` — see D5) | `runtime/terminal/pty.rs` | **Unverified — not assumed.** The function names match POSIX on both platforms, but the property that matters is not presence, it is whether macOS's `posix_openpt` actually *honours* `O_CLOEXEC` the same way Linux's `/dev/ptmx` open does; it has not always | Must be verified on the real `macos-latest` runner with the same concurrent-fork test Linux now has (`no_concurrently_forked_sibling_inherits_a_pty_master_fd`), not inferred from the flag being accepted without error |
 
 **`std::fs::File::try_lock()`** (`project_lock.rs`, `audit/store.rs`'s creation-section guard,
 `transcript/{writer,loading}.rs`) **is already cross-platform** — stabilized in Rust 1.89, which
@@ -154,7 +155,23 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   (`/proc` enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe
   or kqueue `EVFILT_USER`; `SYS_gettid` → `pthread_threadid_np`), one already portable and only
   needing its link target confirmed (`openpty`: `libutil` on glibc, `libSystem` on macOS — check,
-  don't infer), one out of scope (`/proc/meminfo`, already self-labelled). Everything else in this
+  don't infer), one out of scope (`/proc/meminfo`, already self-labelled). **Correction, review
+  579: `openpty` is no longer the call site at all.** A fork/exec race in the Linux PTY path (a
+  sibling thread's `fork` landing in the window between fd creation and a follow-up
+  `fcntl(FD_CLOEXEC)`, demonstrated directly — 7,470 leaked descriptors across 46,143 checks against
+  236 forked children) was fixed by replacing `libc::openpty` with `posix_openpt`/`grantpt`/
+  `unlockpt`/`open(ptsname_r(...))`, requesting `O_CLOEXEC` atomically at each `open()` call instead
+  of as a separate step. **"Portable" was the wrong property to have scoped `openpty` on;
+  atomicity of `CLOEXEC` is the one that matters, and it is not a given across platforms**: macOS's
+  own `posix_openpt` has not always honoured `O_CLOEXEC` the same way Linux's `/dev/ptmx` open does.
+  PR-028-D must *verify* this on the real `macos-latest` runner — the same discipline D4's `/dev/fd`
+  question already uses — via a test structured like `tekstide-core`'s own
+  `no_concurrently_forked_sibling_inherits_a_pty_master_fd` (a bounded, wall-clock-capped
+  concurrent-fork check, not a static read of the flag), not inferred from the flag being accepted
+  without error. If macOS's `posix_openpt` silently ignores `O_CLOEXEC`, the macOS port needs its
+  own, separate close-on-exec application immediately after `open()` returns, accepting a narrower
+  version of the exact race just fixed on Linux as a known, stated gap rather than an undiscovered
+  one. Everything else in this
   subsystem — `kill`, the three termination signals, `fcntl`, `poll`, the `ioctl` calls, `setsid`,
   `waitpid`, the `openat` TOCTOU chain, `geteuid`, `recv` with `MSG_PEEK`\|`MSG_DONTWAIT`,
   `sockaddr_un` sizing — is POSIX and lands unchanged.
@@ -306,8 +323,10 @@ reserved to the owner, needed by PR-028-F and not before — it blocks nothing i
   write-then-read round trip) through the bind path, not assumed from BSD heritage.
 - **PR-028-D — the process/PTY replacements** (D5), and the macOS job starts running tests. `/proc`
   enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe or
-  kqueue `EVFILT_USER`; `SYS_gettid` → `pthread_threadid_np`; `openpty`'s macOS link target
-  confirmed, not inferred. The macOS CI job gains `cargo test --workspace --no-fail-fast`
+  kqueue `EVFILT_USER`; `SYS_gettid` → `pthread_threadid_np`; `posix_openpt`/`grantpt`/`unlockpt`'s
+  macOS `O_CLOEXEC` atomicity verified via the Linux regression test's own shape on the real
+  `macos-latest` runner, not inferred from the call succeeding (review 579 — see D5). The macOS CI
+  job gains `cargo test --workspace --no-fail-fast`
   (still non-blocking); the per-platform test splits named in Acceptance land with the mechanisms
   they test; `test-process-leak.md` gains its platform column in this same slice, since this is the
   first point a row could ever need one.

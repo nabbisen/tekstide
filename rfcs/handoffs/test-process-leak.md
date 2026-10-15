@@ -2587,12 +2587,17 @@ also the one way to guarantee no sibling fork is still around to answer for it. 
 structural reason the real launch path does not share this test's timing, not an unexamined
 assumption -- still not investigated further, because nothing above changes that conclusion.
 
-## The SIGHUP row's own mechanism, confirmed by direct experiment, 2026-10-15
+## A real `CLOEXEC` window found while chasing the SIGHUP row -- not its cause, review 579's required correction
 
 Review 578 handed the SIGHUP row the method that just closed row 1 -- triangulate first (free),
 then instrument the failing path -- and named a specific hypothesis: a sibling fork holding a
 duplicate of the **PTY master** would explain both observations (`exit_status: 1`, then
 `exit_status: 0` -- the session leader ending some way other than the signal this test expects).
+**That hypothesis is wrong, and review 579 corrected it before this section first went out: a real,
+independent `CLOEXEC` defect was found along the way (kept below, in full), but it is not this
+row's mechanism, and an inherited master would actually mask the row's real cause, not produce it.**
+The row's real mechanism and its fix are in the next section; what follows here is the experiment
+that found the (separately real) defect.
 
 ### Triangulation: did not reproduce locally, and that is itself informative
 
@@ -2644,7 +2649,7 @@ afresh, regardless of the path used to reach it -- unlike most file types, for w
 legitimate reason to ever hold such a descriptor, so any match proves inheritance regardless of
 which specific pty instance it is.
 
-### Result: the hypothesis is confirmed, deterministically, in 3 seconds
+### Result: the `CLOEXEC` window is real, confirmed deterministically in 3 seconds
 
 **7,470 leaked-fd observations across 46,143 sampling checks, against 236 total forked children.**
 Most forked children that landed in the window kept the leak for their entire lifetime (one child,
@@ -2665,7 +2670,7 @@ concurrent fork), but structurally worse: row 1's window closed in low single-di
 once the forked child reached its own `exec`; this one does not close at `exec` at all, because
 `CLOEXEC` was never set on the inherited copy to begin with.
 
-### This is not only the SIGHUP row's mechanism -- it is a standing, narrow production concern
+### Not the SIGHUP row's mechanism -- but a standing, narrow production concern on its own
 
 `pty.rs`'s own comment on `set_cloexec` already names the defect class this guards against: *"every
 child this process ever spawns inherited every PTY master already open at that moment, crossing
@@ -2679,18 +2684,87 @@ subprocess (a `git` helper, for instance) landing in this window would inherit a
 handle to a *different* terminal's PTY master, persisting for that subprocess's own lifetime --
 exactly the boundary RFC-009 states it closes, not closed in this one specific case.
 
-**Not fixed here.** This is security-adjacent production code (`pty.rs`, RFC-009's own stated
-boundary), and the standard, well-established remedy for exactly this defect class -- make
-`CLOEXEC` atomic at creation rather than a follow-up call, the same reason `std::os::unix::net::
-UnixListener::bind` is immune to row 1's own mechanism (it uses `SOCK_CLOEXEC` at the `socket()`
-call itself) -- is a one-line-shaped fix in spirit (replace `libc::openpty` with the lower-level
-`posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC)` plus `grantpt`/`unlockpt`/`open(ptsname(...),
-O_RDWR | O_NOCTTY | O_CLOEXEC)` for the slave, both flags set atomically at their respective
-`open()` calls, eliminating the follow-up `fcntl` window entirely) but touches a stated security
-boundary and deserves review before any of it is written, not a unilateral change on the strength
-of a 3-second experiment.
+**Fixed, authorized by review 579 as its own bounded change** (not an RFC -- inside RFC-009's
+existing boundary, the same shape as row 1's own fix): `OpenPty::new` now calls `posix_openpt(O_RDWR
+| O_NOCTTY | O_CLOEXEC)` for the master, `grantpt`/`unlockpt`/`ptsname_r` to find the slave path,
+then `open(slave_name, O_RDWR | O_NOCTTY | O_CLOEXEC)` for the slave -- both flags requested
+atomically at their respective `open()` calls, the same reason `std::os::unix::net::
+UnixListener::bind` was never susceptible to row 1's own mechanism (`SOCK_CLOEXEC` at its own
+`socket()` call). `set_cloexec` is kept, renamed `assert_cloexec`, as a **postcondition check** --
+reads the flag back and errors loudly if it is somehow unset, so a future refactor that drops
+`O_CLOEXEC` from either `open()` call is caught here rather than silently reopening this window.
+`ptsname_r`, not the non-reentrant `ptsname` (which writes into a single process-wide static buffer
+with no thread safety at all -- exactly the kind of race concurrent terminal creation, the thing
+that surfaced this defect, would hit directly).
+
+**`duplicate_slave` verified still works, not assumed**: `dup(2)` does not copy `FD_CLOEXEC` onto
+the new descriptor (POSIX, by design), which is what lets a spawned child's stdin/stdout/stderr/
+ctty copies survive its own `exec` even though the slave fd this process holds is itself
+close-on-exec. The full `runtime::terminal::` module (69 tests, including every test that spawns a
+real shell and reads its output) passes unchanged after the fix.
+
+**A committed, bounded regression test**: `no_concurrently_forked_sibling_inherits_a_pty_master_fd`
+-- the same shape as the experiment above, shrunk to the review's own spec (≤4 concurrent children,
+a 2s wall-clock cap, a `/proc/<pid>/fd` scan over only its own tracked pids), asserting no child's
+fd readlink is `/dev/ptmx`. **Ablated against the pre-fix code** (temporarily restored via `git show
+HEAD:...pty.rs`, not hand-edited): failed exactly as expected -- `2866 forked sibling(s) inherited a
+PTY master fd across 36272 iterations against 160 forks` -- then the fix was restored and the test
+passes again, 0 leaks.
+
+**Other `openpty` callers**: none. `grep -rn "openpty\b"` across the workspace, excluding comments,
+finds `pty.rs` as the only call site this codebase has ever had; now migrated entirely. Nothing else
+needed touching.
+
+**RFC-028 D5 updated** (the draft, not a slice -- still with the owner, no implementation started):
+`openpty` was scoped there as "already portable, only needs its link target confirmed." That was the
+wrong property to scope it on -- atomicity of `CLOEXEC`, not mere portability, is what this defect
+turned on, and macOS's own `posix_openpt` has not always honoured `O_CLOEXEC` the way Linux's
+`/dev/ptmx` open does. PR-028-D now carries a requirement to verify this on the real `macos-latest`
+runner with this same regression test's shape, not infer it from the call succeeding.
 
 ### Gate
 
 The scratch experiment was never committed -- `git status`/`git diff` confirmed clean both times,
-before and after. No product code was changed by this investigation.
+before and after, including during the ablation (restored via `git show`, never hand-edited).
+`cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`: clean.
+`runtime::terminal::`: 69/69. `rfc_docs_invariants`: 23/23.
+
+## The SIGHUP row's actual mechanism, review 579 -- found in the code, not the experiment
+
+**Verdict: Fix -- in the test's own expectation, not product code.** `request_terminate`
+(`termination.rs:86,93`) does, in this exact order:
+
+```rust
+self.session_mut(handle)?.close_master();                            // line 86
+if self.signal_session_leader(handle, TerminationSignal::Sighup)? {  // line 93
+```
+
+This row's own test launches `/bin/cat`, not a shell. `cat`'s blocking read on the PTY slave can
+return **EOF** the instant the master closes (a clean read-end-of-file, `cat` exits 0) or **EIO**
+(the master closed mid-read, `cat` reports exit 1) -- both **before** the `SIGHUP` on the very next
+line is ever sent. The two `TerminationOutcome::Exited` values this row's two occurrences showed
+(`exit_status: 0`, then `exit_status: 1`) are exactly those two cases, not a timing coincidence and
+not load-dependent -- which is also why no amount of synthetic load, and no amount of local
+triangulation, ever reproduced it: the race is deterministic in *shape*, just rare in which side
+wins, and nothing about CPU contention moves that.
+
+**The `CLOEXEC` window above would mask this, not cause it.** If a sibling fork held a duplicate of
+the master, `close_master()` would not actually hang up the line -- `cat` would see neither EOF nor
+`EIO`, and the `SIGHUP` a moment later would win by default, which is the test's *original*
+(currently-wrong) expectation. The CLOEXEC hypothesis predicts the opposite of the two failures
+actually observed.
+
+**The fix is the test asserting its own documented contract, not a tighter one.**
+`request_terminate`'s own doc comment already states it (D3): outcomes are reported *"as `waitpid`
+reports... never inferred from which signal was sent or which `TerminationOutcome` the session
+leader itself produced."* The test used to assert exactly that forbidden inference -- pinning the
+session leader's own exit to `TerminatedBySignal { Sighup }`. Fixed: the deterministic parts of the
+contract (`TerminationSignalSent { Sighup }`, `SessionConfirmedEmpty { confirmed: true }`) stay
+asserted unconditionally; the session leader's own outcome now accepts any of its three real shapes
+-- `TerminatedBySignal { Sighup }`, `Exited { exit_status: 0 }` (EOF), or `Exited { exit_status: 1 }`
+(EIO) -- with a comment at the test's own definition explaining why, quoting D3 directly so a future
+reader does not re-tighten it back into the same violation.
+
+**Gate**: `linux_runtime_terminates_session_leader_with_sighup` passes. No product code changed for
+this row -- `request_terminate`'s own ordering is correct as documented; the test was asserting more
+than the contract promises.

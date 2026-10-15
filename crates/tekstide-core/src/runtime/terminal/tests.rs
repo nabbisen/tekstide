@@ -316,6 +316,22 @@ fn linux_runtime_routes_resize_to_project_terminal() {
     cleanup_root(root);
 }
 
+/// Review 579: `request_terminate` closes the PTY master (line 86) before
+/// sending `SIGHUP` (line 93) -- and this test's own child is `/bin/cat`,
+/// not a shell. `cat`'s blocking read on the slave can return EOF (the
+/// master closed cleanly, `cat` exits 0) or `EIO` (the master closed
+/// mid-read, `cat` reports exit 1) *before* the `SIGHUP` a few lines
+/// later ever arrives -- the two `TerminationOutcome::Exited` values this
+/// row's flake has shown are exactly those two cases, not a timing
+/// coincidence. `request_terminate`'s own doc comment (D3) already states
+/// the contract this test used to violate: outcomes are reported
+/// "as `waitpid` reports... never inferred from which signal was sent or
+/// which `TerminationOutcome` the session leader itself produced." Pinning
+/// one specific `TerminationOutcome` asserted exactly that inference.
+/// What the contract actually promises -- a `SIGHUP` sent, and the session
+/// re-confirmed empty by real enumeration -- is still asserted above,
+/// unconditionally; only the session leader's own, genuinely racy exit
+/// shape is now accepted in any of its real forms.
 #[test]
 fn linux_runtime_terminates_session_leader_with_sighup() {
     let root = test_root("terminate-sighup");
@@ -362,15 +378,27 @@ fn linux_runtime_terminates_session_leader_with_sighup() {
         "the session must be confirmed empty by a real re-enumeration, not merely inferred: \
          {events:?}"
     );
-    assert_eq!(
-        events.last(),
-        Some(&TerminalRuntimeEvent::Terminated {
-            handle: handle.clone(),
-            outcome: TerminationOutcome::TerminatedBySignal {
-                signal: TerminationSignal::Sighup,
-            },
-        })
-    );
+    match events.last() {
+        Some(TerminalRuntimeEvent::Terminated {
+            handle: event_handle,
+            outcome,
+        }) if *event_handle == handle => {
+            assert!(
+                matches!(
+                    outcome,
+                    TerminationOutcome::TerminatedBySignal {
+                        signal: TerminationSignal::Sighup
+                    } | TerminationOutcome::Exited { exit_status: 0 }
+                        | TerminationOutcome::Exited { exit_status: 1 }
+                ),
+                "the session leader's own exit shape is genuinely racy (D3: reported as \
+                 `waitpid` sees it, never inferred) -- `SIGHUP` winning, `cat` seeing EOF on the \
+                 closed master (exit 0), or `cat` seeing EIO (exit 1) are all the contract \
+                 promises; got {outcome:?}"
+            );
+        }
+        other => panic!("expected a final Terminated event for this handle, got {other:?}"),
+    }
 
     let error = runtime
         .write_input(&handle, b"printf 'after-close\\n'\n")
@@ -1111,4 +1139,103 @@ fn a_second_terminals_child_inherits_no_descriptor_for_the_first_terminals_pty_m
         Duration::from_secs(2),
     );
     cleanup_root(root);
+}
+
+/// Review 579: a sibling `fork` on another thread, landing in the window
+/// between `posix_openpt`/`open` and this process's own `set_cloexec`
+/// (before this fix, between `openpty` and a follow-up `fcntl`), inherits
+/// a PTY fd without close-on-exec -- and since the child typically
+/// `exec`s immediately, the inherited copy survives that `exec` and
+/// persists for the rest of the child's life, crossing RFC-009's own
+/// terminal security boundary. Hard-bounded, all of it, after an
+/// unbounded first attempt at this same check froze a shared desktop
+/// during development: at most 4 concurrent children, each living only
+/// 50ms, the whole check capped by **wall clock** (2s) rather than a
+/// fixed iteration count that could balloon on a slow machine, and the
+/// holder scan narrowed to *only this test's own tracked child pids* --
+/// never a scan of the whole system's `/proc`.
+///
+/// Detection: whether a child's `/proc/<pid>/fd/<n>` readlink target is
+/// literally the text `/dev/ptmx`. Not an fd identity check (`fstat`
+/// dev/ino) -- every fd ever opened through `/dev/ptmx` reports that
+/// device node's own *static* identity regardless of which distinct pty
+/// instance it represents, confirmed by hand (`stat -L /dev/ptmx`), so an
+/// identity match would report a "leak" on every single sample
+/// regardless of whether anything actually leaked. A plain `sleep`
+/// binary has no legitimate reason to ever hold a `/dev/ptmx` fd at all,
+/// so any match proves inheritance regardless of which instance.
+#[test]
+fn no_concurrently_forked_sibling_inherits_a_pty_master_fd() {
+    use std::os::fd::AsRawFd;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    const MAX_CONCURRENT_CHILDREN: usize = 4;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+
+    let keep_forking = Arc::new(AtomicBool::new(true));
+    let fork_count = Arc::new(AtomicUsize::new(0));
+    let known_child_pids: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let forker_flag = keep_forking.clone();
+    let forker_count = fork_count.clone();
+    let forker_pids = known_child_pids.clone();
+    let forker = std::thread::spawn(move || {
+        let mut children: Vec<std::process::Child> = Vec::new();
+        while forker_flag.load(Ordering::Relaxed) {
+            children.retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_))));
+            if children.len() < MAX_CONCURRENT_CHILDREN {
+                if let Ok(child) = std::process::Command::new("sleep").arg("0.05").spawn() {
+                    forker_count.fetch_add(1, Ordering::Relaxed);
+                    forker_pids.lock().unwrap().push(child.id());
+                    children.push(child);
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        for mut child in children {
+            let _ = child.wait();
+        }
+    });
+
+    let mut leaks = Vec::new();
+    let mut iterations = 0usize;
+    while std::time::Instant::now() < deadline {
+        iterations += 1;
+        let pty = super::pty::OpenPty::new(TerminalDimensions::default()).expect("open pty");
+        let master = pty.into_master();
+        let _ = master.as_raw_fd(); // kept alive only to hold the master open briefly
+
+        let candidate_pids: Vec<u32> = known_child_pids.lock().unwrap().clone();
+        for pid in candidate_pids {
+            let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+                continue; // already exited
+            };
+            for fd_entry in fds.flatten() {
+                if std::fs::read_link(fd_entry.path())
+                    .is_ok_and(|link| link.to_string_lossy() == "/dev/ptmx")
+                {
+                    leaks.push(format!(
+                        "iteration {iterations}: child pid={pid} fd={:?} is /dev/ptmx -- a \
+                         plain `sleep` binary never opens this itself",
+                        fd_entry.file_name()
+                    ));
+                }
+            }
+        }
+        drop(master);
+    }
+
+    keep_forking.store(false, Ordering::Relaxed);
+    let total_forks = fork_count.load(Ordering::Relaxed);
+    forker.join().unwrap();
+
+    assert!(
+        leaks.is_empty(),
+        "{} forked sibling(s) inherited a PTY master fd across {iterations} iterations against \
+         {total_forks} forks: {:?}",
+        leaks.len(),
+        &leaks[..leaks.len().min(5)]
+    );
 }
