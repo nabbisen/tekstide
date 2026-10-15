@@ -1,6 +1,6 @@
 //! RFC-017 Amendment 1, PR-A1-A: a dedicated reader thread over the PTY
 //! master, feeding a bounded channel, built **alongside**
-//! `LinuxTerminalRuntime::read_available_bounded_for` rather than in
+//! `TerminalRuntime::read_available_bounded_for` rather than in
 //! place of it -- both paths exist so they can be measured and compared
 //! against the same tests. Nothing in `crates/tekstide` drains this
 //! channel yet; wiring it into `TerminalPane` and re-proving P1/P2 for
@@ -104,7 +104,7 @@ pub struct TerminalReader {
     // all) -- distinct from "configured, zero bytes written yet",
     // which is `Some(TranscriptWriteSummary::active(0))`, matching the
     // exact `Option` semantics the runtime-level accessor this replaces
-    // (`LinuxTerminalRuntime::transcript_write_summary`) used to have.
+    // (`TerminalRuntime::transcript_write_summary`) used to have.
     // The reader thread is the sole writer of the lock's contents; this
     // handle only ever reads it.
     transcript_write_summary: Option<Arc<Mutex<TranscriptWriteSummary>>>,
@@ -155,7 +155,7 @@ impl WakeNotifier {
 /// RFC-011 Amendment 2, D1: what [`TerminalReader::spawn`] needs to move
 /// transcript capture into the reader thread -- the writer itself, plus
 /// the capture mode D3's mid-stream failure policy is keyed on. Built by
-/// the caller (`LinuxTerminalRuntime::spawn_output_reader`) from
+/// the caller (`TerminalRuntime::spawn_output_reader`) from
 /// whatever `RunningTerminal` already holds; this module has no opinion
 /// on where either value came from.
 pub struct TranscriptCapture {
@@ -360,7 +360,7 @@ impl TerminalReader {
     }
 
     /// RFC-011 Amendment 2, D1's chosen replacement for the old
-    /// `LinuxTerminalRuntime::transcript_write_summary` -- that method
+    /// `TerminalRuntime::transcript_write_summary` -- that method
     /// read a writer the runtime owned; once the writer moves into this
     /// thread (`spawn`, above), the runtime has nothing left to consult,
     /// so the summary is queried from the reader itself instead, backed

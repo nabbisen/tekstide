@@ -26,7 +26,7 @@ use crate::domain::{
 };
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
-    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalRuntimeHandle, TerminationOutcome,
+    BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeHandle, TerminationOutcome,
 };
 
 use super::support::TestAuditDirs;
@@ -112,7 +112,7 @@ fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
     let mut health = AuditHealth::default();
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let launched = AuditCoordinator::new(&mut store, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -188,7 +188,7 @@ fn supervised_launch_does_not_bind_an_approval_endpoint() {
     let mut health = AuditHealth::default();
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let launched = AuditCoordinator::new(&mut store, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -255,7 +255,7 @@ fn managed_launch_carries_a_real_bound_approval_endpoint() {
              channel must validate",
         );
     let plan = AgentRunLaunchPlan::from_validation(validation, "private command sentinel").unwrap();
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let launched = AuditCoordinator::new(&mut store, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -840,7 +840,7 @@ fn managed_launch_failure_is_recorded_after_authorization_without_process_attach
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, &executable);
     fs::remove_file(&executable).unwrap();
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = AuditCoordinator::new(&mut store, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -876,7 +876,7 @@ fn managed_launch_still_creates_a_process_when_authorization_cannot_persist() {
     let mut writer = RecordingWriter::fail_on(1);
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let _launched = AuditCoordinator::with_writer(&mut writer, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -925,7 +925,7 @@ fn no_started_write_is_attempted_when_its_own_authorized_did_not_persist() {
     let mut writer = RecordingWriter::fail_on(1);
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let launched = AuditCoordinator::with_writer(&mut writer, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -970,7 +970,7 @@ fn plain_agent_launch_is_not_relabelled_as_durably_authorized() {
         Path::new("/bin/sh"),
         AgentCompatibilityLevel::Plain,
     );
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = AuditCoordinator::with_writer(&mut writer, &mut health)
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -990,7 +990,7 @@ fn termination_truth_survives_observational_audit_failure() {
     let mut writer = RecordingWriter::fail_on(3);
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (launched, result) = {
         let mut coordinator = AuditCoordinator::with_writer(&mut writer, &mut health);
         let launched = coordinator
@@ -1037,7 +1037,7 @@ fn a_run_that_exits_records_terminated_with_no_payload_from_the_outcome() {
     let mut health = AuditHealth::default();
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let identity = {
         let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
@@ -1118,7 +1118,7 @@ fn a_run_killed_by_a_signal_records_process_terminated_without_the_signal() {
     let mut health = AuditHealth::default();
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
     let launched = coordinator
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -1170,7 +1170,7 @@ fn a_post_start_runtime_failure_records_runtime_failure_without_its_summary() {
     let mut health = AuditHealth::default();
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
     let launched = coordinator
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -1218,7 +1218,7 @@ fn the_store_refuses_a_termination_for_a_run_that_never_started() {
     let mut health = AuditHealth::default();
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
     let launched = coordinator
         .launch_audited_agent_run(&mut project, plan, &mut runtime)
@@ -1257,7 +1257,7 @@ fn orphaned_runtime_truth_is_not_mislabeled_as_durable_termination() {
     let mut writer = RecordingWriter::fail_on(usize::MAX);
     let mut project = project_for(&dirs, 1);
     let plan = launch_plan_for(&project, Path::new("/bin/sh"));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let mut coordinator = AuditCoordinator::with_writer(&mut writer, &mut health);
     let launched = coordinator
         .launch_audited_agent_run(&mut project, plan, &mut runtime)

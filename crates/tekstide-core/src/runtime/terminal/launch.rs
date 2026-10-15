@@ -23,11 +23,11 @@ use super::{
     TerminalOutputSummary, TerminalRuntimeEvent, TerminalRuntimeHandle,
 };
 
-pub struct LinuxTerminalRuntime {
+pub struct TerminalRuntime {
     pub(super) sessions: HashMap<TerminalId, RunningTerminal>,
 }
 
-impl LinuxTerminalRuntime {
+impl TerminalRuntime {
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
@@ -378,7 +378,7 @@ impl LinuxTerminalRuntime {
     }
 }
 
-impl Default for LinuxTerminalRuntime {
+impl Default for TerminalRuntime {
     fn default() -> Self {
         Self::new()
     }
@@ -515,7 +515,7 @@ fn wait_briefly_for_session_empty(session_id: libc::pid_t, timeout: std::time::D
 /// impl existed, dropping a `RunningTerminal` did nothing, so any path
 /// that dropped one without going through [`termination::request_terminate`]
 /// first -- most concretely, a panicking test, but structurally anything
-/// that drops `LinuxTerminalRuntime`/its `sessions` map without an
+/// that drops `TerminalRuntime`/its `sessions` map without an
 /// explicit termination request first -- leaked a real shell process and
 /// its PTY indefinitely (found at 3,899 leaked processes with
 /// `/dev/pts` at its 4096 limit, 2026-08-25).
@@ -610,7 +610,7 @@ impl Drop for RunningTerminal {
         // hangup (`EIO` on the slave side), specifically because
         // `TerminalPane` (`crates/tekstide`) declares its own
         // `reader: TerminalReader` field before `runtime:
-        // LinuxTerminalRuntime` -- by the time this drop runs as part of
+        // TerminalRuntime` -- by the time this drop runs as part of
         // that struct's own teardown, `TerminalReader::drop` has already
         // shut its thread down and joined it, closing that thread's own
         // `try_clone()`d duplicate of this same master first. **This is

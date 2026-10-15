@@ -16,7 +16,7 @@
 //! exempt: every colour there comes from `crate::theme::Theme`.
 //!
 //! **Input, RFC-017 PR-017-D.** [`TerminalPane::write_input`] is the one
-//! production path that reaches `LinuxTerminalRuntime::write_input`;
+//! production path that reaches `TerminalRuntime::write_input`;
 //! `shell.rs`'s `update` is its only caller, gated on `state.modal` being
 //! absent and on `input::TextStream::to_pty_bytes` -- this module never
 //! constructs a `TextStream` itself or reaches into `iced::keyboard::Key`
@@ -131,8 +131,8 @@ use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use tekstide_core::domain::TerminalSession;
 use tekstide_core::project::{ProjectId, ProjectSession};
 use tekstide_core::runtime::terminal::{
-    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalDimensions, TerminalLaunchError,
-    TerminalLaunchSpec, TerminalReader, TerminalRuntimeError, TerminalRuntimeEvent,
+    BoundedRuntimeSummary, TerminalDimensions, TerminalLaunchError, TerminalLaunchSpec,
+    TerminalReader, TerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
     TerminalRuntimeHandle, TerminationOutcome, TerminationRequest,
 };
 
@@ -235,7 +235,7 @@ pub struct TerminalPane {
     /// reference and the pty does not actually hang up. See
     /// `RunningTerminal::drop`'s own comment for the other half of this.
     reader: TerminalReader,
-    runtime: LinuxTerminalRuntime,
+    runtime: TerminalRuntime,
     handle: TerminalRuntimeHandle,
     processor: Processor<StdSyncHandler>,
     term: Term<VoidListener>,
@@ -300,7 +300,7 @@ impl TerminalPane {
             cols: COLS as u16,
         };
 
-        let mut runtime = LinuxTerminalRuntime::new();
+        let mut runtime = TerminalRuntime::new();
         let (session, _events) = runtime.launch_project_shell(&project, spec)?;
         let handle = TerminalRuntimeHandle::new(session.id.clone(), project.id().clone());
         let pane = Self::from_launched(runtime, handle)?;
@@ -321,7 +321,7 @@ impl TerminalPane {
     /// block the reader thread and, via PTY backpressure, stall the
     /// agent's own process.
     pub fn from_launched(
-        mut runtime: LinuxTerminalRuntime,
+        mut runtime: TerminalRuntime,
         handle: TerminalRuntimeHandle,
     ) -> Result<Self, TerminalLaunchError> {
         let reader = runtime.spawn_output_reader(&handle).map_err(|error| {
@@ -523,11 +523,11 @@ impl TerminalPane {
     /// RFC-039 PR-039-C: `request_terminate`'s first production caller
     /// (`what-closing-a-project-must-not-lose.md` §6 -- treat it as new
     /// code, not plumbing). Each `TerminalPane` owns its own
-    /// `LinuxTerminalRuntime`, so termination has to go through
+    /// `TerminalRuntime`, so termination has to go through
     /// whichever pane's own runtime launched it; there is no shared
     /// runtime a caller could reach independently. Blocks the caller for
     /// up to `sigterm_timeout + sigkill_timeout` -- the same
-    /// synchronous-runtime-call shape every other `LinuxTerminalRuntime`
+    /// synchronous-runtime-call shape every other `TerminalRuntime`
     /// method in this crate already has (agent-run launch, plain-shell
     /// launch), not a new one introduced here.
     pub fn request_terminate(

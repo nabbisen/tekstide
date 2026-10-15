@@ -47,10 +47,10 @@ use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
 use tekstide_core::project::{ProjectMode, ProjectOpenSurface};
 use tekstide_core::route::AppRoute;
 use tekstide_core::runtime::terminal::{
-    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalInputDecision,
-    TerminalInputDecisionReason, TerminalInputPolicy, TerminalInputSource, TerminalLaunchError,
-    TerminalRuntimeEvent, TerminalRuntimeHandle, TerminalTrustedUiState, TerminationOutcome,
-    TerminationRequest, TerminationRequestSource,
+    BoundedRuntimeSummary, TerminalInputDecision, TerminalInputDecisionReason, TerminalInputPolicy,
+    TerminalInputSource, TerminalLaunchError, TerminalRuntime, TerminalRuntimeEvent,
+    TerminalRuntimeHandle, TerminalTrustedUiState, TerminationOutcome, TerminationRequest,
+    TerminationRequestSource,
 };
 use tekstide_core::shell::ApplicationShell;
 
@@ -1299,7 +1299,7 @@ pub struct State {
     /// long as `State` does, so its `Drop` fires at the same moment -- the leading `_`
     /// is the same "held only for its `Drop`" signal `test_support::RealProcessSlot`'s own
     /// callers already spell with `let _real_process_slot = ...`, here on a struct field
-    /// instead of a local. `None` only when `AppStatePathProvider::linux_default()` itself
+    /// instead of a local. `None` only when `AppStatePathProvider::default_for_host()` itself
     /// failed (no `HOME`/`XDG_STATE_HOME`), the same condition that already leaves
     /// `RecentProjectStore` unconstructed in `boot()`; crash detection degrades silently
     /// in that case rather than failing the boot a missing environment variable should
@@ -3893,7 +3893,7 @@ fn record_restricted_mode_blocked_if_applicable(
     }
 }
 
-/// RFC-022 PR-022-D: `AppStatePathProvider::linux_default()` -- RFC-013's
+/// RFC-022 PR-022-D: `AppStatePathProvider::default_for_host()` -- RFC-013's
 /// own "one resolution, N consumers" convention, rather than inventing
 /// new XDG resolution logic in this crate. `None` degrades to "no
 /// transcript capture for this launch," not a launch refusal:
@@ -3917,10 +3917,10 @@ fn open_real_agent_run_state_root() -> Option<std::path::PathBuf> {
 }
 
 /// RFC-027 PR-027-B: recovery records live under the same `<state_root>/recovery/`
-/// `AppStatePathProvider::linux_default` already resolves for `recent-projects.json`,
+/// `AppStatePathProvider::default_for_host` already resolves for `recent-projects.json`,
 /// the audit store and transcripts -- "one resolution, many consumers"
 /// (`recent/store.rs`'s own `state_dir` doc), not a fresh, independently-isolated lookup.
-/// **Reuses `resolve_agent_run_state_dir`, not `AppStatePathProvider::linux_default`
+/// **Reuses `resolve_agent_run_state_dir`, not `AppStatePathProvider::default_for_host`
 /// directly**, specifically for its `#[cfg(test)]` isolation: every site this function
 /// is called from (the persist tick, a project close, the purge) is reachable from
 /// `update()`, which a test drives directly, and `suite-assumes-it-owns-the-machine.md`'s
@@ -3928,7 +3928,7 @@ fn open_real_agent_run_state_root() -> Option<std::path::PathBuf> {
 /// able to resolve the real, developer-owned state root.
 ///
 /// `pub(crate)`, review 521: `main.rs`'s own `open_cli_project_path_and_record` resolved
-/// `AppStatePathProvider::linux_default()` **directly** for RFC-058's project lock, the
+/// `AppStatePathProvider::default_for_host()` **directly** for RFC-058's project lock, the
 /// one call site this exact isolation split had not yet reached -- reachable from a test
 /// in this crate's own `tests.rs` (every CLI-path test calls it), so every such test bound
 /// a real `AF_UNIX` socket and wrote a real lock file under the developer's actual
@@ -3944,14 +3944,14 @@ pub(crate) fn open_real_recovery_state_root() -> Option<std::path::PathBuf> {
 #[cfg(not(test))]
 fn resolve_agent_run_state_dir() -> Option<std::path::PathBuf> {
     let path_provider =
-        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
+        tekstide_core::project::recent::AppStatePathProvider::default_for_host().ok()?;
     Some(path_provider.state_dir().to_path_buf())
 }
 
 /// The only source of a state directory [`open_real_agent_run_state_root`]
 /// can see in a test build -- the same shape `resolve_audit_state_dir`
 /// already has, reused rather than reinvented per that handoff's own
-/// instruction. No fallback to `AppStatePathProvider::linux_default()`
+/// instruction. No fallback to `AppStatePathProvider::default_for_host()`
 /// compiles into this function at all, so the real, developer-owned
 /// `$XDG_STATE_HOME`/`$HOME` is structurally unreachable from any test in
 /// this crate through this path -- not only the ~9 tests that reach it
@@ -3982,7 +3982,7 @@ fn resolve_agent_run_state_dir() -> Option<std::path::PathBuf> {
 /// speculatively.
 ///
 /// **Belt and suspenders**: the resolved directory is checked against
-/// the real one (`AppStatePathProvider::linux_default`, when resolvable)
+/// the real one (`AppStatePathProvider::default_for_host`, when resolvable)
 /// and this panics loudly, naming both paths, if they ever coincide.
 #[cfg(test)]
 fn resolve_agent_run_state_dir() -> Option<std::path::PathBuf> {
@@ -4027,7 +4027,8 @@ fn fresh_default_test_agent_run_state_dir() -> std::path::PathBuf {
 
 #[cfg(test)]
 fn assert_not_the_real_agent_run_state_dir(dir: &std::path::Path) {
-    if let Ok(real_provider) = tekstide_core::project::recent::AppStatePathProvider::linux_default()
+    if let Ok(real_provider) =
+        tekstide_core::project::recent::AppStatePathProvider::default_for_host()
     {
         assert_ne!(
             dir,
@@ -4530,7 +4531,7 @@ fn attempt_prepared_agent_run_launch(
             .capture_filesystem_baseline(project)
     });
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     // RFC-046 PR-046-C: the launch that workspace trust and command
     // approval exist to control gets its durable trail from here on --
     // see `AuditCoordinator::launch_audited_agent_run`'s own doc comment
@@ -7195,7 +7196,7 @@ pub(crate) enum AuditStoreOpenFailure {
 /// and opens the real, durable audit store at
 /// `<tekstide-state-root>/audit/` -- `<tekstide-state-root>` is the
 /// exact same directory `main.rs`'s `RecentProjectStore` already
-/// resolves (`AppStatePathProvider::linux_default`), reused rather than
+/// resolves (`AppStatePathProvider::default_for_host`), reused rather than
 /// independently re-derived, per RFC-013's own diagram ("one resolution,
 /// two consumers," `AppStatePathProvider::state_dir`'s own doc comment).
 ///
@@ -7210,7 +7211,7 @@ pub(crate) enum AuditStoreOpenFailure {
 /// audit-store-test-isolation handoff: the real resolution above is
 /// [`resolve_audit_state_dir`]'s `#[cfg(not(test))]` branch only -- a
 /// `#[cfg(test)]` build never compiles a path to
-/// `AppStatePathProvider::linux_default()` from this function at all,
+/// `AppStatePathProvider::default_for_host()` from this function at all,
 /// see that function's own `#[cfg(test)]` branch.
 pub(crate) fn open_real_audit_store(
     app_shell: &ApplicationShell,
@@ -7572,13 +7573,13 @@ fn apply_recovery_outcome(
 #[cfg(not(test))]
 fn resolve_audit_state_dir() -> Option<std::path::PathBuf> {
     let path_provider =
-        tekstide_core::project::recent::AppStatePathProvider::linux_default().ok()?;
+        tekstide_core::project::recent::AppStatePathProvider::default_for_host().ok()?;
     Some(path_provider.state_dir().to_path_buf())
 }
 
 /// The only source of a state directory `open_real_audit_store` can see
 /// in a test build. There is no fallback to
-/// `AppStatePathProvider::linux_default()` compiled into this function
+/// `AppStatePathProvider::default_for_host()` compiled into this function
 /// at all, so the real, developer-owned `$XDG_STATE_HOME`/`$HOME` is
 /// structurally unreachable from *any* test in this crate -- not merely
 /// the 23 call sites that read from a store, but every one of the
@@ -7610,7 +7611,7 @@ fn resolve_audit_state_dir() -> Option<std::path::PathBuf> {
 /// **Belt and suspenders**: whichever path filled the thread-local --
 /// the lazy default or an explicit [`test_audit_state_dir`] override --
 /// the resolved directory is checked against the real one
-/// (`AppStatePathProvider::linux_default`, when resolvable) and this
+/// (`AppStatePathProvider::default_for_host`, when resolvable) and this
 /// panics loudly, naming both paths, if they ever coincide. In ordinary
 /// operation this can never fire (a fresh temp directory or an
 /// explicitly test-supplied one is never the developer's real state
@@ -7653,7 +7654,8 @@ fn fresh_default_test_audit_state_dir() -> std::path::PathBuf {
 
 #[cfg(test)]
 fn assert_not_the_real_audit_state_dir(dir: &std::path::Path) {
-    if let Ok(real_provider) = tekstide_core::project::recent::AppStatePathProvider::linux_default()
+    if let Ok(real_provider) =
+        tekstide_core::project::recent::AppStatePathProvider::default_for_host()
     {
         assert_ne!(
             dir,

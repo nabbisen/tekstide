@@ -20751,10 +20751,15 @@ fn the_configuration_comes_from_the_resolved_user_path_and_no_other() {
             load_calls.push((path.clone(), code[index..].to_owned()));
         }
         // The provider is built from the environment in exactly one place
-        // outside its own definition: the binary's boot.
+        // outside its own definition: the binary's boot. RFC-028 D3: boot
+        // goes through the host-dispatch point (`default_for_host`), not
+        // a hardcoded platform name directly -- `linux_from_env` is still
+        // searched for here since calling it (as opposed to
+        // `linux_default`, which `default_for_host` itself calls on
+        // Linux) would mean something bypassed the dispatcher entirely.
         if !path.ends_with("config/path.rs") {
             for constructor in [
-                "ConfigPathProvider::linux_default(",
+                "ConfigPathProvider::default_for_host(",
                 "ConfigPathProvider::linux_from_env(",
             ] {
                 if code.contains(constructor) {
@@ -20820,7 +20825,7 @@ fn the_configuration_comes_from_the_resolved_user_path_and_no_other() {
         environment_providers[0]
             .0
             .ends_with("crates/tekstide/src/main.rs")
-            && environment_providers[0].1 == "ConfigPathProvider::linux_default(",
+            && environment_providers[0].1 == "ConfigPathProvider::default_for_host(",
         "{environment_providers:?}"
     );
 }

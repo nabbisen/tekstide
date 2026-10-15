@@ -14,7 +14,7 @@ use crate::project::{
     ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
 };
 use crate::runtime::terminal::{
-    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError,
+    BoundedRuntimeSummary, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntime,
     TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome, TerminationSignal,
 };
 use crate::transcript::{
@@ -521,7 +521,7 @@ fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
     let mut project = restricted_project(ProjectId::for_test(1), &root);
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, events, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -616,7 +616,7 @@ fn a_launch_whose_transcript_file_is_locked_starts_without_capture() {
     let holder = std::fs::File::open(held.transcript_file()).unwrap();
     holder.try_lock().unwrap();
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("a locked transcript file must not refuse the launch (RFC-050 D3)");
@@ -691,7 +691,7 @@ fn a_required_local_bounded_launch_is_refused_when_its_transcript_file_is_locked
     let holder = std::fs::File::open(held.transcript_file()).unwrap();
     holder.try_lock().unwrap();
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect_err("a mode that requires capture must refuse when capture cannot be prepared");
@@ -755,7 +755,7 @@ fn a_launch_whose_budget_is_exhausted_starts_without_capture() {
         ))
         .unwrap();
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("an exhausted budget must not refuse a LocalBounded launch (D4′)");
@@ -862,7 +862,7 @@ fn a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart()
             )
             .expect("local bounded transcript launch should validate");
         let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
-        let mut runtime = LinuxTerminalRuntime::new();
+        let mut runtime = TerminalRuntime::new();
         let (agent_run_id, _events, _endpoint) = project
             .launch_agent_run_with_runtime(plan, &mut runtime)
             .expect("the earlier run should launch");
@@ -940,7 +940,7 @@ fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_outpu
         )
         .expect("local bounded transcript launch should validate");
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1009,7 +1009,7 @@ fn transcript_capture_retains_pty_bytes_dropped_from_ui_buffer() {
         )
         .expect("local bounded transcript launch should validate");
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1084,7 +1084,7 @@ fn transcript_opt_out_launches_without_transcript_metadata() {
         )
         .expect("opted-out transcript launch should validate");
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1137,7 +1137,7 @@ fn required_transcript_capture_rejects_project_local_state_root_before_runtime_l
         )
         .expect("required transcript request should validate before path preflight");
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1170,7 +1170,7 @@ fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
         )
         .expect("local bounded transcript request should validate before path preflight");
     let plan = AgentRunLaunchPlan::from_validation(validation, "Agent").unwrap();
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1234,7 +1234,7 @@ fn project_session_launches_validated_managed_agent_run_through_terminal_runtime
         .expect("Managed profile should validate before launch plan creation");
     let plan = AgentRunLaunchPlan::from_validation(validation, "Built-in AI")
         .expect("validated Managed launch should produce a launch plan");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1320,7 +1320,7 @@ fn a_real_adapter_completes_a_real_approval_round_trip_through_the_production_sp
     let verified_cwd = plan.spec().verified_cwd().clone();
     let project_root = plan.spec().project_root().to_path_buf();
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events) = project
         .launch_prepared_agent_run_with_runtime(plan, &mut runtime)
         .expect("prepared Managed launch should spawn the real adapter binary");
@@ -1485,7 +1485,7 @@ fn a_managed_launch_can_bind_its_approval_channel_without_transcript_capture() {
         "no transcript capture was configured, so no transcript storage path should exist"
     );
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events) = project
         .launch_prepared_agent_run_with_runtime(plan, &mut runtime)
         .expect("prepared Managed launch should spawn the real adapter binary");
@@ -1600,7 +1600,7 @@ fn authorized_supervised_plan_spec_cannot_be_mutated_to_managed_runtime_launch()
     let mut terminal_spec = plan.terminal_launch_spec_for_runtime();
     terminal_spec.kind = TerminalKind::Managed;
 
-    let error = LinuxTerminalRuntime::new()
+    let error = TerminalRuntime::new()
         .launch_project_shell(&project, terminal_spec)
         .expect_err("authorized Supervised plan spec must not be mutable into Managed launch");
 
@@ -1618,7 +1618,7 @@ fn active_clean_text_document_permits_agent_runtime_launch() {
         .expect("active clean document should open");
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1667,7 +1667,7 @@ fn active_dirty_text_document_blocks_agent_runtime_launch_before_process_start()
         .expect("active document should become dirty");
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1697,7 +1697,7 @@ fn active_external_changed_text_document_blocks_agent_runtime_launch_before_proc
         .expect("active file should be externally changed");
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1732,7 +1732,7 @@ fn active_conflict_text_document_blocks_agent_runtime_launch_before_process_star
         .expect("active file should be externally changed");
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1769,7 +1769,7 @@ fn active_save_error_text_document_blocks_agent_runtime_launch_before_process_st
         .expect_err("unsafe symlink save should set SaveError state");
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1800,7 +1800,7 @@ fn safe_save_blocks_external_change_while_agent_run_is_active() {
         .expect("active clean document should open");
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1857,7 +1857,7 @@ fn runtime_launch_rejects_non_minimal_environment_policy_without_project_mutatio
     let mut profile = built_in_profile(Path::new("/bin/sh"));
     profile.environment_policy = AiCliEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()]);
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1903,7 +1903,7 @@ fn runtime_launch_rejects_non_minimal_environment_policy_for_the_adapter_path_to
         .expect("Managed profile should validate before launch plan creation");
     let plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
         .expect("validated Managed launch should produce a launch plan");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let error = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -1928,7 +1928,7 @@ fn project_session_maps_nonzero_agent_run_exit_to_failed() {
     let mut project = restricted_project(ProjectId::for_test(1), &root);
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (agent_run_id, _, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
@@ -2326,7 +2326,7 @@ fn a_trusted_project_launches_a_real_claude_code_profile_through_the_production_
     let plan = AgentRunLaunchPlan::from_validation(validation, "Claude Code")
         .expect("validated launch should produce a launch plan");
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events, _endpoint) = project
         .launch_agent_run_with_runtime(plan, &mut runtime)
         .expect("the de-gated production entry point should launch for real");
@@ -2519,7 +2519,7 @@ impl RoundTripAudit {
 }
 
 fn read_until_contains(
-    runtime: &mut LinuxTerminalRuntime,
+    runtime: &mut TerminalRuntime,
     handle: &TerminalRuntimeHandle,
     marker: &[u8],
 ) -> Vec<u8> {

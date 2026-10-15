@@ -375,6 +375,24 @@ then, not now.
   tested from scratch, the convention documented once as a review-gate rule for future providers.
   `LinuxTerminalRuntime` → `TerminalRuntime` (D3's own rename, performed here — before D5 starts
   editing the type's internals, not inside D5's own slice).
+
+  **Done, 2026-10-15.** `default_for_host()` added to both providers as a whole-function
+  `#[cfg(target_os = "linux")]`/`#[cfg(target_os = "macos")]` split, with a `compile_error!` for
+  anything neither names — the convention is load-bearing immediately, not decorative: every
+  production call site that used to name `linux_default()`/`AppStatePathProvider::linux_default()`
+  directly (`main.rs`, `shell.rs`, 7 real call sites total) now goes through the dispatcher instead.
+  `AppStatePathProvider::macos_default()`/`macos_from_env()` written from scratch, resolving to the
+  *same* `~/Library/Application Support/tekstide` directory `ConfigPathProvider`'s own macOS
+  resolution already uses — a deliberate choice, documented at the definition: unlike XDG's
+  config/state split, Apple's own convention draws no such distinction, so `config.toml`,
+  `recent-projects.json`, and the audit store's subdirectory share one folder on macOS where Linux
+  keeps two. `TerminalRuntime` rename: 112 occurrences across 17 files, a pure identifier rename
+  (confirmed no existing `TerminalRuntime` to collide with before starting), workspace builds and
+  the full test suite passes unchanged. One pre-existing source-scanning test
+  (`the_configuration_comes_from_the_resolved_user_path_and_no_other`, `shell/tests.rs`) had to be
+  updated — it asserted the literal text `"ConfigPathProvider::linux_default("` appears exactly once
+  in production code outside `config/path.rs`; corrected to assert `"ConfigPathProvider::
+  default_for_host("` instead, since that is now genuinely the only production call.
 - **PR-028-C — the IPC replacements** (D4). `LOCAL_PEERCRED`/`xucred` with its version check; the
   `/dev/fd` bind-path question resolved on PR-028-A's own `macos-latest` runner — the only macOS
   machine this project has — via a test asserting `fstat`'s `st_dev`/`st_ino` identity (or a

@@ -18,7 +18,7 @@ use crate::project::{
     ProjectChangeSetError, ProjectContentError, ProjectId, ProjectMode, ProjectOpenSurface,
     ProjectSession, ProjectTerminalError, ReviewBaseline, SaveAllOutcome,
 };
-use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
+use crate::runtime::terminal::{TerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
 #[derive(Debug, Default)]
 pub struct AppState {
@@ -415,7 +415,7 @@ impl AppState {
     pub fn launch_agent_run_with_runtime(
         &mut self,
         plan: AgentRunLaunchPlan,
-        runtime: &mut LinuxTerminalRuntime,
+        runtime: &mut TerminalRuntime,
     ) -> Result<
         (
             AgentRunId,

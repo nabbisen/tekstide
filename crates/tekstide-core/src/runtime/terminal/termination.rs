@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use super::launch::{processes_in_session, session_confirmed_empty, session_id_of};
 use super::{
-    BoundedRuntimeSummary, LinuxTerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
+    BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
     TerminalRuntimeHandle, TerminationOutcome, TerminationRequest, TerminationSignal,
 };
 
@@ -15,7 +15,7 @@ use super::{
 /// turn the enumerate-then-signal step below into an unbounded loop.
 const MAX_SESSION_SIGNAL_ITERATIONS: usize = 256;
 
-impl LinuxTerminalRuntime {
+impl TerminalRuntime {
     pub fn wait_for_exit(
         &mut self,
         handle: &TerminalRuntimeHandle,

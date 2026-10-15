@@ -1,7 +1,7 @@
 use crate::agent::AgentRunLaunchPlan;
 use crate::agent::AgentRunTranscriptCaptureError;
 use crate::runtime::terminal::{
-    LinuxTerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
+    TerminalRuntime, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntimeEvent,
     TerminationOutcome,
 };
 use crate::transcript::{
@@ -361,7 +361,7 @@ impl ProjectSession {
     pub(crate) fn launch_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
-        runtime: &mut LinuxTerminalRuntime,
+        runtime: &mut TerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         self.prepare_agent_run_launch(&mut plan)?;
         self.launch_prepared_agent_run_with_runtime(plan, runtime)
@@ -380,7 +380,7 @@ impl ProjectSession {
     pub(crate) fn launch_prepared_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
-        runtime: &mut LinuxTerminalRuntime,
+        runtime: &mut TerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         let transcript_storage_path = plan.transcript_storage_path().cloned();
 

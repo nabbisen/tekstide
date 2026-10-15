@@ -8,16 +8,34 @@ use std::path::{Path, PathBuf};
 /// `linux_default`/`linux_from_env` shape -- an env-reading `_default`
 /// convenience alongside a pure, injectable `_from_env` that is fully
 /// testable regardless of host OS. `macos_from_env`/`windows_from_env`
-/// exist as real, tested path-construction logic even though nothing
-/// calls `macos_default`/`windows_default` from a real entry point yet
-/// -- no `#[cfg(target_os = ..)]` dispatcher exists because nothing
-/// needs one until a real macOS/Windows build calls it.
+/// exist as real, tested path-construction logic for exactly this
+/// reason -- testable without needing to actually run on either
+/// platform.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigPathProvider {
     config_dir: PathBuf,
 }
 
 impl ConfigPathProvider {
+    /// RFC-028 D3: the single host-dispatch point every caller outside a
+    /// test should use instead of naming `linux_default`/`macos_default`
+    /// directly -- the convention stated once, on
+    /// [`crate::project::recent::AppStatePathProvider::default_for_host`]:
+    /// a whole-function `#[cfg(target_os = "...")]` split per platform,
+    /// never a blanket `#[cfg(unix)]`, and a hard compile error for
+    /// anything this split does not name.
+    #[cfg(target_os = "linux")]
+    pub fn default_for_host() -> Result<Self, ConfigPathError> {
+        Self::linux_default()
+    }
+
+    /// See [`Self::default_for_host`] above for the convention this
+    /// implements.
+    #[cfg(target_os = "macos")]
+    pub fn default_for_host() -> Result<Self, ConfigPathError> {
+        Self::macos_default()
+    }
+
     pub fn linux_default() -> Result<Self, ConfigPathError> {
         Self::linux_from_env(
             std::env::var_os("XDG_CONFIG_HOME"),
@@ -86,6 +104,15 @@ impl ConfigPathProvider {
         &self.config_dir
     }
 }
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+compile_error!(
+    "ConfigPathProvider::default_for_host() has no arm for this target_os -- RFC-028 D3's own \
+     convention requires a dispatch arm added deliberately for a new platform, not a fall-through \
+     to a Unix-shaped default that may not hold. Windows already has tested path-construction logic \
+     (windows_default/windows_from_env) but is not wired into default_for_host() here; that is \
+     RFC-071's own job when it does the rest of the Windows port."
+);
 
 /// The resolved, path-discipline-checked location of `config.toml` and
 /// its containing directory. Constructing one does **not** require

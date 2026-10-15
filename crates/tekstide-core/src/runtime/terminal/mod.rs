@@ -7,7 +7,7 @@ mod termination;
 pub(crate) mod tests;
 mod types;
 
-pub use launch::{LinuxTerminalRuntime, TerminalLaunchError, TerminalRuntimeError};
+pub use launch::{TerminalLaunchError, TerminalRuntime, TerminalRuntimeError};
 pub use reader::{TerminalReader, TerminalReaderDrain, WakeNotifier};
 pub(crate) use security::next_token_len;
 pub use security::{

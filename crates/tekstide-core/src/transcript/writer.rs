@@ -14,7 +14,7 @@ pub struct TranscriptWriterConfig {
     pub retention_limits: TranscriptRetentionLimits,
     /// RFC-011 Amendment 2: carried alongside the writer's own config so
     /// whoever moves the writer into the reader thread
-    /// (`LinuxTerminalRuntime::spawn_output_reader`) has the capture
+    /// (`TerminalRuntime::spawn_output_reader`) has the capture
     /// mode available at the point it constructs the reader's
     /// `TranscriptCapture` -- the mode decides D3's mid-stream failure
     /// policy, which is the reader thread's decision, not the writer's

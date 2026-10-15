@@ -12,6 +12,30 @@ pub struct AppStatePathProvider {
 }
 
 impl AppStatePathProvider {
+    /// RFC-028 D3: the single host-dispatch point every caller outside a
+    /// test should use instead of naming `linux_default`/`macos_default`
+    /// directly -- this is the convention stated once, here, and on
+    /// [`crate::config::ConfigPathProvider::default_for_host`]: a
+    /// whole-function `#[cfg(target_os = "...")]` split per platform,
+    /// never a blanket `#[cfg(unix)]` (which would silently claim the
+    /// BSDs and Solaris too), and a hard compile error for anything this
+    /// split does not name -- a future port must add its own arm
+    /// deliberately, not fall through to a Unix-shaped default that may
+    /// not hold. Adding a future path provider without a matching
+    /// `default_for_host` is a review-gate failure, not a style
+    /// preference.
+    #[cfg(target_os = "linux")]
+    pub fn default_for_host() -> Result<Self, RecentProjectStoreError> {
+        Self::linux_default()
+    }
+
+    /// See [`Self::default_for_host`] above for the convention this
+    /// implements.
+    #[cfg(target_os = "macos")]
+    pub fn default_for_host() -> Result<Self, RecentProjectStoreError> {
+        Self::macos_default()
+    }
+
     pub fn linux_default() -> Result<Self, RecentProjectStoreError> {
         Self::linux_from_env(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
     }
@@ -37,6 +61,45 @@ impl AppStatePathProvider {
         })
     }
 
+    /// RFC-028 D3: written from scratch, mirroring
+    /// [`crate::config::ConfigPathProvider::macos_from_env`]'s own
+    /// `~/Library/Application Support/tekstide` resolution exactly --
+    /// deliberately the *same* directory `ConfigPathProvider` resolves
+    /// to on this platform, not a second, state-specific one. Unlike
+    /// XDG's own `$XDG_CONFIG_HOME`/`$XDG_STATE_HOME` split, Apple's own
+    /// File System Programming Guide draws no such distinction: every
+    /// kind of persistent per-app data (settings, saved state, small
+    /// databases) is conventionally kept under one `Application Support/
+    /// <App>` folder. `config.toml`, `recent-projects.json`, and the
+    /// audit store's own subdirectory (`state_dir`'s other consumer, see
+    /// [`Self::state_dir`]) would therefore share one directory on
+    /// macOS where Linux keeps two -- a platform difference worth
+    /// stating plainly rather than leaving to be rediscovered, since
+    /// nothing about the filenames involved collides.
+    pub fn macos_default() -> Result<Self, RecentProjectStoreError> {
+        Self::macos_from_env(std::env::var_os("HOME"))
+    }
+
+    /// `~/Library/Application Support/tekstide`. See
+    /// [`Self::macos_default`] for why this is the same directory
+    /// [`crate::config::ConfigPathProvider::macos_from_env`] resolves to.
+    pub fn macos_from_env(
+        home: Option<impl AsRef<OsStr>>,
+    ) -> Result<Self, RecentProjectStoreError> {
+        let Some(home) = home.filter(|value| !value.as_ref().is_empty()) else {
+            return Err(RecentProjectStoreError::PathUnavailable(
+                "HOME is unavailable; recent-project state will not be persisted".to_owned(),
+            ));
+        };
+
+        Ok(Self {
+            state_dir: PathBuf::from(home.as_ref())
+                .join("Library")
+                .join("Application Support")
+                .join("tekstide"),
+        })
+    }
+
     pub fn from_state_dir(state_dir: impl Into<PathBuf>) -> Self {
         Self {
             state_dir: state_dir.into(),
@@ -57,6 +120,15 @@ impl AppStatePathProvider {
         &self.state_dir
     }
 }
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+compile_error!(
+    "AppStatePathProvider::default_for_host() has no arm for this target_os -- RFC-028 D3's own \
+     convention requires a dispatch arm added deliberately for a new platform, not a fall-through \
+     to a Unix-shaped default that may not hold. Unlike ConfigPathProvider, this type has no \
+     windows_default/windows_from_env yet either; that is RFC-071's own job when it does the rest \
+     of the Windows port."
+);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecentProjectStoreError {

@@ -143,7 +143,7 @@ fn boot() -> shell::State {
     // invalid file all boot with compiled defaults, and the project
     // board says so (`project_board_configuration_lines`).
     let configuration = shell::load_configuration_at_boot(
-        tekstide_core::config::ConfigPathProvider::linux_default(),
+        tekstide_core::config::ConfigPathProvider::default_for_host(),
     );
 
     // RFC-027 PR-027-A, D1/D12: a crash is detected, not guessed. Resolved
@@ -155,7 +155,7 @@ fn boot() -> shell::State {
     // itself cannot be resolved, the same condition `store` already degrades on;
     // crash detection is not allowed to fail the boot a missing `HOME` should not
     // be able to crash.
-    let instance_marker = match AppStatePathProvider::linux_default() {
+    let instance_marker = match AppStatePathProvider::default_for_host() {
         Ok(path_provider) => {
             match tekstide_core::recovery::start_instance(path_provider.state_dir()) {
                 Ok(startup) => {
@@ -181,7 +181,7 @@ fn boot() -> shell::State {
         }
     };
 
-    let mut store = match AppStatePathProvider::linux_default() {
+    let mut store = match AppStatePathProvider::default_for_host() {
         Ok(path_provider) => Some(RecentProjectStore::new(path_provider)),
         Err(error) => {
             eprintln!("{error}");
@@ -296,7 +296,7 @@ fn open_cli_project_path_and_record(
     tekstide_core::project::root::ProjectRootValidationError,
 > {
     // RFC-058: reuses `shell::open_real_recovery_state_root`, not a fresh
-    // `AppStatePathProvider::linux_default()` call of its own -- corrected at
+    // `AppStatePathProvider::default_for_host()` call of its own -- corrected at
     // review 521, which found the original independent resolution (matching
     // `instance_marker`'s own shape) was the one production call site this
     // crate's `#[cfg(test)]` state-root isolation had not yet reached: every

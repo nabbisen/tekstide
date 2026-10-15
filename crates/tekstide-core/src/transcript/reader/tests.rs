@@ -6,7 +6,7 @@ use super::*;
 use crate::domain::AgentRunId;
 use crate::project::{ProjectId, ProjectSession};
 use crate::runtime::terminal::{
-    LinuxTerminalRuntime, TerminalLaunchSpec, TerminalRuntimeHandle, TerminalSecurityParser,
+    TerminalLaunchSpec, TerminalRuntime, TerminalRuntimeHandle, TerminalSecurityParser,
 };
 use crate::transcript::{
     BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver,
@@ -114,7 +114,7 @@ fn still_being_written_threads_into_the_returned_variant() {
 /// content read whole. The fixture is real captured PTY output, not a
 /// synthesised convenient one -- a real shell running a real `printf`
 /// that emits a genuine SGR escape sequence, captured through the same
-/// `LinuxTerminalRuntime` harness `runtime::terminal::tests` already
+/// `TerminalRuntime` harness `runtime::terminal::tests` already
 /// uses.
 ///
 /// Phrased as a splitting invariant so it needs no per-effect byte
@@ -380,7 +380,7 @@ fn capture_real_sgr_output() -> Vec<u8> {
     let root = pty_test_root("sgr-capture");
     let project = ProjectSession::new(ProjectId::for_test(1), "Project", &root, &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _events) = runtime
         .launch_project_shell(&project, spec)
@@ -398,7 +398,7 @@ fn capture_real_sgr_output() -> Vec<u8> {
 }
 
 fn read_until_contains(
-    runtime: &mut LinuxTerminalRuntime,
+    runtime: &mut TerminalRuntime,
     handle: &TerminalRuntimeHandle,
     marker: &[u8],
 ) -> Vec<u8> {

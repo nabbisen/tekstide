@@ -83,7 +83,7 @@ fn linux_runtime_rejects_cross_project_launch() {
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(ProjectId::for_test(2), "Shell", &root, "/bin/sh");
 
-    let error = LinuxTerminalRuntime::new()
+    let error = TerminalRuntime::new()
         .launch_project_shell(&project, spec)
         .expect_err("cross-project terminal launch must be rejected");
 
@@ -98,7 +98,7 @@ fn linux_runtime_rejects_raw_managed_launch_without_agent_authority() {
     let mut spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
     spec.kind = TerminalKind::Managed;
 
-    let error = LinuxTerminalRuntime::new()
+    let error = TerminalRuntime::new()
         .launch_project_shell(&project, spec)
         .expect_err("raw terminal launch must not mint Managed AgentRun label");
 
@@ -113,7 +113,7 @@ fn linux_runtime_rejects_cwd_escape() {
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &outside, "/bin/sh");
 
-    let error = LinuxTerminalRuntime::new()
+    let error = TerminalRuntime::new()
         .launch_project_shell(&project, spec)
         .expect_err("cwd outside project root must be rejected");
 
@@ -139,7 +139,7 @@ fn linux_runtime_rejects_non_executable_shell_before_spawn() {
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, &shell);
 
-    let error = LinuxTerminalRuntime::new()
+    let error = TerminalRuntime::new()
         .launch_project_shell(&project, spec)
         .expect_err("non-executable shell path must be rejected");
 
@@ -155,7 +155,7 @@ fn linux_runtime_launches_project_shell_and_reads_marker() {
     let root = test_root("launch-shell");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, events) = runtime
         .launch_project_shell(&project, spec)
@@ -199,7 +199,7 @@ fn linux_runtime_rejects_cross_project_input_handle() {
     let root = test_root("cross-project-input");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -234,7 +234,7 @@ fn linux_runtime_reads_output_through_bounded_buffer() {
     let root = test_root("bounded-output");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -277,7 +277,7 @@ fn linux_runtime_routes_resize_to_project_terminal() {
     let root = test_root("resize-terminal");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -337,7 +337,7 @@ fn linux_runtime_terminates_session_leader_with_sighup() {
     let root = test_root("terminate-sighup");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Cat", &root, "/bin/cat");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -417,7 +417,7 @@ fn linux_runtime_rejects_cross_project_termination_handle() {
     let root = test_root("cross-project-terminate");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -471,7 +471,7 @@ fn linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup() {
     let root = test_root("terminate-sigkill-fallback");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -566,7 +566,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     let root = CleanupOnDrop(test_root("terminate-real-backgrounded-job"));
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &*root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -622,7 +622,7 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
     let root = CleanupOnDrop(test_root("terminate-setsid-survives"));
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &*root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -720,7 +720,7 @@ fn signal_candidates_never_signals_a_pid_outside_the_target_session() {
     let root = test_root("terminate-race-reverification");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -877,7 +877,7 @@ impl Drop for CleanupOnDrop {
 }
 
 fn read_until_contains(
-    runtime: &mut LinuxTerminalRuntime,
+    runtime: &mut TerminalRuntime,
     handle: &TerminalRuntimeHandle,
     marker: &[u8],
 ) -> Vec<u8> {
@@ -912,7 +912,7 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
 /// substring, so it keeps reading until a real value is extractable or the deadline passes,
 /// never returning on a marker that is merely present.
 fn read_until_parsed<T>(
-    runtime: &mut LinuxTerminalRuntime,
+    runtime: &mut TerminalRuntime,
     handle: &TerminalRuntimeHandle,
     mut parse: impl FnMut(&[u8]) -> Option<T>,
 ) -> Option<T> {
@@ -948,7 +948,7 @@ fn parse_bgpid(output: &[u8]) -> Option<u32> {
 /// required "leak happening, then not happening" form, the same shape
 /// `test_support`'s `kill_on_drop_child_does_not_leak_across_a_panic`
 /// already established for a bare `Child` -- here for a real,
-/// `LinuxTerminalRuntime`-launched terminal instead. `Drop::drop` runs
+/// `TerminalRuntime`-launched terminal instead. `Drop::drop` runs
 /// synchronously during unwinding, so by the time `catch_unwind` returns
 /// control here, `RunningTerminal`'s own `Drop` impl has already fired.
 ///
@@ -962,7 +962,7 @@ fn dropping_a_running_terminal_kills_the_real_process_group() {
     let root = test_root("drop-kills-process-group");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (terminal, _events) = runtime
         .launch_project_shell(&project, spec)
         .expect("plain shell launch should succeed");
@@ -1006,7 +1006,7 @@ fn launching_a_second_terminal_does_not_kill_the_first() {
     let _real_process_slot = crate::test_support::RealProcessLimiter::acquire();
     let root = test_root("insert-does-not-evict-a-live-session");
     let project = project_session(ProjectId::for_test(1), &root);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let spec_a = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell A", &root, "/bin/sh");
     let (terminal_a, _events) = runtime
@@ -1091,7 +1091,7 @@ fn a_second_terminals_child_inherits_no_descriptor_for_the_first_terminals_pty_m
     let _real_process_slot = crate::test_support::RealProcessLimiter::acquire();
     let root = test_root("no-cross-terminal-master-inheritance");
     let project = project_session(ProjectId::for_test(1), &root);
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let spec_a = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell A", &root, "/bin/sh");
     let (terminal_a, _events) = runtime

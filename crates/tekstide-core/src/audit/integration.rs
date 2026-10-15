@@ -12,7 +12,7 @@ use crate::project::{
     ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
     ProjectTranscriptError, ProjectTranscriptPurgeSummary, TranscriptRetentionCleanup,
 };
-use crate::runtime::terminal::{LinuxTerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
+use crate::runtime::terminal::{TerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
 use super::{
     AuditActionKind, AuditActionSource, AuditActorKind, AuditEventFamily, AuditOutcome,
@@ -593,7 +593,7 @@ impl<'a> AuditCoordinator<'a> {
         &mut self,
         project: &mut ProjectSession,
         mut plan: AgentRunLaunchPlan,
-        runtime: &mut LinuxTerminalRuntime,
+        runtime: &mut TerminalRuntime,
     ) -> Result<AuditActionResult<AuditedAgentLaunch>, AuditIntegrationError> {
         if !plan_is_auditable(&plan) {
             return Err(AuditIntegrationError::InvalidTypedContext);

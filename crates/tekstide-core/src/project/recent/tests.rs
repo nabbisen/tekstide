@@ -544,6 +544,30 @@ fn missing_home_returns_path_error_without_cwd_fallback() {
     assert!(error.to_string().contains("HOME is unavailable"));
 }
 
+/// RFC-028 D3: mirrors `ConfigPathProvider`'s own
+/// `macos_from_env_resolves_under_application_support` test exactly --
+/// same pattern, same resolved directory, since this type deliberately
+/// resolves to the identical path on macOS (see `macos_default`'s own
+/// doc comment for why).
+#[test]
+fn macos_from_env_resolves_under_application_support() {
+    let provider = AppStatePathProvider::macos_from_env(Some(OsString::from("/Users/user")))
+        .expect("HOME should be available");
+
+    assert_eq!(
+        provider.recent_projects_file(),
+        PathBuf::from("/Users/user/Library/Application Support/tekstide/recent-projects.json")
+    );
+}
+
+#[test]
+fn macos_from_env_errors_without_home() {
+    let error = AppStatePathProvider::macos_from_env(None::<OsString>)
+        .expect_err("missing HOME should not fall back to cwd");
+
+    assert!(error.to_string().contains("HOME is unavailable"));
+}
+
 #[test]
 fn availability_reports_folder_missing() {
     let sandbox = TestSandbox::new("folder-missing");

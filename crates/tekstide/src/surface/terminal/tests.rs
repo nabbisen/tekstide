@@ -244,7 +244,7 @@ fn a_launched_pane_renders_real_pty_output_end_to_end() {
 
     assert!(
         scratch.poll_until("PTY_MARKER_017C"),
-        "a real shell's real output, read through LinuxTerminalRuntime and advanced through \
+        "a real shell's real output, read through TerminalRuntime and advanced through \
          SecurityFilter, must reach the rendered grid -- this is TerminalPane's only production \
          Processor::advance call site, so this test is P1's re-enumeration against real code, \
          not just the test harness PR-017-B's own corpus used"

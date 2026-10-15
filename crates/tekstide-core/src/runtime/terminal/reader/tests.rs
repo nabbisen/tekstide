@@ -21,7 +21,7 @@ fn real_pty_output_reaches_the_channel_end_to_end() {
     let root = test_root("reader-basic");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -70,7 +70,7 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
     let root = test_root("reader-wake-data");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -130,7 +130,7 @@ fn the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming()
     let root = test_root("reader-wake-final");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -200,7 +200,7 @@ fn dropping_a_reader_over_a_live_silent_child_also_delivers_a_final_wake() {
     let root = test_root("reader-wake-on-drop");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -271,7 +271,7 @@ fn dropping_a_reader_over_a_live_silent_child_completes_promptly() {
     let root = test_root("reader-drop-live-child");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -330,7 +330,7 @@ fn reader_thread_does_not_busy_wait_while_idle() {
     let root = test_root("reader-idle-cpu");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -388,7 +388,7 @@ fn drain_available_never_blocks_the_caller_even_under_sustained_production() {
     let root = test_root("reader-nonblocking-drain");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -464,7 +464,7 @@ fn backpressure_stalls_the_producer_and_resumes_with_no_byte_loss_across_the_sta
     let root = test_root("reader-backpressure");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -743,7 +743,7 @@ fn transcript_write_blocking_also_blocks_every_later_send() {
         TranscriptRetentionLimits::agent_run_default(),
         TranscriptCaptureMode::LocalBounded,
     )));
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
         .expect("transcript-capturing shell launch should succeed (fifo reader must be open)");
@@ -882,7 +882,7 @@ fn make_fifo(path: &Path) {
 }
 
 /// RFC-011 Amendment 2, PR-A2-A, D1: the replacement for the old
-/// `LinuxTerminalRuntime::transcript_write_summary` must not silently
+/// `TerminalRuntime::transcript_write_summary` must not silently
 /// return `None` and look like "no transcript configured" once the
 /// writer moves into the reader thread. `None` here means capture was
 /// genuinely never requested for this terminal -- the ordinary case for
@@ -893,7 +893,7 @@ fn transcript_write_summary_is_none_when_capture_was_never_configured() {
     let root = test_root("reader-transcript-summary-none");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
 
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
@@ -1203,7 +1203,7 @@ fn launch_with_unwritable_transcript_capture(
     label: &str,
     mode: TranscriptCaptureMode,
 ) -> (
-    LinuxTerminalRuntime,
+    TerminalRuntime,
     TerminalRuntimeHandle,
     TranscriptStoragePath,
     TestDirs,
@@ -1235,7 +1235,7 @@ fn launch_with_unwritable_transcript_capture(
         mode,
     )));
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (terminal, _) = runtime.launch_project_shell(&project, spec).expect(
         "shell launch should succeed even though the transcript path is unwritable -- \
          opening /dev/full for write succeeds; only later writes to it fail",
@@ -1248,7 +1248,7 @@ fn launch_with_transcript_capture(
     label: &str,
     mode: TranscriptCaptureMode,
 ) -> (
-    LinuxTerminalRuntime,
+    TerminalRuntime,
     TerminalRuntimeHandle,
     TranscriptStoragePath,
     TestDirs,
@@ -1276,7 +1276,7 @@ fn launch_with_transcript_capture(
         mode,
     )));
 
-    let mut runtime = LinuxTerminalRuntime::new();
+    let mut runtime = TerminalRuntime::new();
     let (terminal, _) = runtime
         .launch_project_shell(&project, spec)
         .expect("transcript-capturing shell launch should succeed");
