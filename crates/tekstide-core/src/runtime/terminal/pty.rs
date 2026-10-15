@@ -201,6 +201,15 @@ fn set_nonblocking(fd: RawFd) -> Result<(), String> {
 /// does that atomically now, closing a fork/exec race a post-hoc
 /// `fcntl` could never close. This only reads the flag back as a
 /// postcondition check.
+///
+/// Review 580: a failure here means `OpenPty::new` returns `Err` and no
+/// terminal opens at all -- deliberately. If some platform's `open()`
+/// ever accepted `O_CLOEXEC` without honouring it, failing silently here
+/// would let every terminal on that platform start up with the exact
+/// fork/exec leak this function exists to rule out. Refusing to open
+/// rather than opening unprotected is the correct posture for a security
+/// property; do not turn this into a warning that lets `OpenPty::new`
+/// keep going.
 fn assert_cloexec(fd: RawFd) -> Result<(), String> {
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     if flags == -1 {
