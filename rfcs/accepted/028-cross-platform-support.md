@@ -43,7 +43,8 @@ and not:**
 | `SO_PEERCRED`/`libc::ucred` peer-credential check | `approval/channel.rs:1106-1120` | No | `LOCAL_PEERCRED`/`xucred` — different option level (`SOL_LOCAL`, not `SOL_SOCKET`) and a `cr_version` field that must be checked against `XUCRED_VERSION` |
 | `/proc/self/fd/<fd>` TOCTOU-safe bind path | `approval/channel.rs:170,402` | No (`/proc` does not exist on macOS) | `/dev/fd/<fd>` is the plausible BSD-heritage analogue — **must be verified on a real macOS machine that `bind()` through it is still TOCTOU-safe (the same open file, not a re-open by name) before this RFC commits to it; this is an open question, not a decision** |
 | `/proc/meminfo` | `measurement.rs:506` | No, already self-labelled "Linux-only... fails silently elsewhere" | Out of this RFC's scope — memory-pressure measurement is not required for correctness on macOS |
-| `kill`, `SIGHUP`/`SIGKILL`/`SIGTERM`, `fcntl`, `poll`/`pollfd`/`POLLIN`, `ioctl`/`TIOCSCTTY`/`TIOCSWINSZ`/`winsize`, `setsid`, `waitpid`, `openat`/`O_NOFOLLOW`/`O_DIRECTORY`/`O_CLOEXEC`, `geteuid`, `recv` w/ `MSG_PEEK`\|`MSG_DONTWAIT`, `sockaddr_un` | throughout `runtime/terminal/`, `approval/channel.rs`, `project_lock/` | **Yes, unchanged** | — |
+| `libc::ioctl(fd, libc::TIOCSCTTY, 0)` | `runtime/terminal/launch.rs:1133` | **Measured, PR-028-A, 2026-10-15: no — a type mismatch, not a missing symbol.** `TIOCSCTTY` itself exists on macOS; `ioctl`'s own `request` parameter is `u64` there against `u32` on Linux. Never caught by the original symbol-presence sweep, since the symbol genuinely exists on both platforms | `libc::TIOCSCTTY.into()` (rustc's own suggested fix) — mechanically plausible, functional correctness on real hardware not yet verified |
+| `kill`, `SIGHUP`/`SIGKILL`/`SIGTERM`, `fcntl`, `poll`/`pollfd`/`POLLIN`, `TIOCSWINSZ`/`winsize`, `setsid`, `waitpid`, `openat`/`O_NOFOLLOW`/`O_DIRECTORY`/`O_CLOEXEC`, `geteuid`, `recv` w/ `MSG_PEEK`\|`MSG_DONTWAIT`, `sockaddr_un` | throughout `runtime/terminal/`, `approval/channel.rs`, `project_lock/` | **Yes, unchanged** | — |
 | `posix_openpt`/`grantpt`/`unlockpt`/`ptsname_r` with `O_CLOEXEC` requested atomically at each `open()` (review 579's fix, replacing `openpty`'s own non-atomic two-step `fcntl` — see D5) | `runtime/terminal/pty.rs` | **Unverified — not assumed.** The function names match POSIX on both platforms, but the property that matters is not presence, it is whether macOS's `posix_openpt` actually *honours* `O_CLOEXEC` the same way Linux's `/dev/ptmx` open does; it has not always | Must be verified on the real `macos-latest` runner with the same concurrent-fork test Linux now has (`no_concurrently_forked_sibling_inherits_a_pty_master_fd`), not inferred from the flag being accepted without error |
 
 **`std::fs::File::try_lock()`** (`project_lock.rs`, `audit/store.rs`'s creation-section guard,
@@ -326,7 +327,42 @@ leaving it in place means nobody has to re-decide this under schedule pressure.
 `aarch64-apple-darwin` only for the first macOS artifact (D7), Windows reserved as its own future
 RFC (D1), and the keybinding slice landing before any artifact ships (D9).
 
-## Slices
+## PR-028-A measured, 2026-10-15 — this replaces the evidence table's point-in-time sweep
+
+`ci.yml`'s `macos-measurement` job ran on a real push (commit `c6b8a87`) and failed, as its own
+slice description says it is expected to. **11 compile errors, in order, `cargo build --workspace`
+on `macos-latest`:**
+
+1. `approval/channel.rs:1179,1187,1188,1193` (4 sites) — `libc::ucred`/`libc::SO_PEERCRED` don't
+   exist; rustc's own suggestion names `libc::xucred` directly, matching D4's own scoping.
+2. `runtime/terminal/launch.rs:1152` — `libc::SYS_close_range` doesn't exist; D5's own
+   `closefrom` replacement.
+3. `runtime/terminal/pty.rs:252` — **`libc::ptsname_r` doesn't exist on macOS.** This is D5's own
+   flagged concern (added when review 579/580's `CLOEXEC` fix was still in flight) confirmed as a
+   real compile failure, not a hypothetical one. `posix_openpt`/`grantpt`/`unlockpt` themselves
+   compiled without error — the gap is `ptsname_r` specifically, not the whole replacement.
+   rustc's own suggestion (`ptsname`, the non-reentrant form) is exactly the one review 577 ruled
+   out on Linux for thread-safety — a macOS port needs its own reentrant equivalent, not a silent
+   fallback to the unsafe one.
+4. `runtime/terminal/reader.rs:484` — `libc::SYS_gettid` doesn't exist; D5's own
+   `pthread_threadid_np` replacement.
+5. `runtime/terminal/reader.rs:674` (2 errors) — `libc::eventfd`/`libc::EFD_CLOEXEC` don't exist;
+   D5's own self-pipe/kqueue replacement.
+6. **`runtime/terminal/launch.rs:1133` — `libc::ioctl(ctty_fd, libc::TIOCSCTTY, 0)`: a type
+   mismatch, not a missing symbol.** `TIOCSCTTY` itself exists on macOS, but `ioctl`'s own `request`
+   parameter is `u64` there against `u32` on Linux — a new finding, not named in D5's original six.
+   Added to D5's own table below. rustc's own suggested fix (`.into()`) is almost certainly right
+   but unverified against actual ioctl behavior on real hardware, since the semantics of the
+   conversion are mechanical, not functional.
+
+**D5's own mechanism table gains a seventh row** for the `TIOCSCTTY` type mismatch, found only by
+this real measurement, not by the original `libc::`/`/proc`/`SYS_*` sweep (a symbol that exists on
+both platforms with a different parameter type was never going to show up in a presence/absence
+grep). PR-028-B/D's own scope grows by exactly this one line; nothing else in D3/D4 changes.
+
+Measured, not assumed: `nproc`/`pid_max` on this runner type were not captured this slice (not
+needed for a build-only measurement); if PR-028-D's own test-splitting work needs them, capture
+then, not now.
 
 - **PR-028-A — the measurement, before the fix.** Add a `macos-latest` job to `ci.yml`,
   **non-blocking** (`continue-on-error`), running `cargo build --workspace` at minimum. Add the
