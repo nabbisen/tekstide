@@ -19,12 +19,15 @@ regression test forks siblings while opening PTYs and asserts none of them holds
 fails against the previous code (measured: 1,512 inherited descriptors across 38,199 iterations)
 and passed against this one in local testing across many dozens of runs.
 
-**Status, corrected rather than left overstated**: the regression test above fails reproducibly in
-this project's own CI (not locally, not yet reproduced outside it) even against the fixed code,
-and is quarantined (`#[ignore]`) pending investigation rather than deleted or weakened — see
-`rfcs/handoffs/test-process-leak.md` for the full account. Whether the fix itself is incomplete in
-some environments, or the failure has a different cause, is not yet known; this entry will be
-corrected again once it is.
+**Status, verified rather than assumed**: the regression test's own apparent CI-only failure was
+traced to the test, not the fix — `FD_CLOEXEC` is honoured at `execve`, not at `fork`, so a
+forked-but-not-yet-exec'd child's `/proc/<pid>/fd` still lists a properly close-on-exec descriptor,
+and the test's original fd-presence check could not tell that apart from a real leak. Corrected to
+require the child to have already exec'd before counting a match; re-ablated against the real
+pre-fix code to confirm the corrected check still catches the original defect (it does, every
+report past its own exec), then run live on this project's own CI (`ubuntu-latest`) rather than only
+locally — green. The fix is confirmed atomic on that runner, not only on this project's own
+development machine.
 
 **On how likely this was**: reaching it needs a spawn to land inside a window microseconds wide, and
 the figures above come from an experiment built to hit that window deliberately — they are not a
