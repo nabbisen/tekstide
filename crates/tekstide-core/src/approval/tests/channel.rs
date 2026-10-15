@@ -1260,3 +1260,87 @@ fn which_python3() -> Result<String, ()> {
         .map(|s| s.trim().to_string())
         .map_err(|_| ())
 }
+
+/// RFC-028 D4: this project's own open question, named rather than
+/// assumed -- does `/dev/fd/<fd>/<name>` on macOS have the same TOCTOU-
+/// safety property `/proc/self/fd/<fd>/<name>` gives `magic_fd_path` on
+/// Linux (reaching the file a verified directory *fd* points to,
+/// immune to whatever has happened to the directory's *pathname* since
+/// that fd was opened), or does it quietly re-resolve by name instead?
+/// D4's own text is explicit that `/dev/fd` is written into the RFC as
+/// a decision only once this passes on a real runner -- until then it
+/// is a hypothesis, which is exactly why this is a test and not a
+/// doc-comment claim.
+///
+/// Method: open a directory, create a file in it, record the file's
+/// real identity (`fstat`'s `st_dev`/`st_ino`). Then rename the
+/// *directory itself* out of the way and put a different directory
+/// (containing a same-named file with different content) in its place
+/// -- the directory-rename-race shape a TOCTOU attacker would need.
+/// Stat the *same* `/dev/fd/<fd>/<name>` path again: if the identity
+/// is unchanged, the magic path followed the fd, not the pathname, and
+/// the hypothesis holds; if the identity changed (or now points at the
+/// decoy), it does not, and `/dev/fd` cannot be used the way
+/// `/proc/self/fd` is on Linux without its own, different safeguard.
+///
+/// **This can only execute once RFC-028 PR-028-D's own macOS port
+/// makes this crate compile on macOS at all** -- `cargo build` alone
+/// fails today on unrelated, unported mechanisms (PR-028-A's own
+/// measurement), so this test cannot run, only compile, until then.
+/// Written now because the question belongs to this slice (D4); the
+/// answer does not exist yet and must not be assumed.
+#[cfg(target_os = "macos")]
+#[test]
+fn dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+
+    let base = std::env::temp_dir().join(format!(
+        "tekstide-dev-fd-toctou-{}-{}",
+        std::process::id(),
+        rand_seed()
+    ));
+    let real_dir = base.join("real");
+    let decoy_dir = base.join("decoy");
+    let moved_dir = base.join("moved-aside");
+    std::fs::create_dir_all(&real_dir).expect("create real dir");
+    std::fs::create_dir_all(&decoy_dir).expect("create decoy dir");
+
+    std::fs::write(real_dir.join("probe"), b"real-content").expect("write real probe");
+    std::fs::write(decoy_dir.join("probe"), b"decoy-content").expect("write decoy probe");
+
+    let dir_fd = std::fs::File::open(&real_dir).expect("open real dir for its fd");
+    let magic_path = format!("/dev/fd/{}/probe", dir_fd.as_raw_fd());
+
+    let before = std::fs::metadata(&magic_path).expect("magic path resolves before the race");
+    assert_eq!(
+        std::fs::read(&magic_path).expect("read before the race"),
+        b"real-content",
+        "precondition: the magic path reads the real file before anything moves"
+    );
+
+    // The race: the directory this fd was opened from is renamed away,
+    // and a different directory -- same name, different content at the
+    // same relative filename -- takes its place.
+    std::fs::rename(&real_dir, &moved_dir).expect("rename real dir aside");
+    std::fs::rename(&decoy_dir, &real_dir).expect("rename decoy dir into place");
+
+    let after = std::fs::metadata(&magic_path)
+        .expect("magic path must still resolve after the directory rename race");
+    assert_eq!(
+        (before.dev(), before.ino()),
+        (after.dev(), after.ino()),
+        "dev/fd did not follow the verified fd -- the magic path's target identity changed \
+         after the directory holding it was renamed, which means /dev/fd re-resolves by \
+         pathname rather than following the fd the way /proc/self/fd does on Linux"
+    );
+    assert_eq!(
+        std::fs::read(&magic_path).expect("read after the race"),
+        b"real-content",
+        "dev/fd read the decoy's content after the rename race -- it followed the pathname, \
+         not the fd, which means it cannot be used the way /proc/self/fd is on Linux without \
+         its own, different safeguard"
+    );
+
+    let _ = std::fs::remove_dir_all(&base);
+}

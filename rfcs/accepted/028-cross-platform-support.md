@@ -163,6 +163,23 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   `fstat`'s `st_dev`/`st_ino` before and after, or a write-then-read round trip, not merely that the
   path resolves. `/dev/fd` is written into this RFC only once that assertion passes on the runner;
   until then it is a hypothesis, not D4's decision.
+
+  **PR-028-C, 2026-10-15: the `LOCAL_PEERCRED`/`xucred` half is done; the `/dev/fd` half is written,
+  not yet verified, and a real sequencing dependency on D5 was found doing it.** `peer_credentials`
+  split into Linux (`SO_PEERCRED`/`ucred`, unchanged) and macOS (`LOCAL_PEERCRED`/`xucred`, with the
+  `cr_version` check this decision specified) arms behind this crate's own cross-platform
+  `PeerCredentials` struct (`pid`/`gid` as `Option`, since macOS's mechanism reports neither the
+  same way Linux's does); `peer_uid` and the `BindTargetAlreadyListening` diagnostic both updated to
+  the new shape. The `/dev/fd` test (`dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname`,
+  `approval/tests/channel.rs`) is written — a directory-rename race, not merely a path-resolves
+  check — and its logic was sanity-checked by temporarily building it under `#[cfg(target_os =
+  "linux")]` (where `/dev/fd` is itself a `/proc/self/fd` symlink, so the test is expected to pass
+  there and did). **It cannot run on macOS yet, only compile, and that is a real dependency this
+  RFC's own "C and D may land in either order" did not account for**: `cargo build --workspace`
+  fails on macOS today (PR-028-A's own 11 errors, all D5's), so no test — this one included — can
+  execute on that platform until D5's own sweep makes the crate compile there at all. The hypothesis
+  stays unverified, stated as exactly that, until a PR-028-D (or later) CI run can actually execute
+  it.
 - **D5. Process/PTY: six Linux-only mechanisms, re-scoped against a full sweep rather than the
   three files expected to hold them (review 566's own correction).** Four replaced in-kind
   (`/proc` enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe
@@ -435,5 +452,9 @@ then, not now.
   macOS path alongside the Linux one before the first macOS artifact ships, not discovered at the
   release gate.
 
-PR-028-C and PR-028-D may land in either order; PR-028-A and PR-028-B must land first; PR-028-E
-needs PR-028-D's own macOS test run to check its collision sweep against, not just its own code.
+PR-028-C and PR-028-D may land in either order **at the code/decision level — found, PR-028-C,
+2026-10-15: not at the test-execution level**. `cargo build --workspace` fails on macOS until every
+one of D5's six mechanisms is ported (PR-028-A's own 11 errors are all D5's), so no macOS test —
+including C's own `/dev/fd` TOCTOU check — can actually *run* until D5's sweep is done, even though
+C's code can be written and reviewed first. PR-028-A and PR-028-B must land first; PR-028-E needs
+PR-028-D's own macOS test run to check its collision sweep against, not just its own code.

@@ -12,10 +12,11 @@
 //!    Tekstide spawned for *this specific* `AgentRun` must not be able to
 //!    submit a proposal that gets treated as legitimate. Two independent
 //!    layers enforce this, deliberately redundant:
-//!    - **Peer credentials** (`SO_PEERCRED`, kernel-verified, unforgeable
-//!      by the connecting process): the connecting process must run as
-//!      the same Unix user as Tekstide itself. This rejects a different
-//!      *user account* entirely.
+//!    - **Peer credentials** (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on
+//!      macOS -- RFC-028 D4, both kernel-verified and unforgeable by the
+//!      connecting process): the connecting process must run as the same
+//!      Unix user as Tekstide itself. This rejects a different *user
+//!      account* entirely.
 //!    - **The per-run capability token**: same-user is not enough on a
 //!      machine where the same user runs other processes. The token is
 //!      generated fresh per `bind()` call, delivered to the real adapter
@@ -453,9 +454,11 @@ pub enum ApprovalChannelErrorReason {
     /// removed. Distinguished from a bare `Io` for the same reason as
     /// [`Self::BindTargetNotASocket`] -- review 554's own row-1 re-count.
     /// Review 576: this arm's `source` now also names the peer's
-    /// `SO_PEERCRED` pid/uid/gid, gathered from the connected stream
-    /// before it is dropped -- the refusal is unchanged, only the
-    /// diagnostic detail is new.
+    /// credentials (pid/uid/gid, `pid`/`gid` `"unknown"` on macOS, since
+    /// that platform's own mechanism does not report either the same
+    /// way -- see this module's private `PeerCredentials` for why),
+    /// gathered from the connected stream before it is dropped -- the
+    /// refusal is unchanged, only the diagnostic detail is new.
     BindTargetAlreadyListening,
 }
 
@@ -988,12 +991,20 @@ fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), Appro
             // whether the peer is this test process itself (the staging
             // is suspect) or something else (a pid worth chasing).
             let diagnostic = match peer_credentials(&stream) {
+                // RFC-028 D4: `pid`/`gid` are `Option` because macOS's own
+                // mechanism does not report a pid at all and reports
+                // groups rather than one primary gid -- "unknown" on
+                // that platform is accurate, not a missing case.
                 Ok(cred) => io::Error::other(format!(
-                    "connect() succeeded; peer is pid={} uid={} gid={} (SO_PEERCRED)",
-                    cred.pid, cred.uid, cred.gid
+                    "connect() succeeded; peer is pid={} uid={} gid={}",
+                    cred.pid
+                        .map_or_else(|| "unknown".to_owned(), |pid| pid.to_string()),
+                    cred.uid,
+                    cred.gid
+                        .map_or_else(|| "unknown".to_owned(), |gid| gid.to_string()),
                 )),
                 Err(error) => io::Error::other(format!(
-                    "connect() succeeded but SO_PEERCRED failed: {error}"
+                    "connect() succeeded but reading peer credentials failed: {error}"
                 )),
             };
             Err(ApprovalChannelError::with_source(
@@ -1172,11 +1183,33 @@ fn current_euid() -> u32 {
     unsafe { libc::geteuid() }
 }
 
-/// Reads the connecting process's real, kernel-verified credentials via
-/// `SO_PEERCRED`. This is not something the connecting process can spoof:
-/// the kernel fills in `ucred` from the actual socket peer at `connect()`
-/// time, not from anything the peer transmits.
-fn peer_credentials(stream: &UnixStream) -> io::Result<libc::ucred> {
+/// RFC-028 D4: this crate's own cross-platform shape for a peer's
+/// kernel-verified credentials, independent of either platform's raw
+/// struct. `pid` and `gid` are `Option` because the two mechanisms this
+/// type abstracts over do not report the same things: macOS's
+/// `LOCAL_PEERCRED`/`xucred` carries no pid at all (`LOCAL_PEERPID` is a
+/// separate sockopt, not needed here -- the only check this crate ever
+/// makes is same-user, which `uid` alone answers) and reports a *list*
+/// of groups rather than one primary gid, so `gid` here is the first
+/// reported group when macOS provides at least one.
+struct PeerCredentials {
+    pid: Option<u32>,
+    uid: u32,
+    gid: Option<u32>,
+}
+
+/// Reads the connecting process's real, kernel-verified credentials.
+/// This is not something the connecting process can spoof: the kernel
+/// fills in the platform's own credentials struct from the actual
+/// socket peer at `connect()` time, not from anything the peer
+/// transmits. Linux: `SO_PEERCRED`/`struct ucred`. macOS: RFC-028 D4,
+/// `LOCAL_PEERCRED`/`struct xucred` -- a different option *level*
+/// (`SOL_LOCAL`, not `SOL_SOCKET`), with its own `cr_version` field
+/// checked against `XUCRED_VERSION` before trusting the rest of the
+/// struct, the same discipline this security boundary already applies
+/// to every other kernel-reported value.
+#[cfg(target_os = "linux")]
+fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
     let fd = stream.as_raw_fd();
     // SAFETY: `cred` is a plain-old-data struct with no invariants beyond
     // its fields being initialized, which `getsockopt` does on success;
@@ -1196,7 +1229,48 @@ fn peer_credentials(stream: &UnixStream) -> io::Result<libc::ucred> {
         if result != 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(cred)
+        Ok(PeerCredentials {
+            pid: Some(cred.pid as u32),
+            uid: cred.uid,
+            gid: Some(cred.gid),
+        })
+    }
+}
+
+/// See [`peer_credentials`]'s own doc comment (the Linux arm) for the
+/// convention this implements.
+#[cfg(target_os = "macos")]
+fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
+    let fd = stream.as_raw_fd();
+    // SAFETY: same reasoning as the Linux arm above -- `cred` is
+    // plain-old-data, `len` is sized to match, both fixed-size.
+    unsafe {
+        let mut cred: libc::xucred = std::mem::zeroed();
+        let mut len = std::mem::size_of::<libc::xucred>() as libc::socklen_t;
+        let result = libc::getsockopt(
+            fd,
+            libc::SOL_LOCAL,
+            libc::LOCAL_PEERCRED,
+            &mut cred as *mut libc::xucred as *mut libc::c_void,
+            &mut len,
+        );
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if cred.cr_version != libc::XUCRED_VERSION {
+            return Err(io::Error::other(format!(
+                "LOCAL_PEERCRED returned cr_version {}, expected {} -- refusing to trust the \
+                 rest of the struct",
+                cred.cr_version,
+                libc::XUCRED_VERSION
+            )));
+        }
+        let gid = (cred.cr_ngroups > 0).then(|| cred.cr_groups[0]);
+        Ok(PeerCredentials {
+            pid: None,
+            uid: cred.cr_uid,
+            gid,
+        })
     }
 }
 
