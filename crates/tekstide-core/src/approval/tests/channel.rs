@@ -1295,11 +1295,22 @@ fn dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname() {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::MetadataExt;
 
+    // Review 587: cleans up even if an assertion below panics, so a red
+    // run on the real runner doesn't also leak a temp directory into the
+    // next one.
+    struct CleanupGuard(std::path::PathBuf);
+    impl Drop for CleanupGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     let base = std::env::temp_dir().join(format!(
         "tekstide-dev-fd-toctou-{}-{}",
         std::process::id(),
         rand_seed()
     ));
+    let _cleanup = CleanupGuard(base.clone());
     let real_dir = base.join("real");
     let decoy_dir = base.join("decoy");
     let moved_dir = base.join("moved-aside");
@@ -1312,7 +1323,25 @@ fn dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname() {
     let dir_fd = std::fs::File::open(&real_dir).expect("open real dir for its fd");
     let magic_path = format!("/dev/fd/{}/probe", dir_fd.as_raw_fd());
 
-    let before = std::fs::metadata(&magic_path).expect("magic path resolves before the race");
+    // Review 587: the likelier outcome on a BSD-derived `/dev/fd`
+    // (`fdescfs`, which re-opens the fd a descriptor names rather than
+    // supporting `/proc`-style path traversal *through* a directory
+    // descriptor) is that this access fails outright, not that it
+    // succeeds unsafely. Named and asserted as its own, distinct
+    // outcome -- "not traversable at all" -- rather than folded into
+    // the same `.expect()` the later identity check uses, so a red run
+    // says which of the two it hit.
+    let before = match std::fs::metadata(&magic_path) {
+        Ok(metadata) => metadata,
+        Err(error) => panic!(
+            "NOT TRAVERSABLE: /dev/fd/<fd>/<name> did not resolve at all ({error}) -- this is \
+             the likelier outcome on a BSD-derived /dev/fd (fdescfs re-opens the fd itself; it \
+             is not obliged to support path traversal through a directory descriptor the way \
+             /proc/self/fd does on Linux). See RFC-028 D4's own two named fallbacks \
+             (pthread_fchdir_np + a relative bind(), or accepting the already-verified \
+             directory fd with the residual documented) -- this is not a bug in this test."
+        ),
+    };
     assert_eq!(
         std::fs::read(&magic_path).expect("read before the race"),
         b"real-content",
@@ -1325,22 +1354,25 @@ fn dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname() {
     std::fs::rename(&real_dir, &moved_dir).expect("rename real dir aside");
     std::fs::rename(&decoy_dir, &real_dir).expect("rename decoy dir into place");
 
-    let after = std::fs::metadata(&magic_path)
-        .expect("magic path must still resolve after the directory rename race");
+    let after = std::fs::metadata(&magic_path).unwrap_or_else(|error| {
+        panic!(
+            "the magic path resolved before the rename race but not after it ({error}) -- \
+             neither \"not traversable\" nor \"traversable but unsafe\", a third shape worth \
+             its own investigation rather than assuming either fallback applies"
+        )
+    });
     assert_eq!(
         (before.dev(), before.ino()),
         (after.dev(), after.ino()),
-        "dev/fd did not follow the verified fd -- the magic path's target identity changed \
-         after the directory holding it was renamed, which means /dev/fd re-resolves by \
-         pathname rather than following the fd the way /proc/self/fd does on Linux"
+        "TRAVERSABLE BUT UNSAFE: dev/fd did not follow the verified fd -- the magic path's \
+         target identity changed after the directory holding it was renamed, which means \
+         /dev/fd re-resolves by pathname rather than following the fd the way /proc/self/fd \
+         does on Linux. See RFC-028 D4's own two named fallbacks."
     );
     assert_eq!(
         std::fs::read(&magic_path).expect("read after the race"),
         b"real-content",
-        "dev/fd read the decoy's content after the rename race -- it followed the pathname, \
-         not the fd, which means it cannot be used the way /proc/self/fd is on Linux without \
-         its own, different safeguard"
+        "TRAVERSABLE BUT UNSAFE: dev/fd read the decoy's content after the rename race -- it \
+         followed the pathname, not the fd. See RFC-028 D4's own two named fallbacks."
     );
-
-    let _ = std::fs::remove_dir_all(&base);
 }

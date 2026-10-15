@@ -1211,13 +1211,24 @@ struct PeerCredentials {
 #[cfg(target_os = "linux")]
 fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
     let fd = stream.as_raw_fd();
-    // SAFETY: `cred` is a plain-old-data struct with no invariants beyond
-    // its fields being initialized, which `getsockopt` does on success;
-    // `len` is initialized to the struct's size, matching what
-    // `getsockopt` expects for a fixed-size option, and is unused if the
-    // call fails.
+    // Review 587's own recommendation, applied for symmetry with the
+    // macOS arm's `cr_version` sentinel below: seeded with values no
+    // real peer ever has (a negative pid, `u32::MAX` uid/gid) rather
+    // than zeroed, so a hypothetical `getsockopt` that reports success
+    // without actually writing the buffer cannot be mistaken for pid 0/
+    // uid 0 (root) -- it instead produces a uid that will never match
+    // `self.owner_uid` and the connection fails closed. No kernel
+    // actually does this; this is defence-in-depth, not a live fix.
+    let mut cred = libc::ucred {
+        pid: -1,
+        uid: u32::MAX,
+        gid: u32::MAX,
+    };
+    // SAFETY: `cred` is a plain-old-data struct with no invariants
+    // beyond its fields being initialized (done above); `len` is
+    // initialized to the struct's size, matching what `getsockopt`
+    // expects for a fixed-size option, and is unused if the call fails.
     unsafe {
-        let mut cred: libc::ucred = std::mem::zeroed();
         let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
         let result = libc::getsockopt(
             fd,
@@ -1242,10 +1253,24 @@ fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
 #[cfg(target_os = "macos")]
 fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
     let fd = stream.as_raw_fd();
-    // SAFETY: same reasoning as the Linux arm above -- `cred` is
-    // plain-old-data, `len` is sized to match, both fixed-size.
+    // Review 587: `XUCRED_VERSION` is `0`, the same bit pattern
+    // `mem::zeroed()` produces -- without this, a hypothetical
+    // `getsockopt` that reports success without writing the buffer
+    // would be indistinguishable from a genuine version-0 reply, and
+    // the `cr_version` check below would be a tautology rather than a
+    // guard. Seeding `cr_version` with a sentinel that is *not*
+    // `XUCRED_VERSION` first makes the existing check real: an
+    // unwritten struct now fails it, the same way a torn or truncated
+    // one should.
+    //
+    // SAFETY: `cred` is a plain-old-data struct with no invariants
+    // beyond its fields being initialized; zeroing first and then
+    // overwriting `cr_version` leaves every field initialized before
+    // `getsockopt` or the version check reads any of them. `len` is
+    // sized to match, fixed-size.
     unsafe {
         let mut cred: libc::xucred = std::mem::zeroed();
+        cred.cr_version = u32::MAX;
         let mut len = std::mem::size_of::<libc::xucred>() as libc::socklen_t;
         let result = libc::getsockopt(
             fd,

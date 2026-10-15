@@ -180,6 +180,32 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   execute on that platform until D5's own sweep makes the crate compile there at all. The hypothesis
   stays unverified, stated as exactly that, until a PR-028-D (or later) CI run can actually execute
   it.
+
+  **Required, review 587: the test must say which of two failure shapes it hit, and the two
+  fallbacks are named now rather than discovered if the hypothesis fails.** Updated to report "NOT
+  TRAVERSABLE" (the magic path never resolved at all) distinctly from "TRAVERSABLE BUT UNSAFE" (it
+  resolved but followed the renamed pathname, not the fd) — the first is the likelier outcome:
+  `/dev/fd` on BSD-derived systems is `fdescfs`, which re-opens the file a descriptor names, and is
+  not obliged to support `/proc`-style path traversal *through* a directory descriptor
+  (`/dev/fd/<n>/<name>`) the way `/proc/self/fd` does on Linux. Two named fallbacks, either usable
+  if the real answer is "not traversable" or "unsafe":
+
+  1. **`pthread_fchdir_np` + a relative `bind()`.** Sets the *per-thread* current directory (not the
+     process-global one `fchdir` would mutate — unacceptable in a multi-threaded GUI process, where
+     it would move every thread's relative paths, not just the caller's), then binds a short
+     relative name instead of an absolute magic path — the same TOCTOU-closing property
+     `/proc/self/fd` gives on Linux, reached a different way. **Not in the `libc` crate** (checked
+     against the vendored Apple module directly): needs this crate's own `extern "C"` declaration,
+     and being an `_np` ("non-portable," Apple's own naming convention for such APIs) interface, its
+     availability should be confirmed on the real runner rather than assumed from the name matching
+     a known Darwin symbol.
+  2. **Accept the already-verified directory fd and document the residual.** The `approval`
+     directory this binds into is already opened `O_NOFOLLOW|O_DIRECTORY` through a pinned
+     `state_root_fd` and `fchmod`ed `0700` (response 113's own existing discipline); what would
+     remain exposed is a same-user rename of a directory this process already holds an open fd to —
+     narrower than the general TOCTOU class this mechanism exists to close, but a real, stated
+     residual risk if chosen, not a mitigation. Must be written as exactly that in whichever slice
+     decides between these two, not left implicit.
 - **D5. Process/PTY: six Linux-only mechanisms, re-scoped against a full sweep rather than the
   three files expected to hold them (review 566's own correction).** Four replaced in-kind
   (`/proc` enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe
