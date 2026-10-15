@@ -163,8 +163,10 @@ struct ListenerSettleResult {
 /// socket answering `connect()` until the child reaches `exec` (std sets
 /// `CLOEXEC`, so the window closes there, not at the child's eventual
 /// exit). Measured live, repeatedly, on 2026-10-15: closes within
-/// 1.9ms-5.3ms every time it was caught. This function accepts that
-/// window explicitly -- polls until the path refuses or `budget` elapses
+/// single-digit milliseconds (1.5ms-6.5ms across every catch so far)
+/// every time it was caught -- never approaching the 500ms budget below.
+/// This function accepts that window explicitly -- polls until the path
+/// refuses or `budget` elapses
 /// -- rather than letting the test fail on a race already understood and
 /// bounded. The common case (no sibling fork in flight) is checked first,
 /// cheaply, with no polling or `/proc` work at all.
@@ -218,10 +220,18 @@ fn wait_for_path_to_stop_answering(socket_path: &Path, budget: Duration) -> List
     } else {
         format!(
             "the path never stopped answering within the {budget:?} budget -- longer than any \
-             fork/exec window measured for this process (1.9ms-5.3ms); something else is holding \
-             this socket open. Holder: {holder_while_open}"
+             fork/exec window measured for this process (single-digit milliseconds); something \
+             else is holding this socket open. Holder: {holder_while_open}"
         )
     };
+    // Review 578: the slow path was built to produce a good diagnosis and
+    // then only ever showed it on failure -- a window that crept from
+    // 5ms toward the 500ms budget would pass in total silence, and the
+    // budget would quietly become a blindfold instead of a bound. Printed
+    // every time the fast path is skipped, success or not, so a reader
+    // watching test output (not just a failure) sees the tolerance
+    // actually being used.
+    eprintln!("wait_for_path_to_stop_answering: {diagnosis}");
     ListenerSettleResult { closed, diagnosis }
 }
 

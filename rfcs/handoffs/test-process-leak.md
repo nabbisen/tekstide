@@ -2508,9 +2508,14 @@ the holder via `/proc/net/unix` → inode → `/proc/*/fd` scan → `/proc/<pid>
 timer, which is not free — doing so attributed the lookup's own latency to the window being
 measured, producing readings of 7-9 **microseconds** that undersold how long the window really is.
 Moving the timer to start first (the lookup still runs, now timed honestly, inside the loop)
-produced the real figures: **1.9ms, 5.1ms, 5.3ms, 5.3ms** across four live catches that afternoon —
-low single-digit milliseconds, not microseconds, but still squarely inside "the hypothesis predicts
-a window that closes," not "never closes."
+produced the real figures: **1.9ms, 5.1ms, 5.3ms, 5.3ms** across the first four live catches that
+afternoon, widening to **1.5ms-6.5ms** across eight catches total once review 578's own
+verification gate ran the suite further — low single-digit milliseconds throughout, not
+microseconds, and never approaching the 500ms budget below, but still squarely inside "the
+hypothesis predicts a window that closes," not "never closes." The exact bound is not load-bearing
+for the fix (`wait_for_path_to_stop_answering`'s own doc comment and failure message say
+"single-digit milliseconds" rather than quote a specific range, deliberately, so neither drifts out
+of date as more samples arrive).
 
 **A second real finding, this one about the kernel rather than this test's own code**:
 `/proc/net/unix` can list a socket still bound to its path with `Inode` printed as literal `0` —
@@ -2569,9 +2574,15 @@ assertion, confirmed it fails naming the real risk, reverted).
 This is the first row in this entire document to go from "recurring, unexplained" to "mechanism
 confirmed, staging fixed, verified not to recur across 60 runs" in a single slice. What remains
 genuinely open, stated plainly rather than implied fixed: the holder was never positively named on
-a live occurrence, only inferred from timing and a deterministic stand-in; and the same race, by
-the same mechanism, could in principle still affect production if two real `ApprovalChannelEndpoint`
-binds ever raced against an unrelated `Command::spawn` in the same process at the same instant —
-not investigated here, because nothing in the production launch path does both in a way that
-shares this test's timing, and speculative production hardening was explicitly the thing review 577
-said not to do.
+a live occurrence, only inferred from timing and a deterministic stand-in.
+
+**Production reachability, review 578's own sharpening**: the race needs two conditions to
+coexist, not one -- a stale socket *file* that outlives its own listener, **and** a sibling process
+holding a duplicate of that listener's fd at the moment something else connects to the path. In
+production, `ApprovalChannelEndpoint::drop` removes the socket file as part of the endpoint's own
+teardown; the only way a file survives past that is an *ungraceful* exit, which takes the whole
+process down -- and every forked child holding a duplicate of its fds goes with it. The two
+conditions are not independent: the one way to get a surviving stale file (the process dies) is
+also the one way to guarantee no sibling fork is still around to answer for it. This is a stated
+structural reason the real launch path does not share this test's timing, not an unexamined
+assumption -- still not investigated further, because nothing above changes that conclusion.
