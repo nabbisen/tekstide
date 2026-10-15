@@ -2586,3 +2586,111 @@ conditions are not independent: the one way to get a surviving stale file (the p
 also the one way to guarantee no sibling fork is still around to answer for it. This is a stated
 structural reason the real launch path does not share this test's timing, not an unexamined
 assumption -- still not investigated further, because nothing above changes that conclusion.
+
+## The SIGHUP row's own mechanism, confirmed by direct experiment, 2026-10-15
+
+Review 578 handed the SIGHUP row the method that just closed row 1 -- triangulate first (free),
+then instrument the failing path -- and named a specific hypothesis: a sibling fork holding a
+duplicate of the **PTY master** would explain both observations (`exit_status: 1`, then
+`exit_status: 0` -- the session leader ending some way other than the signal this test expects).
+
+### Triangulation: did not reproduce locally, and that is itself informative
+
+Unlike row 1 (which reproduced at ~19% within the first few dozen runs), the SIGHUP row did not
+fire once across 70 local runs in three shapes: the test alone (30 runs, `--exact`, necessarily
+single-threaded), the full `runtime::terminal::tests::` module alone (30 runs, ~23 tests, most of
+which open a real PTY), and the full `tekstide-core` lib suite (10 runs, 1142 tests). This is
+consistent with, not evidence against, the hypothesis: this row has only ever fired twice in this
+project's entire history, both during an actual release-candidate gate (a different load shape --
+`cargo build` and `cargo test` running together, cold caches, a genuinely different machine state
+-- than a warm, already-compiled, isolated loop on an otherwise idle box). A rate this low does not
+triangulate the cheap way row 1 did; the mechanism needed a direct, synthetic test instead.
+
+### A direct experiment, run twice -- the first run was unsafe and is why this section exists at all
+
+**First attempt (not committed, caused real harm): a background thread spawned `sleep` child
+processes in an unbounded, unthrottled loop while the main thread opened 3000 PTYs, each iteration
+scanning *every process on the machine's* `/proc/*/fd`.** This machine is shared with other agents'
+live sessions (confirmed via `ps aux` showing concurrent `cargo test` runs for unrelated projects
+at the time). The spawn loop had no cap and no rate limit; if the (expensive, full-system) scan per
+iteration took longer than a single `sleep` child's lifetime, new children could accumulate faster
+than old ones exited, with nothing bounding the total. This froze the shared desktop's console
+window -- confirmed by the user directly, not inferred. No lasting damage was found afterward (no
+stray processes, no OOM-kill entries in the journal, working tree and build both verified clean),
+but the experiment itself was the failure, independent of what it would have shown.
+
+**Second attempt, hard-bounded this time**: at most 4 concurrent children (a retained-and-reaped
+pool, not an unbounded `Vec`), each living 50ms, the whole experiment capped by **wall clock** (3
+seconds) rather than an iteration count that could balloon on a slow machine, and the holder scan
+narrowed to *only this experiment's own tracked child pids* -- never a scan of the whole system.
+Verified safe before trusting any result from it: process count was 588 before, 587 after: no leak.
+
+**A real methodology bug, caught before trusting the result, the same discipline as review 577's
+own two bugs**: the first pass at the corrected experiment used `fstat()` dev/ino matching to prove
+a forked child held *the same* pty instance this iteration had just opened -- and found "leaks" on
+every single iteration against the same child, which was itself the tell. Checked by hand:
+`stat -L /dev/ptmx` on this machine reports a fixed `dev=7 ino=186`, and **every fd ever opened
+through `/dev/ptmx` reports that same static identity, regardless of which distinct pty instance it
+represents** -- confirmed with a throwaway Python check opening `/dev/ptmx` twice and comparing
+`fstat()` results. `TIOCGPTN` gives the real per-instance pty number, but there is no safe way to
+run that ioctl against a *different* process's fd from outside it; re-opening
+`/proc/<pid>/fd/<n>` for a ptmx-derived fd was also checked by hand and allocates a **new** pty
+instance rather than reconnecting to the original one (ptmx's own `open()` method always allocates
+afresh, regardless of the path used to reach it -- unlike most file types, for which
+`/proc/<pid>/fd/<n>` is a magic symlink that reconnects to the exact same open file).
+
+**Fixed by checking something simpler and just as conclusive**: whether a child's fd
+*readlink target* is literally the text `/dev/ptmx` at all. A plain `sleep` binary has no
+legitimate reason to ever hold such a descriptor, so any match proves inheritance regardless of
+which specific pty instance it is.
+
+### Result: the hypothesis is confirmed, deterministically, in 3 seconds
+
+**7,470 leaked-fd observations across 46,143 sampling checks, against 236 total forked children.**
+Most forked children that landed in the window kept the leak for their entire lifetime (one child,
+pid 1541025, held `/dev/ptmx` open at fd 3 across at least ten consecutive sampling iterations) --
+not a microsecond flicker, a persistent handle for as long as that unrelated `sleep` process ran.
+
+**Mechanism, confirmed rather than inferred**: `pty.rs`'s `OpenPty::new` calls `libc::openpty`
+(which does not accept `O_CLOEXEC` -- glibc's convenience wrapper has no flag parameter for it),
+then applies `FD_CLOEXEC` afterward via a separate `fcntl(F_SETFD, ...)` call once `set_nonblocking`
+has also run. Any fork on *any other thread in the process* that lands between `openpty()` returning
+and that `fcntl` call completing inherits the not-yet-protected fd; because `CLOEXEC` is a
+per-descriptor flag copied at fork time, setting it afterward in *this* process has no effect on a
+copy a sibling fork already took before that point -- and because the child typically `exec`s
+immediately (as `Command::spawn` does), the inherited copy, lacking `CLOEXEC` at fork time, survives
+that `exec` and persists for the rest of the child's life. This is the same defect class as row 1's
+own fork/exec window (a gap between resource creation and `CLOEXEC` application, raced by a
+concurrent fork), but structurally worse: row 1's window closed in low single-digit milliseconds
+once the forked child reached its own `exec`; this one does not close at `exec` at all, because
+`CLOEXEC` was never set on the inherited copy to begin with.
+
+### This is not only the SIGHUP row's mechanism -- it is a standing, narrow production concern
+
+`pty.rs`'s own comment on `set_cloexec` already names the defect class this guards against: *"every
+child this process ever spawns inherited every PTY master already open at that moment, crossing
+RFC-009's terminal security boundary."* That fix closes the case where a PTY is already fully open
+(cloexec applied) before a *later* spawn happens. It does not close -- cannot close, with
+`openpty()` plus a follow-up `fcntl` -- the case demonstrated here: a spawn on *another thread*,
+anywhere in the process, racing into the brief window *while* a PTY is being opened. Tekstide opens
+new terminals and spawns other subprocesses (git operations via `runtime::git`, among others)
+routinely and concurrently in real use, not only in this synthetic test. A short-lived, unrelated
+subprocess (a `git` helper, for instance) landing in this window would inherit a live, functional
+handle to a *different* terminal's PTY master, persisting for that subprocess's own lifetime --
+exactly the boundary RFC-009 states it closes, not closed in this one specific case.
+
+**Not fixed here.** This is security-adjacent production code (`pty.rs`, RFC-009's own stated
+boundary), and the standard, well-established remedy for exactly this defect class -- make
+`CLOEXEC` atomic at creation rather than a follow-up call, the same reason `std::os::unix::net::
+UnixListener::bind` is immune to row 1's own mechanism (it uses `SOCK_CLOEXEC` at the `socket()`
+call itself) -- is a one-line-shaped fix in spirit (replace `libc::openpty` with the lower-level
+`posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC)` plus `grantpt`/`unlockpt`/`open(ptsname(...),
+O_RDWR | O_NOCTTY | O_CLOEXEC)` for the slave, both flags set atomically at their respective
+`open()` calls, eliminating the follow-up `fcntl` window entirely) but touches a stated security
+boundary and deserves review before any of it is written, not a unilateral change on the strength
+of a 3-second experiment.
+
+### Gate
+
+The scratch experiment was never committed -- `git status`/`git diff` confirmed clean both times,
+before and after. No product code was changed by this investigation.
