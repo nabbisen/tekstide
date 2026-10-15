@@ -25,7 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 028 | [Cross-Platform Support — macOS](./proposed/028-cross-platform-support.md) | **Proposed 2026-10-14.** M14. Scoped against what the current code actually assumes (process/PTY, IPC/sockets, filesystem/paths/watcher), not a hypothetical matrix; Windows reserved as its own future RFC |
+| 028 | [Cross-Platform Support — macOS](./accepted/028-cross-platform-support.md) | **Accepted by the human owner 2026-10-15; D1–D9 as written, the Run It question answered by the acceptance itself.** `0.38.0`, M14. Scoped against a mechanical sweep of what the current code actually assumes (process/PTY, IPC/sockets, filesystem/paths/watcher), not a hypothetical matrix. Six Linux-only mechanisms need macOS replacements; keybindings are the one real GUI-layer gap (D9) and land before any artifact ships; Windows reserved as its own future RFC. **Run It on real Apple hardware before the first macOS tag** — or, failing that, an artifact labelled as never having had it |
 
 
 

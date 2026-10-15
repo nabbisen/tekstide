@@ -1,6 +1,8 @@
 # RFC-028: Cross-Platform Support — macOS
 
-Status: **Proposed 2026-10-14.** Scoped against what the current code actually assumes, not a
+Status: **Accepted by the human owner 2026-10-15.** D1–D9 as written; **the Run It question
+answered by the acceptance itself** — see *Decided on acceptance*. `0.38.0` in the authorised
+schedule. Proposed 2026-10-14. Scoped against what the current code actually assumes, not a
 hypothetical platform matrix — found by a four-part investigation (process/PTY, IPC/sockets,
 filesystem/paths/watcher, GUI/clipboard/packaging) whose load-bearing claims were independently
 re-derived against vendored dependency sources, not taken on report alone. Returned twice before
@@ -303,6 +305,22 @@ discipline of never claiming more than what was actually verified:
 
 Whether the owner has Apple hardware to run (1) on before the first tag is a factual question
 reserved to the owner, needed by PR-028-F and not before — it blocks nothing in PR-028-A through E.
+
+## Decided on acceptance (2026-10-15)
+
+**The Run It gate: option (1).** The owner accepted this RFC *with the reviewer's recommendation*,
+which was that **Run It is performed on real Apple hardware before the first macOS artifact is
+tagged** — the same gate every Linux release already requires. PR-028-F does not close without it.
+
+Option (2) stays written in *Acceptance* above rather than being deleted: if the hardware is not
+available when PR-028-F is reached, the artifact ships **labelled in its own release notes as not
+yet run on real hardware**, and that is the only other shape this release may take. A fallback that
+was considered and ranked is more useful to a later reader than one that was never named — and
+leaving it in place means nobody has to re-decide this under schedule pressure.
+
+**Unchanged by the acceptance, recorded so it is not re-opened as an open question:**
+`aarch64-apple-darwin` only for the first macOS artifact (D7), Windows reserved as its own future
+RFC (D1), and the keybinding slice landing before any artifact ships (D9).
 
 ## Slices
 

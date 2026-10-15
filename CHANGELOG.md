@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Fixed — a subprocess could inherit another terminal's PTY master
+
+Opening a terminal called `openpty()` and then applied close-on-exec to the two descriptors it
+returned with a separate `fcntl`. Between those two steps the descriptors existed without the flag,
+so a process spawned on any other thread in that window — a `git` helper, an AI CLI agent — took a
+copy whose close-on-exec was never set and could not be: the flag is copied at fork time, and
+setting it afterwards cannot reach a copy already taken. That copy survived the child's own `exec`
+and lived as long as the child did, giving it a working handle to a *different* terminal's PTY
+master: readable, writable, and outside the boundary RFC-009 states it closes.
+
+Fixed by requesting close-on-exec atomically at each `open()` instead (`posix_openpt` for the
+master, `open` for the slave), so no window exists to race into; the previous `fcntl` is kept only
+as a read-back that refuses to open a terminal at all if the flag somehow is not set. A bounded
+regression test forks siblings while opening PTYs and asserts none of them holds `/dev/ptmx`; it
+fails against the previous code (measured: 1,512 inherited descriptors across 38,199 iterations)
+and passes against this one.
+
+**On how likely this was**: reaching it needs a spawn to land inside a window microseconds wide, and
+the figures above come from an experiment built to hit that window deliberately — they are not a
+rate anyone would see in normal use. No report of it exists; it was found while investigating an
+unrelated intermittent test failure.
+
 ### Added — `ApprovalChannelErrorReason` gains two variants
 
 `BindTargetNotASocket` and `BindTargetAlreadyListening`, distinguishing the two arms of a stale
