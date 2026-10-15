@@ -480,8 +480,36 @@ impl Drop for TerminalReader {
     }
 }
 
+/// RFC-028 D5: the only consumer of this value, [`TerminalReader::
+/// os_thread_id`], feeds it into a `/proc/self/task/<tid>/stat` read in
+/// `reader/tests.rs` -- genuinely Linux-only, not merely untested
+/// elsewhere, so the macOS arm here only needs to produce *some*
+/// process-local, comparison-stable identifier, not a kernel tid in the
+/// Linux sense. That test gets its own, Linux-only `#[cfg]`; this
+/// function's job is only to compile and return something real on both
+/// platforms.
+#[cfg(target_os = "linux")]
 fn current_thread_id() -> i32 {
     unsafe { libc::syscall(libc::SYS_gettid) as i32 }
+}
+
+/// `pthread_threadid_np`, not a `0`/`NULL` sentinel for "current thread"
+/// -- that behaviour is documented for Apple's own API, but
+/// `libc::pthread_self()` is unambiguous and costs nothing extra.
+/// Truncated to `i32` from the real `u64` id: every consumer treats this
+/// as an opaque, process-local comparison key, never as an id fed to a
+/// further kernel call the way Linux's own tid is elsewhere in this
+/// module.
+#[cfg(target_os = "macos")]
+fn current_thread_id() -> i32 {
+    let mut tid: u64 = 0;
+    // SAFETY: `tid` is a valid, aligned `u64` the call writes through;
+    // `pthread_self()` always returns the calling thread's own, valid
+    // handle.
+    unsafe {
+        libc::pthread_threadid_np(libc::pthread_self(), &mut tid);
+    }
+    tid as i32
 }
 
 /// RFC-017 Amendment 1, PR-A1-C: every exit path here does the same two

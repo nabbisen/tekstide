@@ -324,6 +324,16 @@ fn dropping_a_reader_over_a_live_silent_child_completes_promptly() {
 /// sleep, no busy-wait." A busy-wait would burn CPU while nothing is
 /// happening on the PTY; a real `poll(2)`-parked thread would not.
 /// Measured, not asserted from the mechanism's description alone.
+///
+/// RFC-028 D5/Acceptance: genuinely Linux-only, not merely untested on
+/// macOS yet -- `thread_cpu_ticks` below reads `/proc/self/task/<tid>/
+/// stat`, which does not exist on macOS at all. The *property* this
+/// measures (a real `poll(2)` park, not a busy-wait) is not platform-
+/// specific; only this particular measurement technique is. A macOS
+/// equivalent needs its own mechanism (e.g. `getrusage(RUSAGE_THREAD, ...)`-
+/// style per-thread CPU accounting, if available) and is not written
+/// here -- named rather than silently dropped.
+#[cfg(target_os = "linux")]
 #[test]
 fn reader_thread_does_not_busy_wait_while_idle() {
     let _real_process_slot = RealProcessLimiter::acquire();
@@ -1365,6 +1375,7 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn thread_cpu_ticks(tid: i32) -> u64 {
     let path = format!("/proc/self/task/{tid}/stat");
     let content = std::fs::read_to_string(&path).unwrap_or_else(|error| {

@@ -1130,7 +1130,16 @@ fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, Ter
             if libc::setsid() == -1 {
                 return Err(io::Error::last_os_error());
             }
-            if libc::ioctl(ctty_fd, libc::TIOCSCTTY, 0) == -1 {
+            // RFC-028 D5: `ioctl`'s own `request` parameter is `c_ulong`
+            // on macOS against `TIOCSCTTY`'s own `c_uint` there -- a
+            // mismatch Linux never has (both are the same `Ioctl` alias
+            // there), so widening unconditionally would make clippy's
+            // own `useless_conversion` lint fail the Linux build.
+            #[cfg(target_os = "macos")]
+            let ctty_request = u64::from(libc::TIOCSCTTY);
+            #[cfg(target_os = "linux")]
+            let ctty_request = libc::TIOCSCTTY;
+            if libc::ioctl(ctty_fd, ctty_request, 0) == -1 {
                 return Err(io::Error::last_os_error());
             }
             libc::close(ctty_fd);
