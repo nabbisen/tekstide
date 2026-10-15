@@ -27,7 +27,17 @@ libc                        = "0.2"
 # RFC-026 D4, adopted at review 452: non-recursive per-directory watches only, so
 # the default `macos_fsevent` feature (macOS-only) is off. Re-check row: the 9.0 line
 # (release candidates since 2026-01-25; see rfcs/handoffs/dependency-advisories.md).
-notify                      = { version = "8.2.0", default-features = false }
+#
+# RFC-028 D2: `macos_fsevent` off (above) with no replacement left every `cfg(all(
+# target_os = "macos", not(feature = "macos_kqueue")))` path in `notify`'s own
+# `src/lib.rs` compiling in a backend that needs `fsevent-sys`, which was never
+# pulled in -- a macOS build breaks today, regardless of anything this project adds.
+# `macos_kqueue` is the fix, not re-enabling `macos_fsevent`: `kqueue` needs no
+# `FSEvents`-style elevated privilege, and RFC-026 D4's own non-recursive design
+# never needed `FSEvents`' native recursive-tree behaviour anyway. Inert on
+# Linux/Windows -- every gate it un-gates in `notify`'s own source is additionally
+# `cfg(target_os = "macos")`.
+notify                      = { version = "8.2.0", default-features = false, features = ["macos_kqueue"] }
 
 serde                       = { version = "1", features = ["derive"] }
 serde_json                  = "1"

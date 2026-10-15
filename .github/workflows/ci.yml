@@ -52,6 +52,17 @@
 # **No `paths:` filter.** A workspace-wide build/test gate has no subset of the repo
 # it can safely ignore -- the same reasoning `docs.yml`'s own header already gives for
 # itself, reached independently here for a different set of files.
+#
+# **The second job, `macos-measurement` (RFC-028 D7, PR-028-A): a live, continuous
+# measurement of distance from a macOS build, not a release gate.** `continue-
+# on-error: true` at the job level, same advisory-then-blocking shape this file's
+# own `gate` job and RFC-072's quarantine job both use for a different artefact --
+# red here is the expected result today and is not a failure of this job or the
+# slice that added it. It runs on every push to `main`, the same as `gate`, so the
+# next compile error anyone introduces is caught the moment it is written rather
+# than at the next point-in-time audit (this RFC's own evidence table was exactly
+# such an audit, already stale by the time it was reviewed). Flipped to blocking
+# once PR-028-F lands it green, build *and* test both, not before.
 
 name: ci
 
@@ -144,3 +155,21 @@ jobs:
             exit 1
           fi
           echo "0 fixture entries left."
+
+  macos-measurement:
+    # RFC-028 PR-028-A: a measurement, not a gate -- see this file's own header.
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Rust (rustup's own update path)
+        run: |
+          set -euo pipefail
+          rustup update stable
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: cargo build --workspace
+        run: cargo build --workspace

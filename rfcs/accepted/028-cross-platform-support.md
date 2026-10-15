@@ -272,7 +272,11 @@ test, in PR-028-F once genuinely green. **Tests expected to need per-platform ga
 than discovered at the first macOS test run**: `reader.rs`'s own unit tests for
 `create_eventfd`/`block_on_eventfd` and the thread-id helper `SYS_gettid` backs; `launch.rs`'s and
 `termination.rs`'s process-group-enumeration tests (anything asserting against `/proc/<pid>/stat`
-output shape); `channel.rs`'s `SO_PEERCRED`/`peer_uid` tests. Each gets a `#[cfg(target_os =
+output shape); `channel.rs`'s `SO_PEERCRED`/`peer_uid` tests. **Added since the first draft**:
+`tests.rs`'s own `no_concurrently_forked_sibling_inherits_a_pty_master_fd` (review 579/580's PTY
+`CLOEXEC` regression test) — its holder scan reads `/proc/<pid>/fd`, which does not exist on macOS
+at all, so it is `/proc`-dependent by construction, not merely untested there yet; it did not exist
+when this list was first written two days before this correction. Each gets a `#[cfg(target_os =
 "linux")]`/`#[cfg(target_os = "macos")]` split testing the same behavioural contract against each
 platform's own mechanism, not a shared test disabled on one side.
 
