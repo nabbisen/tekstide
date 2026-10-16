@@ -2899,10 +2899,43 @@ under different timing than local -- a transcript write or a disk read racing th
 in a way neither this test nor its production code has been shown to handle wrong, only shown to be
 sometimes slower than the test's own sequencing assumes.
 
-**Disposition: Accept, pending a second occurrence.** Re-ran the same CI job
-(`gh run rerun --failed`, same commit, no code change) rather than push an unrelated commit to
-re-trigger it -- green on the second try, `gate` fully passing. Confirms this was transient rather
-than a stuck, deterministic break (which would have recurred identically), consistent with the
-"never reproduced locally, 5/5 clean" finding above. No cause claimed -- this entry exists so a
-future occurrence (if any) has something to compare against, per this register's own discipline
-that a disclosure is not complete without a row.
+**Re-verdicted, review 591: `Accept, pending a second occurrence` was wrong -- the mechanism was
+identifiable from the code at the time, not actually unknown.** The panic is at line 916; line 915
+(`assert_eq!(loaded.loaded, 1)`) passed, meaning the loader found and loaded the transcript and the
+very next call said nothing was purgeable. Two methods on one object, single-threaded between them,
+disagreeing is not what an environment-timing flake looks like -- it is what a filter looks like:
+
+```rust
+// session.rs:2555
+fn transcript_is_purgeable(transcript: &Transcript) -> bool {
+    !transcript.is_tombstone()
+        && !matches!(transcript.origin,
+            TranscriptOrigin::FoundOnDisk { writer_held_lock_at_load: true })
+}
+```
+
+fed by a real probe (`transcript/loading.rs:212,234`: `probe_locks && lock_is_held(&path)`, which is
+`file.try_lock().is_err()`). **The CI run loaded the transcript and observed the writer's lock still
+held, and `transcript_is_purgeable` excluded it exactly as RFC-050 D3 intends** (`session.rs:1942`:
+"purge obeys the lock"). The product behaved correctly; the test's own premise did not hold --
+`drop(first)` does not synchronously guarantee the earlier session's transcript writer (a capture
+thread) has released its file lock, and nothing enforces that it has by the time the test loads.
+`File::try_lock` is per-open-file-description (`flock`), so a still-open writer handle in the same
+process is enough to trip it, and that thread's own shutdown can lag `drop` by a few schedules, more
+so under a 2-vCPU CI runner's own contention than locally.
+
+**Verdict: Fix -- in the test's own precondition**, the third instance of one pattern in this
+register (row 1's staging, the PTY test's fork→exec window, now this): a test asserting a
+post-condition whose precondition it never established. Fixed the same shape as row 1's own
+`wait_for_path_to_stop_answering`: a bounded wait (`wait_until_transcript_lock_is_released`,
+2s budget) for the lock to actually be released before loading, failing loudly naming the budget if
+it never is -- not an unconditional wait, so a genuine stuck lock (a real defect) still surfaces as
+a clear panic rather than hanging the suite. **Ablated**: a throwaway test holding a real lock on a
+real file confirmed the wait panics at the right message once its budget elapses and does not
+return early; removed after confirming, never committed.
+
+**Recorded, not acted on**: the identical window exists in real use -- a user closing a project and
+immediately reopening it could, briefly, have its transcript read as still-being-written rather than
+purgeable. The product already distinguishes those two states deliberately
+(`transcripts_still_being_written_count`), so this is behaviour, not a defect; the only open
+question is how long the window is in practice, and nobody needs to answer that today.

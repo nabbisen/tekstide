@@ -894,6 +894,17 @@ fn a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart()
     );
     let saved = first.recent_project_state();
     drop(first);
+    // Review 591: `drop(first)` does not synchronously guarantee the
+    // earlier session's transcript writer -- a capture thread -- has
+    // released its file lock; the thread's own shutdown can lag `drop`
+    // by a few schedules, more so under CI's own contention than
+    // locally. This test's own premise is that the lock is already gone
+    // by the time it loads, which `drop` alone never promised. Same
+    // shape as row 1's own `wait_for_path_to_stop_answering`
+    // (`approval/tests/channel.rs`): wait, bounded, for the real
+    // condition rather than assuming it, and fail loudly naming the
+    // budget if it never arrives.
+    wait_until_transcript_lock_is_released(&transcript_path, Duration::from_secs(2));
 
     let mut second = AppState::default();
     second.restore_recent_projects(saved);
@@ -924,6 +935,34 @@ fn a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart()
 
     cleanup_root(root);
     cleanup_root(state_root);
+}
+
+/// Review 591: the same `File::open` + `try_lock` probe
+/// `transcript/loading.rs`'s own (private) `lock_is_held` uses, reused
+/// here rather than reinvented -- bounded and failing loudly, not an
+/// unconditional wait, so a genuine stuck lock (a real defect, not this
+/// test's own precondition) still surfaces as a clear panic rather than
+/// hanging the suite.
+fn wait_until_transcript_lock_is_released(path: &std::path::Path, budget: Duration) {
+    let start = std::time::Instant::now();
+    loop {
+        let Ok(file) = std::fs::File::open(path) else {
+            return; // can't check here; the real load call will surface whatever this is
+        };
+        let held = file.try_lock().is_err();
+        drop(file);
+        if !held {
+            return;
+        }
+        if start.elapsed() >= budget {
+            panic!(
+                "the earlier run's transcript writer still held its file lock {budget:?} after \
+                 the owning AppState was dropped -- this is this test's own precondition, not \
+                 the thing under test; see test-process-leak.md's own row for this test"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
