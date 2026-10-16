@@ -260,37 +260,41 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   type needs its own `cfg`) is sound but deliberately not rushed into code in the same slice as two
   mechanisms with real open questions below.
 
-  **Two genuine open questions, found by checking rather than assumed from D5's own original
-  text:**
-  1. **`SYS_close_range` → `closefrom`, D5's own stated replacement, does not hold on macOS as
-     written.** `closefrom` is not in the vendored `libc` crate for Apple targets at all (checked
-     directly — present for FreeBSD/DragonFly/NetBSD, absent for `apple`), and whether Darwin's own
-     libc exposes a safe, async-signal-safe native `closefrom` the way FreeBSD's is a raw syscall
-     is genuinely unclear from available documentation (even `sudo`'s own portability code emulates
-     it via `proc_pidinfo` on some platforms rather than assume a native one). This call site runs
-     inside `Command::pre_exec` -- the post-`fork`, pre-`exec` child, where only async-signal-safe
-     functions are safe to call at all; `proc_pidinfo`-based emulation is not a safe substitute
-     there, only a plausible-sounding one. The existing Linux comment already frames this mechanism
-     as "a bonus layer... not something this spawn may fail over" (the real, primary defence is
-     `OpenPty::new`'s own `O_CLOEXEC`, already cross-platform and unaffected by this). Not
-     implemented speculatively; an open question for the owner/reviewer rather than a guessed
-     `extern "C"` declaration whose runtime behaviour cannot be verified without real hardware.
-  2. **`ptsname_r` does not exist in the `libc` crate for Apple targets, and Apple's own
-     implementation is not a simple libc wrapper either.** Checked Apple's own open-source `Libc`
-     source: `ptsname_r` there calls the `TIOCPTYGNAME` ioctl directly (not wrapped by the Rust
-     `libc` crate for Apple targets), writes into a 128-byte buffer, then `stat`s the returned path
-     before trusting it. Replicating this would mean declaring the `TIOCPTYGNAME` ioctl's own
-     numeric value myself, which is exactly the kind of unverifiable kernel constant this project's
-     own discipline says not to guess at — a wrong value is undefined behaviour at runtime, not a
-     compile error, and there is no macOS hardware to check it against outside the CI runner's own
-     build step (which cannot catch a wrong *value*, only a wrong *name*).
+  **Both open questions answered, review 589 — decisions, not suggestions:**
+  1. **`SYS_close_range`/`closefrom`: neither exists on macOS (confirmed: `closefrom` is a BSD-ism
+     Apple never adopted, absent from the vendored `libc` crate for Apple targets). Answer: a
+     bounded `close(2)` loop instead, with the bound computed in the parent.** `close(2)` is on
+     POSIX's async-signal-safe list, so a loop of it is legal inside `pre_exec` where
+     `proc_pidinfo`-based emulation (the alternative considered and rejected) is not. The bound
+     (`sysconf(_SC_OPEN_MAX)`, clamped both ends against an error return and a pathological limit)
+     is computed before the `fork`, since `sysconf` itself is not async-signal-safe, and moved into
+     the closure. **Implemented and done**: this replaces the Linux-only raw `syscall(SYS_close_range,
+     …)` entirely with one mechanism for both platforms, removing that path's own glibc-version
+     caveat as a side effect. Framing kept exactly as before: a bonus layer over `OpenPty::new`'s
+     own `O_CLOEXEC`, not something a spawn may fail over.
+  2. **`ptsname_r`: review 589's own answer was `ptsname()` under a crate-owned lock, since
+     `ptsname_r` was believed absent for Apple. A later check refines that premise, not yet
+     implemented pending confirmation.** Apple's own open-source `Libc` and `rustix` (already a
+     transitive dependency of this workspace, via `alacritty_terminal`) both show `ptsname_r`
+     **does** exist in Apple's own libSystem, starting macOS 10.13.4 — it is simply not wrapped by
+     the Rust `libc` crate's Apple module. `rustix`'s own backend (`src/backend/libc/pty/
+     syscalls.rs`, both vendored versions in this workspace's own dependency tree) calls it via
+     `weak!` linkage specifically to tolerate pre-10.13.4 systems, falling back to the
+     `TIOCPTYGNAME` ioctl only then. Since this RFC's own D7 already restricts the first macOS
+     release to `aarch64-apple-darwin`, and Apple Silicon hardware cannot run anything older than
+     macOS 11.0 (four major versions past 10.13.4), a plain, non-weak `extern "C"` declaration of
+     `ptsname_r` (the genuine, documented POSIX signature, not a numeric ioctl guess) would always
+     link and work on any system this release could possibly run on — no lock, no residual risk
+     about a concurrent caller elsewhere in the dependency tree, no unverifiable constant.
+     **Not substituted for the decided answer without saying so**: this is a real finding that
+     changes the premise review 589's own answer was reasoned from, surfaced for confirmation
+     rather than silently implemented differently from what was decided.
 
-  **Gate for what landed**: `cargo fmt --check`, `clippy -D warnings`, full workspace test suite,
-  all clean on `ubuntu-latest`. Measured on `macos-latest` itself, the same discipline PR-028-A
-  established: PR-028-A's own 11 errors → 6 after PR-028-C's `LOCAL_PEERCRED`/`xucred` port → 4
-  after this slice's `TIOCSCTTY`/`SYS_gettid` fixes (confirmed: the two that disappeared here were
-  exactly those two mechanisms' own errors, nothing else moved). The four remaining are exactly the
-  `eventfd`/`EFD_CLOEXEC` pair and the two open questions above.
+  **Gate for what landed**: `cargo fmt --check`, `clippy -D warnings`, full workspace test suite
+  (three consecutive runs), all clean on `ubuntu-latest`. Measured on `macos-latest` itself, the
+  same discipline PR-028-A established: 11 → 6 (PR-028-C) → 4 (`TIOCSCTTY`/`SYS_gettid`) → expected
+  3 once the close-range fix above is confirmed on the runner. `eventfd`/`EFD_CLOEXEC` (its own
+  slice, by design) and `ptsname_r`'s own final answer remain.
 - **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
   fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
   gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real

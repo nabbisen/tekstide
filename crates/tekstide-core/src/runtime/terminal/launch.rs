@@ -1125,6 +1125,12 @@ fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, Ter
         .stdout(unsafe { Stdio::from_raw_fd(stdout_fd) })
         .stderr(unsafe { Stdio::from_raw_fd(stderr_fd) });
 
+    // RFC-028 D5, review 589: computed here, in the parent, and moved
+    // into `pre_exec` below -- `sysconf` is not on POSIX's async-signal-
+    // safe list, so it cannot be called inside the post-`fork`, pre-
+    // `exec` child the closure runs in, only before the fork happens.
+    let close_from_bound = close_range_upper_bound();
+
     unsafe {
         command.pre_exec(move || {
             if libc::setsid() == -1 {
@@ -1150,15 +1156,27 @@ fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, Ter
             // found through. stdin/stdout/stderr are already at their
             // final fds 0-2 by this point (`Command` wires them before
             // running `pre_exec`), so starting at 3 cannot touch them.
-            // Raw `syscall(2)`, not `libc::close_range` directly: the
-            // libc wrapper is a real symbol this binary would fail to
-            // *load* on a glibc older than 2.34 if linked directly, where
-            // going through the stable, decades-old `syscall(2)` entry
-            // point instead fails only this one call, at run time, with
-            // `ENOSYS` -- silently ignored, since this is a bonus layer
-            // over the fix that already closed the known hole, not
-            // something this spawn may fail over.
-            libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0);
+            //
+            // RFC-028 D5, review 589: a bounded `close(2)` loop, not
+            // `SYS_close_range`/`closefrom` -- neither exists on macOS
+            // (`closefrom` is a BSD-ism Apple never adopted, absent from
+            // the vendored `libc` for Apple targets; checked directly,
+            // not assumed), and `proc_pidinfo`-based emulation is not
+            // async-signal-safe, so it is not a legal substitute inside
+            // this closure regardless of availability. `close(2)` itself
+            // *is* on POSIX's async-signal-safe list, so a loop is legal
+            // where almost nothing else is. The bound (`close_from_
+            // bound`, above) was computed in the parent precisely so this
+            // loop never needs to call anything that is not on that
+            // list. Cheaper than it sounds in practice -- macOS's default
+            // soft `RLIMIT_NOFILE` is commonly 256 -- but still only a
+            // bonus layer over the fix that already closed the known
+            // hole (`OpenPty::new`'s own `O_CLOEXEC`), not something this
+            // spawn may fail over, the same framing this mechanism has
+            // always had.
+            for fd in 3..close_from_bound {
+                libc::close(fd);
+            }
             Ok(())
         });
     }
@@ -1171,4 +1189,28 @@ fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, Ter
     pty.close_slave();
 
     Ok(child)
+}
+
+/// RFC-028 D5, review 589: `sysconf(_SC_OPEN_MAX)`, called here in the
+/// parent -- `sysconf` is not async-signal-safe, so `spawn_pty_child`'s
+/// own `pre_exec` closure (running post-`fork`, pre-`exec`) must never
+/// call it directly; this value is computed before the fork and moved
+/// in instead. Clamped on both ends: `<= 0` covers `sysconf`'s own error
+/// return and the (rare) "no defined limit" case alike, since either one
+/// becoming an unbounded loop is worse than a conservative fallback; the
+/// upper clamp keeps a pathological limit from turning a spawn into a
+/// long, visible pause, which is the one thing this bonus layer must
+/// never cost.
+fn close_range_upper_bound() -> libc::c_int {
+    const FALLBACK: libc::c_int = 4096;
+    const CLAMP: libc::c_int = 65536;
+    // SAFETY: `sysconf` takes a plain `c_int` name and has no
+    // preconditions beyond that; it cannot fail in a way that corrupts
+    // anything, only in a way that returns -1.
+    let limit = unsafe { libc::sysconf(libc::_SC_OPEN_MAX) };
+    if limit <= 0 {
+        FALLBACK
+    } else {
+        libc::c_int::try_from(limit).unwrap_or(CLAMP).min(CLAMP)
+    }
 }
