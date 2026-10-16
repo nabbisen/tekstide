@@ -272,29 +272,36 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
      …)` entirely with one mechanism for both platforms, removing that path's own glibc-version
      caveat as a side effect. Framing kept exactly as before: a bonus layer over `OpenPty::new`'s
      own `O_CLOEXEC`, not something a spawn may fail over.
-  2. **`ptsname_r`: review 589's own answer was `ptsname()` under a crate-owned lock, since
-     `ptsname_r` was believed absent for Apple. A later check refines that premise, not yet
-     implemented pending confirmation.** Apple's own open-source `Libc` and `rustix` (already a
-     transitive dependency of this workspace, via `alacritty_terminal`) both show `ptsname_r`
-     **does** exist in Apple's own libSystem, starting macOS 10.13.4 — it is simply not wrapped by
-     the Rust `libc` crate's Apple module. `rustix`'s own backend (`src/backend/libc/pty/
-     syscalls.rs`, both vendored versions in this workspace's own dependency tree) calls it via
-     `weak!` linkage specifically to tolerate pre-10.13.4 systems, falling back to the
-     `TIOCPTYGNAME` ioctl only then. Since this RFC's own D7 already restricts the first macOS
-     release to `aarch64-apple-darwin`, and Apple Silicon hardware cannot run anything older than
-     macOS 11.0 (four major versions past 10.13.4), a plain, non-weak `extern "C"` declaration of
-     `ptsname_r` (the genuine, documented POSIX signature, not a numeric ioctl guess) would always
-     link and work on any system this release could possibly run on — no lock, no residual risk
-     about a concurrent caller elsewhere in the dependency tree, no unverifiable constant.
-     **Not substituted for the decided answer without saying so**: this is a real finding that
-     changes the premise review 589's own answer was reasoned from, surfaced for confirmation
-     rather than silently implemented differently from what was decided.
+  2. **`ptsname_r`: review 589's first answer (`ptsname()` under a crate-owned lock) was superseded
+     by review 590 once a later check refined the premise it rested on — `ptsname_r` is not absent
+     from Apple's own libSystem, only from the Rust `libc` crate's Apple module.** Confirmed in two
+     independent places: Apple's own open-source `Libc`, and `rustix` (already a transitive
+     dependency of this workspace via `alacritty_terminal`, both vendored versions present in this
+     tree's own `Cargo.lock`), whose own backend (`src/backend/libc/pty/syscalls.rs`) calls the real
+     symbol on Apple targets via `weak!` linkage specifically to tolerate macOS versions older than
+     10.13.4, falling back to the `TIOCPTYGNAME` ioctl only then. **Decided: a direct, non-weak
+     `extern "C"` declaration of the real POSIX signature**, not a dependency on `rustix` for one
+     function (a D-level decision, not a slice detail, per review 590) and not a guessed ioctl
+     value. **Safe only because of D7's own `aarch64-apple-darwin`-only restriction on the first
+     artifact** — Apple Silicon cannot run anything older than macOS 11.0, four majors past the
+     10.13.4 floor `rustix`'s own `weak!` linkage exists to tolerate. **If an Intel
+     (`x86_64-apple-darwin`) artifact is ever added** (D7 defers this, does not rule it out, and
+     Intel Macs can run 10.13.0-10.13.3, where this symbol is genuinely absent), this floor no
+     longer holds on its own — whoever adds that artifact must either re-establish a floor above
+     10.13.4 for it or switch this declaration to `weak!` linkage the way `rustix` already does,
+     stated at the declaration site itself (`pty.rs`), not only here. **Review 589's own lock-based
+     answer is kept, not deleted, as the rejected alternative**: a real residual the chosen answer
+     does not have (the lock only ever protected this crate's own calls, not a hypothetical
+     concurrent caller elsewhere in the dependency tree), recorded so the reasoning already exists
+     if the declaration above ever needs to fall back to it.
 
-  **Gate for what landed**: `cargo fmt --check`, `clippy -D warnings`, full workspace test suite
-  (three consecutive runs), all clean on `ubuntu-latest`. Measured on `macos-latest` itself, the
-  same discipline PR-028-A established: 11 → 6 (PR-028-C) → 4 (`TIOCSCTTY`/`SYS_gettid`) → expected
-  3 once the close-range fix above is confirmed on the runner. `eventfd`/`EFD_CLOEXEC` (its own
-  slice, by design) and `ptsname_r`'s own final answer remain.
+  **Both implemented and confirmed on `macos-latest` itself, not assumed from local Linux
+  testing**: 11 (PR-028-A) → 6 (PR-028-C) → 4 (`TIOCSCTTY`/`SYS_gettid`) → 3 (close-range) → done,
+  this slice, for `ptsname_r`. **Gate**: `cargo fmt --check`, `clippy -D warnings`, full workspace
+  test suite (three consecutive runs), all clean on `ubuntu-latest`. `eventfd`/`EFD_CLOEXEC` — its
+  own slice, by design, agreed in review 589 — is the only mechanism left; once it lands, this is
+  the first point PR-028-C's own `/dev/fd` TOCTOU question (held, unverified, since that slice) can
+  finally execute at all.
 - **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
   fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
   gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real

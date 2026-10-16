@@ -244,12 +244,75 @@ fn grant_and_unlock(master_fd: RawFd) -> Result<(), String> {
 /// process-wide static buffer with no thread-safety guarantee at all,
 /// which concurrent terminal creation across threads (exactly what
 /// surfaced this file's own fork/exec race) would race on directly.
+#[cfg(target_os = "linux")]
 fn slave_path(master_fd: RawFd) -> Result<[libc::c_char; 128], String> {
     let mut buf = [0 as libc::c_char; 128];
     // SAFETY: `buf` is valid for `buf.len()` bytes for the duration of
     // this call; `master_fd` is a valid, just-opened, granted-and-
     // unlocked `posix_openpt` fd.
     let result = unsafe { libc::ptsname_r(master_fd, buf.as_mut_ptr(), buf.len()) };
+    if result != 0 {
+        return Err(format!(
+            "ptsname_r failed: {}",
+            io::Error::from_raw_os_error(result)
+        ));
+    }
+    Ok(buf)
+}
+
+/// RFC-028 D5, review 590: `ptsname_r` genuinely exists in Apple's own
+/// libSystem (confirmed independently against Apple's own open-source
+/// `Libc` *and* `rustix` -- already a transitive dependency of this
+/// workspace via `alacritty_terminal`, both vendored versions in this
+/// tree's own `Cargo.lock` -- whose own backend calls the real symbol on
+/// Apple targets via `weak!` linkage). It is simply not wrapped by the
+/// Rust `libc` crate's Apple module, which is why this crate declares it
+/// directly rather than reaching for `ptsname()` under a lock (the
+/// rejected alternative -- see below) or guessing at `TIOCPTYGNAME`'s own
+/// numeric value (review 589's own correctly-ruled-out option: a wrong
+/// *value* is undefined behaviour at runtime, uncatchable by any build).
+///
+/// **This declaration is non-weak, and that is only safe because of
+/// RFC-028 D7's own `aarch64-apple-darwin`-only restriction on the first
+/// macOS artifact.** `rustix`'s own `weak!` linkage exists purely to
+/// tolerate macOS versions older than 10.13.4, where this symbol does
+/// not exist and a non-weak reference fails to *load* (not merely
+/// behaves incorrectly); Apple Silicon hardware cannot run anything
+/// older than macOS 11.0, four majors past that floor, so no such system
+/// can ever run this binary. **If an Intel (`x86_64-apple-darwin`)
+/// artifact is ever added** -- D7 explicitly defers this, not rules it
+/// out -- that floor no longer holds on its own (Intel Macs can run
+/// 10.13.0-10.13.3), and whoever adds it must either re-establish a
+/// floor above 10.13.4 for that target or switch this declaration back
+/// to `weak!` linkage the way `rustix` already does. Do not ship a
+/// second artifact without resolving this sentence first.
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn ptsname_r(fd: libc::c_int, buf: *mut libc::c_char, buflen: libc::size_t) -> libc::c_int;
+}
+
+/// Review 589's own answer, before review 590's refinement superseded
+/// it: `ptsname()` (the non-reentrant form) called while holding a
+/// crate-owned `Mutex`, copying the result into our own buffer before
+/// releasing the lock -- serialising this crate's own calls fully,
+/// since `slave_path` is this workspace's only call site. **Rejected in
+/// favour of the direct `ptsname_r` declaration above**: the lock only
+/// ever protected *this crate's own* calls, leaving a stated residual
+/// (another library in the process calling the non-reentrant `ptsname()`
+/// concurrently would still race) that the real, reentrant symbol does
+/// not have at all. Recorded, not deleted, so the reasoning is already
+/// available if the declaration above ever needs to fall back to it
+/// (e.g. if an Intel artifact is added without re-establishing the OS
+/// floor first, per that declaration's own warning).
+#[cfg(target_os = "macos")]
+fn slave_path(master_fd: RawFd) -> Result<[libc::c_char; 128], String> {
+    let mut buf = [0 as libc::c_char; 128];
+    // SAFETY: `buf` is valid for `buf.len()` bytes for the duration of
+    // this call; `master_fd` is a valid, just-opened, granted-and-
+    // unlocked `posix_openpt` fd; the `ptsname_r` symbol declared above
+    // is non-weak and therefore guaranteed to exist on any target this
+    // binary can run on, per that declaration's own OS-floor reasoning.
+    let result = unsafe { ptsname_r(master_fd, buf.as_mut_ptr(), buf.len()) };
     if result != 0 {
         return Err(format!(
             "ptsname_r failed: {}",
