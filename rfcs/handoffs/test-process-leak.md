@@ -2870,3 +2870,39 @@ the direct `O_CLOEXEC`-on-the-real-runner check this register asked for two sect
 fd is gone after `exec` there, the flag genuinely works there. `CHANGELOG.md`'s own wording is held
 until that run is confirmed green, then stated once, per review 583's own instruction not to flip it
 a third time before the ground has actually stopped moving.
+
+## New row, 2026-10-16 -- `a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart`, found in CI, not caused by the commit it rode in on
+
+PR-028-D's own gate (commit `e192847`, a doc-comment-only fix on macOS-`cfg`'d code -- no behaviour
+change on any platform this runs tests on) failed the blocking `gate` job:
+
+```text
+thread 'agent::tests::a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart'
+panicked at crates/tekstide-core/src/agent/tests.rs:916:5:
+assertion `left == right` failed
+  left: 0
+ right: 1
+```
+
+`project.purgeable_transcript_count()` read `0` where the test expects `1`, immediately after
+`project.load_transcripts_from_disk(&state_root)` -- a real shell launch (`write_input`/
+`wait_for_exit` against an actual PTY), a real transcript file write, a simulated restart
+(`AppState::default()` plus `restore_recent_projects`), then a real disk read-back. Checked against
+this register's own standing suspects before writing it up: no existing row names this test.
+
+**Not caused by the commit it rode in on**: that commit only reworded a comment attached to a
+`#[cfg(target_os = "macos")]` `extern "C"` block, which the Linux `gate` job never even compiles --
+there is no mechanism by which it could change this test's own, Linux-only behaviour. **Not
+reproduced locally**: 5/5 runs of this exact test, same machine, same binary shape. Consistent with
+this register's own established pattern for real-process/real-file tests landing on a CI runner
+under different timing than local -- a transcript write or a disk read racing the restart sequence
+in a way neither this test nor its production code has been shown to handle wrong, only shown to be
+sometimes slower than the test's own sequencing assumes.
+
+**Disposition: Accept, pending a second occurrence.** Re-ran the same CI job
+(`gh run rerun --failed`, same commit, no code change) rather than push an unrelated commit to
+re-trigger it -- green on the second try, `gate` fully passing. Confirms this was transient rather
+than a stuck, deterministic break (which would have recurred identically), consistent with the
+"never reproduced locally, 5/5 clean" finding above. No cause claimed -- this entry exists so a
+future occurrence (if any) has something to compare against, per this register's own discipline
+that a disclosure is not complete without a row.
