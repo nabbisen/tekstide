@@ -260,32 +260,32 @@ fn slave_path(master_fd: RawFd) -> Result<[libc::c_char; 128], String> {
     Ok(buf)
 }
 
-/// RFC-028 D5, review 590: `ptsname_r` genuinely exists in Apple's own
-/// libSystem (confirmed independently against Apple's own open-source
-/// `Libc` *and* `rustix` -- already a transitive dependency of this
-/// workspace via `alacritty_terminal`, both vendored versions in this
-/// tree's own `Cargo.lock` -- whose own backend calls the real symbol on
-/// Apple targets via `weak!` linkage). It is simply not wrapped by the
-/// Rust `libc` crate's Apple module, which is why this crate declares it
-/// directly rather than reaching for `ptsname()` under a lock (the
-/// rejected alternative -- see below) or guessing at `TIOCPTYGNAME`'s own
-/// numeric value (review 589's own correctly-ruled-out option: a wrong
-/// *value* is undefined behaviour at runtime, uncatchable by any build).
-///
-/// **This declaration is non-weak, and that is only safe because of
-/// RFC-028 D7's own `aarch64-apple-darwin`-only restriction on the first
-/// macOS artifact.** `rustix`'s own `weak!` linkage exists purely to
-/// tolerate macOS versions older than 10.13.4, where this symbol does
-/// not exist and a non-weak reference fails to *load* (not merely
-/// behaves incorrectly); Apple Silicon hardware cannot run anything
-/// older than macOS 11.0, four majors past that floor, so no such system
-/// can ever run this binary. **If an Intel (`x86_64-apple-darwin`)
-/// artifact is ever added** -- D7 explicitly defers this, not rules it
-/// out -- that floor no longer holds on its own (Intel Macs can run
-/// 10.13.0-10.13.3), and whoever adds it must either re-establish a
-/// floor above 10.13.4 for that target or switch this declaration back
-/// to `weak!` linkage the way `rustix` already does. Do not ship a
-/// second artifact without resolving this sentence first.
+// RFC-028 D5, review 590: `ptsname_r` genuinely exists in Apple's own
+// libSystem (confirmed independently against Apple's own open-source
+// `Libc` *and* `rustix` -- already a transitive dependency of this
+// workspace via `alacritty_terminal`, both vendored versions in this
+// tree's own `Cargo.lock` -- whose own backend calls the real symbol on
+// Apple targets via `weak!` linkage). It is simply not wrapped by the
+// Rust `libc` crate's Apple module, which is why this crate declares it
+// directly rather than reaching for `ptsname()` under a lock (the
+// rejected alternative -- see below) or guessing at `TIOCPTYGNAME`'s own
+// numeric value (review 589's own correctly-ruled-out option: a wrong
+// *value* is undefined behaviour at runtime, uncatchable by any build).
+//
+// This declaration is non-weak, and that is only safe because of
+// RFC-028 D7's own `aarch64-apple-darwin`-only restriction on the first
+// macOS artifact. `rustix`'s own `weak!` linkage exists purely to
+// tolerate macOS versions older than 10.13.4, where this symbol does
+// not exist and a non-weak reference fails to *load* (not merely
+// behaves incorrectly); Apple Silicon hardware cannot run anything
+// older than macOS 11.0, four majors past that floor, so no such system
+// can ever run this binary. If an Intel (`x86_64-apple-darwin`)
+// artifact is ever added -- D7 explicitly defers this, not rules it
+// out -- that floor no longer holds on its own (Intel Macs can run
+// 10.13.0-10.13.3), and whoever adds it must either re-establish a
+// floor above 10.13.4 for that target or switch this declaration back
+// to `weak!` linkage the way `rustix` already does. Do not ship a
+// second artifact without resolving this sentence first.
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn ptsname_r(fd: libc::c_int, buf: *mut libc::c_char, buflen: libc::size_t) -> libc::c_int;
