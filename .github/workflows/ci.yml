@@ -63,6 +63,14 @@
 # than at the next point-in-time audit (this RFC's own evidence table was exactly
 # such an audit, already stale by the time it was reviewed). Flipped to blocking
 # once PR-028-F lands it green, build *and* test both, not before.
+#
+# RFC-028 D5, review 595: build reached zero errors on 2026-10-17 (`39bf840`), so
+# this job now also runs the real test suite -- the first time any test in this
+# workspace has executed on a second platform. Still `continue-on-error: true`
+# and still measurement, not a gate: PR-028-C's own `/dev/fd` TOCTOU test runs for
+# the first time here, as do `WakeSignal`'s own runner-only checks (review 593's
+# CLOEXEC postcondition and wake-contract tests, and the `poll(2)`-on-a-kqueue-fd
+# assumption `poll_for_readiness` documents as unverifiable anywhere but here).
 
 name: ci
 
@@ -173,3 +181,10 @@ jobs:
 
       - name: cargo build --workspace
         run: cargo build --workspace
+
+      - name: cargo test --workspace --all-targets --no-fail-fast
+        run: |
+          set -euo pipefail
+          rm -rf "$CI_TMPDIR"
+          mkdir -p "$CI_TMPDIR"
+          TMPDIR="$CI_TMPDIR" cargo test --workspace --all-targets --no-fail-fast
