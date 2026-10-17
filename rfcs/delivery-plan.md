@@ -118,6 +118,7 @@ carry no dates — a release ships when its RFC closes and the gate is green thr
 | `0.35.0` | **059** Seeing The Audit | `REQ-SEC-025`, and the gap that **nothing renders the audit store** | Twelve families record and nothing shows one; `query` and the whole purge API already exist with no production call site |
 | `0.36.0` | **060** Command Approval A User Can Reach | `REQ-AGENT-012`, `013`; `REQ-SEC-012`, `013` | **A 1.0 blocker** |
 | `0.37.0`+ | **028**, **029**, NFR verification | `NFR-PORT-001`..`003`; docs, CI, release automation; every performance budget | M14, the 1.0 candidate band |
+| after **028** | **074** Capability Boundaries | — (no requirement names it; it is what makes the rest of M14 reviewable) | **Inserted 2026-10-17 at the owner's direction, decided by the architect.** `tekstide-core` is one strongly connected component of ten modules (42 internal edges, ~33k of 40k production lines) and `project/` holds six separately-authored capabilities plus the orchestrator. It goes **before** the final security review (whose worth equals the worth of the structure it reviewed), **before RFC-071** (Windows has no containment design to port — it is built from scratch into `runtime`/`approval`/`project`, three of the ten tangled modules), and **before RFC-070** (this product's first outbound network request, a new threat surface that should be *born* isolated rather than retrofitted). It goes **after RFC-028**, which is two compile errors from done and is landing `cfg` arms in four of those same modules. Goal definition and the three design decisions: the architect's own `tekstide-structure-goal-definition.md`. |
 
 ### `what-works-today.md` has no invariants, and it drifted (2026-10-07)
 
@@ -798,6 +799,16 @@ Every RFC in this queue inherits these. They are not restated in each document.
 4. **No colour-only status.** `NFR-UX-002` applies to every rendered surface.
 5. **Untrusted content stays untrusted.** Terminal output, transcripts, diffs, Git metadata, and file contents are rendered as data, never as trusted chrome.
 6. **Release at every milestone.** See the ROADMAP tracking rules.
+7. **A published-API break is allowed when the result is better, and is batched.** Owner ruling,
+   2026-10-17: breaking `tekstide-core`'s published surface needs no per-instance permission — the
+   standard is whether the change is reasonable and leaves the product better, which is the same
+   standard everything else here is held to. What remains required is the *shape* of the break:
+   batched into the release that carries it (RFC-036's own precedent, *"deletion of published API
+   is on the table deliberately, batched into one release"*), named in one changelog entry with old
+   and new spellings, never dribbled across releases. Measured 2026-10-17, so the cost is on
+   record: crates.io reports **no external reverse dependency** on `tekstide-core` — the only one is
+   this workspace's own crate — against 808 total downloads, 766 of them recent, which is this
+   project's own CI and installs. That window closes at `1.0.0`, where the promise changes.
 
 ## Maintenance
 
