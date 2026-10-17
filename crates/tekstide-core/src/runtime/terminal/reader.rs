@@ -126,7 +126,7 @@ pub struct TerminalReader {
     transcript_write_summary: Option<Arc<Mutex<TranscriptWriteSummary>>>,
 }
 
-/// A duplicated handle onto one [`TerminalReader`]'s wake [`WakeSignal`],
+/// A duplicated handle onto one [`TerminalReader`]'s wake `WakeSignal`,
 /// obtained via [`TerminalReader::try_clone_wake_notifier`]. Carries no
 /// PTY data of its own -- see [`Self::block_until_woken`].
 pub struct WakeNotifier {
@@ -145,7 +145,7 @@ impl WakeNotifier {
     /// notifier again.
     ///
     /// **Does not promise a wake count, and does not promise one wake
-    /// per signal** -- see [`WakeSignal::wait`]'s own doc for exactly
+    /// per signal** -- see `WakeSignal::wait`'s own doc for exactly
     /// what is and is not guaranteed across the two backends. Callers
     /// must already be correct for spurious and coalesced wakes; this
     /// one is, since it never infers "how many chunks were sent" from
@@ -158,7 +158,7 @@ impl WakeNotifier {
     }
 
     /// A second, independent duplicate of this notifier's own
-    /// [`WakeSignal`], sharing the same underlying signal and
+    /// `WakeSignal`, sharing the same underlying signal and
     /// `reader_alive` flag -- for a caller that only holds a borrow
     /// (`&WakeNotifier`, for example inside an API that hands out
     /// `&self` rather than ownership) but needs an owned, `'static`
@@ -406,7 +406,7 @@ impl TerminalReader {
     }
 
     /// RFC-017 Amendment 1, PR-A1-C: a duplicate handle onto this
-    /// reader's wake [`WakeSignal`], for a caller that wants to wait for
+    /// reader's wake `WakeSignal`, for a caller that wants to wait for
     /// readiness instead of polling `drain_available` on a timer.
     /// `try_clone`'s failure mode is the same resource exhaustion
     /// `spawn` can already fail on.
