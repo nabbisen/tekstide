@@ -175,6 +175,56 @@ fn the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming()
     cleanup_root(root);
 }
 
+/// RFC-028 D5, review 593's check #1: `WakeSignal::create`'s own
+/// postcondition (same shape as `pty.rs`'s `assert_cloexec`) already
+/// refuses to return a kqueue fd that is not close-on-exec -- this just
+/// confirms the happy path actually produces one, directly against the
+/// fd rather than only indirectly through "the reader spawned at all."
+/// macOS-only: Linux's `eventfd(2)` sets `EFD_CLOEXEC` atomically at the
+/// syscall itself, with no separate `fcntl` step to have a postcondition
+/// about.
+#[cfg(target_os = "macos")]
+#[test]
+fn wake_signal_kqueue_fd_is_close_on_exec_immediately_after_create() {
+    let signal = super::WakeSignal::create().expect("WakeSignal::create should succeed");
+    let fd = signal.as_raw_fd();
+    // SAFETY: `fd` is a valid, live fd for the duration of this call.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    assert_ne!(
+        flags, -1,
+        "fcntl(F_GETFD) should succeed against a freshly created WakeSignal"
+    );
+    assert_ne!(
+        flags & libc::FD_CLOEXEC,
+        0,
+        "WakeSignal::create's own postcondition should already refuse to return a non-CLOEXEC \
+         fd -- if this fires, that postcondition itself has a bug, not just the fd"
+    );
+}
+
+/// Review 593, Decision 2's contract, exercised directly against
+/// `WakeSignal` rather than through the full `TerminalReader`/
+/// `WakeNotifier` machinery: after `signal`, at least one subsequent
+/// `wait` observes a wake. **Deliberately stops after one `wait` call**
+/// -- asserting anything about a *second* call after two signals would
+/// assert the wrong half of the contract. `eventfd` counts (a second
+/// `wait` would also return `true` there); `EVFILT_USER` with `EV_CLEAR`
+/// coalesces (a second `wait` would block forever on that backend,
+/// since nothing remains to wake it). A test that happened to pass on
+/// Linux by relying on the stronger, uncoalesced behaviour and then hung
+/// on macOS is exactly what this slice exists to avoid.
+#[test]
+fn wake_signal_contract_signal_then_wait_observes_a_wake_even_when_coalesced() {
+    let signal = super::WakeSignal::create().expect("WakeSignal::create should succeed");
+    signal.signal();
+    signal.signal();
+    assert!(
+        signal.wait(),
+        "at least one wait after one or more signals should observe a wake, regardless of \
+         whether the backend counts or coalesces them"
+    );
+}
+
 /// RFC-017 Amendment 1, PR-A1-C: the shutdown path (`Drop` over a live,
 /// silent child, not a child exiting on its own) must also deliver a
 /// final wake -- otherwise a `WakeNotifier` cloned before the pane

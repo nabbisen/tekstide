@@ -18,19 +18,34 @@
 //! a byte count and then discards part of it -- "unreachable" here is a
 //! structural property of the type, not a runtime check.
 //!
-//! **RFC-017 Amendment 1, PR-A1-C: [`WakeNotifier`], a second `eventfd`
-//! separate from the shutdown one.** `read_available_bounded_for`'s old
-//! call site was reached by a fixed-interval poll tick; removing that
+//! **RFC-017 Amendment 1, PR-A1-C: [`WakeNotifier`], a second wake
+//! signal separate from the shutdown one.** `read_available_bounded_for`'s
+//! old call site was reached by a fixed-interval poll tick; removing that
 //! tick (PR-A1-C's own job) needs something to replace its role of
 //! telling a caller "go check this terminal now" without reintroducing
-//! a timer. The reader thread signals this `eventfd` whenever it
-//! buffers new bytes, and one final time on every exit path (shutdown,
-//! EOF, or a fatal read error) -- see [`WakeNotifier::block_until_woken`]'s
-//! own doc for why "the reader is done" needs an explicit signal rather
-//! than being inferred from the `eventfd`'s own semantics.
+//! a timer. The reader thread signals this whenever it buffers new
+//! bytes, and one final time on every exit path (shutdown, EOF, or a
+//! fatal read error) -- see [`WakeNotifier::block_until_woken`]'s own
+//! doc for why "the reader is done" needs an explicit signal rather than
+//! being inferred from the signal's own semantics.
+//!
+//! **RFC-028 D5 (review 593): [`WakeSignal`] is the cross-platform
+//! primitive behind both the shutdown signal and `WakeNotifier`.**
+//! `eventfd(2)` (Linux) does not exist on Apple targets, and no atomic-
+//! `CLOEXEC` self-pipe construction exists there either (`pipe2` and
+//! `SOCK_CLOEXEC` are both absent for `apple` in the vendored `libc`
+//! crate, and `rustix` -- already a transitive dependency -- omits its
+//! own flagged `pipe_with` entirely for Apple rather than ship a racy
+//! fallback). A self-pipe's specific failure mode -- a concurrently
+//! `exec`'d child inheriting the write end, so the read side never sees
+//! EOF and shutdown hangs -- is also why a narrower `CLOEXEC` window is
+//! not an adequate fix on its own: `WakeSignal` uses `kqueue(2)` with a
+//! single `EVFILT_USER` registration on macOS instead, which has no
+//! write end for anything to inherit. See [`WakeSignal`]'s own doc for
+//! the exact contract this gives both backends.
 
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
@@ -77,20 +92,21 @@ pub struct TerminalReader {
     receiver: Option<Receiver<Vec<u8>>>,
     join_handle: Option<JoinHandle<()>>,
     os_thread_id: i32,
-    // The write end of an `eventfd(2)` the reader thread also `poll(2)`s
+    // Signalled by `Self::shutdown`/`Drop`, polled by the reader thread
     // alongside the PTY master. Response 201: dropping `receiver` alone
     // only unblocks a thread parked in `sender.send` on a full channel;
     // it does nothing for the far more common case of a thread parked in
     // `poll(2)` on a live, silent child (no data, PTY not hung up). This
     // is what makes that case interruptible too -- see `Drop`.
-    shutdown: fs::File,
-    // RFC-017 Amendment 1, PR-A1-C: a second `eventfd`, signalled by the
-    // reader thread (not `Drop`) every time it either buffers new bytes
-    // or stops for good -- what lets a caller replace polling with a
-    // real wait. `TerminalReader` itself never reads this fd; it exists
-    // to be duplicated out via [`Self::try_clone_wake_notifier`] for
-    // whoever needs to wake up when this reader has something to report.
-    wake: fs::File,
+    shutdown: WakeSignal,
+    // RFC-017 Amendment 1, PR-A1-C: a second `WakeSignal`, signalled by
+    // the reader thread (not `Drop`) every time it either buffers new
+    // bytes or stops for good -- what lets a caller replace polling with
+    // a real wait. `TerminalReader` itself never waits on this; it
+    // exists to be duplicated out via [`Self::try_clone_wake_notifier`]
+    // for whoever needs to wake up when this reader has something to
+    // report.
+    wake: WakeSignal,
     // Set to `false` by the reader thread immediately before its last
     // ever wake signal, on every exit path -- shutdown, EOF, or a fatal
     // read error. `eventfd`'s own counter has no notion of "the writer
@@ -110,43 +126,48 @@ pub struct TerminalReader {
     transcript_write_summary: Option<Arc<Mutex<TranscriptWriteSummary>>>,
 }
 
-/// A duplicated handle onto one [`TerminalReader`]'s wake `eventfd`,
+/// A duplicated handle onto one [`TerminalReader`]'s wake [`WakeSignal`],
 /// obtained via [`TerminalReader::try_clone_wake_notifier`]. Carries no
 /// PTY data of its own -- see [`Self::block_until_woken`].
 pub struct WakeNotifier {
-    file: fs::File,
+    signal: WakeSignal,
     reader_alive: Arc<AtomicBool>,
 }
 
 impl WakeNotifier {
-    /// Blocks (a real `poll(2)` park, not a sleep) until the reader
-    /// thread has either buffered new bytes or stopped for good, then
-    /// drains the `eventfd`'s accumulated count. Returns `true` if more
-    /// wakes may still arrive -- the caller should act on this wake and
-    /// call again; `false` means this was the reader's last wake ever,
-    /// on any exit path (shutdown, EOF, or a fatal read error) -- the
-    /// caller should still act on it once (there may be a final exit to
-    /// notice) and then stop waiting, since nothing will signal this
+    /// Blocks (a real wait, not a sleep) until the reader thread has
+    /// either buffered new bytes or stopped for good. Returns `true` if
+    /// more wakes may still arrive -- the caller should act on this wake
+    /// and call again; `false` means this was the reader's last wake
+    /// ever, on any exit path (shutdown, EOF, or a fatal read error) --
+    /// the caller should still act on it once (there may be a final exit
+    /// to notice) and then stop waiting, since nothing will signal this
     /// notifier again.
+    ///
+    /// **Does not promise a wake count, and does not promise one wake
+    /// per signal** -- see [`WakeSignal::wait`]'s own doc for exactly
+    /// what is and is not guaranteed across the two backends. Callers
+    /// must already be correct for spurious and coalesced wakes; this
+    /// one is, since it never infers "how many chunks were sent" from
+    /// "how many times I was woken."
     pub fn block_until_woken(&self) -> bool {
-        if !block_on_eventfd(self.file.as_raw_fd()) {
+        if !self.signal.wait() {
             return false;
         }
-        let mut buffer = [0_u8; 8];
-        let _ = (&self.file).read(&mut buffer);
         self.reader_alive.load(Ordering::Acquire)
     }
 
-    /// A second, independent duplicate of this notifier's own `eventfd`
-    /// handle, sharing the same underlying counter and `reader_alive`
-    /// flag -- for a caller that only holds a borrow (`&WakeNotifier`,
-    /// for example inside an API that hands out `&self` rather than
-    /// ownership) but needs an owned, `'static` handle to move into a
-    /// background thread. Failure here is the same resource-exhaustion
-    /// case `try_clone_wake_notifier` can already fail on.
+    /// A second, independent duplicate of this notifier's own
+    /// [`WakeSignal`], sharing the same underlying signal and
+    /// `reader_alive` flag -- for a caller that only holds a borrow
+    /// (`&WakeNotifier`, for example inside an API that hands out
+    /// `&self` rather than ownership) but needs an owned, `'static`
+    /// handle to move into a background thread. Failure here is the
+    /// same resource-exhaustion case `try_clone_wake_notifier` can
+    /// already fail on.
     pub fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
-            file: self.file.try_clone()?,
+            signal: self.signal.try_clone()?,
             reader_alive: Arc::clone(&self.reader_alive),
         })
     }
@@ -284,8 +305,10 @@ impl TerminalReader {
     /// ready, consuming no CPU while parked -- a real blocking primitive,
     /// not a fixed delay guessed to be short enough.
     ///
-    /// Fallible only because `eventfd(2)` can fail (resource exhaustion)
-    /// -- everything else here is infallible in practice.
+    /// Fallible because [`WakeSignal::create`] can fail -- resource
+    /// exhaustion on both platforms, plus (macOS only) the `CLOEXEC`
+    /// postcondition it checks after construction -- everything else
+    /// here is infallible in practice.
     ///
     /// **RFC-011 Amendment 2, D1**: `transcript_capture`, when `Some`,
     /// moves a real `BoundedTranscriptWriter` into this reader thread --
@@ -300,19 +323,19 @@ impl TerminalReader {
         master: fs::File,
         transcript_capture: Option<TranscriptCapture>,
     ) -> io::Result<Self> {
-        // Owned by `TerminalReader` for the `write` side `Drop` uses to
-        // signal shutdown; the reader thread below only needs the bare
-        // fd number to `poll(2)` it, not ownership -- `shutdown` here
-        // keeps the fd open for as long as `TerminalReader` (and
-        // therefore the thread that polls it) exists.
-        let shutdown_fd = create_eventfd()?;
-        let shutdown = unsafe { fs::File::from_raw_fd(shutdown_fd) };
-        // Same shape, second `eventfd`: kept alive here only so
+        // Owned by `TerminalReader` for `Drop` to signal shutdown
+        // through; the reader thread gets its own clone below (see
+        // `thread_shutdown`) rather than reaching into this one, so
+        // ownership of each side is ordinary and `Send`-safe instead of
+        // resting on "the other field happens to keep the fd open."
+        let shutdown = WakeSignal::create()?;
+        // Same shape, second signal: kept alive here only so
         // `try_clone_wake_notifier` has something to duplicate from for
         // as long as this `TerminalReader` exists. Nothing on this
-        // struct ever reads it.
-        let wake_fd = create_eventfd()?;
-        let wake = unsafe { fs::File::from_raw_fd(wake_fd) };
+        // struct ever waits on it.
+        let wake = WakeSignal::create()?;
+        let thread_shutdown = shutdown.try_clone()?;
+        let thread_wake = wake.try_clone()?;
         let reader_alive = Arc::new(AtomicBool::new(true));
 
         let (sender, receiver) = mpsc::sync_channel(CHANNEL_CAPACITY);
@@ -339,8 +362,8 @@ impl TerminalReader {
             reader_thread_loop(
                 master,
                 sender,
-                shutdown_fd,
-                wake_fd,
+                thread_shutdown,
+                thread_wake,
                 thread_reader_alive,
                 transcript_state,
             );
@@ -383,13 +406,13 @@ impl TerminalReader {
     }
 
     /// RFC-017 Amendment 1, PR-A1-C: a duplicate handle onto this
-    /// reader's wake `eventfd`, for a caller that wants to wait for
+    /// reader's wake [`WakeSignal`], for a caller that wants to wait for
     /// readiness instead of polling `drain_available` on a timer.
     /// `try_clone`'s failure mode is the same resource exhaustion
     /// `spawn` can already fail on.
     pub fn try_clone_wake_notifier(&self) -> io::Result<WakeNotifier> {
         Ok(WakeNotifier {
-            file: self.wake.try_clone()?,
+            signal: self.wake.try_clone()?,
             reader_alive: Arc::clone(&self.reader_alive),
         })
     }
@@ -439,34 +462,32 @@ impl TerminalReader {
     /// actually triggers a hangup, once this one is already gone too.
     ///
     /// Idempotent: every step is itself idempotent (`Option::take` on an
-    /// already-`None` field is a no-op; a second `eventfd` write is
-    /// harmless), so calling this explicitly and then letting `Drop` run
-    /// anyway -- which every caller's own drop still does -- performs no
-    /// second shutdown, just two calls that agree the first one already
+    /// already-`None` field is a no-op; a second signal is harmless), so
+    /// calling this explicitly and then letting `Drop` run anyway --
+    /// which every caller's own drop still does -- performs no second
+    /// shutdown, just two calls that agree the first one already
     /// finished. **After this returns, [`Self::drain_available`] panics**
     /// -- there is no more reader thread left to have buffered anything,
     /// and this reader will never receive real PTY output again.
     ///
-    /// Response 201: the shutdown `eventfd` write and the `receiver`
-    /// drop are two independent unblock paths, both needed. Writing to
-    /// `shutdown` wakes a thread parked in `poll(2)` on a live, silent
-    /// child (no data, pty not hung up) -- the fd shows readable,
-    /// `reader_thread_loop` sees it ahead of the pty fd and returns
-    /// immediately; a write failure here is not actionable (the join
-    /// below is the only thing that must still complete), so it is not
-    /// propagated. Dropping `receiver` is what unblocks a thread already
-    /// past `poll(2)` and parked in `sender.send` on a full channel
-    /// instead, which is not reading `shutdown` at that moment: it makes
-    /// that blocked (or any future) `send` return an error, which is
-    /// `reader_thread_loop`'s own signal to stop. With both unblock
-    /// paths in place, the join below can no longer depend on the
-    /// child's own behaviour --
+    /// Response 201: the shutdown signal and the `receiver` drop are two
+    /// independent unblock paths, both needed. Signalling `shutdown`
+    /// wakes a thread parked in `poll(2)` on a live, silent child (no
+    /// data, pty not hung up) -- the fd shows readable, `reader_thread_loop`
+    /// sees it ahead of the pty fd and returns immediately; a failure
+    /// here is not actionable (the join below is the only thing that
+    /// must still complete), so it is not propagated. Dropping
+    /// `receiver` is what unblocks a thread already past `poll(2)` and
+    /// parked in `sender.send` on a full channel instead, which is not
+    /// reading `shutdown` at that moment: it makes that blocked (or any
+    /// future) `send` return an error, which is `reader_thread_loop`'s
+    /// own signal to stop. With both unblock paths in place, the join
+    /// below can no longer depend on the child's own behaviour --
     /// `dropping_a_reader_over_a_live_silent_child_completes_promptly`
     /// proves it under a real timeout, so a regression here fails that
     /// test rather than hanging the suite.
     pub fn shutdown(&mut self) {
-        let wakeup: u64 = 1;
-        let _ = self.shutdown.write(&wakeup.to_ne_bytes());
+        self.shutdown.signal();
         self.receiver.take();
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
@@ -514,16 +535,16 @@ fn current_thread_id() -> i32 {
 
 /// RFC-017 Amendment 1, PR-A1-C: every exit path here does the same two
 /// things in the same order before returning -- mark `reader_alive`
-/// `false`, then signal `wake_fd` -- so a `WakeNotifier` can never
-/// observe "still alive" after the reader has actually stopped, nor
-/// miss the final wake that tells it so. Factored into one place rather
-/// than repeated at each `return`, so that ordering cannot drift between
+/// `false`, then signal `wake` -- so a `WakeNotifier` can never observe
+/// "still alive" after the reader has actually stopped, nor miss the
+/// final wake that tells it so. Factored into one place rather than
+/// repeated at each `return`, so that ordering cannot drift between
 /// call sites.
 fn reader_thread_loop(
     mut master: fs::File,
     sender: SyncSender<Vec<u8>>,
-    shutdown_fd: RawFd,
-    wake_fd: RawFd,
+    shutdown: WakeSignal,
+    wake: WakeSignal,
     reader_alive: Arc<AtomicBool>,
     mut transcript: Option<ReaderTranscriptState>,
 ) {
@@ -531,16 +552,16 @@ fn reader_thread_loop(
     let mut buffer = [0_u8; READ_CHUNK_BYTES];
 
     loop {
-        match poll_for_readiness(pty_fd, shutdown_fd) {
+        match poll_for_readiness(pty_fd, &shutdown) {
             PollOutcome::ShutdownRequested | PollOutcome::Failed => {
-                return stop_reading(&reader_alive, wake_fd);
+                return stop_reading(&reader_alive, &wake);
             }
             PollOutcome::PtyReadable => {}
         }
 
         loop {
             match master.read(&mut buffer) {
-                Ok(0) => return stop_reading(&reader_alive, wake_fd),
+                Ok(0) => return stop_reading(&reader_alive, &wake),
                 Ok(bytes_read) => {
                     let chunk = &buffer[..bytes_read];
                     let outcome = transcript
@@ -550,9 +571,9 @@ fn reader_thread_loop(
                     match outcome {
                         TranscriptCaptureOutcome::Send => {
                             if sender.send(chunk.to_vec()).is_err() {
-                                return stop_reading(&reader_alive, wake_fd);
+                                return stop_reading(&reader_alive, &wake);
                             }
-                            signal_wake(wake_fd);
+                            wake.signal();
                         }
                         TranscriptCaptureOutcome::Suppress { stop_reading: true } => {
                             // RFC-011 Amendment 2, D3: `RequiredLocalBounded`.
@@ -566,8 +587,8 @@ fn reader_thread_loop(
                             // termination, and this thread stays alive
                             // and joinable, responsive only to shutdown
                             // from now on.
-                            signal_wake(wake_fd);
-                            return wait_for_shutdown_only(&reader_alive, shutdown_fd, wake_fd);
+                            wake.signal();
+                            return wait_for_shutdown_only(&reader_alive, &shutdown, &wake);
                         }
                         TranscriptCaptureOutcome::Suppress {
                             stop_reading: false,
@@ -577,13 +598,13 @@ fn reader_thread_loop(
                             // -- capture is now permanently off for the
                             // rest of this reader's life, and the
                             // *next* chunk read is `Send` again.
-                            signal_wake(wake_fd);
+                            wake.signal();
                         }
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return stop_reading(&reader_alive, wake_fd),
+                Err(_) => return stop_reading(&reader_alive, &wake),
             }
         }
     }
@@ -592,38 +613,28 @@ fn reader_thread_loop(
 /// The reader thread's last act on every exit path: mark itself dead,
 /// then wake anyone waiting so they notice -- both the "the reader has
 /// permanently stopped" state and the "something happened, go check"
-/// signal reuse the same `eventfd`, ordered so a waiter reading `false`
-/// off `reader_alive` can trust it.
-fn stop_reading(reader_alive: &AtomicBool, wake_fd: RawFd) {
+/// signal reuse the same [`WakeSignal`], ordered so a waiter reading
+/// `false` off `reader_alive` can trust it.
+fn stop_reading(reader_alive: &AtomicBool, wake: &WakeSignal) {
     reader_alive.store(false, Ordering::Release);
-    signal_wake(wake_fd);
+    wake.signal();
 }
 
 /// RFC-011 Amendment 2, D3: `RequiredLocalBounded`'s "stop reading"
-/// landing state -- reused from [`block_on_eventfd`], the same
-/// single-fd `poll(2)` primitive [`WakeNotifier::block_until_woken`]
-/// already uses, since waiting on exactly the shutdown fd and nothing
-/// else is exactly what this needs. **Deliberately does not call
+/// landing state -- waits on exactly the shutdown signal and nothing
+/// else, which is exactly what this needs. **Deliberately does not call
 /// `stop_reading` (mark dead) on entry**: the reader has not
 /// permanently ended -- the child is still alive, just blocked -- so
 /// `reader_alive` must stay `true` for as long as this thread is merely
 /// stalled rather than actually gone. Only once real shutdown arrives
 /// (`Drop`, or any other future termination path that reuses the same
-/// `eventfd`) does this proceed to the normal exit, at which point
+/// signal) does this proceed to the normal exit, at which point
 /// `reader_alive` finally becomes `false` and one last wake fires --
 /// the same guarantee every other exit path in this module already
 /// gives a `WakeNotifier`.
-fn wait_for_shutdown_only(reader_alive: &AtomicBool, shutdown_fd: RawFd, wake_fd: RawFd) {
-    block_on_eventfd(shutdown_fd);
-    stop_reading(reader_alive, wake_fd);
-}
-
-fn signal_wake(wake_fd: RawFd) {
-    let value: u64 = 1;
-    let bytes = value.to_ne_bytes();
-    unsafe {
-        libc::write(wake_fd, bytes.as_ptr().cast(), bytes.len());
-    }
+fn wait_for_shutdown_only(reader_alive: &AtomicBool, shutdown: &WakeSignal, wake: &WakeSignal) {
+    shutdown.wait();
+    stop_reading(reader_alive, wake);
 }
 
 enum PollOutcome {
@@ -632,13 +643,23 @@ enum PollOutcome {
     Failed,
 }
 
-/// Blocks until the PTY master is readable, the shutdown `eventfd` is
-/// signalled, or `poll(2)` itself fails unrecoverably. Checks the
-/// shutdown fd first: if a `Drop` write and real PTY output race on the
-/// same wakeup, exiting promptly is correct either way, since whatever
-/// is still in the PTY's kernel buffer is not this module's job to keep
-/// draining once the caller has asked to stop.
-fn poll_for_readiness(pty_fd: RawFd, shutdown_fd: RawFd) -> PollOutcome {
+/// Blocks until the PTY master is readable, `shutdown` is signalled, or
+/// `poll(2)` itself fails unrecoverably. Checks the shutdown fd first:
+/// if a `Drop` signal and real PTY output race on the same wakeup,
+/// exiting promptly is correct either way, since whatever is still in
+/// the PTY's kernel buffer is not this module's job to keep draining
+/// once the caller has asked to stop.
+///
+/// **Identical on both platforms, deliberately**: this relies on a
+/// `WakeSignal`'s underlying fd being directly `poll(2)`-able, which is
+/// true for Linux's `eventfd` by construction and, for macOS's `kqueue`,
+/// is documented BSD/Darwin behaviour rather than something this module
+/// invented. `dropping_a_reader_over_a_live_silent_child_completes_promptly`
+/// (this module's own bounded-timeout test) is what would catch a
+/// regression in that assumption on the real runner -- a wrong answer
+/// here is a hang, not a compile error, which is exactly why that test
+/// exists under a hard timeout instead of asserting on documentation.
+fn poll_for_readiness(pty_fd: RawFd, shutdown: &WakeSignal) -> PollOutcome {
     let mut fds = [
         libc::pollfd {
             fd: pty_fd,
@@ -646,7 +667,7 @@ fn poll_for_readiness(pty_fd: RawFd, shutdown_fd: RawFd) -> PollOutcome {
             revents: 0,
         },
         libc::pollfd {
-            fd: shutdown_fd,
+            fd: shutdown.as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         },
@@ -671,11 +692,256 @@ fn poll_for_readiness(pty_fd: RawFd, shutdown_fd: RawFd) -> PollOutcome {
     }
 }
 
+/// RFC-028 D5 (review 593): the cross-platform primitive behind both
+/// `TerminalReader`'s shutdown signal and [`WakeNotifier`]. Exposes only
+/// the two operations a caller needs -- [`Self::signal`] and
+/// [`Self::wait`] -- never a raw file descriptor whose *kind* (counter
+/// vs. kqueue) a caller could structure around.
+///
+/// **The contract, stated exactly because the two backends implement it
+/// differently**: after `signal` returns, at least one subsequent
+/// `wait` call (on this handle or any of its [`Self::try_clone`]s)
+/// observes a wake. This type does **not** promise a wake count, and
+/// does **not** promise one wake per signal -- `eventfd` counts (N
+/// signals before any wait can produce a count of N, drained by
+/// whichever wait drains it); `EVFILT_USER` with `EV_CLEAR` coalesces (N
+/// signals before any wait can still produce exactly one observed
+/// wake). Every caller in this module already tolerates spurious and
+/// coalesced wakes -- none of them infer "how many chunks were sent"
+/// from "how many times I was woken."
+///
+/// Linux: one `eventfd(2)`, `EFD_CLOEXEC` set atomically at creation.
+/// macOS: one `kqueue(2)` with a single `EVFILT_USER` registration,
+/// triggered via `kevent(..., NOTE_TRIGGER)` -- chosen over a self-pipe
+/// specifically because it has no write end for a concurrently-exec'd
+/// child to inherit (review 593, Decision 1): the self-pipe failure mode
+/// (a leaked write end means `wait` never sees EOF, so shutdown hangs)
+/// does not exist for this backend at all, regardless of `CLOEXEC`
+/// timing. The precedent is not this module's own invention: `polling`
+/// (already a transitive dependency) uses the same filter for the same
+/// reason, by its own account, "to avoid allocating a pipe."
+struct WakeSignal {
+    #[cfg(target_os = "linux")]
+    file: fs::File,
+    #[cfg(target_os = "macos")]
+    kq: Arc<std::os::fd::OwnedFd>,
+}
+
+#[cfg(target_os = "linux")]
+impl WakeSignal {
+    fn create() -> io::Result<Self> {
+        // SAFETY: no preconditions beyond kernel resource limits.
+        let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
+        if fd == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `fd` was just returned by `eventfd(2)` above, valid
+        // and owned by nothing else yet.
+        Ok(Self {
+            file: unsafe { fs::File::from_raw_fd(fd) },
+        })
+    }
+
+    fn signal(&self) {
+        let value: u64 = 1;
+        let bytes = value.to_ne_bytes();
+        // SAFETY: `self.file`'s fd is a valid, live `eventfd`; `bytes`
+        // is a valid 8-byte buffer for the duration of this call.
+        // Best-effort: a write failure here is not actionable by any
+        // caller (`Drop`, or the reader thread's own exit path), and a
+        // stuck signal would surface as a hang in `wait` instead.
+        unsafe {
+            libc::write(self.file.as_raw_fd(), bytes.as_ptr().cast(), bytes.len());
+        }
+    }
+
+    fn wait(&self) -> bool {
+        if !poll_single_fd(self.file.as_raw_fd()) {
+            return false;
+        }
+        let mut buffer = [0_u8; 8];
+        let _ = (&self.file).read(&mut buffer);
+        true
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+        })
+    }
+
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl WakeSignal {
+    /// `kqueue(2)` has no atomic-`CLOEXEC` constructor on Apple targets
+    /// (checked directly against the vendored `libc` crate and against
+    /// `rustix`, which omits its own flagged `pipe_with` entirely for
+    /// `apple` rather than ship a racy fallback -- review 593). `fcntl`
+    /// here is the best available, matching what `polling` itself does
+    /// for the same reason. `assert_cloexec_macos` below is the
+    /// postcondition that actually catches a regression -- same shape
+    /// as `pty.rs`'s own `assert_cloexec`, refusing rather than
+    /// continuing if it is somehow unset.
+    fn create() -> io::Result<Self> {
+        // SAFETY: no preconditions beyond kernel resource limits.
+        let fd = unsafe { libc::kqueue() };
+        if fd == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        if let Err(error) = Self::make_cloexec_and_register(fd) {
+            // SAFETY: `fd` is a valid, still-owned fd this function
+            // created and is refusing to hand back.
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(error);
+        }
+        // SAFETY: `fd` is a valid, fully set-up kqueue fd, owned by
+        // nothing else yet.
+        let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+        Ok(Self {
+            kq: Arc::new(owned),
+        })
+    }
+
+    fn make_cloexec_and_register(fd: RawFd) -> io::Result<()> {
+        // SAFETY: `fd` is the just-created, valid kqueue fd.
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        assert_cloexec_macos(fd)?;
+
+        let setup = libc::kevent {
+            ident: WAKE_SIGNAL_IDENT,
+            filter: libc::EVFILT_USER,
+            flags: libc::EV_ADD | libc::EV_CLEAR,
+            fflags: 0,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        // SAFETY: `fd` is the just-created, valid kqueue fd; `setup` is
+        // a single, fully-initialized `kevent` registering this
+        // kqueue's own one-shot wake event; no output buffer is
+        // requested.
+        let result =
+            unsafe { libc::kevent(fd, &setup, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+        if result == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    fn signal(&self) {
+        let trigger = libc::kevent {
+            ident: WAKE_SIGNAL_IDENT,
+            filter: libc::EVFILT_USER,
+            flags: 0,
+            fflags: libc::NOTE_TRIGGER,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        // SAFETY: `self.kq` is a valid, live kqueue fd, already
+        // registered (at construction) for this exact `ident`/
+        // `EVFILT_USER` pair; no output buffer requested. Best-effort,
+        // matching this module's `eventfd` write convention above: not
+        // actionable by any caller, and a stuck signal would surface as
+        // a hang in `wait` instead.
+        unsafe {
+            libc::kevent(
+                self.kq.as_raw_fd(),
+                &trigger,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            );
+        }
+    }
+
+    fn wait(&self) -> bool {
+        loop {
+            let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+            // SAFETY: `self.kq` is a valid, live kqueue fd; `event` is a
+            // single, valid output slot; a `NULL` timeout blocks
+            // indefinitely, the same "real wait, not a sleep" contract
+            // this module's own `poll(2)` calls already give.
+            let result = unsafe {
+                libc::kevent(
+                    self.kq.as_raw_fd(),
+                    std::ptr::null(),
+                    0,
+                    &mut event,
+                    1,
+                    std::ptr::null(),
+                )
+            };
+            if result == -1 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return false;
+            }
+            if result > 0 {
+                return true;
+            }
+            // `result == 0`: no event despite a `NULL`/infinite timeout
+            // -- not supposed to happen, but retrying costs nothing and
+            // keeps this loop's only exit paths "woken" or "the kqueue
+            // itself failed," matching the Linux backend's own shape.
+        }
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            kq: Arc::clone(&self.kq),
+        })
+    }
+
+    fn as_raw_fd(&self) -> RawFd {
+        self.kq.as_raw_fd()
+    }
+}
+
+/// Arbitrary and private to this module: `EVFILT_USER` idents are not
+/// file descriptors and need no relationship to anything outside the
+/// one kqueue `WakeSignal::create` registers them against, so any fixed
+/// value distinguishes this registration from itself consistently.
+#[cfg(target_os = "macos")]
+const WAKE_SIGNAL_IDENT: libc::uintptr_t = 1;
+
+/// Same shape as `pty.rs`'s own `assert_cloexec`: a postcondition, not
+/// the mechanism -- `make_cloexec_and_register`'s `fcntl` call above is
+/// what actually sets the flag. This only reads it back and refuses
+/// loudly if it is somehow unset, so a future refactor that drops that
+/// call fails here instead of silently reopening the window `WakeSignal`
+/// exists to close.
+#[cfg(target_os = "macos")]
+fn assert_cloexec_macos(fd: RawFd) -> io::Result<()> {
+    // SAFETY: `fd` is a valid, live fd for the duration of this call.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if flags & libc::FD_CLOEXEC == 0 {
+        return Err(io::Error::other(
+            "WakeSignal's kqueue fd was not close-on-exec after fcntl(F_SETFD, FD_CLOEXEC)",
+        ));
+    }
+    Ok(())
+}
+
 /// Blocks until `fd` is readable or `poll(2)` itself fails
-/// unrecoverably. The single-fd counterpart to [`poll_for_readiness`],
-/// used by [`WakeNotifier::block_until_woken`] -- that caller has only
-/// one fd to wait on, not a PTY master plus a shutdown signal.
-fn block_on_eventfd(fd: RawFd) -> bool {
+/// unrecoverably. Used only by [`WakeSignal`]'s own Linux `wait`
+/// implementation -- the macOS backend waits via `kevent(2)` directly
+/// instead, since consuming the event and waiting for it are one call
+/// there.
+#[cfg(target_os = "linux")]
+fn poll_single_fd(fd: RawFd) -> bool {
     let mut pollfd = libc::pollfd {
         fd,
         events: libc::POLLIN,
@@ -695,15 +961,6 @@ fn block_on_eventfd(fd: RawFd) -> bool {
             return true;
         }
         // Spurious wakeup with nothing actually ready; poll again.
-    }
-}
-
-fn create_eventfd() -> io::Result<RawFd> {
-    let fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
-    if fd == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(fd)
     }
 }
 
