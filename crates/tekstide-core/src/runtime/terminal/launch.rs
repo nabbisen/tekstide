@@ -1157,13 +1157,13 @@ fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, Ter
             // final fds 0-2 by this point (`Command` wires them before
             // running `pre_exec`), so starting at 3 cannot touch them.
             //
-            // RFC-028 D5, review 589: a bounded `close(2)` loop, not
+            // RFC-028 D5, review 589: a bounded loop, not
             // `SYS_close_range`/`closefrom` -- neither exists on macOS
             // (`closefrom` is a BSD-ism Apple never adopted, absent from
             // the vendored `libc` for Apple targets; checked directly,
             // not assumed), and `proc_pidinfo`-based emulation is not
             // async-signal-safe, so it is not a legal substitute inside
-            // this closure regardless of availability. `close(2)` itself
+            // this closure regardless of availability. `fcntl` itself
             // *is* on POSIX's async-signal-safe list, so a loop is legal
             // where almost nothing else is. The bound (`close_from_
             // bound`, above) was computed in the parent precisely so this
@@ -1174,8 +1174,45 @@ fn spawn_pty_child(mut command: Command, pty: &mut OpenPty) -> Result<Child, Ter
             // hole (`OpenPty::new`'s own `O_CLOEXEC`), not something this
             // spawn may fail over, the same framing this mechanism has
             // always had.
+            //
+            // **`F_SETFD`/`FD_CLOEXEC`, not `close(2)` -- review 593's
+            // follow-up, and a real, confirmed regression, not a style
+            // change.** This loop used `close(2)` from review 589 until
+            // now. `Command::spawn()` (the `pre_exec` path) creates its
+            // own internal pipe before `fork` to report a genuine
+            // `exec()` failure back to the parent with the real `errno`;
+            // closing that pipe's write end early -- its fd is ordinary,
+            // not reserved, and sits inside `3..close_from_bound` same as
+            // anything else -- makes the parent see `EOF`, std's own
+            // "`exec` succeeded" signal, before `exec` was ever
+            // attempted. **Confirmed directly, by the reviewer, after an
+            // earlier version of this comment cited a probe that could
+            // not show it**: a file marked executable with a `#!`
+            // shebang naming an interpreter that does not exist fails
+            // `exec` with `ENOENT` (unlike a missing shebang entirely,
+            // which fails with `ENOEXEC` -- glibc retries *that* case
+            // via `/bin/sh -c`, running the file as a script and masking
+            // the defect regardless of which loop body is used, which is
+            // why an earlier probe built against `ENOEXEC` was
+            // meaningless evidence either way). Against the real
+            // `ENOENT` case: `close(2)` here reports `spawn() -> Ok`
+            // followed by the child dying on `SIGABRT` with no
+            // diagnostic attached (std's own child-side code aborts on
+            // the errno pipe it needed being gone); `fcntl` here reports
+            // `spawn() -> Err(ENOENT)` correctly, immediately, to the
+            // real caller. See
+            // `launching_a_shell_with_a_nonexistent_interpreter_reports_
+            // failure_not_a_dead_child` for the regression test this
+            // produced. Marking the fd close-
+            // on-exec instead of closing it outright keeps the identical
+            // property for every *other* descriptor (nothing survives a
+            // *successful* `exec`) without touching what happens on a
+            // *failed* one: std's own pipe is already `CLOEXEC` for
+            // exactly that reason, so this loop is a no-op against it
+            // either way, and a failed `exec` can still write the real
+            // `errno` through it.
             for fd in 3..close_from_bound {
-                libc::close(fd);
+                libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
             }
             Ok(())
         });

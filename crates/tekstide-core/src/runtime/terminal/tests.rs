@@ -150,6 +150,50 @@ fn linux_runtime_rejects_non_executable_shell_before_spawn() {
     cleanup_root(root);
 }
 
+/// RFC-028 D5, review 594: the regression review 593's follow-up found
+/// and fixed. The shell here passes every pre-check above (exists,
+/// executable bit set) and only fails once `exec` actually runs,
+/// against an interpreter named in its own `#!` line that does not
+/// exist -- `ENOENT`, not `ENOEXEC`. That distinction matters: a
+/// shebang-less file fails with `ENOEXEC`, which glibc's own `execvp`
+/// silently retries via `/bin/sh -c`, running the file as a script and
+/// masking this exact defect regardless of which `pre_exec` close-loop
+/// body is used (an earlier probe built against that case produced no
+/// usable evidence either way, for exactly this reason). `ENOENT` is
+/// not retried, so this is the one shape that actually exercises
+/// `spawn_pty_child`'s own `pre_exec` closure racing `Command::spawn`'s
+/// internal errno pipe -- see that closure's own comment for the full
+/// mechanism. **Must report failure, not `Ok` followed by a dead
+/// child with no diagnostic attached.**
+#[test]
+fn launching_a_shell_with_a_nonexistent_interpreter_reports_failure_not_a_dead_child() {
+    let root = test_root("nonexistent-interpreter-shell");
+    let shell = root.join("shell-with-missing-interpreter");
+    std::fs::write(
+        &shell,
+        "#!/definitely/not/a/real/interpreter/tekstide-probe\n",
+    )
+    .expect("fake shell should be created");
+    let mut permissions = std::fs::metadata(&shell)
+        .expect("fake shell metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&shell, permissions).expect("fake shell should be marked executable");
+
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, &shell);
+
+    let error = TerminalRuntime::new()
+        .launch_project_shell(&project, spec)
+        .expect_err(
+            "a shell whose interpreter does not exist must be reported as a launch failure, not \
+             as a successful launch of a child that is about to die with no diagnostic",
+        );
+
+    assert!(matches!(error, TerminalLaunchError::SpawnFailed { .. }));
+    cleanup_root(root);
+}
+
 #[test]
 fn linux_runtime_launches_project_shell_and_reads_marker() {
     let root = test_root("launch-shell");

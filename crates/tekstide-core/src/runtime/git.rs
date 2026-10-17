@@ -119,6 +119,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -1531,11 +1532,81 @@ fn spawn_git_command(
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
+
+    // RFC-028 D5, review 593 (Decision 3): this was the one frequently-
+    // exercised exec path in the process with no close loop of its own
+    // -- `runtime::terminal::launch`'s `spawn_pty_child` has carried one
+    // since review 589, for exactly this reason. Any descriptor this
+    // process holds without `CLOEXEC` (a `WakeSignal`, or anything else,
+    // present or future) is exposed to whatever `git` subprocess races
+    // its own creation on another thread; this closes that for every
+    // descriptor at once, not only the one that happened to motivate it.
+    //
+    // **`fcntl(F_SETFD, FD_CLOEXEC)`, not `close(2)`, and this is a real
+    // finding, not a style choice.** `Command::spawn()` (the `pre_exec`
+    // path) creates its own internal pipe before `fork` specifically to
+    // report an `exec()` failure back to the parent with the real
+    // `errno` -- `git_not_found_reports_unavailable_not_a_panic` caught
+    // this directly: an earlier version of this loop used `close(2)`
+    // and started reporting `SpawnFailed` instead of `NotFound`, because
+    // closing that pipe's write end early (its fd is ordinary, not
+    // reserved, and falls inside `3..close_from_bound` same as anything
+    // else) makes the parent see `EOF` -- std's own "`exec` succeeded"
+    // signal -- before `exec` has even been attempted. Marking the fd
+    // close-on-exec instead of closing it outright gives the identical
+    // security property for every *other* descriptor (nothing survives
+    // into a successful `exec`) without touching what happens on a
+    // *failed* one: std's pipe is already `CLOEXEC` for exactly that
+    // reason, so this loop is a no-op against it either way, and a
+    // failed `exec` can still write the real `errno` through it. `fcntl`
+    // is on POSIX's async-signal-safe list the same as `close` is, so
+    // this is legal inside `pre_exec` without any new reasoning.
+    // `close_range_upper_bound` is computed here, in the parent, and
+    // moved into `pre_exec` below for the same reason `launch.rs`'s own
+    // twin of this function is: `sysconf` is not on POSIX's async-
+    // signal-safe list and cannot be called inside the post-`fork`,
+    // pre-`exec` child this closure runs in. stdin/stdout/stderr are
+    // already at their final fds 0-2 by this point (`Command` wires
+    // them before running `pre_exec`), so starting at 3 cannot touch
+    // them.
+    let close_from_bound = close_range_upper_bound();
+    // SAFETY: the closure only calls `fcntl(F_SETFD, ...)` on fds
+    // `>= 3`, which is async-signal-safe and cannot affect this child's
+    // own stdio; an invalid fd in the range just fails with `EBADF`,
+    // which this loop does not need to check.
+    unsafe {
+        command.pre_exec(move || {
+            for fd in 3..close_from_bound {
+                libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+            }
+            Ok(())
+        });
+    }
+
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     command
+}
+
+/// Twin of `runtime::terminal::launch`'s own `close_range_upper_bound`
+/// -- not shared across the two modules because `launch` is private to
+/// `terminal` and therefore unreachable from here, and the function is
+/// small enough that duplicating it costs less than coupling two
+/// otherwise-unrelated spawn paths through a shared private item.
+fn close_range_upper_bound() -> libc::c_int {
+    const FALLBACK: libc::c_int = 4096;
+    const CLAMP: libc::c_int = 65536;
+    // SAFETY: `sysconf` takes a plain `c_int` name and has no
+    // preconditions beyond that; it cannot fail in a way that corrupts
+    // anything, only in a way that returns -1.
+    let limit = unsafe { libc::sysconf(libc::_SC_OPEN_MAX) };
+    if limit <= 0 {
+        FALLBACK
+    } else {
+        libc::c_int::try_from(limit).unwrap_or(CLAMP).min(CLAMP)
+    }
 }
 
 enum WaitOutcome {

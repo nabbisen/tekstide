@@ -250,20 +250,71 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
     *property* (a real `poll(2)` park, not a busy-wait) is not written and is named here rather
     than silently dropped.
 
-  **Designed, not yet written: `eventfd`/`EFD_CLOEXEC` → a self-pipe.** Both are a single-fd,
-  bidirectional eventfd today, read and written from several places across `reader.rs` (shutdown
-  signalling, wake notification, `WakeNotifier::try_clone`). A self-pipe needs two genuinely
-  distinct fds (read end, write end) where eventfd needed one, which is a real refactor of this
-  module's own fd-ownership shape, not a drop-in symbol swap — the design (a small
-  `WakeSignal`-style type presenting `write_fd`/`read_fd` uniformly, Linux backing it with one
-  `dup`'d eventfd and macOS with the genuinely distinct pipe ends, so no caller outside that one
-  type needs its own `cfg`) is sound but deliberately not rushed into code in the same slice as two
-  mechanisms with real open questions below.
+  **Done, 2026-10-17, review 593: `eventfd`/`EFD_CLOEXEC` → `kqueue`+`EVFILT_USER`, not a
+  self-pipe.** The self-pipe design sketched above (two genuinely distinct fds, Linux `dup`'d from
+  one `eventfd`, macOS from a genuinely distinct pipe) was superseded before any code was written
+  against it, for a reason specific to this process, not a style preference: neither `pipe2`
+  (atomic `O_CLOEXEC`) nor `socketpair`'s `SOCK_CLOEXEC` exists for Apple targets in the vendored
+  `libc` crate, and `rustix` — already a transitive dependency — omits its own flagged `pipe_with`
+  entirely for Apple rather than ship a racy fallback, confirming this is a genuine platform gap,
+  not a crate-coverage one. A self-pipe's specific failure mode under that gap — a concurrently
+  `exec`'d child inheriting the write end during the unavoidable `pipe()`-then-`fcntl` window, so
+  the read side never sees EOF and shutdown hangs — does not exist at all for a single-fd
+  `kqueue` with one `EVFILT_USER` registration, triggered via `kevent(..., NOTE_TRIGGER)`: there is
+  no write end for anything to inherit. `polling` (already a transitive dependency) uses the same
+  filter for the same reason, by its own account, "to avoid allocating a pipe." Implemented as
+  `WakeSignal` (`reader.rs`), a small type exposing only `signal`/`wait` — never a raw fd a caller
+  could structure around — backing both the shutdown signal and `WakeNotifier` on both platforms.
+  **The contract is stated once, precisely, because the two backends do not agree on more than
+  this**: after `signal`, at least one subsequent `wait` observes a wake; no wake count is
+  promised, and no one-wake-per-signal guarantee either (`eventfd` counts; `EVFILT_USER` with
+  `EV_CLEAR` coalesces). Every existing caller already tolerated spurious/coalesced wakes before
+  this change, so none needed updating. The kqueue fd still has no atomic-`CLOEXEC` constructor
+  (`fcntl` after `kqueue()`, same two-step `polling` itself uses) — a postcondition check refuses
+  construction if that somehow did not take, same shape as `pty.rs`'s own `assert_cloexec`, and the
+  residual (a window in which an fd could leak) is an fd leak, not a hang, handled generally by the
+  close-loop fix immediately below rather than specifically for this one fd. Not independently
+  verifiable without macOS hardware: that a `kqueue` fd is `poll(2)`-able (documented BSD/Darwin
+  behaviour this module relies on to keep one `poll_for_readiness` implementation for both
+  platforms) and that `kevent(2)` behaves as described are both first proven by the real runner's
+  first executable macOS suite, not by anything checked here.
+
+  **Found and fixed the same day, review 593/594: the bounded close loop above (`close(2)`)
+  silently broke `Command::spawn()`'s own exec-failure reporting, on both the git-subprocess path
+  and this one.** `Command::spawn()`'s `pre_exec` path creates its own pipe before `fork` to report
+  a genuine `exec()` failure back to the parent with the real `errno`; that pipe's write-end fd is
+  ordinary, not reserved, and sits inside whatever range a loop like this one closes. Closing it
+  early makes the parent see `EOF` — std's own "exec succeeded" signal — before `exec` was ever
+  attempted, so a target that cannot run is reported as a successful launch, with the real failure
+  only surfacing later as a dead child with no diagnostic attached. Found via a real test
+  regression (`git_not_found_reports_unavailable_not_a_panic`, when `runtime/git.rs`'s own spawn
+  path first gained this loop) and confirmed to hold for `spawn_pty_child`'s pre-existing, identical
+  loop too — review 594's own reproduction, built after an initial probe here was spoiled by
+  glibc's `ENOEXEC` → `/bin/sh -c` retry (a shebang-less file still starts *something*, masking
+  the defect regardless of which loop body runs): a file marked executable with a `#!` shebang
+  naming an interpreter that does not exist fails `exec` with `ENOENT`, which is not retried.
+  Against that case, `close(2)` reports `spawn() -> Ok` followed by the child dying on `SIGABRT`
+  with nothing attached (std's own child-side code aborts on the errno pipe it needed being gone);
+  `fcntl` reports `spawn() -> Err(ENOENT)` correctly, immediately. **Fixed in both places by
+  marking fds close-on-exec (`fcntl(fd, F_SETFD, FD_CLOEXEC)`) instead of closing them outright**:
+  `fcntl` is on POSIX's async-signal-safe list the same as `close` is, gives the identical security
+  property for every *other* descriptor (nothing survives a *successful* `exec`), and is a no-op
+  against std's own pipe either way (already `CLOEXEC`), so a *failed* `exec` can still report the
+  real error through it. Regression tests at both sites now: `git_not_found_reports_unavailable_
+  not_a_panic` (pre-existing, caught this first) and `launching_a_shell_with_a_nonexistent_
+  interpreter_reports_failure_not_a_dead_child` (new, `terminal/tests.rs`), the latter ablated by
+  temporarily restoring `close(2)` and confirming it fails before restoring the real fix.
+
+  (The self-pipe sketch originally here was superseded before any code was written against it --
+  see "Done, 2026-10-17, review 593" above for what was actually built and why.)
 
   **Both open questions answered, review 589 — decisions, not suggestions:**
   1. **`SYS_close_range`/`closefrom`: neither exists on macOS (confirmed: `closefrom` is a BSD-ism
      Apple never adopted, absent from the vendored `libc` crate for Apple targets). Answer: a
-     bounded `close(2)` loop instead, with the bound computed in the parent.** `close(2)` is on
+     bounded `close(2)` loop instead, with the bound computed in the parent.** (**Superseded
+     2026-10-17** — see "Found and fixed the same day, review 593 follow-up" above: the mechanism
+     is now `fcntl(F_SETFD, FD_CLOEXEC)` in the same loop, not `close(2)`, for a real correctness
+     reason, not a style change.) `close(2)` is on
      POSIX's async-signal-safe list, so a loop of it is legal inside `pre_exec` where
      `proc_pidinfo`-based emulation (the alternative considered and rejected) is not. The bound
      (`sysconf(_SC_OPEN_MAX)`, clamped both ends against an error return and a pathological limit)
