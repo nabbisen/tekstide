@@ -12945,10 +12945,23 @@ fn a_second_attempt_at_a_locked_project_opens_no_duplicate_and_says_nothing_fals
              (found {forbidden:?} in {rendered:?})"
         );
     }
+    // Review 603: no knock is ever actually sent from this path today
+    // (nothing in the real open path calls `project_lock::attention::
+    // request_attention` -- only the standalone diagnostic probe does),
+    // so the message must not claim one was sent either. Previously
+    // required `lowered.contains("attention")` -- removed along with
+    // the sentence it was asserting on, not loosened in place, so a
+    // future edit that reintroduces the claim without a real knock
+    // behind it fails here again rather than this test quietly
+    // tolerating it.
     assert!(
-        lowered.contains("already open") && lowered.contains("attention"),
-        "the rendered message must say the project is already open and that attention was \
-         asked for: {rendered:?}"
+        lowered.contains("already open"),
+        "the rendered message must say the project is already open: {rendered:?}"
+    );
+    assert!(
+        !lowered.contains("attention"),
+        "the rendered message must not claim attention was asked for -- nothing in this path \
+         sends a knock yet: {rendered:?}"
     );
 }
 
@@ -13039,10 +13052,18 @@ fn a_cli_launched_second_attempt_at_a_locked_project_sets_the_real_board_notice(
              (found {forbidden:?} in {rendered:?})"
         );
     }
+    // Review 603: see the sibling GUI-path test's own comment -- no
+    // knock is sent from this path either, so the board must not claim
+    // one was.
     assert!(
-        lowered.contains("already open") && lowered.contains("attention"),
+        lowered.contains("already open"),
         "a CLI-launched instance refused for an already-open project must say so on a real \
          board, not only to stderr: {rendered:?}"
+    );
+    assert!(
+        !lowered.contains("attention"),
+        "the rendered message must not claim attention was asked for -- nothing in this path \
+         sends a knock yet: {rendered:?}"
     );
 }
 

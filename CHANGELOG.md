@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed — the "already open" board notice no longer claims a knock was sent
+
+RFC-028 review 603: `project-board-open-blocked`'s second sentence ("It has been asked for your
+attention") described a knock that nothing in the real open path — any of the three GUI call
+sites, or the CLI path — ever actually sends; only a standalone diagnostic probe binary calls
+`project_lock::attention::request_attention`. True on neither platform today, not only on macOS
+(where the attention socket cannot yet bind at all). Removed rather than qualified: making the
+claim conditional on an outcome that does not yet exist would still say "could not ask" for the
+wrong reason. The board now says only "This project is already open in another Tekstide window."
+Wiring the knock itself and restoring a true second sentence is reserved as RFC-075, outside this
+RFC's scope.
+
 ### Fixed — `project_lock::attention`'s own `max_socket_path_len` had the same macOS off-by-one
 
 A deliberate, documented second copy of `approval::channel`'s `max_socket_path_len` (RFC-058

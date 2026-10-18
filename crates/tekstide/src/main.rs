@@ -327,10 +327,13 @@ fn open_cli_project_path_and_record(
         // detection already uses a few lines above this function's call
         // site, never an exit code.
         tekstide_core::app::ProjectOpenOutcome::Blocked { holder_pid, .. } => {
-            eprintln!(
-                "tekstide: this project is already open in another Tekstide window; it has \
-                 been asked for your attention"
-            );
+            // RFC-028 review 603: no knock is actually sent from this
+            // path (or any real open path) today -- see
+            // `project-board-open-blocked`'s own doc comment in
+            // `en.ftl` for the full correction. Said nothing this
+            // diagnostic could not back up, the same reason that
+            // sentence lost its own second half.
+            eprintln!("tekstide: this project is already open in another Tekstide window");
             // Review 517 Required 1: the same real diagnostic the three
             // GUI open call sites now give `holder_pid`, not a value kept
             // for a purpose nothing serves.

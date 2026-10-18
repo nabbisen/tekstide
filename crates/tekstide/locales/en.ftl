@@ -376,14 +376,22 @@ project-board-run-record-left-in-place = { $count ->
    *[other] { $count } agent run records could not be read, and could not be renamed either. They stay where they were, and their runs are listed as transcripts with no run.
 }
 project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
-# RFC-058 D8/D9: a second attempt to open a project another live Tekstide
-# process already holds. Deliberately never says "switched to", "raised",
-# "focused" or any synonym -- on Wayland this process cannot raise another
-# window (winit's own `gain_focus` is documented unsupported there), and
-# this sentence must stay true regardless of what the compositor actually
-# shows. "Asked for your attention" describes this process's own action
-# (the knock it sent), not a promise about what happens next.
-project-board-open-blocked = This project is already open in another Tekstide window. It has been asked for your attention.
+# RFC-058 D8/D9, corrected RFC-028 review 603: a second attempt to open a
+# project another live Tekstide process already holds. Deliberately
+# never says "switched to", "raised", "focused" or any synonym -- on
+# Wayland this process cannot raise another window (winit's own
+# `gain_focus` is documented unsupported there). The second sentence
+# this used to carry ("It has been asked for your attention") claimed a
+# knock that `project_lock::attention::request_attention` was never
+# actually called to send from this code path -- true about nothing on
+# either platform, not only on macOS, where the attention socket cannot
+# yet bind at all. Removed rather than qualified: inventing an outcome
+# to make the claim conditional would still say "could not ask" for the
+# wrong reason (nobody tried), not the one a real, attempted-and-failed
+# knock would describe. RFC-075 (reserved) owns wiring the knock itself
+# and restoring a true second sentence once there is a real outcome to
+# report.
+project-board-open-blocked = This project is already open in another Tekstide window.
 
 # §6's second state, and response 376's requirement that it name the
 # key rather than count keys. Since PR-045-A the parser *refuses* every
