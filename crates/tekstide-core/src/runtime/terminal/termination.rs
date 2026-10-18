@@ -224,25 +224,34 @@ impl TerminalRuntime {
             }
 
             if session_confirmed_empty(session_id) {
-                // response 340's own zombie fix means this can now be
+                // response 340's own zombie fix means this can be
                 // reached with `child_outcome` still `None` even though
                 // the leader is, in fact, gone: `is_live_member_of_session`
                 // excludes a zombie from the enumeration, so the session
                 // can read "empty" a few microseconds before this same
-                // loop's own `try_child_outcome` call happens to observe
-                // and reap it. Nothing else can have reaped this specific
-                // child (only its real parent, this process, can), so if
-                // the session is confirmed empty and we have not reaped
-                // it ourselves yet, it must currently be exactly that
-                // unreaped zombie -- a blocking `wait()` on it returns
-                // essentially instantly rather than genuinely blocking.
+                // loop's own `try_child_outcome` call above happens to
+                // observe and reap it.
+                //
+                // **Review 598: this used to fall back to a *blocking*
+                // `wait()` here**, reasoning that the only way to reach
+                // this point unreaped was exactly that zombie, so the
+                // block "returns essentially instantly." That reasoning
+                // was correct about the zombie case and wrong about what
+                // happens when `session_confirmed_empty` itself is
+                // wrong -- a bug in RFC-028 D5's macOS enumeration port
+                // (`getsid` failing was silently read as "not a member"
+                // instead of "could not confirm") turned this into an
+                // unbounded wait on a live, running shell, and the CI
+                // runner it happened on sat blocked for five hours. **A
+                // derived boolean must never be trusted into an
+                // unbounded block.** One more, non-blocking
+                // `try_child_outcome` call instead: a real zombie is
+                // caught by it immediately (reaping an already-dead
+                // process needs no actual OS-level wait), and a
+                // wrongly-"empty" session falls through to the honest
+                // `OrphanedUnknown` below instead of hanging.
                 if child_outcome.is_none() {
-                    child_outcome = self
-                        .session_mut(handle)?
-                        .child
-                        .wait()
-                        .map(outcome_from_exit_status)
-                        .ok();
+                    child_outcome = self.try_child_outcome(handle)?;
                 }
                 return Ok(Some(child_outcome.unwrap_or_else(|| {
                     TerminationOutcome::OrphanedUnknown {
