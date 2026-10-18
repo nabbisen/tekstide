@@ -73,6 +73,11 @@ permissions:
 jobs:
   artifacts:
     runs-on: ubuntu-latest
+    # Review 598: every job in this project's workflows gets an explicit
+    # bound now, after one with none sat blocked for 5+ hours elsewhere
+    # (ci.yml's own macos-measurement). 30 minutes is generous against a
+    # `--release` build, not a measured ceiling.
+    timeout-minutes: 30
     steps:
       - name: Resolve the tag this run is for
         id: tag

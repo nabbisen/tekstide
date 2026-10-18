@@ -51,6 +51,12 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Review 598: every job in this project's workflows gets an explicit
+    # bound now, after one with none sat blocked for 5+ hours elsewhere
+    # (ci.yml's own macos-measurement). This job's own comment above
+    # already says "a one-minute build"; 10 minutes is a generous
+    # margin against that, not a measured ceiling.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -81,6 +87,8 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # Review 598: see `build`'s own comment above.
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

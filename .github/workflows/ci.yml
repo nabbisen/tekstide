@@ -96,6 +96,12 @@ env:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    # Review 598: this job finishes in ~4-5 minutes; 15 is a generous
+    # margin, not a measured bound. Every job in this file got one after
+    # a job with none sat blocked for 5+ hours (see macos-measurement's
+    # own, below) -- a job with no timeout is the workflow-level version
+    # of an unbounded wait() on a value that might be wrong.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -168,6 +174,15 @@ jobs:
     # RFC-028 PR-028-A: a measurement, not a gate -- see this file's own header.
     runs-on: macos-latest
     continue-on-error: true
+    # Review 598: this job sat blocked for 5h05m (GitHub's own 6-hour
+    # job default) after a real hang in newly-ported macOS code --
+    # `continue-on-error` only means it never fails `gate`, not that it
+    # cannot run for hours on every single push until someone notices
+    # and cancels it by hand. 30 minutes is generous against this job's
+    # own ordinary ~3-4 minutes (build + test, no macOS runner queueing
+    # counted against it -- GitHub does not charge queue time against a
+    # job's own timeout), not a measured ceiling.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
