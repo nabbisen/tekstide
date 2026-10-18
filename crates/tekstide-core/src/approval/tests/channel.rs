@@ -77,12 +77,23 @@ fn resolve_creates_the_macos_approval_directory_under_the_temp_anchor() {
         "channel_dir must not be under state_root on macOS: {:?}",
         directory.channel_dir()
     );
+    // Review 605 follow-up, found on the real runner: `std::env::
+    // temp_dir()` is not canonicalised (macOS's own `/tmp` is itself a
+    // symlink to `/private/tmp`), but `channel_dir_under`'s own macOS
+    // arm canonicalises before joining `"tekstide"` -- comparing against
+    // the raw, uncanonicalised prefix failed on the real runner even
+    // though both sides name the same real directory. Canonicalising
+    // the expected prefix here too is the fix, not loosening the
+    // assertion -- the exact "/tmp vs /private/tmp" trap this whole RFC
+    // found 402 times over in review 596's own triage.
+    let expected_prefix = std::fs::canonicalize(std::env::temp_dir())
+        .expect("$TMPDIR must canonicalise")
+        .join("tekstide");
     assert!(
-        directory
-            .channel_dir()
-            .starts_with(std::env::temp_dir().join("tekstide")),
-        "channel_dir must be under the $TMPDIR anchor on macOS: {:?}",
-        directory.channel_dir()
+        directory.channel_dir().starts_with(&expected_prefix),
+        "channel_dir must be under the $TMPDIR anchor on macOS: {:?}, expected under {:?}",
+        directory.channel_dir(),
+        expected_prefix
     );
 }
 
@@ -790,6 +801,19 @@ s.close()
 /// perform the swap, then bind, and confirm the swap is caught rather
 /// than the endpoint ending up bound inside the attacker's target
 /// directory.
+///
+/// **Linux only, found on the real runner**: `directory.channel_dir()`
+/// on macOS is the *shared* `$TMPDIR/tekstide` anchor -- every test in
+/// this binary that resolves a directory there gets the exact same
+/// path, unlike Linux's own `state_root`-derived one, which
+/// `temp_state_root`'s unique naming already keeps exclusive to this
+/// test. `std::fs::remove_dir` on it fails `DirectoryNotEmpty` the
+/// moment any other, concurrently-running test has also created a
+/// socket under the same shared directory -- confirmed directly, not
+/// inferred, by the real runner's own error. `symlink_swap_between_
+/// resolve_and_bind_is_rejected_on_macos`, below, is the same property
+/// against a private stand-in instead of the shared real one.
+#[cfg(target_os = "linux")]
 #[test]
 fn symlink_swap_between_resolve_and_bind_is_rejected() {
     let state_root = temp_state_root("swap");
@@ -827,6 +851,50 @@ fn symlink_swap_between_resolve_and_bind_is_rejected() {
     // the swap was actually caught, the same "assertion checks the
     // wrong path" shape this review has already found twice elsewhere
     // in this file.
+    let leaked_socket = attacker_target.join(format!(
+        "{}.sock",
+        super::super::channel::socket_filename_stem(&agent_run_id)
+    ));
+    assert!(
+        !leaked_socket.exists(),
+        "no socket may be created inside the symlink target"
+    );
+}
+
+/// macOS's own version of the property above, against a private,
+/// test-owned stand-in rather than the shared real `$TMPDIR/tekstide`
+/// anchor every other concurrently-running test also resolves a
+/// directory under -- see the Linux test's own doc comment for why
+/// operating on the shared one directly is unsafe here.
+#[cfg(target_os = "macos")]
+#[test]
+fn symlink_swap_between_resolve_and_bind_is_rejected_on_macos() {
+    let anchor_root = temp_state_root("macos-dirswap-anchor");
+    let _anchor_guard = super::super::channel::test_channel_anchor_root(&anchor_root);
+    let state_root = temp_state_root("macos-dirswap-state-root");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    // `resolve()` has already run and approved of `channel_dir` (under
+    // this test's own private anchor) as a real directory -- but that
+    // directory does not exist on disk yet at this point (creation
+    // happens inside `bind()`). Create it first, as an earlier `bind()`
+    // call would have, then perform the swap `resolve()` cannot see:
+    // replace it with a symlink to somewhere else entirely, simulating
+    // a same-user process racing a *second* `bind()` call.
+    std::fs::create_dir_all(directory.channel_dir()).expect("create the real approval dir first");
+    let attacker_target = temp_state_root("macos-dirswap-target");
+    std::fs::remove_dir(directory.channel_dir()).expect("remove the real approval dir");
+    std::os::unix::fs::symlink(&attacker_target, directory.channel_dir())
+        .expect("swap in a symlink");
+
+    let result = ApprovalChannelEndpoint::bind(&directory, &agent_run_id);
+    assert!(
+        result.is_err(),
+        "bind() must refuse a channel directory that resolves to a symlink at bind time, \
+         even though resolve() checked and approved it earlier"
+    );
+
     let leaked_socket = attacker_target.join(format!(
         "{}.sock",
         super::super::channel::socket_filename_stem(&agent_run_id)
