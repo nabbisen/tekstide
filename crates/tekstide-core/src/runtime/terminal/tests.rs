@@ -842,8 +842,8 @@ fn signal_candidates_never_signals_a_pid_outside_the_target_session() {
 /// and not the guard; it panics before returning.
 ///
 /// This instead tests [`session_confirmed_empty`] directly, with no real
-/// session or `request_terminate` call at all:
-/// [`force_session_enumeration_failure_for_test`] forces
+/// session or `request_terminate` call at all: [`test_proc_root`] points
+/// the real enumeration at a directory that cannot be listed, forcing
 /// `processes_in_session` to return `None` deterministically -- the
 /// *other* honest-`false` case `what-containment-must-not-become.md` §4
 /// names explicitly ("a `/proc` read that failed"). Found dishonest
@@ -851,15 +851,11 @@ fn signal_candidates_never_signals_a_pid_outside_the_target_session() {
 /// `session_confirmed_empty` defaulted a failed read to an empty `Vec`,
 /// which is precisely the unearned "almost certainly empty" confidence
 /// that document forbids.
-///
-/// RFC-028 D5: platform-neutral since the override moved behind
-/// [`force_session_enumeration_failure_for_test`] -- this test exercises
-/// the real enumeration-failure path (a never-created directory on
-/// Linux, a thread-local flag on macOS, since there is no path to point
-/// a `libproc` call at instead) on whichever platform it runs on.
 #[test]
 fn session_confirmed_empty_reports_false_when_its_own_enumeration_fails() {
-    let _enumeration_failure_guard = super::launch::force_session_enumeration_failure_for_test();
+    let unreadable_proc = test_root("session-confirmed-empty-unreadable-proc");
+    std::fs::remove_dir(&unreadable_proc).expect("directory should be removable to force ENOENT");
+    let _proc_root_guard = super::launch::test_proc_root(&unreadable_proc);
 
     assert!(
         !super::launch::session_confirmed_empty(1),

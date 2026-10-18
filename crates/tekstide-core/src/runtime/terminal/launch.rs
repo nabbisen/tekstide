@@ -770,38 +770,12 @@ pub(super) fn session_confirmed_empty(session_id: libc::pid_t) -> bool {
 /// (`#[cfg(test)]` only) instead of the real `/proc`, so a test can
 /// deterministically force the "enumeration failed" branch without
 /// racing real process reaping timing to observe it.
-#[cfg(target_os = "linux")]
 pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::pid_t>> {
     let entries = std::fs::read_dir(proc_root()).ok()?;
     Some(
         entries
             .flatten()
             .filter_map(|entry| entry.file_name().to_str()?.parse::<libc::pid_t>().ok())
-            .filter(|&pid| is_live_member_of_session(pid, session_id))
-            .collect(),
-    )
-}
-
-/// RFC-028 D5: macOS has no `/proc` -- `proc_listallpids` (`libproc`,
-/// declared directly in the vendored `libc` crate's Apple module, no
-/// extra feature needed) is this platform's own bulk enumeration.
-/// Bounded at [`MAX_ENUMERATED_PIDS`] rather than sized dynamically: a
-/// two-call "ask for the size, then allocate exactly that" pattern would
-/// still race a pid appearing between the two calls, and this project's
-/// own standing lesson (an earlier, genuinely unbounded `/proc` scan
-/// froze a shared desktop) is to bound first and accept the rare,
-/// explicit truncation case rather than reach for "big enough in
-/// practice." A buffer that comes back exactly full is treated as
-/// truncated -- see [`list_all_pids`]'s own doc for why that is reported
-/// as a failed enumeration, not a partial one.
-#[cfg(target_os = "macos")]
-pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::pid_t>> {
-    if enumeration_forced_to_fail() {
-        return None;
-    }
-    let pids = list_all_pids()?;
-    Some(
-        pids.into_iter()
             .filter(|&pid| is_live_member_of_session(pid, session_id))
             .collect(),
     )
@@ -822,7 +796,6 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// Confirmed directly by the reviewer, not inferred: a zombie's own
 /// `state` field really is `Z`, and a plain session-field filter really
 /// does count it.
-#[cfg(target_os = "linux")]
 fn is_live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> bool {
     let Some(stat) = process_stat(pid) else {
         return false;
@@ -830,117 +803,7 @@ fn is_live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> bool 
     stat.session_id == session_id && stat.state != 'Z'
 }
 
-/// Same property as the Linux version above, by two separate calls
-/// rather than one `/proc/<pid>/stat` read: `getsid(2)` (POSIX, declared
-/// for every `unix` target, not only Linux) gives the session id
-/// directly, and `proc_pidinfo(..., PROC_PIDTBSDINFO, ...)` gives
-/// `pbi_status`, compared against `SZOMB` for the same zombie exclusion
-/// `is_live_member_of_session`'s own Linux doc explains. Either call
-/// failing (the pid has already exited and been reaped between the
-/// enumeration and this check) means "not a live member," the same
-/// tolerance `process_stat`'s `None` already gets on Linux.
-#[cfg(target_os = "macos")]
-fn is_live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> bool {
-    // SAFETY: `getsid` has no preconditions beyond `pid` being a plain
-    // integer; it is safe to call against a pid that no longer exists.
-    let real_session_id = unsafe { libc::getsid(pid) };
-    if real_session_id == -1 || real_session_id != session_id {
-        return false;
-    }
-    !is_zombie(pid)
-}
-
-/// `proc_pidinfo`'s own documented way to read a process's `p_stat`
-/// field without `/proc` -- `result != size` covers both an outright
-/// failure (the pid is already gone) and a short read, treated the same
-/// way `process_stat`'s `None` is on Linux: "could not confirm this one
-/// either way" is not "confirmed not a zombie."
-#[cfg(target_os = "macos")]
-fn is_zombie(pid: libc::pid_t) -> bool {
-    // SAFETY: `info` is a plain, fully-zeroed `proc_bsdinfo` the call
-    // writes into; `size` matches its own real size exactly, the
-    // buffer `proc_pidinfo` is documented to require.
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    let result =
-        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    result == size && info.pbi_status == libc::SZOMB
-}
-
-/// Bounded enumeration, not sized-to-fit -- see [`processes_in_session`]'s
-/// own macOS doc for why. Chosen to match `launch.rs`'s own
-/// `close_range_upper_bound`'s upper clamp, the closest existing
-/// precedent in this file for "how many of something is implausibly
-/// many, for a real machine, right now."
-#[cfg(target_os = "macos")]
-const MAX_ENUMERATED_PIDS: usize = 65536;
-
-/// `None` only on an outright `proc_listallpids` failure (a negative
-/// return) or on a reply that exactly fills the buffer -- the latter
-/// cannot be distinguished here from "there were more pids than
-/// `MAX_ENUMERATED_PIDS` and the rest were silently dropped," and
-/// reporting a confidently-partial list would be exactly the unearned
-/// confidence `what-containment-must-not-become.md` §4 forbids. Real
-/// machines are nowhere near this bound; hitting it at all is itself
-/// worth surfacing as a failure rather than quietly tolerating.
-#[cfg(target_os = "macos")]
-fn list_all_pids() -> Option<Vec<libc::pid_t>> {
-    let mut buffer: Vec<libc::pid_t> = vec![0; MAX_ENUMERATED_PIDS];
-    let capacity_bytes = std::mem::size_of_val(buffer.as_slice()) as libc::c_int;
-    // SAFETY: `buffer` is valid for `capacity_bytes` for the duration
-    // of this call.
-    let written_bytes =
-        unsafe { libc::proc_listallpids(buffer.as_mut_ptr().cast(), capacity_bytes) };
-    if written_bytes <= 0 || written_bytes >= capacity_bytes {
-        return None;
-    }
-    let count = written_bytes as usize / std::mem::size_of::<libc::pid_t>();
-    buffer.truncate(count);
-    Some(buffer)
-}
-
-/// Compiled out entirely in a non-test build -- the same "no indirection
-/// at all outside `#[cfg(test)]`" shape [`proc_root`]'s own two bodies
-/// already give the Linux side, not merely a runtime check that always
-/// returns `false` in production.
 #[cfg(not(test))]
-#[cfg(target_os = "macos")]
-fn enumeration_forced_to_fail() -> bool {
-    false
-}
-
-#[cfg(test)]
-#[cfg(target_os = "macos")]
-fn enumeration_forced_to_fail() -> bool {
-    TEST_FORCE_ENUMERATION_FAILURE.with(std::cell::Cell::get)
-}
-
-#[cfg(test)]
-#[cfg(target_os = "macos")]
-thread_local! {
-    /// Set only by [`force_session_enumeration_failure_for_test`] --
-    /// macOS's own analogue of [`test_proc_root`]'s directory override,
-    /// needed because there is no path here to point enumeration at
-    /// instead; this flag short-circuits the real `libproc` calls the
-    /// same deterministic way.
-    ///
-    /// **Thread-local, not a global `AtomicBool`, deliberately**: this
-    /// suite runs tests concurrently in one process, and a global flag
-    /// would let one test's forced failure corrupt every other test's
-    /// enumeration running at the same time -- the intermittent kind of
-    /// failure this project has already spent a week proving is the
-    /// expensive kind to diagnose. The corollary is also deliberate: if
-    /// `processes_in_session` is ever called from a different thread
-    /// than the one holding the guard (a future refactor moving this
-    /// call off the test's own thread, for example), the override stops
-    /// applying and this test's assertion *fails* rather than silently
-    /// stopping coverage -- the right failure direction, not a silent gap.
-    static TEST_FORCE_ENUMERATION_FAILURE: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-}
-
-#[cfg(not(test))]
-#[cfg(target_os = "linux")]
 fn proc_root() -> &'static std::path::Path {
     std::path::Path::new("/proc")
 }
@@ -956,7 +819,6 @@ fn proc_root() -> &'static std::path::Path {
 /// (`/proc` unreadable, a sandboxed environment, resource exhaustion),
 /// not a contrived one.
 #[cfg(test)]
-#[cfg(target_os = "linux")]
 fn proc_root() -> std::path::PathBuf {
     TEST_PROC_ROOT
         .with(|cell| cell.borrow().clone())
@@ -964,7 +826,6 @@ fn proc_root() -> std::path::PathBuf {
 }
 
 #[cfg(test)]
-#[cfg(target_os = "linux")]
 thread_local! {
     static TEST_PROC_ROOT: std::cell::RefCell<Option<std::path::PathBuf>> =
         const { std::cell::RefCell::new(None) };
@@ -973,13 +834,11 @@ thread_local! {
 /// RAII guard for [`test_proc_root`] -- restores the real `/proc` on
 /// drop.
 #[cfg(test)]
-#[cfg(target_os = "linux")]
 pub(super) struct TestProcRootGuard {
     _private: (),
 }
 
 #[cfg(test)]
-#[cfg(target_os = "linux")]
 impl Drop for TestProcRootGuard {
     fn drop(&mut self) {
         TEST_PROC_ROOT.with(|cell| *cell.borrow_mut() = None);
@@ -993,7 +852,6 @@ impl Drop for TestProcRootGuard {
 /// see [`proc_root`]'s own doc comment for why a real test needs this
 /// rather than racing `SIGKILL` reaping speed.
 #[cfg(test)]
-#[cfg(target_os = "linux")]
 pub(super) fn test_proc_root(path: &std::path::Path) -> TestProcRootGuard {
     TEST_PROC_ROOT.with(|cell| {
         let mut cell = cell.borrow_mut();
@@ -1006,68 +864,17 @@ pub(super) fn test_proc_root(path: &std::path::Path) -> TestProcRootGuard {
     TestProcRootGuard { _private: () }
 }
 
-/// RFC-028 D5: the platform-neutral guard RFC-043 D3's own required
-/// negative test (`session_confirmed_empty_reports_false_when_its_own_
-/// enumeration_fails`) uses, so that one test exercises the real
-/// enumeration-failure path on whichever platform it runs on rather
-/// than being written against `/proc` specifically. Linux: points
-/// [`test_proc_root`] at a path that was never created (`ENOENT` is as
-/// deterministic as "exists with no read permission," and needs no
-/// cleanup). macOS: sets [`TEST_FORCE_ENUMERATION_FAILURE`] directly,
-/// since there is no path to point a syscall-based enumeration at
-/// instead.
-#[cfg(test)]
-pub(super) fn force_session_enumeration_failure_for_test() -> ForcedEnumerationFailureGuard {
-    #[cfg(target_os = "linux")]
-    {
-        let never_created = std::env::temp_dir().join(format!(
-            "tekstide-forced-proc-enumeration-failure-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock should be after unix epoch")
-                .as_nanos()
-        ));
-        ForcedEnumerationFailureGuard {
-            _proc_root_guard: test_proc_root(&never_created),
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        TEST_FORCE_ENUMERATION_FAILURE.with(|cell| cell.set(true));
-        ForcedEnumerationFailureGuard { _private: () }
-    }
-}
-
-#[cfg(test)]
-pub(super) struct ForcedEnumerationFailureGuard {
-    #[cfg(target_os = "linux")]
-    _proc_root_guard: TestProcRootGuard,
-    #[cfg(target_os = "macos")]
-    _private: (),
-}
-
-#[cfg(test)]
-#[cfg(target_os = "macos")]
-impl Drop for ForcedEnumerationFailureGuard {
-    fn drop(&mut self) {
-        TEST_FORCE_ENUMERATION_FAILURE.with(|cell| cell.set(false));
-    }
-}
-
 /// `/proc/<pid>/stat`'s own format: `pid (comm) state ppid pgrp session
 /// ...`, space-separated after the `)` that closes `comm` -- `comm`
 /// itself can contain spaces or even `)`, so this splits on the *last*
 /// `)` in the line rather than the first space, the standard way to
 /// parse this file safely. `state` is field 0 of what remains; `ppid`,
 /// `pgrp`, `session` are 1-3.
-#[cfg(target_os = "linux")]
 struct ProcessStat {
     state: char,
     session_id: libc::pid_t,
 }
 
-#[cfg(target_os = "linux")]
 fn process_stat(pid: libc::pid_t) -> Option<ProcessStat> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_comm = stat.rsplit_once(')')?.1;
@@ -1093,20 +900,8 @@ fn process_stat(pid: libc::pid_t) -> Option<ProcessStat> {
 /// zombie is already a harmless no-op at the kernel level, so there is
 /// no false-positive-survivor risk here the way there was in the
 /// enumeration this function is not part of.
-#[cfg(target_os = "linux")]
 pub(super) fn session_id_of(pid: libc::pid_t) -> Option<libc::pid_t> {
     process_stat(pid).map(|stat| stat.session_id)
-}
-
-/// Same contract as the Linux version above, directly from `getsid(2)`
-/// -- no `proc_pidinfo` call needed here at all, since this one is
-/// deliberately not zombie-aware either.
-#[cfg(target_os = "macos")]
-pub(super) fn session_id_of(pid: libc::pid_t) -> Option<libc::pid_t> {
-    // SAFETY: `getsid` has no preconditions beyond `pid` being a plain
-    // integer; it is safe to call against a pid that no longer exists.
-    let session_id = unsafe { libc::getsid(pid) };
-    (session_id != -1).then_some(session_id)
 }
 
 /// Creates the transcript writer for a launch, or decides the launch goes
