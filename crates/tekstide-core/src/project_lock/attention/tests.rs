@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{bind_attention_listener, request_attention};
+use super::{bind_attention_listener, max_socket_path_len, request_attention};
 
 /// Deliberately short, pid-plus-counter rather than
 /// `recovery::tests::test_root`'s own nanosecond-timestamp shape --
@@ -21,6 +21,25 @@ fn test_root(label: &str) -> PathBuf {
 
 fn cleanup_root(root: PathBuf) {
     let _ = fs::remove_dir_all(root);
+}
+
+/// Review 602: the same regression `approval::channel`'s own
+/// `max_socket_path_len` guards against -- two independently-maintained
+/// copies of one computation (this module's own doc comment on
+/// `max_socket_path_len` explains the deliberate duplication) disagree
+/// the day someone fixes one without the other. Asserts the computed
+/// value directly against each platform's real `sun_path` limit, rather
+/// than through a real bound path -- the attention socket's own path
+/// still derives from `state_root` today (unlike the approval channel's,
+/// moved off it in review 601), so a real-path headroom test here would
+/// currently fail on macOS for a reason this specific test is not about.
+#[test]
+fn max_socket_path_len_matches_the_real_platform_limit() {
+    #[cfg(target_os = "linux")]
+    const EXPECTED: usize = 107;
+    #[cfg(target_os = "macos")]
+    const EXPECTED: usize = 103;
+    assert_eq!(max_socket_path_len(), EXPECTED);
 }
 
 /// D10: a knock is delivered as a real accepted connection, not an

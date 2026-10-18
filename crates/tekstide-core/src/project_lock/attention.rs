@@ -34,10 +34,24 @@ pub fn attention_socket_path(state_root: &Path, project_id: &str) -> PathBuf {
 /// computation `approval::channel`'s own `max_socket_path_len` already
 /// makes, for the reason this module's own doc comment gives for not
 /// sharing it directly.
+///
+/// **Review 602: reads `sun_path`'s own array length directly, rather
+/// than deriving it by subtracting header fields from the struct's
+/// total size** -- the same fix `approval::channel`'s own copy of this
+/// function already got, for the same reason: the subtraction formula
+/// assumed `sockaddr_un` has no header field before `sun_family`, true
+/// on Linux and false on macOS/BSD's own extra leading `sun_len` byte,
+/// silently reporting 104 as the max where the real limit is 103. Two
+/// independently-maintained copies of one computation is a defect the
+/// day someone edits one without the other -- today was that day, which
+/// is why both are fixed in the same commit rather than one now and one
+/// later.
 fn max_socket_path_len() -> usize {
-    let sun_path_len =
-        std::mem::size_of::<libc::sockaddr_un>() - std::mem::size_of::<libc::sa_family_t>();
-    sun_path_len - 1
+    // SAFETY: only used for its own `sun_path` field's array length;
+    // never treated as a real address or dereferenced through a raw
+    // pointer.
+    let probe: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    probe.sun_path.len() - 1
 }
 
 /// Binds the holder's own attention listener, right alongside acquiring

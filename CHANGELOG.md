@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed — `project_lock::attention`'s own `max_socket_path_len` had the same macOS off-by-one
+
+A deliberate, documented second copy of `approval::channel`'s `max_socket_path_len` (RFC-058
+D10's own trade: a second, independent copy of three lines is cheaper than threading a dependency
+between two otherwise-unrelated modules) — which meant it carried the exact same formula, and
+therefore the exact same bug, once the original was found and fixed. Two independently-maintained
+copies of one computation is a defect the day someone edits one without the other; fixed in the
+same way and the same commit as the original, rather than left to diverge further.
+
 ### Changed — the approval channel's socket directory moves on macOS; `AgentRunId` prefix dropped from socket filenames
 
 RFC-028 D4, review 600: `sockaddr_un`'s usable `sun_path` is 103 bytes on macOS (confirmed by
