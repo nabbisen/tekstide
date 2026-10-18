@@ -76,7 +76,14 @@ jobs:
     # Review 598: every job in this project's workflows gets an explicit
     # bound now, after one with none sat blocked for 5+ hours elsewhere
     # (ci.yml's own macos-measurement). 30 minutes is generous against a
-    # `--release` build, not a measured ceiling.
+    # `--release` build (observed: 4m11s) -- deliberately the loosest of
+    # the five bounds in this project's workflows, not an oversight to
+    # tighten into consistency with the others. This job builds *and
+    # uploads* release assets; a timeout landing mid-upload leaves a
+    # published release with assets missing, caught eventually by
+    # `post-publish-check.sh` but only after the tag already exists.
+    # Review 599: that asymmetric cost (a published, incomplete release)
+    # is why this one stays the most generous rather than the tightest.
     timeout-minutes: 30
     steps:
       - name: Resolve the tag this run is for
