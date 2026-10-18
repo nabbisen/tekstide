@@ -216,7 +216,7 @@ impl ApprovalChannelDirectory {
 /// prefix is somehow absent (it never is, in practice -- `AgentRunId` is
 /// only ever constructed with it) rather than panicking on an assumption
 /// about a type this module does not own.
-fn socket_filename_stem(agent_run_id: &AgentRunId) -> &str {
+pub(super) fn socket_filename_stem(agent_run_id: &AgentRunId) -> &str {
     agent_run_id
         .as_str()
         .strip_prefix("agent-run-")
@@ -341,10 +341,75 @@ fn channel_dir_under(state_root: &Path) -> Result<PathBuf, ApprovalChannelPathEr
 #[cfg(target_os = "macos")]
 fn channel_dir_under(_state_root: &Path) -> Result<PathBuf, ApprovalChannelPathError> {
     let tmp_root = canonicalize_dir(
-        &std::env::temp_dir(),
+        &channel_anchor_root(),
         ApprovalChannelPathErrorReason::ChannelAnchorUnavailable,
     )?;
     Ok(tmp_root.join("tekstide"))
+}
+
+/// The real `$TMPDIR` in production. Review 604: swapping the real,
+/// system-wide `$TMPDIR` for a symlink to test `channel_anchor_fd`'s
+/// own ancestor-swap protection would disrupt every other process on
+/// the machine, not only this test suite's own other threads -- unlike
+/// `state_root`, which a test already controls as a plain parameter,
+/// there is no safe way to exercise this property against the real
+/// path. `test_channel_anchor_root` (`#[cfg(test)]` only) gives a test
+/// a stand-in it owns instead, the same shape `launch.rs`'s own
+/// `test_proc_root` already uses for an analogous reason -- thread-local,
+/// not a global, so one test's override cannot affect another test
+/// running concurrently on a different thread.
+#[cfg(target_os = "macos")]
+fn channel_anchor_root() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(path) = TEST_CHANNEL_ANCHOR_ROOT.with(|cell| cell.borrow().clone()) {
+            return path;
+        }
+    }
+    std::env::temp_dir()
+}
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+thread_local! {
+    static TEST_CHANNEL_ANCHOR_ROOT: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard for [`test_channel_anchor_root`] -- restores the real
+/// `$TMPDIR` on drop.
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+pub(super) struct TestChannelAnchorRootGuard {
+    _private: (),
+}
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+impl Drop for TestChannelAnchorRootGuard {
+    fn drop(&mut self) {
+        TEST_CHANNEL_ANCHOR_ROOT.with(|cell| *cell.borrow_mut() = None);
+    }
+}
+
+/// Forces [`channel_anchor_root`] to use `path` instead of the real
+/// `$TMPDIR` for the returned guard's lifetime, so a test can safely
+/// swap its own, test-owned stand-in for a symlink without touching the
+/// real system temp directory every other process on the machine also
+/// relies on.
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+pub(super) fn test_channel_anchor_root(path: &Path) -> TestChannelAnchorRootGuard {
+    TEST_CHANNEL_ANCHOR_ROOT.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        assert!(
+            cell.is_none(),
+            "test_channel_anchor_root called twice on the same thread without dropping the \
+             first guard"
+        );
+        *cell = Some(path.to_path_buf());
+    });
+    TestChannelAnchorRootGuard { _private: () }
 }
 
 /// macOS only: pins `channel_dir`'s own parent (`$TMPDIR`, not
@@ -355,7 +420,7 @@ fn channel_dir_under(_state_root: &Path) -> Result<PathBuf, ApprovalChannelPathE
 #[cfg(target_os = "macos")]
 fn channel_anchor_fd() -> Result<OwnedFd, ApprovalChannelPathError> {
     let tmp_root = canonicalize_dir(
-        &std::env::temp_dir(),
+        &channel_anchor_root(),
         ApprovalChannelPathErrorReason::ChannelAnchorUnavailable,
     )?;
     fs::create_dir_all(&tmp_root).map_err(|_error| {

@@ -50,11 +50,40 @@ fn resolve_directory(state_root: &std::path::Path) -> ApprovalChannelDirectory {
 
 // --- Path resolution ----------------------------------------------
 
+/// **Linux only, review 604**: `channel_dir` deliberately no longer
+/// derives from `state_root` on macOS at all (`channel_dir_under`'s own
+/// macOS doc, review 600/601) -- this property is false by design
+/// there, not a premise that happened to stop holding. See
+/// `resolve_creates_the_macos_approval_directory_under_the_temp_anchor`,
+/// below, for the property that replaces it.
+#[cfg(target_os = "linux")]
 #[test]
 fn resolve_creates_the_approval_directory_under_the_state_root() {
     let state_root = temp_state_root("create");
     let directory = resolve_directory(&state_root);
     assert!(directory.channel_dir().starts_with(&state_root));
+}
+
+/// macOS's own version of the property above: `channel_dir` lives under
+/// the short per-user `$TMPDIR` anchor, never under `state_root`, no
+/// matter what `state_root` is.
+#[cfg(target_os = "macos")]
+#[test]
+fn resolve_creates_the_macos_approval_directory_under_the_temp_anchor() {
+    let state_root = temp_state_root("create");
+    let directory = resolve_directory(&state_root);
+    assert!(
+        !directory.channel_dir().starts_with(&state_root),
+        "channel_dir must not be under state_root on macOS: {:?}",
+        directory.channel_dir()
+    );
+    assert!(
+        directory
+            .channel_dir()
+            .starts_with(std::env::temp_dir().join("tekstide")),
+        "channel_dir must be under the $TMPDIR anchor on macOS: {:?}",
+        directory.channel_dir()
+    );
 }
 
 #[test]
@@ -69,6 +98,13 @@ fn resolve_rejects_a_relative_state_root() {
     );
 }
 
+/// **Linux only, review 604**: `channel_dir` here is `state_root.
+/// join("approval")`, so symlinking that exact path is this property's
+/// own setup. On macOS `channel_dir` is `$TMPDIR/tekstide` instead --
+/// `resolve_rejects_a_macos_symlinked_approval_directory`, below, tests
+/// the same `reject_symlink` call against the path that actually
+/// matters there.
+#[cfg(target_os = "linux")]
 #[test]
 fn resolve_rejects_a_symlinked_approval_directory() {
     let state_root = temp_state_root("symlink");
@@ -76,6 +112,30 @@ fn resolve_rejects_a_symlinked_approval_directory() {
     let approval_path = state_root.join("approval");
     std::os::unix::fs::symlink(&elsewhere, &approval_path).expect("create symlink");
 
+    let result = ApprovalChannelPathResolver
+        .resolve(ApprovalChannelPathRequest::new(&state_root, Vec::new()));
+    assert_eq!(
+        result.unwrap_err().reason,
+        ApprovalChannelPathErrorReason::ChannelPathIsSymlink
+    );
+}
+
+/// macOS's own version: `channel_dir` is `<anchor>/tekstide`, not under
+/// `state_root` at all, so the symlink has to sit where `channel_dir`
+/// actually resolves to. Uses `test_channel_anchor_root` rather than the
+/// real, system-wide `$TMPDIR` -- swapping the real one for a symlink
+/// would disrupt every other process on the machine, not only this
+/// suite's own other threads.
+#[cfg(target_os = "macos")]
+#[test]
+fn resolve_rejects_a_macos_symlinked_approval_directory() {
+    let anchor_root = temp_state_root("macos-symlink-anchor");
+    let _anchor_guard = super::super::channel::test_channel_anchor_root(&anchor_root);
+    let elsewhere = temp_state_root("macos-symlink-target");
+    let channel_dir = anchor_root.join("tekstide");
+    std::os::unix::fs::symlink(&elsewhere, &channel_dir).expect("create symlink");
+
+    let state_root = temp_state_root("macos-symlink-state-root");
     let result = ApprovalChannelPathResolver
         .resolve(ApprovalChannelPathRequest::new(&state_root, Vec::new()));
     assert_eq!(
@@ -396,21 +456,54 @@ fn a_live_listener_at_the_bind_path_is_refused_as_already_listening() {
          from under the process still listening on it"
     );
     // Review 576's own first instrument: `_live_listener` above is owned by
-    // this same test process, so the peer SO_PEERCRED names when
-    // `clear_stale_socket` connects to it must be this process's own pid
-    // -- confirming the new diagnostic correctly identifies an in-process
-    // answerer, which is exactly what row 1's real, non-deterministic
-    // occurrences need distinguished from "something else."
-    let own_pid = std::process::id();
+    // this same test process, so the peer credentials when
+    // `clear_stale_socket` connects to it must name this process's own
+    // pid -- confirming the new diagnostic correctly identifies an
+    // in-process answerer, which is exactly what row 1's real,
+    // non-deterministic occurrences need distinguished from "something
+    // else." **Review 604: `pid={own_pid}` only on Linux's `SO_PEERCRED`.**
+    // RFC-028 D4's own `PeerCredentials.pid: Option<u32>` exists precisely
+    // because macOS's `LOCAL_PEERCRED`/`xucred` carries no pid at all
+    // (confirmed on the real runner here, not a new finding -- the
+    // bind-refusal logic above this already passed, so this is the
+    // diagnostic's own wording, not the mechanism). `BindTargetAlreadyListening`'s
+    // own diagnostic formatting already renders `"unknown"` for that
+    // `None` case (`channel.rs`'s own doc comment on the variant), so
+    // this asserts the platform-correct expectation instead of a Linux
+    // one both platforms were held to.
     let source_message = error
         .source()
-        .expect("review 576: BindTargetAlreadyListening must carry the peer's SO_PEERCRED detail")
+        .expect("review 576: BindTargetAlreadyListening must carry the peer credential detail")
         .to_string();
-    assert!(
-        source_message.contains(&format!("pid={own_pid}")),
-        "the peer connecting to its own just-bound listener is this same test process -- the \
-         diagnostic source should name pid={own_pid}, got {source_message:?}"
-    );
+    #[cfg(target_os = "linux")]
+    {
+        let own_pid = std::process::id();
+        assert!(
+            source_message.contains(&format!("pid={own_pid}")),
+            "the peer connecting to its own just-bound listener is this same test process -- the \
+             diagnostic source should name pid={own_pid}, got {source_message:?}"
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Review 605: asserting only the absent field confirms this
+        // platform's own gap, not what the test exists to prove -- that
+        // the diagnostic identifies an in-process answerer. `xucred`
+        // carries no pid, but it does carry a uid, and the peer
+        // connecting to its own just-bound listener is this same test
+        // process, so that uid must be this process's own real one.
+        let real_uid = unsafe { libc::geteuid() };
+        assert!(
+            source_message.contains("pid=unknown"),
+            "macOS's LOCAL_PEERCRED/xucred carries no pid at all -- the diagnostic source should \
+             say so rather than name one, got {source_message:?}"
+        );
+        assert!(
+            source_message.contains(&format!("uid={real_uid}")),
+            "the peer connecting to its own just-bound listener is this same test process -- the \
+             diagnostic source should name uid={real_uid}, got {source_message:?}"
+        );
+    }
 }
 
 /// Review 577's part 3: RFC-022's trust boundary names peer credentials
@@ -726,7 +819,18 @@ fn symlink_swap_between_resolve_and_bind_is_rejected() {
     // Confirm the attacker's directory was not touched (no socket placed
     // there, no permissions changed) and nothing was bound outside the
     // real state root.
-    let leaked_socket = attacker_target.join(format!("{agent_run_id}.sock"));
+    //
+    // Review 604: the real filename strips `AgentRunId`'s own
+    // `"agent-run-"` prefix (`socket_filename_stem`, review 600/601) --
+    // asserting against the unstripped `{agent_run_id}.sock` would check
+    // for a file that was never going to exist regardless of whether
+    // the swap was actually caught, the same "assertion checks the
+    // wrong path" shape this review has already found twice elsewhere
+    // in this file.
+    let leaked_socket = attacker_target.join(format!(
+        "{}.sock",
+        super::super::channel::socket_filename_stem(&agent_run_id)
+    ));
     assert!(
         !leaked_socket.exists(),
         "no socket may be created inside the symlink target"
@@ -977,6 +1081,17 @@ fn the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit() {
 /// response 112 closed. `resolve()` now pins `state_root` as an fd once,
 /// and `bind()` never re-resolves its pathname again, so this swap must
 /// now be rejected too.
+///
+/// **Linux only, review 604**: on macOS `bind()` never reaches the
+/// socket through `state_root_fd` at all (`channel_anchor`'s macOS arm
+/// uses `channel_anchor_fd`, pinned to `$TMPDIR`, not `state_root_fd`),
+/// so swapping `state_root` for a symlink cannot redirect anything
+/// there -- the property holds by construction, not by this test's own
+/// swap-and-check. `ancestor_symlink_swap_of_the_macos_anchor_is_
+/// rejected`, below, is `channel_anchor_fd`'s own version of the same
+/// property, against the thing that actually protects macOS's bind
+/// path.
+#[cfg(target_os = "linux")]
 #[test]
 fn ancestor_symlink_swap_of_the_state_root_itself_is_rejected() {
     let state_root = temp_state_root("ancestor-swap");
@@ -999,9 +1114,14 @@ fn ancestor_symlink_swap_of_the_state_root_itself_is_rejected() {
          subdirectory) has been swapped for a symlink since resolve() ran"
     );
 
-    let leaked_socket = attacker_target
-        .join("approval")
-        .join(format!("{agent_run_id}.sock"));
+    // Review 604: the real filename strips the `"agent-run-"` prefix
+    // (`socket_filename_stem`) -- see `symlink_swap_between_resolve_
+    // and_bind_is_rejected`'s own comment for why asserting against the
+    // unstripped name would check a path that was never real either way.
+    let leaked_socket = attacker_target.join("approval").join(format!(
+        "{}.sock",
+        super::super::channel::socket_filename_stem(&agent_run_id)
+    ));
     assert!(
         !leaked_socket.exists(),
         "no socket may be created inside the symlink target reached via the swapped ancestor"
@@ -1010,6 +1130,55 @@ fn ancestor_symlink_swap_of_the_state_root_itself_is_rejected() {
     // Clean up the symlink so it doesn't get treated as a real directory
     // by anything that later enumerates the parent temp directory.
     let _ = std::fs::remove_file(&state_root);
+}
+
+/// macOS's own version of the property above, against the thing that
+/// actually protects macOS's bind path: `channel_anchor_fd`, pinned to
+/// `$TMPDIR` (here, `test_channel_anchor_root`'s own test-owned
+/// stand-in -- swapping the real, system-wide `$TMPDIR` would disrupt
+/// every other process on the machine, not only this suite's own other
+/// threads) at `resolve()` time. Swapping that anchor for a symlink
+/// between `resolve()` and `bind()` is the same race
+/// `ancestor_symlink_swap_of_the_state_root_itself_is_rejected` closes
+/// on Linux, against the fd that actually matters on this platform.
+#[cfg(target_os = "macos")]
+#[test]
+fn ancestor_symlink_swap_of_the_macos_anchor_is_rejected() {
+    let anchor_root = temp_state_root("macos-ancestor-swap-anchor");
+    let _anchor_guard = super::super::channel::test_channel_anchor_root(&anchor_root);
+    let state_root = temp_state_root("macos-ancestor-swap-state-root");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    // `resolve()` has already pinned `anchor_root` (standing in for
+    // `$TMPDIR`) as an fd by this point. Now perform the swap that
+    // fd-pinning is supposed to defeat: replace the anchor *itself*
+    // with a symlink to somewhere else entirely, simulating a
+    // same-user process racing a later `bind()` call.
+    let attacker_target = temp_state_root("macos-ancestor-swap-target");
+    std::fs::remove_dir(&anchor_root).expect("remove the real anchor root");
+    std::os::unix::fs::symlink(&attacker_target, &anchor_root)
+        .expect("swap the anchor itself for a symlink");
+
+    let result = ApprovalChannelEndpoint::bind(&directory, &agent_run_id);
+    assert!(
+        result.is_err(),
+        "bind() must refuse when the $TMPDIR anchor itself (not just the tekstide \
+         subdirectory) has been swapped for a symlink since resolve() ran"
+    );
+
+    let leaked_socket = attacker_target.join("tekstide").join(format!(
+        "{}.sock",
+        super::super::channel::socket_filename_stem(&agent_run_id)
+    ));
+    assert!(
+        !leaked_socket.exists(),
+        "no socket may be created inside the symlink target reached via the swapped anchor"
+    );
+
+    // Clean up the symlink so it doesn't get treated as a real directory
+    // by anything that later enumerates the parent temp directory.
+    let _ = std::fs::remove_file(&anchor_root);
 }
 
 /// Response 113 Q2 (promoted to required E1 scope): a same-user peer that
