@@ -206,6 +206,48 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
      narrower than the general TOCTOU class this mechanism exists to close, but a real, stated
      residual risk if chosen, not a mitigation. Must be written as exactly that in whichever slice
      decides between these two, not left implicit.
+
+  **Decided, 2026-10-18-19, reviews 597/600/601/602/603.** `/dev/fd` is dead — confirmed on the
+  real runner, "NOT TRAVERSABLE," the likelier outcome named above. **Option 1,
+  `pthread_fchdir_np`**, chosen over option 2 for the reason D4 already gave it preference for:
+  it preserves the TOCTOU property the Linux path actually has rather than accepting a residual on
+  this security boundary specifically. Declared directly (absent from the vendored `libc` crate,
+  as expected); `ThreadDirScope`'s own `enter` carries a postcondition (`fstat` on the directory fd
+  against `stat(".")` by `st_dev`/`st_ino`) rather than trusting a bare zero return, and its `Drop`
+  checks its own revert (`debug_assert_eq!`) rather than discarding it silently.
+
+  **A second, real problem surfaced while wiring it in, independent of the mechanism: `sockaddr_
+  un`'s usable `sun_path` is 103 bytes on macOS (104 is the formula's own number, not the true
+  limit — `size_of::<sockaddr_un>() - size_of::<sa_family_t>()` never accounted for macOS/BSD's
+  extra leading `sun_len` byte; fixed by reading `sun_path`'s own array length directly instead),
+  and a real `AgentRunId`-based socket path under a state root as long as `~/Library/Application
+  Support/tekstide/approval` does not fit — no bind-time mechanism shortens the path an adapter
+  must later `connect()` to, since that path is never resolved relative to anything.** Fixed by
+  moving the socket's own directory off `state_root` entirely on macOS (`std::env::temp_dir().
+  join("tekstide")`, pinned as its own anchor fd with the same ancestor-swap protection
+  `state_root_fd` already gives Linux, and checked for ownership/writability before being trusted
+  — `std::env::temp_dir()` falls back to the world-writable `/tmp` when `TMPDIR` is unset) and
+  dropping `AgentRunId`'s own `"agent-run-"` prefix from socket filenames on both platforms. D3's
+  own `Application Support` decision for *durable* state is untouched; only the socket's own
+  directory moves.
+
+  **General rule, so a third socket does not rediscover the same ceiling: every `AF_UNIX` path
+  this product binds derives from a short per-user anchor, never from `state_root`, with a
+  headroom test asserting comfortable (not merely sufficient) margin on each platform that binds
+  it.** `project_lock::attention`'s own socket — a deliberate, documented second copy of this
+  module's socket-path-length check (RFC-058 D10's own trade) — had the exact same off-by-one for
+  the exact same reason, found and fixed in the same pass, and now inherits this rule too
+  (`$TMPDIR/tekstide-attention`, a sibling anchor, not nested inside the approval channel's own).
+
+  **Found in the same pass, and corrected separately rather than absorbed here: the attention
+  socket's own knock was never wired into any real open path** (three GUI call sites, one CLI
+  path) — only a standalone diagnostic binary ever called `request_attention`. The board's own
+  "it has been asked for your attention" sentence was therefore never true on either platform, a
+  pre-existing RFC-058 defect that this RFC's own socket-length work happened to surface, not
+  create. The false claim is removed here (a thing the product says that is not true is fixed
+  before a thing the product does not yet do); wiring the knock itself is reserved as **RFC-075**,
+  with RFC-058's own closeout gaining a dated correction recording what its own verification
+  actually checked.
 - **D5. Process/PTY: six Linux-only mechanisms, re-scoped against a full sweep rather than the
   three files expected to hold them (review 566's own correction).** Four replaced in-kind
   (`/proc` enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe

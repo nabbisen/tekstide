@@ -42,6 +42,34 @@ fn max_socket_path_len_matches_the_real_platform_limit() {
     assert_eq!(max_socket_path_len(), EXPECTED);
 }
 
+/// Review 603's general D4 rule, macOS's shape: `attention_socket_dir`
+/// there is always `$TMPDIR/tekstide-attention`, never derived from
+/// `state_root` at all, so the real, deterministic path can be
+/// asserted directly against the real runner's own `$TMPDIR` -- the
+/// same headroom-style test `approval::channel`'s own macOS test uses,
+/// adapted for this module's own filename shape
+/// (`<project_id>.attention.sock`, no prefix to strip since `ProjectId`
+/// carries none).
+#[cfg(target_os = "macos")]
+#[test]
+fn the_macos_attention_socket_path_leaves_comfortable_headroom_under_the_real_limit() {
+    let state_root = test_root("macos-headroom");
+    let project_id = uuid::Uuid::new_v4().to_string();
+    let path = super::attention_socket_path(&state_root, &project_id);
+
+    let path_len = path.as_os_str().len();
+    const MACOS_SUN_PATH_LIMIT: usize = 103;
+    const STATED_HEADROOM: usize = 10;
+    assert!(
+        path_len + STATED_HEADROOM <= MACOS_SUN_PATH_LIMIT,
+        "the real, resolved macOS attention socket path is {path_len} bytes, leaving less than \
+         the stated {STATED_HEADROOM}-byte headroom under the real {MACOS_SUN_PATH_LIMIT}-byte \
+         sun_path limit -- attention_socket_dir's own $TMPDIR/tekstide-attention choice may \
+         have regressed"
+    );
+    cleanup_root(state_root);
+}
+
 /// D10: a knock is delivered as a real accepted connection, not an
 /// in-memory flag -- the holder's own `accept()` is what fires.
 #[test]

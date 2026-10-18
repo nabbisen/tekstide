@@ -23,10 +23,48 @@ use std::path::{Path, PathBuf};
 
 use super::project_locks_dir;
 
-/// `<state_root>/project-locks/<project_id>.attention.sock` -- a sibling
-/// of the lock file itself, under the same directory D3 already names.
+/// `<state_root>/project-locks/<project_id>.attention.sock` on Linux -- a
+/// sibling of the lock file itself, under the same directory D3 already
+/// names. RFC-028 D4, review 603's general rule: **every `AF_UNIX` path
+/// this product binds derives from a short per-user anchor, never from
+/// `state_root`, with a headroom test per socket** -- the approval
+/// channel already learned this the hard way (review 600/601) and this
+/// socket now inherits the rule instead of rediscovering the ceiling a
+/// third time. See `attention_socket_dir`'s own macOS doc for why.
 pub fn attention_socket_path(state_root: &Path, project_id: &str) -> PathBuf {
-    project_locks_dir(state_root).join(format!("{project_id}.attention.sock"))
+    attention_socket_dir(state_root).join(format!("{project_id}.attention.sock"))
+}
+
+/// Linux: unchanged, `state_root`-relative. macOS: `std::env::temp_dir()`
+/// joined with a name of its own (`"tekstide-attention"`, a sibling of
+/// `approval::channel`'s own `"tekstide"` anchor, not nested inside it --
+/// the two modules stay as independent on macOS as `max_socket_path_len`'s
+/// own deliberate duplication already keeps them on every platform).
+/// `sockaddr_un`'s usable `sun_path` is 103 bytes on macOS; a real
+/// `ProjectId`-based path under a state root as long as `~/Library/
+/// Application Support/tekstide/project-locks` does not reliably fit,
+/// and -- the same lesson the approval channel's own `channel_dir_under`
+/// states -- nothing at bind time can shorten the path a knock's own
+/// `connect()` must use, since that path is never resolved relative to
+/// anything.
+///
+/// **Deliberately does not add `approval::channel`'s own anchor-
+/// trustworthiness check** (owned by this process's `euid`, not group-
+/// or world-writable) -- this module's own doc comment already states
+/// why its threat model differs: a spoofed knock costs an unwanted
+/// attention flash, and this function's own worst case under a
+/// `TMPDIR`-less environment (another user's directory already at
+/// `/tmp/tekstide-attention`) degrades to exactly the same `None` this
+/// module already returns for an ordinary bind failure, not a new risk
+/// proportionate to carrying that check.
+#[cfg(target_os = "linux")]
+fn attention_socket_dir(state_root: &Path) -> PathBuf {
+    project_locks_dir(state_root)
+}
+
+#[cfg(target_os = "macos")]
+fn attention_socket_dir(_state_root: &Path) -> PathBuf {
+    std::env::temp_dir().join("tekstide-attention")
 }
 
 /// The longest path `bind`/`connect` can accept in a `sockaddr_un`, not
@@ -67,11 +105,14 @@ pub fn bind_attention_listener(state_root: &Path, project_id: &str) -> Option<Un
     if path.as_os_str().len() > max_socket_path_len() {
         return None;
     }
-    // Self-sufficient regardless of call order: in production this
-    // directory already exists (`acquire_project_lock` creates it first),
-    // but this function makes no assumption about having been called
-    // after that one.
-    std::fs::create_dir_all(project_locks_dir(state_root)).ok()?;
+    // Self-sufficient regardless of call order. On Linux, in production,
+    // this directory already exists (`acquire_project_lock` creates the
+    // same `project_locks_dir` first) -- but this function makes no
+    // assumption about having been called after that one, which matters
+    // for real on macOS now: `attention_socket_dir`'s own anchor there
+    // is not `project_locks_dir` at all, so nothing else creates it
+    // first.
+    std::fs::create_dir_all(attention_socket_dir(state_root)).ok()?;
     // A previous holder that crashed leaves this special file behind --
     // `bind` on an existing path fails `AddrInUse` regardless of whether
     // anything is still listening on it, so clearing it first is what

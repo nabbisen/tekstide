@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed — the attention socket's own directory moves on macOS, same as the approval channel's
+
+RFC-028 D4, review 603: `project_lock::attention`'s socket has the same `sun_path`-length ceiling
+the approval channel hit first, for the same reason — a real `ProjectId`-based path under a state
+root as long as `~/Library/Application Support/tekstide/project-locks` does not fit macOS's
+103-byte usable `sun_path`. On macOS only, the attention socket's own directory now lives under
+`std::env::temp_dir()` (`$TMPDIR/tekstide-attention`, a sibling of the approval channel's own
+`$TMPDIR/tekstide` anchor, not nested inside it — the two stay as independent on macOS as their
+duplicated `max_socket_path_len` already keeps them everywhere else) instead of under the state
+root. The general rule this and the approval channel now both follow: every `AF_UNIX` path this
+product binds derives from a short per-user anchor, never from `state_root`, with a headroom test
+on each platform that binds it.
+
 ### Fixed — the "already open" board notice no longer claims a knock was sent
 
 RFC-028 review 603: `project-board-open-blocked`'s second sentence ("It has been asked for your

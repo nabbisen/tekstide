@@ -188,3 +188,39 @@ every refusal looks the same.
 
 Full handoff pack, evidence, and the acceptance checklist with every item's own proof:
 `rfcs/handoffs/058-one-process-per-project/`.
+
+## Correction (2026-10-19, RFC-028 review 603)
+
+**The knock was never wired into any real open path.** This closeout's own words above —
+"addressing the holder over a real `AF_UNIX` knock rather than naming it to the user" — are true
+about what `cd28995`'s own verification actually checked: a real knock between the standalone
+`project_process_probe` diagnostic binary and a held probe ("the held probe... reports having
+actually accepted the knock on its own listener"). They are silent about whether the three real
+GUI open call sites or the CLI path send one, because that question was asked of the probe and
+never of the GUI. It was not: `project_lock::attention::request_attention` has exactly four
+references in this codebase today — its own definition, its own two unit tests, and the probe
+binary — at `cd28995` and at every commit since.
+
+**The live capture quoted above proved the text, not the behaviour.** The screenshot shows the
+rendered sentence, which `shell.rs`'s own board-line function has always rendered unconditionally
+on a refusal being recorded, true regardless of whether a knock was attempted. A real screenshot
+of a real second window is still real evidence — about rendering, which is everything it was ever
+asked to show.
+
+**Why this went unnoticed for two reviews and a live capture: half the mechanism is live, and
+half a mechanism that works looks like the whole thing from either end.** The *listener* half is
+genuinely wired in production — `AppState::add_project_from_path_protected` binds the attention
+listener the moment this process acquires a lock, `try_clone_attention_listener` feeds a GUI
+subscription, and the holder's own window really does react to a knock when one arrives. Reading
+only the receiving end, the feature looks present. Reading only the rendered text, the same claim
+looks earned. Nobody read both ends against each other until RFC-028's own socket-path work
+traced the claim all the way back.
+
+**Disposition**: the board's own sentence ("It has been asked for your attention") is removed in
+RFC-028 — a false claim is fixed before a missing feature, and RFC-028 is what makes this
+statement permanently false on a platform it is about to ship (the attention socket cannot yet
+bind on macOS either, for the same `sun_path`-length reason the approval channel hit first).
+Wiring the knock itself — where the call belongs, what the user is told when a knock is attempted
+and fails, whether to attempt one at all on a platform or configuration where the socket cannot
+bind — is reserved as **RFC-075**, since it needs its own decisions and is not a slice of the RFC
+that found the gap.
