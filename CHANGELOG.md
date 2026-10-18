@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Changed — the approval channel's socket directory moves on macOS; `AgentRunId` prefix dropped from socket filenames
+
+RFC-028 D4, review 600: `sockaddr_un`'s usable `sun_path` is 103 bytes on macOS (confirmed by
+reading the field's own array length directly rather than deriving it — see the `Fixed` entry for
+`max_socket_path_len` below), and no bind-time mechanism shortens the path an adapter must later
+`connect()` to, since that path is never resolved relative to anything. A real `AgentRunId`-based
+socket path under a state root as long as `~/Library/Application Support/tekstide/approval` does
+not fit. On macOS only, the approval socket's own directory now lives under `std::env::temp_dir()`
+(`$TMPDIR/tekstide`) instead of under the state root — the Apple-sanctioned, per-user, short
+location for exactly this kind of non-durable IPC. D3's own `Application Support` decision for
+*durable* state is unaffected; only the socket's own directory moves. On both platforms, socket
+filenames drop `AgentRunId`'s own `"agent-run-"` prefix (meaningful in a log line, pure overhead in
+a path this crate already knows holds nothing else), leaving `<uuid>.sock`.
+`ApprovalChannelPathErrorReason` gains `ChannelAnchorUnavailable` (macOS only) for a failure
+resolving or pinning that directory. **This is a breaking change for anything matching
+`tekstide-core`'s `ApprovalChannelPathErrorReason` exhaustively.**
+
+### Fixed — `max_socket_path_len` was one byte too permissive on macOS
+
+The previous formula (`size_of::<sockaddr_un>() - size_of::<sa_family_t>()`) assumed no header
+field precedes `sun_family` — true on Linux and false on macOS/BSD's own extra leading `sun_len`
+byte, silently reporting 104 as the max where the real limit is 103. A 104-byte path passed this
+check and would have failed only at the real `bind()` call. Now reads `sun_path`'s own array
+length directly, correct by construction on any platform's `sockaddr_un` regardless of what
+precedes it.
+
 ### Added — `ApprovalChannelErrorReason` gains `ThreadChdirUnavailable`
 
 RFC-028 D4: the approval channel's own TOCTOU-safe bind path now has a macOS mechanism, not only

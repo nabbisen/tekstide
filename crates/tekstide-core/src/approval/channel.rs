@@ -150,11 +150,29 @@ impl ApprovalChannelPathRequest {
 /// for different `AgentRun`s. `Eq`/`PartialEq` are deliberately not
 /// derived (an fd is not a meaningful value to compare) -- nothing outside
 /// this module ever compared two directories anyway.
+///
+/// **`channel_dir` is not always under `state_root`.** Linux:
+/// `state_root.join("approval")`, same as always, and `state_root_fd`
+/// anchors `bind()`'s own `openat`. macOS (review 600): a short, per-user
+/// temp location instead (see [`ApprovalChannelPathResolver::resolve`]'s
+/// own doc for the arithmetic) -- `sockaddr_un`'s `sun_path` cannot hold
+/// the real `AgentRunId`-based filename under a state root as long as
+/// `~/Library/Application Support/tekstide/approval`, and no bind-time
+/// trick (`pthread_fchdir_np` included) shortens the path the *adapter*
+/// must later `connect()` to, since that one is never resolved relative
+/// to anything. `channel_anchor_fd` is macOS's own separately-pinned
+/// parent-of-`channel_dir` fd for that case, protecting the same
+/// ancestor-swap race `state_root_fd` protects Linux's `channel_dir`
+/// against -- D3's own `Application Support` decision for *durable*
+/// state is untouched; only the socket's own, non-durable directory
+/// moves.
 #[derive(Clone, Debug)]
 pub struct ApprovalChannelDirectory {
     state_root: PathBuf,
     channel_dir: PathBuf,
     state_root_fd: Arc<OwnedFd>,
+    #[cfg(target_os = "macos")]
+    channel_anchor_fd: Arc<OwnedFd>,
 }
 
 impl ApprovalChannelDirectory {
@@ -166,12 +184,18 @@ impl ApprovalChannelDirectory {
         &self.channel_dir
     }
 
-    /// One socket per `AgentRun`, named by its id.
+    /// One socket per `AgentRun`, named by its bare UUID suffix (review
+    /// 600 drops the `agent-run-` prefix `AgentRunId`'s own `Display`
+    /// carries -- meaningful in a log line, pure overhead in a path
+    /// this crate already knows holds nothing else) -- `.sock` appended.
     ///
-    /// Unix `sun_path` is bounded (~108 bytes on Linux); an unusually long
-    /// state-root path can make this exceed that limit. `bind()` binds
-    /// through a short `/proc/self/fd`-relative path rather than this real
-    /// path (see `magic_fd_path`), so the limit no longer surfaces there --
+    /// Unix `sun_path` is bounded (103 usable bytes on macOS, 107 on
+    /// Linux -- see `max_socket_path_len`'s own doc for why the two
+    /// differ and why the formula computing them reads the field's own
+    /// length rather than deriving it). `bind()` binds through a short,
+    /// verified-fd-relative path rather than this real one (Linux:
+    /// `/proc/self/fd`; macOS: `pthread_fchdir_np` -- see
+    /// `enter_bind_context`), so the limit does not surface *there* --
     /// response 113 Required 1 found that this let a too-long path bind
     /// successfully and then fail silently at *connect* time instead, on
     /// the adapter's side, with an endpoint that looks healthy but can
@@ -180,8 +204,23 @@ impl ApprovalChannelDirectory {
     /// before doing anything else, specifically so that failure mode is
     /// closed rather than moved.
     pub fn socket_path(&self, agent_run_id: &AgentRunId) -> PathBuf {
-        self.channel_dir.join(format!("{agent_run_id}.sock"))
+        self.channel_dir
+            .join(format!("{}.sock", socket_filename_stem(agent_run_id)))
     }
+}
+
+/// `AgentRunId`'s own `Display` carries a `"agent-run-"` prefix meaningful
+/// in a log line; stripped here because it is pure, unnecessary length in
+/// a socket filename living inside a directory this crate already knows
+/// holds nothing but approval sockets. Falls back to the full id if the
+/// prefix is somehow absent (it never is, in practice -- `AgentRunId` is
+/// only ever constructed with it) rather than panicking on an assumption
+/// about a type this module does not own.
+fn socket_filename_stem(agent_run_id: &AgentRunId) -> &str {
+    agent_run_id
+        .as_str()
+        .strip_prefix("agent-run-")
+        .unwrap_or(agent_run_id.as_str())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -193,6 +232,14 @@ pub enum ApprovalChannelPathErrorReason {
     ChannelPathEscapesStateRoot,
     ChannelPathIsSymlink,
     ChannelPathTypeInvalid,
+    /// Review 600, macOS only: `channel_dir`'s own parent (the per-user
+    /// temp root, not `state_root`) could not be canonicalised, created,
+    /// or pinned as an fd. Distinguished from `InvalidStateRoot` because
+    /// it names a different directory -- a reader seeing `InvalidStateRoot`
+    /// for a failure that has nothing to do with the state root would be
+    /// actively misled, the same reasoning `ThreadChdirUnavailable` was
+    /// given its own name for on `ApprovalChannelError`'s side.
+    ChannelAnchorUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -223,14 +270,6 @@ impl ApprovalChannelPathResolver {
             &request.state_root,
             ApprovalChannelPathErrorReason::InvalidStateRoot,
         )?;
-        let channel_dir = state_root.join("approval");
-
-        if !channel_dir.starts_with(&state_root) {
-            return Err(ApprovalChannelPathError::new(
-                ApprovalChannelPathErrorReason::ChannelPathEscapesStateRoot,
-            ));
-        }
-        reject_symlink(&channel_dir)?;
 
         // Response 113 Required 2: pin the state root itself as an open fd,
         // right after resolving its pathname, rather than only pinning the
@@ -239,11 +278,11 @@ impl ApprovalChannelPathResolver {
         // only that component -- an ancestor swap (replacing `state_root`
         // itself with a symlink sometime between this call and a later
         // `bind()`) was still possible, one directory higher than the race
-        // response 112 closed. An fd pins an inode: `bind()` resolves the
-        // `approval` subdirectory via `openat` relative to `state_root_fd`
-        // (see `bind()`), so no pathname swap at any level after this
-        // point can redirect it, no matter how long a caller waits between
-        // `resolve()` and `bind()`.
+        // response 112 closed. An fd pins an inode: Linux's `bind()`
+        // resolves the `approval` subdirectory via `openat` relative to
+        // `state_root_fd` (see `bind()`), so no pathname swap at any level
+        // after this point can redirect it, no matter how long a caller
+        // waits between `resolve()` and `bind()`.
         fs::create_dir_all(&state_root).map_err(|_error| {
             ApprovalChannelPathError::new(ApprovalChannelPathErrorReason::InvalidStateRoot)
         })?;
@@ -251,10 +290,15 @@ impl ApprovalChannelPathResolver {
             ApprovalChannelPathError::new(ApprovalChannelPathErrorReason::InvalidStateRoot)
         })?;
 
+        let channel_dir = channel_dir_under(&state_root)?;
+        reject_symlink(&channel_dir)?;
+
         let resolved = ApprovalChannelDirectory {
             state_root,
             channel_dir,
             state_root_fd: Arc::new(state_root_fd),
+            #[cfg(target_os = "macos")]
+            channel_anchor_fd: Arc::new(channel_anchor_fd()?),
         };
         for project_root in request.project_roots {
             resolved.ensure_project_root_compatible(&project_root)?;
@@ -263,7 +307,120 @@ impl ApprovalChannelPathResolver {
     }
 }
 
+/// Linux: `state_root.join("approval")`, same as always -- `bind()`
+/// anchors its own `openat` on `state_root_fd` (already pinned by the
+/// time this runs), so this is purely a pathname, checked here only for
+/// the "did my own `.join` escape `state_root`" sanity property response
+/// 113 originally added.
+#[cfg(target_os = "linux")]
+fn channel_dir_under(state_root: &Path) -> Result<PathBuf, ApprovalChannelPathError> {
+    let channel_dir = state_root.join("approval");
+    if !channel_dir.starts_with(state_root) {
+        return Err(ApprovalChannelPathError::new(
+            ApprovalChannelPathErrorReason::ChannelPathEscapesStateRoot,
+        ));
+    }
+    Ok(channel_dir)
+}
+
+/// macOS (review 600): deliberately **not** under `state_root` at all.
+/// `sockaddr_un`'s usable `sun_path` is 103 bytes there (see
+/// `max_socket_path_len`'s own doc); a real `AgentRunId`-based socket
+/// filename under a state root as long as `~/Library/Application
+/// Support/tekstide/approval` does not fit, and no bind-time mechanism
+/// shortens the path the adapter must later `connect()` to, since that
+/// path is never resolved relative to anything -- it is the literal
+/// bytes a `sockaddr_un` carries. `std::env::temp_dir()`'s own per-user,
+/// `$TMPDIR`-backed directory is the Apple-sanctioned place for exactly
+/// this (non-durable, 0700-able, short): D3's own `Application Support`
+/// decision for *durable* state is untouched by this -- only the
+/// socket's own directory moves, nothing else this crate persists.
+/// `state_root` itself is still resolved and pinned above regardless of
+/// platform, since `ensure_project_root_compatible` and this type's own
+/// public accessors still mean what they always have.
+#[cfg(target_os = "macos")]
+fn channel_dir_under(_state_root: &Path) -> Result<PathBuf, ApprovalChannelPathError> {
+    let tmp_root = canonicalize_dir(
+        &std::env::temp_dir(),
+        ApprovalChannelPathErrorReason::ChannelAnchorUnavailable,
+    )?;
+    Ok(tmp_root.join("tekstide"))
+}
+
+/// macOS only: pins `channel_dir`'s own parent (`$TMPDIR`, not
+/// `state_root`) as an open fd, the same ancestor-swap protection
+/// `state_root_fd` gives Linux's `channel_dir` -- `bind()` resolves
+/// `channel_dir`'s own subdirectory (`"tekstide"`) via `openat` relative
+/// to this fd, not by re-resolving `$TMPDIR`'s pathname.
+#[cfg(target_os = "macos")]
+fn channel_anchor_fd() -> Result<OwnedFd, ApprovalChannelPathError> {
+    let tmp_root = canonicalize_dir(
+        &std::env::temp_dir(),
+        ApprovalChannelPathErrorReason::ChannelAnchorUnavailable,
+    )?;
+    fs::create_dir_all(&tmp_root).map_err(|_error| {
+        ApprovalChannelPathError::new(ApprovalChannelPathErrorReason::ChannelAnchorUnavailable)
+    })?;
+    let anchor_fd = open_dir_no_follow(&tmp_root).map_err(|_error| {
+        ApprovalChannelPathError::new(ApprovalChannelPathErrorReason::ChannelAnchorUnavailable)
+    })?;
+    assert_anchor_is_trustworthy(&anchor_fd).map_err(|_error| {
+        ApprovalChannelPathError::new(ApprovalChannelPathErrorReason::ChannelAnchorUnavailable)
+    })?;
+    Ok(anchor_fd)
+}
+
+/// Review 601: `std::env::temp_dir()` returns `$TMPDIR` when set (a
+/// per-user, `0700` directory under `/var/folders/…` on a normal macOS
+/// session) but falls back to the world-writable, sticky-bit `/tmp`
+/// when `TMPDIR` is unset or empty -- a cron job, a stripped
+/// environment, a `launchd` context that never set it. Traced what that
+/// actually buys another local user before deciding how much to close:
+/// a pre-created symlink is already refused by `open_dir_no_follow`'s
+/// own `O_NOFOLLOW`, and a pre-created directory owned by someone else
+/// already fails the later `fchmod(0o700)` with `EPERM`. The one gap
+/// neither of those catches: a directory that genuinely **is** ours (so
+/// `fchmod` succeeds) but is group- or world-writable -- left behind by
+/// an earlier buggy run, or by anything else running as this same user
+/// -- open to another local user dropping entries into it in the window
+/// between `mkdirat` and that `fchmod`. Checked directly against the fd
+/// this call already opened, not by re-resolving the pathname, so there
+/// is no new window between this check and the fd it describes.
+#[cfg(target_os = "macos")]
+fn assert_anchor_is_trustworthy(anchor_fd: &OwnedFd) -> io::Result<()> {
+    // SAFETY: `anchor_fd` is a valid, open fd for the duration of this
+    // call; `stat_buf` is a valid, fully-zeroed `libc::stat` the call
+    // writes into.
+    let mut stat_buf: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(anchor_fd.as_raw_fd(), &mut stat_buf) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if stat_buf.st_uid != current_euid() {
+        return Err(io::Error::other(
+            "the approval channel's $TMPDIR anchor is not owned by this process's own user",
+        ));
+    }
+    if stat_buf.st_mode & (libc::S_IWGRP | libc::S_IWOTH) != 0 {
+        return Err(io::Error::other(
+            "the approval channel's $TMPDIR anchor is group- or world-writable",
+        ));
+    }
+    Ok(())
+}
+
 impl ApprovalChannelDirectory {
+    /// Refuses if `project_root` would contain either this channel's
+    /// socket directory or its durable state root -- a project a user
+    /// opens must never be able to read or tamper with either.
+    ///
+    /// **Review 601: the first clause (`channel_dir.starts_with
+    /// (project_root)`) can never fire on macOS**, since `channel_dir`
+    /// there is always `$TMPDIR/tekstide` (`channel_dir_under`'s own
+    /// macOS doc) and never under anything a `project_root` could name.
+    /// That is the guard being satisfied by construction, not a dead or
+    /// buggy clause -- the property it checks still holds, just for a
+    /// reason this function no longer has to verify itself on that
+    /// platform.
     pub fn ensure_project_root_compatible(
         &self,
         project_root: &Path,
@@ -647,19 +804,23 @@ impl ApprovalChannelEndpoint {
             ));
         }
 
-        // Response 113 Required 2: `mkdirat`/`openat` relative to the
-        // state-root fd pinned once in `resolve()`, instead of
-        // re-resolving `channel_dir`'s pathname here the way the previous
-        // revision's `open_dir_no_follow(directory.channel_dir())` did.
-        // That call re-resolved `state_root`'s pathname on every `bind()`,
-        // so a same-user swap of `state_root` itself (not just the
-        // `approval` subdirectory) between `resolve()` and `bind()` still
-        // worked -- `state_root_fd` was opened once and never re-resolves
-        // its own pathname again, closing that too.
-        let state_root_fd = directory.state_root_fd.as_raw_fd();
-        mkdirat_if_missing(state_root_fd, "approval", 0o700).map_err(ApprovalChannelError::io)?;
+        // Response 113 Required 2: `mkdirat`/`openat` relative to an
+        // already-pinned anchor fd (Linux: `state_root_fd`; macOS,
+        // review 600: `channel_anchor_fd`, pinned to `$TMPDIR` rather
+        // than `state_root` -- see `channel_dir_under`'s own macOS doc
+        // for why `channel_dir` is not under `state_root` there at all),
+        // instead of re-resolving `channel_dir`'s pathname here the way
+        // the previous revision's `open_dir_no_follow(directory.
+        // channel_dir())` did. That call re-resolved the anchor's own
+        // pathname on every `bind()`, so a same-user swap of the anchor
+        // itself (not just the subdirectory this call opens) between
+        // `resolve()` and `bind()` still worked -- the fd was opened
+        // once and never re-resolves its own pathname again, closing
+        // that too.
+        let (anchor_fd, subdir_name) = channel_anchor(directory);
+        mkdirat_if_missing(anchor_fd, subdir_name, 0o700).map_err(ApprovalChannelError::io)?;
         let dir_fd =
-            openat_dir_no_follow(state_root_fd, "approval").map_err(ApprovalChannelError::io)?;
+            openat_dir_no_follow(anchor_fd, subdir_name).map_err(ApprovalChannelError::io)?;
         fchmod(dir_fd.as_raw_fd(), 0o700).map_err(ApprovalChannelError::io)?;
 
         // Response 113 Q1 item 1 (Linux) / RFC-028 D4 review 597/599
@@ -672,7 +833,7 @@ impl ApprovalChannelEndpoint {
         // target -- and surfaces as a distinguished reason instead of a
         // bare `Io` that would otherwise look identical to an unrelated
         // bind failure.
-        let filename = format!("{agent_run_id}.sock");
+        let filename = format!("{}.sock", socket_filename_stem(agent_run_id));
         let bind_context = enter_bind_context(&dir_fd, &filename)
             .map_err(|_error| ApprovalChannelError::new(bind_context_error_reason()))?;
         let bind_path = &bind_context.path;
@@ -1234,6 +1395,21 @@ fn bind_context_error_reason() -> ApprovalChannelErrorReason {
 #[cfg(target_os = "macos")]
 fn bind_context_error_reason() -> ApprovalChannelErrorReason {
     ApprovalChannelErrorReason::ThreadChdirUnavailable
+}
+
+/// What `bind()`'s own `mkdirat`/`openat` pair resolves `channel_dir`'s
+/// subdirectory relative to -- `directory.state_root_fd` naming
+/// `"approval"` on Linux, `directory.channel_anchor_fd` naming
+/// `"tekstide"` on macOS. See `channel_dir_under`'s own two doc comments
+/// for why these differ.
+#[cfg(target_os = "linux")]
+fn channel_anchor(directory: &ApprovalChannelDirectory) -> (RawFd, &'static str) {
+    (directory.state_root_fd.as_raw_fd(), "approval")
+}
+
+#[cfg(target_os = "macos")]
+fn channel_anchor(directory: &ApprovalChannelDirectory) -> (RawFd, &'static str) {
+    (directory.channel_anchor_fd.as_raw_fd(), "tekstide")
 }
 
 /// The longest path `bind`/`connect` can accept in a `sockaddr_un`, not

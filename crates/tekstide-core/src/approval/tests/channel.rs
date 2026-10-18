@@ -859,6 +859,16 @@ fn stale_socket_clearing_refuses_a_non_socket_file() {
 /// (327 bytes) exceeded `sun_path`, leaving a healthy-looking endpoint no
 /// adapter could ever `connect()` to. `bind()` now checks the real path's
 /// length explicitly and must refuse before doing anything else.
+///
+/// **Linux only, review 600**: this test's whole premise -- a deep
+/// `state_root` forces a long *real* socket path -- stopped holding for
+/// macOS the moment `channel_dir_under`'s macOS arm stopped deriving
+/// `channel_dir` from `state_root` at all (it is always `$TMPDIR/
+/// tekstide` there, regardless of how deep `state_root` is). macOS's own
+/// version of this property is `the_macos_socket_path_leaves_
+/// comfortable_headroom_under_the_real_limit`, below -- a different
+/// shape because the thing that can go wrong is different.
+#[cfg(target_os = "linux")]
 #[test]
 fn bind_rejects_a_state_root_deep_enough_to_exceed_sun_path() {
     let mut state_root = std::env::temp_dir();
@@ -894,6 +904,69 @@ fn bind_rejects_a_state_root_deep_enough_to_exceed_sun_path() {
         "bind() must refuse a real socket path too long for sockaddr_un, \
          rather than binding through the short /proc/self/fd path and \
          leaving connect() to fail later"
+    );
+}
+
+/// Review 600's own required regression: the "fits comfortably" half of
+/// the property the pathological test above covers the "refused when it
+/// does not fit" half of. A realistic state root -- one padded segment
+/// the size of a plausible real directory name, not the six 40-byte
+/// segments the other test uses to deliberately force the failure case
+/// -- must leave comfortable headroom under `sun_path`'s real 107-byte
+/// Linux limit, not merely squeak under it, so a future change
+/// lengthening any fixed component this module controls (the
+/// `"approval"` dirname, `.sock`, or `AgentRunId`'s own prefix if
+/// `socket_filename_stem`'s strip were ever reverted) is caught here
+/// before a real user's own, typically longer, home directory pushes a
+/// realistic path over the edge.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_realistic_linux_socket_path_leaves_comfortable_headroom() {
+    let mut state_root = temp_state_root("realistic-headroom");
+    state_root.push("a".repeat(16));
+    std::fs::create_dir_all(&state_root).expect("create the realistic state root");
+    let state_root = state_root
+        .canonicalize()
+        .expect("canonicalize realistic state root");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let path_len = directory.socket_path(&agent_run_id).as_os_str().len();
+    const LINUX_SUN_PATH_LIMIT: usize = 107;
+    const STATED_HEADROOM: usize = 15;
+    assert!(
+        path_len + STATED_HEADROOM <= LINUX_SUN_PATH_LIMIT,
+        "a realistic socket path is {path_len} bytes, leaving less than the stated \
+         {STATED_HEADROOM}-byte headroom under Linux's {LINUX_SUN_PATH_LIMIT}-byte sun_path \
+         limit -- this module's own fixed overhead may have grown"
+    );
+}
+
+/// Review 600's own required regression, macOS's shape: `channel_dir`
+/// there is always `$TMPDIR/tekstide` (`channel_dir_under`'s macOS arm),
+/// never derived from `state_root` at all, so the real, deterministic
+/// path can be asserted directly against the real runner's own
+/// `$TMPDIR` rather than needing a synthetic stand-in the way Linux's
+/// counterpart above does. Catches the same regression class: this
+/// module's own fixed overhead (the `"tekstide"` dirname,
+/// `socket_filename_stem`'s prefix strip, `.sock`) growing enough to
+/// eat the stated headroom under the real 103-byte limit.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit() {
+    let state_root = temp_state_root("macos-headroom");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+
+    let path_len = directory.socket_path(&agent_run_id).as_os_str().len();
+    const MACOS_SUN_PATH_LIMIT: usize = 103;
+    const STATED_HEADROOM: usize = 10;
+    assert!(
+        path_len + STATED_HEADROOM <= MACOS_SUN_PATH_LIMIT,
+        "the real, resolved macOS socket path is {path_len} bytes, leaving less than the \
+         stated {STATED_HEADROOM}-byte headroom under the real {MACOS_SUN_PATH_LIMIT}-byte \
+         sun_path limit -- channel_dir_under's own $TMPDIR/tekstide choice, or \
+         socket_filename_stem's prefix strip, may have regressed"
     );
 }
 
