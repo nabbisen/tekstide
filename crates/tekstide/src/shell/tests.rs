@@ -6574,6 +6574,21 @@ fn a_managed_launch_with_capture_disabled_still_binds_its_approval_channel() {
 /// catalog text actually rendered from that refusal must name the
 /// state directory and `XDG_STATE_HOME`, not fall through to the
 /// unnamed generic message.
+///
+/// **Linux only, RFC-028 D4 review 601**: this test's own premise -- a
+/// deep `state_root` forces a long *real* socket path -- stopped
+/// holding for macOS the moment the approval channel's `channel_dir`
+/// stopped deriving from `state_root` there at all (`channel.rs`'s own
+/// `channel_dir_under`, macOS arm: always `$TMPDIR/tekstide`,
+/// independent of `state_root`'s own depth). The rendered text this
+/// test checks for is also genuinely Linux-specific on its own terms --
+/// `XDG_STATE_HOME` names nothing on macOS -- so there is no single
+/// property left here that would even describe what a macOS version of
+/// this test should assert, unlike `tekstide-core`'s own sibling test
+/// (which has a direct macOS counterpart, `the_macos_socket_path_
+/// leaves_comfortable_headroom_under_the_real_limit`, asserting the
+/// opposite: that a real `AgentRunId`-based path now fits comfortably).
+#[cfg(target_os = "linux")]
 #[test]
 fn a_managed_launch_whose_state_root_is_too_deep_for_the_approval_socket_names_the_reason() {
     let mut app_shell = ApplicationShell::new();
