@@ -1261,16 +1261,25 @@ fn which_python3() -> Result<String, ()> {
         .map_err(|_| ())
 }
 
-/// RFC-028 D4: this project's own open question, named rather than
-/// assumed -- does `/dev/fd/<fd>/<name>` on macOS have the same TOCTOU-
-/// safety property `/proc/self/fd/<fd>/<name>` gives `magic_fd_path` on
-/// Linux (reaching the file a verified directory *fd* points to,
-/// immune to whatever has happened to the directory's *pathname* since
-/// that fd was opened), or does it quietly re-resolve by name instead?
-/// D4's own text is explicit that `/dev/fd` is written into the RFC as
-/// a decision only once this passes on a real runner -- until then it
-/// is a hypothesis, which is exactly why this is a test and not a
-/// doc-comment claim.
+/// RFC-028 D4: this project's own open question, **answered by review
+/// 597 on the real runner** -- does `/dev/fd/<fd>/<name>` on macOS have
+/// the same TOCTOU-safety property `/proc/self/fd/<fd>/<name>` gives
+/// `magic_fd_path` on Linux (reaching the file a verified directory
+/// *fd* points to, immune to whatever has happened to the directory's
+/// *pathname* since that fd was opened), or does it quietly re-resolve
+/// by name instead? **No**: the magic path did not resolve at all
+/// (`NOT TRAVERSABLE`, the likelier outcome this test's own assertion
+/// already distinguished before the answer existed) -- `fdescfs`
+/// re-opens the fd a descriptor names rather than supporting path
+/// traversal through a directory descriptor the way `/proc/self/fd`
+/// does. That answer is why `enter_bind_context`'s macOS arm
+/// (`channel.rs`) uses `pthread_fchdir_np` plus a relative path
+/// instead, not `/dev/fd` at all. **Kept as a standing regression
+/// check, not deleted**, now that the question it was written to
+/// answer is closed: this still exercises a true fact the design
+/// decision depends on staying true, the same "rejected alternative
+/// recorded, not removed" treatment this RFC has already given
+/// `ptsname_r`'s own rejected lock-based answer in `pty.rs`.
 ///
 /// Method: open a directory, create a file in it, record the file's
 /// real identity (`fstat`'s `st_dev`/`st_ino`). Then rename the
@@ -1282,13 +1291,6 @@ fn which_python3() -> Result<String, ()> {
 /// the hypothesis holds; if the identity changed (or now points at the
 /// decoy), it does not, and `/dev/fd` cannot be used the way
 /// `/proc/self/fd` is on Linux without its own, different safeguard.
-///
-/// **This can only execute once RFC-028 PR-028-D's own macOS port
-/// makes this crate compile on macOS at all** -- `cargo build` alone
-/// fails today on unrelated, unported mechanisms (PR-028-A's own
-/// measurement), so this test cannot run, only compile, until then.
-/// Written now because the question belongs to this slice (D4); the
-/// answer does not exist yet and must not be assumed.
 #[cfg(target_os = "macos")]
 #[test]
 fn dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname() {

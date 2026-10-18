@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added — `ApprovalChannelErrorReason` gains `ThreadChdirUnavailable`
+
+RFC-028 D4: the approval channel's own TOCTOU-safe bind path now has a macOS mechanism, not only
+Linux's `/proc/self/fd` magic path. `/dev/fd` was tested on the real runner and confirmed not
+traversable the way `/proc/self/fd` is, so macOS binds through `pthread_fchdir_np` (the calling
+thread's own current directory, not the whole process's) plus a relative path instead.
+`ThreadChdirUnavailable` is macOS's own distinguished reason for that call failing, parallel to
+`ProcMagicPathUnavailable` on Linux. **This is a breaking change for anything matching
+`tekstide-core`'s `ApprovalChannelErrorReason` exhaustively** — a `match` with no wildcard arm
+over this enum no longer compiles without handling the new variant.
+
 ### Fixed — a subprocess could inherit another terminal's PTY master
 
 Opening a terminal called `openpty()` and then applied close-on-exec to the two descriptors it

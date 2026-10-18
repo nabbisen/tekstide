@@ -58,6 +58,8 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "macos")]
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -435,8 +437,21 @@ pub enum ApprovalChannelErrorReason {
     /// desktop-targeted, so this is expected to be rare). Distinguished
     /// from a bare `Io` so this specific, environmental precondition is
     /// identifiable rather than indistinguishable from any other bind
-    /// failure.
+    /// failure. Linux only -- see [`Self::ThreadChdirUnavailable`] for
+    /// macOS's own, differently-shaped version of the same precondition.
     ProcMagicPathUnavailable,
+    /// RFC-028 D4, review 597/599: macOS's own equivalent of
+    /// [`Self::ProcMagicPathUnavailable`] -- `/dev/fd` was checked and
+    /// confirmed not traversable the way `/proc/self/fd` is (`fdescfs`
+    /// re-opens the fd itself rather than supporting path traversal
+    /// through a directory descriptor), so this platform binds through
+    /// `pthread_fchdir_np` (the calling *thread's* cwd, not the whole
+    /// process's) plus a relative path instead. This reason means that
+    /// call itself failed -- almost always because the symbol does not
+    /// exist on the running macOS version (undocumented officially,
+    /// present since OS X 10.5; checked, not assumed, by the postcondition
+    /// at the call site, not by a version number).
+    ThreadChdirUnavailable,
     /// `clear_stale_socket` found a file at the bind path that exists but
     /// is not a socket (`response 112 Q3`'s own refusal: connecting to a
     /// regular file also yields `ECONNREFUSED`, so this case is refused
@@ -614,15 +629,18 @@ impl ApprovalChannelEndpoint {
         let socket_path = directory.socket_path(agent_run_id);
 
         // Response 113 Required 1: checked against the *real* path, up
-        // front, before anything else. Binding below goes through a short
-        // `/proc/self/fd`-relative path (see `magic_fd_path`'s doc
-        // comment for why that shortness is incidental, not a feature),
-        // which no longer fails here on a long real path the way the
-        // previous revision did -- it would instead bind successfully and
-        // leave a real adapter's later `connect()` (which must use the
-        // real path) to fail against a healthy-looking, unreachable
-        // endpoint. That is a harder failure to diagnose than the one it
-        // replaced, so it is closed explicitly here instead.
+        // front, before anything else. Binding below goes through a
+        // short, verified-fd-relative path instead (Linux: the `/proc/
+        // self/fd` magic path; macOS: a `pthread_fchdir_np`-scoped
+        // relative path -- see `enter_bind_context`'s own two doc
+        // comments for why that shortness is incidental to closing a
+        // TOCTOU race, not a feature), which no longer fails here on a
+        // long real path the way the previous revision did -- it would
+        // instead bind successfully and leave a real adapter's later
+        // `connect()` (which must use the real path) to fail against a
+        // healthy-looking, unreachable endpoint. That is a harder
+        // failure to diagnose than the one it replaced, so it is closed
+        // explicitly here instead.
         if socket_path.as_os_str().len() > max_socket_path_len() {
             return Err(ApprovalChannelError::new(
                 ApprovalChannelErrorReason::SocketPathTooLong,
@@ -644,23 +662,24 @@ impl ApprovalChannelEndpoint {
             openat_dir_no_follow(state_root_fd, "approval").map_err(ApprovalChannelError::io)?;
         fchmod(dir_fd.as_raw_fd(), 0o700).map_err(ApprovalChannelError::io)?;
 
-        // Response 113 Q1 item 1: this fd-relative approach depends on
-        // `/proc/self/fd` being mounted and functional. Checked here,
-        // against the fd this call just opened itself, so a failure is
-        // unambiguously about `/proc` rather than about the eventual bind
+        // Response 113 Q1 item 1 (Linux) / RFC-028 D4 review 597/599
+        // (macOS): this fd-relative approach depends on a per-platform
+        // precondition -- `/proc/self/fd` being mounted and functional
+        // on Linux, `pthread_fchdir_np` succeeding (and its own
+        // postcondition holding) on macOS. Checked here, against the fd
+        // this call just opened itself, so a failure is unambiguously
+        // about that precondition rather than about the eventual bind
         // target -- and surfaces as a distinguished reason instead of a
         // bare `Io` that would otherwise look identical to an unrelated
         // bind failure.
-        verify_proc_fd_magic_path_available(&dir_fd).map_err(|_error| {
-            ApprovalChannelError::new(ApprovalChannelErrorReason::ProcMagicPathUnavailable)
-        })?;
-
         let filename = format!("{agent_run_id}.sock");
-        let bind_path = magic_fd_path(&dir_fd, &filename);
+        let bind_context = enter_bind_context(&dir_fd, &filename)
+            .map_err(|_error| ApprovalChannelError::new(bind_context_error_reason()))?;
+        let bind_path = &bind_context.path;
 
-        clear_stale_socket(&bind_path, &socket_path)?;
+        clear_stale_socket(bind_path, &socket_path)?;
 
-        let listener = UnixListener::bind(&bind_path).map_err(ApprovalChannelError::io)?;
+        let listener = UnixListener::bind(bind_path).map_err(ApprovalChannelError::io)?;
         // Empirically, `fchmod` on the *listening socket's own fd* does
         // not reliably update the bound special file's mode bits (tried
         // first; the socket file kept its umask-derived default despite
@@ -668,12 +687,16 @@ impl ApprovalChannelEndpoint {
         // where `fchmod` unambiguously works, a socket fd's relationship
         // to the special file's inode metadata is evidently not the same
         // thing. Falling back to a path-based `set_permissions`, but
-        // still through `bind_path` (the `/proc/self/fd`-relative path)
+        // still through `bind_path` (the verified-fd-relative path)
         // rather than the plain path, so this still resolves through the
         // already-verified directory fd instead of re-resolving a
         // separate pathname.
-        fs::set_permissions(&bind_path, fs::Permissions::from_mode(0o600))
+        fs::set_permissions(bind_path, fs::Permissions::from_mode(0o600))
             .map_err(ApprovalChannelError::io)?;
+        // `bind_context` drops here, after every operation that needed
+        // its path -- on macOS, this is where the calling thread's cwd
+        // reverts.
+        drop(bind_context);
 
         let raw_token = generate_capability_token();
         let expected_token = super::protocol::validate_token(raw_token.clone())
@@ -1126,7 +1149,25 @@ fn openat_dir_no_follow(dir_fd: RawFd, name: &str) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-/// A path that resolves through the kernel's fd table (Linux's `/proc/
+/// What `bind()` actually binds `UnixListener` (and the later
+/// `set_permissions` call) through -- resolved via the kernel's fd table
+/// on Linux (an absolute magic path, no held state) and via a
+/// thread-local `chdir` on macOS (a relative path, with a guard that
+/// must stay alive for every operation using it and reverts the calling
+/// thread's cwd on drop). **Dropping the macOS guard early, before every
+/// operation that needs the relative path has finished, would silently
+/// resolve later operations against whatever the thread's cwd happens to
+/// be instead** -- the field exists specifically to make "keep this
+/// alive" a type-level fact rather than a convention to remember. `path`
+/// is deliberately the only thing read at any call site; nothing outside
+/// this type inspects which platform's shape produced it.
+struct BindContext {
+    path: PathBuf,
+    #[cfg(target_os = "macos")]
+    _scope: ThreadDirScope,
+}
+
+/// Linux: a path that resolves through the kernel's fd table (`/proc/
 /// self/fd` magic symlinks) rather than by re-resolving `dir_fd`'s
 /// directory pathname from scratch. Binding or chmod-ing through this
 /// path cannot be redirected by anything that happens to the directory's
@@ -1140,19 +1181,7 @@ fn openat_dir_no_follow(dir_fd: RawFd, name: &str) -> io::Result<OwnedFd> {
 /// check in `bind()` against the *real* `socket_path` is what enforces
 /// the limit now; nobody should remove that check on the theory that
 /// binding through this short path has lifted it.
-fn magic_fd_path(dir_fd: &OwnedFd, filename: &str) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}/{filename}", dir_fd.as_raw_fd()))
-}
-
-/// The longest path `bind`/`connect` can accept in a `sockaddr_un`, not
-/// counting the mandatory trailing NUL terminator the kernel requires
-/// (response 113 Required 1).
-fn max_socket_path_len() -> usize {
-    let sun_path_len =
-        std::mem::size_of::<libc::sockaddr_un>() - std::mem::size_of::<libc::sa_family_t>();
-    sun_path_len - 1
-}
-
+///
 /// Confirms `/proc/self/fd/<fd>` resolves, for the fd this module just
 /// opened itself, before relying on the same mechanism to construct a
 /// bind path (response 113 Q1 item 1). `/proc` not being mounted is the
@@ -1161,10 +1190,172 @@ fn max_socket_path_len() -> usize {
 /// configurations -- and checking against a fd we know is valid isolates
 /// that specific precondition from any other reason a later operation on
 /// the constructed path might fail.
-fn verify_proc_fd_magic_path_available(dir_fd: &OwnedFd) -> io::Result<()> {
+#[cfg(target_os = "linux")]
+fn enter_bind_context(dir_fd: &OwnedFd, filename: &str) -> io::Result<BindContext> {
     let self_path = PathBuf::from(format!("/proc/self/fd/{}", dir_fd.as_raw_fd()));
     fs::metadata(&self_path)?;
-    Ok(())
+    Ok(BindContext {
+        path: PathBuf::from(format!("/proc/self/fd/{}/{filename}", dir_fd.as_raw_fd())),
+    })
+}
+
+/// macOS: RFC-028 D4, review 597/599. `/dev/fd` was checked on the real
+/// runner and confirmed not traversable the way `/proc/self/fd` is
+/// (`fdescfs` re-opens the fd itself rather than supporting path
+/// traversal through a directory descriptor), so this platform cannot
+/// construct an absolute magic path at all. `pthread_fchdir_np` changes
+/// the *calling thread's* current directory, not the whole process's --
+/// unlike `chdir(2)`/`fchdir(2)`, which would race every other thread in
+/// this process doing its own relative file I/O (a different `AgentRun`'s
+/// own `bind()` running concurrently, for one) -- so the relative path
+/// this returns resolves through `dir_fd`'s own verified inode the same
+/// way the Linux magic path does, without the process-wide side effect a
+/// plain `chdir` would have.
+///
+/// `ThreadDirScope::enter` carries its own postcondition (`fstat` on
+/// `dir_fd` against `stat(".")` after the call) rather than trusting a
+/// zero return alone -- the same "postcondition, not the mechanism"
+/// discipline `pty.rs`'s `assert_cloexec` already uses for a different
+/// close-on-exec race in this same workspace.
+#[cfg(target_os = "macos")]
+fn enter_bind_context(dir_fd: &OwnedFd, filename: &str) -> io::Result<BindContext> {
+    let scope = ThreadDirScope::enter(dir_fd)?;
+    Ok(BindContext {
+        path: PathBuf::from(filename),
+        _scope: scope,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn bind_context_error_reason() -> ApprovalChannelErrorReason {
+    ApprovalChannelErrorReason::ProcMagicPathUnavailable
+}
+
+#[cfg(target_os = "macos")]
+fn bind_context_error_reason() -> ApprovalChannelErrorReason {
+    ApprovalChannelErrorReason::ThreadChdirUnavailable
+}
+
+/// The longest path `bind`/`connect` can accept in a `sockaddr_un`, not
+/// counting the mandatory trailing NUL terminator the kernel requires
+/// (response 113 Required 1).
+///
+/// **Review 600: reads `sun_path`'s own array length directly, rather
+/// than deriving it by subtracting header fields from the struct's
+/// total size.** The previous formula (`size_of::<sockaddr_un>() -
+/// size_of::<sa_family_t>()`) assumed `sockaddr_un` has no header field
+/// before `sun_family` -- true on Linux (`{ sa_family_t, sun_path }`,
+/// formula gives exactly 108) and false on macOS/BSD (`{ sun_len: u8,
+/// sun_family: sa_family_t, sun_path }` -- an extra leading byte the
+/// formula never subtracted), silently returning 104 there instead of
+/// `sun_path`'s real size of 104... minus the one byte the NUL still
+/// needs, which the old formula's own final `- 1` then took from the
+/// *wrong* starting number: 104 reported as the max instead of the
+/// true 103. A 104-byte path passed this check and failed only at the
+/// real `bind()` call -- the exact "pre-check disagrees with the
+/// kernel" shape this project fixes on sight. Reading the field's own
+/// length instead is correct by construction on every platform's own
+/// `sockaddr_un`, with no assumption about what else precedes it.
+fn max_socket_path_len() -> usize {
+    // SAFETY: only used for its own `sun_path` field's array length;
+    // never treated as a real address or dereferenced through a raw
+    // pointer.
+    let probe: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    probe.sun_path.len() - 1
+}
+
+/// Declared directly: not in the vendored `libc` crate for any target
+/// (checked), undocumented in Apple's own reference but present in the
+/// open-source `pthread.c`/`pthread.h` since OS X 10.5 and used by
+/// several real projects for exactly this "relative-path-through-a-
+/// verified-fd, without a process-wide `chdir`" pattern. `-1` is its own
+/// documented sentinel for "revert this thread to the process's shared
+/// cwd" -- what [`ThreadDirScope`]'s `Drop` uses, rather than needing to
+/// save and restore whatever the thread's previous cwd happened to be.
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn pthread_fchdir_np(fd: libc::c_int) -> libc::c_int;
+}
+
+/// RAII guard for a successful [`pthread_fchdir_np`] call -- reverts this
+/// thread's cwd on drop regardless of what happened while it was held,
+/// including a bind or chmod failure in between, so a single failed
+/// `ApprovalChannelEndpoint::bind` can never leave the calling OS thread
+/// permanently pointed at an approval directory for whatever unrelated
+/// work it does next.
+#[cfg(target_os = "macos")]
+struct ThreadDirScope;
+
+#[cfg(target_os = "macos")]
+impl ThreadDirScope {
+    fn enter(dir_fd: &OwnedFd) -> io::Result<Self> {
+        // SAFETY: `dir_fd` is a valid, currently-open directory fd owned
+        // by the caller for at least the duration of this call.
+        if unsafe { pthread_fchdir_np(dir_fd.as_raw_fd()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        if let Err(error) = Self::assert_cwd_is(dir_fd) {
+            // SAFETY: `-1` is `pthread_fchdir_np`'s own documented
+            // sentinel for "revert to the process's shared cwd"; always
+            // legal to call, regardless of this thread's prior state.
+            unsafe {
+                pthread_fchdir_np(-1);
+            }
+            return Err(error);
+        }
+        Ok(Self)
+    }
+
+    /// Postcondition, not the mechanism: confirms the calling thread's
+    /// cwd now really is `dir_fd`'s own directory (same device and
+    /// inode), rather than trusting `pthread_fchdir_np`'s zero return
+    /// alone. A mismatch here would mean every subsequent relative-path
+    /// operation in this scope silently resolves against the wrong
+    /// directory instead of failing loudly -- exactly the class of
+    /// defect a postcondition check exists to catch instead of assume.
+    fn assert_cwd_is(dir_fd: &OwnedFd) -> io::Result<()> {
+        // SAFETY: `dir_fd` is a valid, open fd for the duration of this
+        // call; `stat_buf` is a valid, fully-zeroed `libc::stat` the
+        // call writes into.
+        let mut stat_buf: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(dir_fd.as_raw_fd(), &mut stat_buf) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        let cwd = fs::metadata(".")?;
+        if stat_buf.st_dev as u64 == cwd.dev() && stat_buf.st_ino as u64 == cwd.ino() {
+            Ok(())
+        } else {
+            Err(io::Error::other(
+                "pthread_fchdir_np reported success but the calling thread's cwd does not match \
+                 the directory fd it was given",
+            ))
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for ThreadDirScope {
+    fn drop(&mut self) {
+        // SAFETY: `-1` is `pthread_fchdir_np`'s own documented sentinel
+        // for "revert to the process's shared cwd"; always legal to call.
+        let result = unsafe { pthread_fchdir_np(-1) };
+        // `Drop` cannot return an error, and a failed revert here is the
+        // same failure class `enter`'s own postcondition exists to
+        // catch: this OS thread would stay scoped to the approval
+        // directory it should have left, and every later relative-path
+        // operation on it would resolve somewhere unintended --
+        // silently, with no error of its own. `debug_assert_eq!`, this
+        // crate's own established shape for a best-effort failure that
+        // must still be loud (`config/sensitive.rs`,
+        // `runtime::terminal::security::parser`), rather than a bare
+        // best-effort call with nothing checking it.
+        debug_assert_eq!(
+            result, 0,
+            "pthread_fchdir_np(-1) failed while reverting this thread's cwd after a bind \
+             attempt -- this thread is left scoped to the approval directory it should have \
+             left"
+        );
+    }
 }
 
 fn fchmod(fd: RawFd, mode: u32) -> io::Result<()> {
