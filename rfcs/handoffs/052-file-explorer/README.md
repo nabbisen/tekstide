@@ -40,3 +40,15 @@ B builds the tree, C renders it. Checklist:
 
 `.gitignore` handling and an `ignored` badge (next slice), a hidden-file toggle, the file watcher and
 multi-document model (RFC-026), drag-and-drop, multi-select, and re-platforming onto `snora`.
+
+## The measurement harness
+
+[`measurement/`](./measurement/) is a standalone crate (its own `Cargo.lock`, not a member of the
+main workspace, by deliberate choice — see that `Cargo.lock`'s own commit history) that `#[path]`-
+includes `tekstide-core`'s own `hostile_fixture.rs` and drives both the third-party `DirectoryTree`
+widget and our composition against it, measuring the D3/D8 properties this RFC decided on. Run it
+with `cargo run --release` from inside `measurement/`. Its `Cargo.lock` is a build input, not a
+historical record — `cargo metadata --locked` must exit 0 — and the `results-run*.txt` files beside
+it are the actual historical record: full, captured output from real runs, one per entry, diffed
+against each other to catch a behavior or performance change between them rather than relying on
+memory of what the numbers used to be.
