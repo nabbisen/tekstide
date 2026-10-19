@@ -397,6 +397,25 @@ impl Drop for TestChannelAnchorRootGuard {
 /// swap its own, test-owned stand-in for a symlink without touching the
 /// real system temp directory every other process on the machine also
 /// relies on.
+///
+/// **Review 606: required reading before writing a macOS test that
+/// touches `channel_dir()` itself, not just a socket inside it.** On
+/// macOS, `channel_dir()` is the one *shared* `$TMPDIR/tekstide` anchor
+/// -- every test in this binary that calls `resolve_directory` resolves
+/// to the exact same path, unlike Linux's own `state_root`-derived one,
+/// which `temp_state_root`'s unique naming already keeps exclusive per
+/// test. Binding a uniquely-named socket inside the shared directory is
+/// fine (that is what production itself does, safely, since nothing in
+/// this crate ever enumerates or lists the directory, only binds a
+/// per-run name inside it). **Creating, removing, or replacing the
+/// directory itself is not** -- it races every other concurrently-
+/// running test's own socket the same way `symlink_swap_between_
+/// resolve_and_bind_is_rejected_on_macos` found out, failing
+/// `DirectoryNotEmpty` the moment another test's socket already existed
+/// there. Any test doing the latter on macOS must call this function
+/// first and operate on the stand-in it returns instead, the same
+/// pattern that test and `ancestor_symlink_swap_of_the_macos_anchor_is_
+/// rejected` both already use.
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 pub(super) fn test_channel_anchor_root(path: &Path) -> TestChannelAnchorRootGuard {
