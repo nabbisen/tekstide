@@ -521,6 +521,12 @@ fn a_blocked_entry_is_never_asked_about_and_stays_unknown() {
 /// R6: the query is asked about the **raw** filename, not the lossy display
 /// name -- so a non-UTF-8 name is answered as itself and the answer lands on the
 /// right row.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "APFS refuses a filename that is not valid UTF-8 (EILSEQ), so the property this \
+              test checks cannot be constructed here; the platform fact itself is asserted by \
+              hostile_tests::the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it"
+)]
 #[test]
 fn a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row() {
     let repo = Repo::new("non-utf8");

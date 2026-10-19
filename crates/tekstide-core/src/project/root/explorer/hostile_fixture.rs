@@ -61,10 +61,37 @@ pub fn non_utf8_name() -> OsString {
     OsString::from_vec(b"bad-\xFF\xFE-name.txt".to_vec())
 }
 
+/// True when `error` is APFS refusing to create a file whose name is not
+/// valid UTF-8. Checked by raw errno rather than `libc` (this module is
+/// standard-library only, on purpose -- see the module doc comment) or
+/// `std::io::ErrorKind`: confirmed on the real runner this crate's CI uses,
+/// `io::Error::kind()` reports `Uncategorized` for this failure, so an
+/// `ErrorKind` match would fall straight through to the catch-all `panic!`
+/// below and fix nothing -- not a toolchain-portability guess, an observed
+/// fact. `92` is likewise observed (`Os { code: 92, .. }` on the runner's
+/// own log), not inferred from Darwin's ABI docs. The `cfg!(target_os =
+/// "macos")` guard is load-bearing, not decoration: 92 means `EILSEQ` only
+/// on Darwin (on Linux it is `ENOPROTOOPT`, and `EILSEQ` is 84). The guard
+/// marks the constant as Darwin-only, and keeps any Linux-side refusal
+/// landing in the catch-all `panic!` below, which is where an unexpected
+/// filesystem guarantee belongs.
+fn is_invalid_utf8_name_error(error: &std::io::Error) -> bool {
+    const APFS_EILSEQ: i32 = 92;
+    cfg!(target_os = "macos") && error.raw_os_error() == Some(APFS_EILSEQ)
+}
+
 pub struct HostileFixture {
     pub base: PathBuf,
     pub project: PathBuf,
     pub outside: PathBuf,
+    /// Names under `escaping/` the filesystem refused to create, with the
+    /// error it gave. APFS validates UTF-8 in filenames where ext4 accepts
+    /// arbitrary bytes, so [`non_utf8_name`] cannot exist on macOS -- a
+    /// filesystem guarantee, not a product regression. Recorded here rather
+    /// than silently building a fixture with fewer hostile rows: a count
+    /// that quietly shrank would make macOS coverage *look* equal to
+    /// Linux's without being so.
+    pub escaping_refused: Vec<(OsString, String)>,
 }
 
 impl HostileFixture {
@@ -98,7 +125,16 @@ impl HostileFixture {
         fs::create_dir_all(&escaping).unwrap();
         fs::write(escaping.join(BIDI_NAME), b"bidi\n").unwrap();
         fs::write(escaping.join(NEWLINE_NAME), b"newline\n").unwrap();
-        fs::write(escaping.join(non_utf8_name()), b"not utf-8\n").unwrap();
+        let mut escaping_refused = Vec::new();
+        match fs::write(escaping.join(non_utf8_name()), b"not utf-8\n") {
+            Ok(()) => {}
+            // APFS: the name itself is not valid UTF-8, so the filesystem
+            // refuses to create it at all, before any content is written.
+            Err(error) if is_invalid_utf8_name_error(&error) => {
+                escaping_refused.push((non_utf8_name(), error.to_string()));
+            }
+            Err(error) => panic!("unexpected error creating the non-UTF-8-named file: {error}"),
+        }
 
         // links: two that escape the root, one broken, one that stays in.
         let links = project.join("links");
@@ -132,6 +168,7 @@ impl HostileFixture {
             base,
             project,
             outside,
+            escaping_refused,
         }
     }
 

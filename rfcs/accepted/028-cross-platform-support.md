@@ -395,6 +395,29 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   own slice, by design, agreed in review 589 — is the only mechanism left; once it lands, this is
   the first point PR-028-C's own `/dev/fd` TOCTOU question (held, unverified, since that slice) can
   finally execute at all.
+  **Found while making the macOS job's own test suite runnable, review 596/609 — not a D5
+  mechanism itself, but surfaced by D5's work and recorded here since this is where the macOS
+  coverage story lives.** `HostileFixture::build` (RFC-052's own hostile-filename fixture,
+  `project/root/explorer/hostile_fixture.rs`) and four standalone tests each built a filename
+  whose bytes are not valid UTF-8 and unconditionally `.unwrap()`ed creating it. APFS validates
+  UTF-8 in filenames where ext4 accepts arbitrary bytes; every one of those writes panicked with
+  `EILSEQ` on the real runner (28 panics, five locations) — a filesystem guarantee, not a product
+  regression. Two different fixes for two different shapes, not one: the shared fixture (24 of the
+  28, every test where the hostile name is incidental to what it checks) now tolerates exactly
+  this refusal and records which name was refused on a new `escaping_refused` field, rather than
+  silently building a fixture with fewer hostile rows — a new test
+  (`the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it`) names
+  the gap permanently. The four standalone tests where the non-UTF-8 name *is* the property under
+  test (`scanner_preserves_non_utf8_filename_identity_in_relative_path`,
+  `a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row`,
+  `a_non_utf8_path_is_skipped_from_the_map_but_still_counted`,
+  `a_non_utf8_filename_survives_the_round_trip`) are instead `#[cfg_attr(target_os = "macos",
+  ignore = "...")]`: tolerating the write there would leave a test that passes while checking
+  nothing. Checked by raw errno (`92`, observed on the runner's own log, not inferred from Darwin's
+  ABI docs) rather than `libc` or `std::io::ErrorKind` (`io::Error::kind()` reports
+  `Uncategorized` for this failure on the real toolchain, confirmed, not assumed) — the fixture is
+  standard-library only on purpose, shared with the standalone
+  `rfcs/handoffs/052-file-explorer/measurement` crate.
 - **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
   fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
   gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real

@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Fixed — 28 `EILSEQ` panics on APFS, at five locations; the fixture degrades and records, four single-purpose tests are `ignore`d
+
+RFC-028 review 596/609, item 4: five places in the test suite built a filename whose bytes are not
+valid UTF-8 and unconditionally `.unwrap()`ed creating it, to exercise lossy-display handling.
+APFS validates UTF-8 in filenames where ext4 accepts arbitrary bytes, so every one of those writes
+panicked with `EILSEQ` on macOS — a filesystem guarantee, not a product regression, but a panic
+instead of a told-apart failure. The real runner's log (28 panics, grouped by location) showed two
+different shapes that need two different fixes:
+
+- **`HostileFixture::build`** (24 of the 28, every test that shares the fixture): the hostile name
+  is incidental to what these tests check — bidi overrides, newlines, symlink escapes, unreadable
+  directories. The fixture now tolerates exactly this refusal and records it on a new
+  `escaping_refused` field rather than silently building a fixture with fewer hostile rows: the
+  three call sites that asserted an exact row count now subtract `escaping_refused.len()`, and a
+  new test (`the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it`)
+  names the gap permanently so macOS's coverage here cannot look equal to Linux's without being so.
+- **Four standalone tests** (`explorer/tests.rs::scanner_preserves_non_utf8_filename_identity_in_relative_path`,
+  `ignore_tests.rs::a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row`,
+  `git/tests.rs::a_non_utf8_path_is_skipped_from_the_map_but_still_counted`,
+  `git/tests.rs::a_non_utf8_filename_survives_the_round_trip`): the non-UTF-8 name *is* the
+  property under test, each one's entire reason to exist. Tolerating the write here would leave a
+  test that passes while checking nothing — the same shape already corrected three times in this
+  project — so these four are `#[cfg_attr(target_os = "macos", ignore = "...")]` instead, the
+  reason string naming the fixture's own test as where the underlying platform fact is still
+  asserted.
+
+Checked by raw errno rather than `libc` (the fixture is standard-library only on purpose, shared
+with the standalone `rfcs/handoffs/052-file-explorer/measurement` crate) or `std::io::ErrorKind`
+(confirmed on the real runner: `io::Error::kind()` reports `Uncategorized` for this failure, so an
+`ErrorKind` match would never fire). `92` and the `Uncategorized` kind are both observed from the
+runner's own log, not inferred from Darwin's ABI docs; the `cfg!(target_os = "macos")` guard is
+load-bearing since `92` is `ENOPROTOOPT` on Linux, where `EILSEQ` is `84`.
+
 ### Changed — the attention socket's own directory moves on macOS, same as the approval channel's
 
 RFC-028 D4, review 603: `project_lock::attention`'s socket has the same `sun_path`-length ceiling

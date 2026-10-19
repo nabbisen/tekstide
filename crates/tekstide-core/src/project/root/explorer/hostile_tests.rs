@@ -88,7 +88,11 @@ fn with_the_guards_removed_the_hostile_fixture_actually_escapes_and_renders_raw(
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
         .collect();
-    assert_eq!(names.len(), 3);
+    assert_eq!(
+        names.len(),
+        3 - fixture.escaping_refused.len(),
+        "escaping/ holds every name the filesystem accepted, no fewer, no more: {names:?}"
+    );
     let lossy: Vec<String> = names
         .iter()
         .map(|name| name.to_string_lossy().into_owned())
@@ -101,15 +105,22 @@ fn with_the_guards_removed_the_hostile_fixture_actually_escapes_and_renders_raw(
         lossy.iter().any(|name| name.contains('\n')),
         "raw, the newline name splits a row: {lossy:?}"
     );
-    let non_utf8 = names
-        .iter()
-        .find(|name| name.as_bytes().starts_with(b"bad-"))
-        .expect("the non-UTF-8 name exists");
-    assert!(non_utf8.to_str().is_none(), "and one is not text at all");
-    assert!(
-        non_utf8.to_string_lossy().contains('\u{FFFD}'),
-        "lossy conversion invents a replacement character the file does not have"
-    );
+    if fixture.escaping_refused.is_empty() {
+        let non_utf8 = names
+            .iter()
+            .find(|name| name.as_bytes().starts_with(b"bad-"))
+            .expect("the non-UTF-8 name exists");
+        assert!(non_utf8.to_str().is_none(), "and one is not text at all");
+        assert!(
+            non_utf8.to_string_lossy().contains('\u{FFFD}'),
+            "lossy conversion invents a replacement character the file does not have"
+        );
+    } else {
+        eprintln!(
+            "skipped: the filesystem refused the non-UTF-8 name: {:?}",
+            fixture.escaping_refused
+        );
+    }
 
     // (3) The other rows are real too.
     assert!(fs::read_dir(fixture.broken_link()).is_err());
@@ -169,7 +180,11 @@ fn the_escape_rows_are_blocked_rows_and_the_escape_directory_cannot_be_scanned()
 fn hostile_names_are_escaped_at_the_one_choke_point_and_the_raw_path_is_kept() {
     let fixture = HostileFixture::build("names", SMALL_BREADTH);
     let scan = scan(&fixture, "escaping").expect("scans");
-    assert_eq!(scan.nodes.len(), 3, "every hostile name is still a row");
+    assert_eq!(
+        scan.nodes.len(),
+        3 - fixture.escaping_refused.len(),
+        "every hostile name the filesystem accepted is still a row"
+    );
 
     for node in &scan.nodes {
         let shown = quote_untrusted(&node.name);
@@ -199,16 +214,48 @@ fn hostile_names_are_escaped_at_the_one_choke_point_and_the_raw_path_is_kept() {
 
     // The row's *path* stays byte-exact: opening the row must open the
     // file, not a lossy spelling of it.
-    let raw = scan
-        .nodes
-        .iter()
-        .find(|node| node.relative_path.file_name() == Some(non_utf8_name().as_os_str()))
-        .expect("the non-UTF-8 row keeps its exact bytes in its path");
-    assert!(raw.name.contains('\u{FFFD}'), "display name is lossy");
-    assert!(
-        fixture.project.join(&raw.relative_path).exists(),
-        "and the path still opens the real file"
-    );
+    if fixture.escaping_refused.is_empty() {
+        let raw = scan
+            .nodes
+            .iter()
+            .find(|node| node.relative_path.file_name() == Some(non_utf8_name().as_os_str()))
+            .expect("the non-UTF-8 row keeps its exact bytes in its path");
+        assert!(raw.name.contains('\u{FFFD}'), "display name is lossy");
+        assert!(
+            fixture.project.join(&raw.relative_path).exists(),
+            "and the path still opens the real file"
+        );
+    } else {
+        eprintln!(
+            "skipped: the filesystem refused the non-UTF-8 name: {:?}",
+            fixture.escaping_refused
+        );
+    }
+}
+
+/// RFC-052's checklist expects three hostile names in `escaping/`; APFS
+/// (unlike ext4) refuses to create a file whose name is not valid UTF-8, so
+/// macOS's fixture holds two. This exists so that gap is a named, permanent
+/// fact in the suite -- `cargo test -- --list` shows it whether or not
+/// anyone ever reads the two assertions above that quietly shrink around it.
+#[test]
+fn the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it() {
+    let fixture = HostileFixture::build("non-utf8-coverage", 3);
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            fixture.escaping_refused.len(),
+            1,
+            "APFS is expected to refuse exactly the non-UTF-8 name: {:?}",
+            fixture.escaping_refused
+        );
+        assert_eq!(fixture.escaping_refused[0].0, non_utf8_name());
+    } else {
+        assert!(
+            fixture.escaping_refused.is_empty(),
+            "this filesystem unexpectedly refused a hostile name: {:?}",
+            fixture.escaping_refused
+        );
+    }
 }
 
 #[test]

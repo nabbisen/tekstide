@@ -230,7 +230,7 @@ fn hostile_names_are_still_raw_in_the_model_and_every_one_is_a_row() {
             _ => None,
         })
         .collect();
-    assert_eq!(names.len(), 3, "{names:?}");
+    assert_eq!(names.len(), 3 - fixture.escaping_refused.len(), "{names:?}");
     // Escaping is the surface's job, at the point of drawing: the model
     // keeps the name a row's path was built from.
     assert!(names.iter().any(|name| name.contains(NEWLINE_NAME)));

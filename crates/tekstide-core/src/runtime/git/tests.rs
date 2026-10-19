@@ -1181,6 +1181,12 @@ fn non_ascii_space_bearing_and_newline_bearing_filenames_map_to_their_real_on_di
 /// `git status` output in one call meant one odd filename turned the
 /// entire read into `None`, dropping the whole repository to
 /// branch-only -- the blast radius R-2 named.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "APFS refuses a filename that is not valid UTF-8 (EILSEQ), so the property this \
+              test checks cannot be constructed here; the platform fact itself is asserted by \
+              hostile_tests::the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it"
+)]
 #[test]
 fn a_non_utf8_path_is_skipped_from_the_map_but_still_counted() {
     use std::ffi::OsStr;
@@ -1631,6 +1637,12 @@ fn a_project_root_inside_its_repository_gets_the_repository_root_rules() {
 
 /// R6: `-z` is bytes. A filename that is not UTF-8 comes back exactly, and
 /// nothing decodes lossily on the way to the comparison.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "APFS refuses a filename that is not valid UTF-8 (EILSEQ), so the property this \
+              test checks cannot be constructed here; the platform fact itself is asserted by \
+              hostile_tests::the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it"
+)]
 #[test]
 fn a_non_utf8_filename_survives_the_round_trip() {
     use std::os::unix::ffi::{OsStrExt, OsStringExt};

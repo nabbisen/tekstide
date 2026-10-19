@@ -182,6 +182,12 @@ fn scanner_reports_file_target_as_not_directory() {
 }
 
 #[cfg(unix)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "APFS refuses a filename that is not valid UTF-8 (EILSEQ), so the property this \
+              test checks cannot be constructed here; the platform fact itself is asserted by \
+              hostile_tests::the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it"
+)]
 #[test]
 fn scanner_preserves_non_utf8_filename_identity_in_relative_path() {
     let sandbox = TestSandbox::new("explorer-non-utf8");
