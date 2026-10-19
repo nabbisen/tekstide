@@ -30,7 +30,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **row 8, PTY read timing, not process leak or audit store.** The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. **Fixed by the test-flake-disposition pass (2026-10-09), the same shape as review 478's two backgrounded-job tests: polls the parse itself (`poll_demo_pane_until_parsed`) instead of a substring followed by a separate parse. See the dated disposition entry.** |
 | `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry. Confirmed by the test-flake-disposition pass (2026-10-09): still passes. Retired from active tracking.** |
 | `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed. Confirmed by the test-flake-disposition pass (2026-10-09): both still pass, no test mutex anywhere in the file. Retired from active tracking.** |
-| `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. **Confirmed by the test-flake-disposition pass (2026-10-09): still passes. Retired from active tracking.** |
+| `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. **Confirmed by the test-flake-disposition pass (2026-10-09): still passes on Linux. Retired from active tracking there.** **Reopened for macOS (2026-10-19): the same test fails deterministically on `macos-measurement` at a different assertion -- `wait_for_exit` returns `None` where `Exited { exit_status: 0 }` is expected (`reader/tests.rs:115`). Not the 2026-09-15 race, not an intermittent. See the dated entry at the end.** |
 | `audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active` | RFC-030 PR-030-B's wiring-layer gate, run 3 of 3 (2026-09-22) — failed once under the third of three consecutive full-workspace runs; passed immediately in isolation (`cargo test -p tekstide-core audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active`, 1 passed, 0 failed). The name names its own contention (a WAL reader held open while purge runs); not investigated further this session — flagged as a candidate for the same class of SQLite-under-parallel-load timing sensitivity this document's other rows already describe, not confirmed as the same root cause. **Verdict, test-flake-disposition pass (2026-10-09): Accept. See the dated disposition entry.** |
 | `runtime::git::tests::every_failure_to_answer_is_unknown_and_never_none_ignored` | RFC-055 PR-055-C, one ablation run (2026-09-25) — **suspected `ETXTBSY` on a stand-in `git` script; not reproduced; mitigated in the test, see the dated section at the end.** `wait_until_executable` already retries on `errno 26` before handing out the stand-in script. **Confirmed by the test-flake-disposition pass (2026-10-09): mitigation still in place, no recurrence since. Retired from active tracking.** |
 
@@ -2939,3 +2939,44 @@ immediately reopening it could, briefly, have its transcript read as still-being
 purgeable. The product already distinguishes those two states deliberately
 (`transcripts_still_being_written_count`), so this is behaviour, not a defect; the only open
 question is how long the window is in practice, and nobody needs to answer that today.
+
+## Reopened on macOS, 2026-10-19 -- `the_wake_notifier_wakes_when_real_pty_output_arrives`
+
+Row 33 said "still passes. Retired from active tracking." That was true of Linux and is **false on
+macOS**, so the row is corrected rather than left standing. Found by the dev team on the real
+`macos-measurement` runner at `afdf687`, and disclosed as a correction to their own RFC-028 596
+triage assumption that every reader-module failure there was downstream of the containment bug.
+
+**Not an intermittent.** It fails every run on that job, and at a different place from the
+2026-09-15 race: `reader/tests.rs:115`, `left: None / right: Some(Exited { exit_status: 0 })`. It
+is recorded here only because this document claimed the test was closed.
+
+**Established by reading the code (review 608), not measured on Apple hardware:**
+
+- `wait_for_exit` -> `wait_for_child_outcome` (`termination.rs:173-201`) is a bare
+  `child.try_wait()` + 10 ms sleep loop capped at the caller's timeout. No session enumeration is
+  involved, so `None` means the direct child was neither reapable nor errored for 5 s.
+- The assertion above the failing one *passed*, so the write path, the shell and the reader were
+  all live seconds earlier: the `printf` marker reached the slave, ran, and woke the notifier.
+- `write_input` (`launch.rs:169-192`) is `write_all` + `flush` with both errors surfaced, and the
+  test's `.expect` on the `exit\n` write did not fire, so those bytes were accepted in full.
+- `try_wait` did not error either (its own `.expect` message is absent), so it returned `Ok(None)`
+  throughout: the child exists, is unreaped, and is not a zombie.
+
+**Falsified before it cost a run:** the reviewer's first hypothesis -- that a macOS master `read()`
+after slave close returns `EIO` rather than `Ok(0)`, leaving the reader's EOF arm unfired -- cannot
+be the cause. `reader.rs:562-565` ends in `Err(_) => return stop_reading(...)`, the same stop path
+as EOF, and the reader does not reap the child in any case.
+
+**Open hypothesis, with the probe named:** the child may be in `SSTOP`, not running. `try_wait`
+passes no `WUNTRACED`, so a stopped child is indistinguishable from a live one and yields
+`Ok(None)` forever -- exactly the signature above. A shell stopping on its way out (a tty
+operation raising `SIGTTOU` during exit, where macOS job control diverges from Linux's) would
+explain why `printf` worked and `exit` did not: the first needed the shell to read, the second
+needed it to terminate. The existing `is_zombie` (`launch.rs:918-926`) already reads `pbi_status`
+via `proc_pidinfo(PROC_PIDTBSDINFO)`, and `libc::SSTOP` exists on Apple in the same enum
+(`SSTOP = 4`, `SZOMB = 5`), so one `cfg(test)` diagnostic at the timeout settles it in a single
+run.
+
+**Standing constraint on the fix:** widening the 5 s timeout is not a fix and is not accepted as
+one unless a probe shows a real exit arriving late *and* how late. A stopped child never arrives.
