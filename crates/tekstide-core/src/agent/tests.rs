@@ -16,7 +16,7 @@ use crate::project::{
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntime,
     TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome, TerminationSignal,
-    arm_pty_responsiveness_probe_for_test, wait_for_shell_ready,
+    arm_pty_responsiveness_probe_for_test, wait_for_exit_draining, wait_for_shell_ready,
 };
 use crate::transcript::{
     TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver, TranscriptRetentionLimits,
@@ -1175,8 +1175,7 @@ fn transcript_opt_out_launches_without_transcript_metadata() {
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to opted-out AgentRun PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("opted-out AgentRun wait should not fail")
         .expect("opted-out AgentRun should exit");
     project
@@ -1258,8 +1257,7 @@ fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to local bounded AgentRun PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("local bounded disabled AgentRun wait should not fail")
         .expect("local bounded disabled AgentRun should exit");
     project
@@ -1327,8 +1325,7 @@ fn project_session_launches_validated_managed_agent_run_through_terminal_runtime
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to Managed AgentRun PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("Managed AgentRun shell wait should not fail")
         .expect("Managed AgentRun shell should exit");
     project
@@ -1719,8 +1716,7 @@ fn active_clean_text_document_permits_agent_runtime_launch() {
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to AgentRun PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("AgentRun shell wait should not fail")
         .expect("AgentRun shell should exit");
     project
@@ -1918,8 +1914,7 @@ fn safe_save_blocks_external_change_while_agent_run_is_active() {
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to AgentRun PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("AgentRun shell wait should not fail")
         .expect("AgentRun shell should exit");
     project
@@ -2024,8 +2019,7 @@ fn project_session_maps_nonzero_agent_run_exit_to_failed() {
     runtime
         .write_input(&handle, b"exit 7\n")
         .expect("nonzero exit should write to AgentRun PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("AgentRun shell wait should not fail")
         .expect("AgentRun shell should exit");
     assert_eq!(outcome, TerminationOutcome::Exited { exit_status: 7 });

@@ -22,6 +22,11 @@ use super::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
     TerminalOutputSummary, TerminalRuntimeEvent, TerminalRuntimeHandle,
 };
+// Only `wait_for_exit_draining` (`#[cfg(test)]`) uses this; a non-test
+// build never calls it, so the import must be gated the same way or it
+// is unused there.
+#[cfg(test)]
+use super::TerminationOutcome;
 
 pub struct TerminalRuntime {
     pub(super) sessions: HashMap<TerminalId, RunningTerminal>,
@@ -621,6 +626,17 @@ impl Drop for RunningTerminal {
             drop(master);
         }
 
+        // **Load-bearing for a second, independent reason, reviews
+        // 625-629: on macOS, a shell that has begun exiting (`P_WEXIT`
+        // set in its own `p_flag`, measured directly via `sysctl`) can
+        // wedge inside `proc_exit` for as long as its own PTY master end
+        // stays open and unread.** Closing it here, before the SIGHUP and
+        // the session sweep below, turns that into an immediate `EIO` on
+        // the shell's own side rather than a silent, unbounded wait on
+        // whoever is waiting for this session to empty. Do not reorder
+        // this drop to after the signalling below for tidiness; on macOS
+        // that reorder reintroduces the wedge, and only there, and only
+        // sometimes.
         let session_id = self.process_group_id;
         // Same `<= 1` refusal `send_signal_to_process_group` already
         // applies before signalling -- group 0 means "this process's own
@@ -1524,6 +1540,41 @@ pub(crate) fn wait_for_shell_ready(runtime: &mut TerminalRuntime, handle: &Termi
         "shell did not become ready before the readiness deadline; captured: {}",
         String::from_utf8_lossy(&output)
     );
+}
+
+/// Review 625-629's own remedy, generalising the measurement that proved
+/// it: on macOS, a shell that has begun exiting can wedge inside
+/// `proc_exit` for as long as its own PTY master end stays open and
+/// unread (`P_WEXIT` set, `p_stat` still `SRUN`, stable over repeated
+/// samples -- see `request_terminate`'s and `RunningTerminal::drop`'s own
+/// doc comments for the production-side reasoning this mirrors).
+/// `project_session_launches_agent_run_through_terminal_runtime_and_
+/// completes` proved, as a one-test throwaway measurement, that spawning
+/// the output reader before the exit command goes in is sufficient; this
+/// is that same fix, generalised into one helper so the other eleven
+/// armed sites use the identical mechanism rather than eleven copies that
+/// could drift from it or from the worked example that proved it.
+///
+/// Reuses `spawn_output_reader`'s own background thread -- already this
+/// crate's established draining mechanism (the wake notifier and both
+/// `transcript::reader` tests the handshake itself fixed all drain this
+/// way) -- rather than building a second, parallel drain loop that reads
+/// the master directly. Nothing is done with the reader's own output;
+/// the mechanism under test/remedy is the background thread's continuous
+/// `read()` keeping the master's kernel buffer from filling, not
+/// anything a caller does with the bytes it carries.
+///
+/// A drop-in replacement for `runtime.wait_for_exit(handle, timeout)`, not
+/// a new API shape: same arguments, same return type, so a call site
+/// changes only its own function name.
+#[cfg(test)]
+pub(crate) fn wait_for_exit_draining(
+    runtime: &mut TerminalRuntime,
+    handle: &TerminalRuntimeHandle,
+    timeout: Duration,
+) -> Result<Option<TerminationOutcome>, TerminalRuntimeError> {
+    let _draining_reader = runtime.spawn_output_reader(handle)?;
+    runtime.wait_for_exit(handle, timeout)
 }
 
 #[cfg(test)]

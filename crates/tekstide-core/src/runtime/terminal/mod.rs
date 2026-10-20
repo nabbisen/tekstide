@@ -9,7 +9,9 @@ mod types;
 
 pub use launch::{TerminalLaunchError, TerminalRuntime, TerminalRuntimeError};
 #[cfg(test)]
-pub(crate) use launch::{arm_pty_responsiveness_probe_for_test, wait_for_shell_ready};
+pub(crate) use launch::{
+    arm_pty_responsiveness_probe_for_test, wait_for_exit_draining, wait_for_shell_ready,
+};
 // `list_all_pids` only exists under this same `cfg` in `launch.rs` itself
 // (review 596's own macOS libproc port) -- a separate re-export line,
 // not folded into the one above, because that one is platform-neutral

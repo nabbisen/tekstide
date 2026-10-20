@@ -270,8 +270,7 @@ fn linux_runtime_rejects_cross_project_input_handle() {
     runtime
         .write_input(&handle, b"exit\n")
         .expect("cleanup exit should write to PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("shell wait should not fail");
     assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
     cleanup_root(root);
@@ -512,8 +511,7 @@ fn linux_runtime_rejects_cross_project_termination_handle() {
     runtime
         .write_input(&handle, b"exit\n")
         .expect("cleanup exit should write to PTY");
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .expect("shell wait should not fail");
     assert_eq!(outcome, Some(TerminationOutcome::Exited { exit_status: 0 }));
     cleanup_root(root);

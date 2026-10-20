@@ -79,6 +79,17 @@ impl TerminalRuntime {
     /// preferable to the failure mode this fixes: a busy terminal's
     /// `SIGHUP` being a silent no-op and every job in it reaching
     /// `SIGKILL` instead.
+    ///
+    /// **Closing the master before the wait below is now load-bearing for
+    /// a second, independent reason, reviews 625-629: on macOS, a shell
+    /// that has begun exiting (`P_WEXIT` set in its own `p_flag`, measured
+    /// directly via `sysctl`) can wedge inside `proc_exit` for as long as
+    /// its own PTY master end stays open and unread** -- the tty teardown
+    /// has nowhere to put the shell's own final output. Closing the
+    /// master here turns that into an immediate `EIO` on the shell's own
+    /// side instead of a silent, unbounded wait on ours. Do not reorder
+    /// this call to after the wait for tidiness; on macOS that reorder
+    /// reintroduces the wedge, and only there, and only sometimes.
     pub fn request_terminate(
         &mut self,
         handle: &TerminalRuntimeHandle,

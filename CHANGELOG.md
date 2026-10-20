@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Fixed — review 629: the cluster's own remedy, generalised — `wait_for_exit_draining` at the remaining 12 sites, and the production ordering that already avoided this documented as deliberate
+
+Both halves of review 628's experiment came back positive: `P_WEXIT` set and stable over three
+samples 100ms apart (not sampling luck), and draining the master before writing the exit command let
+the one measured test's shell actually finish exiting. Diagnosis closed: on macOS, a shell that has
+begun exiting can wedge inside `proc_exit` for as long as its own PTY master end stays open and
+unread.
+
+Checked both production paths that wait for a shell to finish, and both already close the master
+first — `request_terminate` (`termination.rs`) and `RunningTerminal::drop` (`launch.rs`) — so nothing
+in the shipped product was exposed to this. That ordering was accidental, not designed for this
+reason, and is now documented as deliberate at both sites: reordering either call for tidiness would
+reintroduce a macOS-only, intermittent hang.
+
+Generalised the one-test fix into `wait_for_exit_draining`, a `#[cfg(test)]` test-support helper
+(same shape and choke-point discipline as `wait_for_shell_ready`) that spawns the output reader
+before waiting for exit, used at the 12 remaining armed sites across `agent::tests`,
+`audit::tests::integration`, and `runtime::terminal::tests`. The one site that proved the mechanism
+as a throwaway measurement keeps its own direct `spawn_output_reader` call, unchanged, as the worked
+example the helper generalises.
+
+**Correction to review 625's own D5 entry, amended rather than appended to:** review 625 read the
+libproc blindness as meaning the containment guard (`assert_session_is_empty`) cannot fail on macOS
+at all, and that review 608's "~42 cleared" was therefore the guard going vacuous. Review 628's own
+visibility data refutes the unqualified claim: a live, non-exiting PTY child is fully visible to
+libproc. The blindness is specific to the `proc_exit` window, not every PTY child, so a real
+survivor — the case RFC-043 exists for — is still visible and the guard still fires; only a process
+genuinely mid-exit is invisible for the span of that window. Review 608's "42 cleared" is therefore
+neither confirmed vacuous nor confirmed real: unmeasured, not proven either way. The standing watch
+review 625 added to `release-checklist.md` (every containment guard must be shown to **fail**, on
+every supported platform) is not yet discharged — the ablation itself (a live `trap '' HUP` survivor
+on macOS, confirming the guard goes red there) is the next open question, now a measurement rather
+than an argument.
+
 ### Found, not yet fixed — review 628: a hypothesis with its falsifier, and a one-test experiment to test it — `proc_exit`, wedged for lack of a draining reader
 
 Review 627's own visibility experiment settled which half of review 625's open question was true:

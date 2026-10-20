@@ -27,7 +27,7 @@ use crate::domain::{
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeHandle, TerminationOutcome,
-    arm_pty_responsiveness_probe_for_test, wait_for_shell_ready,
+    arm_pty_responsiveness_probe_for_test, wait_for_exit_draining, wait_for_shell_ready,
 };
 
 use super::support::TestAuditDirs;
@@ -125,8 +125,7 @@ fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
         TerminalRuntimeHandle::new(launched.value.terminal_id().clone(), project.id().clone());
     wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
-    let outcome = runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .unwrap()
         .unwrap();
     assert_eq!(outcome, TerminationOutcome::Exited { exit_status: 0 });
@@ -1006,8 +1005,7 @@ fn termination_truth_survives_observational_audit_failure() {
             TerminalRuntimeHandle::new(launched.value.terminal_id().clone(), project.id().clone());
         wait_for_shell_ready(&mut runtime, &handle);
         runtime.write_input(&handle, b"exit 0\n").unwrap();
-        let outcome = runtime
-            .wait_for_exit(&handle, Duration::from_secs(5))
+        let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
             .unwrap()
             .unwrap();
         let result = coordinator
@@ -1057,8 +1055,7 @@ fn a_run_that_exits_records_terminated_with_no_payload_from_the_outcome() {
         let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
         wait_for_shell_ready(&mut runtime, &handle);
         runtime.write_input(&handle, b"exit 0\n").unwrap();
-        let outcome = runtime
-            .wait_for_exit(&handle, Duration::from_secs(5))
+        let outcome = wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
             .unwrap()
             .unwrap();
         coordinator
@@ -1298,8 +1295,7 @@ fn orphaned_runtime_truth_is_not_mislabeled_as_durable_termination() {
     assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Detached);
     wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
-    runtime
-        .wait_for_exit(&handle, Duration::from_secs(5))
+    wait_for_exit_draining(&mut runtime, &handle, Duration::from_secs(5))
         .unwrap()
         .unwrap();
 }
