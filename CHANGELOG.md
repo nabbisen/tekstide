@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Fixed — review 622: `run_directories_in_other_uuid_spellings_are_skipped_and_still_present` degrades and records on a case-insensitive volume, the same class as review 620's explorer test
+
+Two of the fixture's own UUID spellings differ only in case; on a case-folding volume the second
+write opens the first spelling's own file instead of creating a sibling, same mechanism as review
+620. Fixed the same way: create the lowercase spelling first, probe whether the uppercase spelling's
+path already exists before writing it, and build the "other" set conditionally — only the pure-
+uppercase variant collides by case alone, so the no-hyphens/braced/URN-prefixed variants are
+unaffected and stay in the set on every volume. A runtime probe, not `cfg!(target_os = "macos")`, for
+the same reason as before: case-folding is a property of the volume, not the OS.
+
+### Added — review 622: `report_child_status_at_timeout` reads `pbsi_comm`/`pbsi_status` via `PROC_PIDT_SHORTBSDINFO`, to discriminate the 18-test macOS PTY cluster's two suspects in one datum
+
+25 of the remaining macOS failures are not nine findings; 18 of them share one cause, proven from
+bytes already captured in a prior run (no new run needed): a `/bin/sh` launched on a PTY produces no
+real output, never acts on written input, and never exits — the kernel's own line-discipline echo of
+the written command satisfies assertions that look for output, while the two assertions that need a
+byte the terminal cannot fake (a real `0x1b` control byte, not literal backslash-`033` text) do not.
+`pbsi_comm` (the real process name, up to 16 characters, via `proc_pidinfo(PROC_PIDT_SHORTBSDINFO)`
+into `proc_bsdshortinfo`) answers which half: `"sh"` means the child exec'd and the shell itself is
+not reading its controlling terminal (`TIOCSCTTY` ordering, fd assignment, or the slave's open
+flags); the test binary's own name means `pre_exec` never finished and the child never became a
+shell at all. Same discriminator this project already used for `comm == "sleep"` in the fork/exec
+`CLOEXEC` work. Proposes nothing; the diagnostic only adds a read, nothing it reads is consumed, and
+no fix for the cluster itself is attempted here — per review 622, the datum comes before the diff.
+
 ### Fixed — review 621: R6's own guarantee ("only the repository's own effective configuration is ever read") was false on macOS; `GIT_CONFIG_NOSYSTEM=1` closes it, pinned with a test
 
 Measured, not inferred: `GIT_CONFIG_SYSTEM=/dev/null` (R6, review 407) relocates where git looks

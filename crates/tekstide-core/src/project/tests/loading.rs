@@ -182,13 +182,29 @@ fn run_directories_in_other_uuid_spellings_are_skipped_and_still_present() {
         fs::write(&path, b"a name this product never writes").unwrap();
         path
     };
-    let others = [
-        spelled(uuid.to_uppercase()),
+    // Review 622: APFS is case-insensitive (case-preserving) by default,
+    // where ext4 is case-sensitive -- the same class the explorer test
+    // was fixed for. An uppercase UUID spelling is a pure case variant of
+    // the product's own lowercase one, so on such a volume it resolves to
+    // the *same* directory as `ours`, below, rather than creating a
+    // genuinely separate adversarial row -- silently corrupting which
+    // spelling actually ends up on disk if created first, which is why
+    // `ours` is created before any collision is even checked for. A
+    // runtime probe, not `cfg!(target_os = "macos")`: case-folding is a
+    // property of the volume, not the OS.
+    let ours = spelled(uuid.to_owned());
+    let uppercase_path = project_dir
+        .join(format!("agent-run-{}", uuid.to_uppercase()))
+        .join("transcript.log");
+    let case_insensitive = uppercase_path.exists();
+    let mut others = vec![
         spelled(uuid.replace('-', "")),
         spelled(format!("{{{uuid}}}")),
         spelled(format!("urn:uuid:{uuid}")),
     ];
-    let ours = spelled(uuid.to_owned());
+    if !case_insensitive {
+        others.push(spelled(uuid.to_uppercase()));
+    }
 
     let loaded = project.load_transcripts_from_disk(&dirs.state_root);
     project.purge_project_transcripts().unwrap();

@@ -1038,6 +1038,20 @@ fn enumeration_forced_to_fail() -> bool {
 ///   `WSTOPPED`, which was the entire point, but leaves the child waitable
 ///   by whoever waits on it next.
 ///
+/// **Review 622's own extension, for the 18-test cluster found once the
+/// `/tmp` and git-gate classes stopped accounting for the residue**: a
+/// `PROC_PIDT_SHORTBSDINFO` read into `libc::proc_bsdshortinfo`, carrying
+/// `pbsi_comm` -- up to 16 characters of the real process name -- and its
+/// own `pbsi_status`. One datum answers whether `spawn_pty_child` ever
+/// became a shell at all (`pbsi_comm == "sh"`: it did, and the shell
+/// itself is not reading or acting on its controlling terminal; anything
+/// else, most plausibly this test binary's own name: `pre_exec` never
+/// finished, between `fork` and `exec`). The less-privileged flavour,
+/// not the full `PROC_PIDTBSDINFO` `is_zombie` already uses above, on the
+/// chance it answers where the full one does not -- the same
+/// `comm == "sleep"` discriminator this project already used once, in
+/// the fork/exec `CLOEXEC` work.
+///
 /// `#[cfg(test)]`-only, the same shape `enumeration_progress` already
 /// uses, so this is never reachable in a shipped binary; a no-op on Linux
 /// or in a non-test build, so the platform-neutral caller never needs its
@@ -1076,6 +1090,46 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
         format!("pbi_status = {status} ({meaning})")
     };
 
+    // Review 622's own named probe, for the 18-test cluster: `pbsi_comm`
+    // (up to 16 characters of the real process name) decides between the
+    // two suspects in one datum. `"sh"` means the child exec'd the shell
+    // and the shell itself is not reading or acting on its controlling
+    // terminal (`TIOCSCTTY` ordering, which fd ends up on 0/1/2, the
+    // slave's own open flags); this test binary's own name means
+    // `pre_exec` never finished and the child never became a shell at all
+    // (`setsid`, `TIOCSCTTY`, the `dup2`s, or the `fcntl(F_SETFD,
+    // FD_CLOEXEC)` loop over `close_range_upper_bound()`, all between
+    // `fork` and `exec` in `spawn_pty_child`). `PROC_PIDT_SHORTBSDINFO`
+    // (13) into `proc_bsdshortinfo`, not the full `PROC_PIDTBSDINFO`
+    // flavour `is_zombie` already uses above -- the short flavour is the
+    // less-privileged one, so it may answer where the full one does not,
+    // the same reasoning this project used for `comm == "sleep"` in the
+    // fork/exec `CLOEXEC` work.
+    let mut short_info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
+    let short_size = std::mem::size_of::<libc::proc_bsdshortinfo>() as libc::c_int;
+    let proc_bsdshortinfo_result = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDT_SHORTBSDINFO,
+            0,
+            (&raw mut short_info).cast(),
+            short_size,
+        )
+    };
+    let proc_bsdshortinfo_label = if proc_bsdshortinfo_result != short_size {
+        format!("failed: {:?}", io::Error::last_os_error())
+    } else {
+        // SAFETY: `pbsi_comm` is a fixed-size, zeroed-then-written buffer;
+        // `proc_pidinfo` is documented to NUL-terminate it on success, the
+        // same contract any `c_char` buffer from this API carries.
+        let comm = unsafe { std::ffi::CStr::from_ptr(short_info.pbsi_comm.as_ptr()) };
+        format!(
+            "pbsi_comm={:?} pbsi_status={}",
+            comm.to_string_lossy(),
+            short_info.pbsi_status
+        )
+    };
+
     // SAFETY: `wait_info` is a plain, fully-zeroed `siginfo_t` the call
     // writes into on a real state change; `WNOWAIT` is the property this
     // entire call exists for -- see this function's own doc comment for
@@ -1103,8 +1157,8 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
 
     eprintln!(
         "[wait-for-exit-timeout] pid {pid}: kill(pid, 0) = {kill_result} (errno={kill_errno:?}); \
-         proc_pidinfo: {proc_pidinfo_label}; waitid(WNOHANG|WNOWAIT|WEXITED|WSTOPPED) = \
-         {waitid_label}"
+         proc_pidinfo: {proc_pidinfo_label}; proc_bsdshortinfo: {proc_bsdshortinfo_label}; \
+         waitid(WNOHANG|WNOWAIT|WEXITED|WSTOPPED) = {waitid_label}"
     );
 }
 
