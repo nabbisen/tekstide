@@ -114,13 +114,26 @@ impl Repo {
         relative: &str,
         env: &[(String, String)],
     ) -> (ExplorerDirectoryScan, Vec<Vec<OsString>>) {
+        self.scan_with_policy(handle, relative, env, &FileExplorerScanPolicy::linux_mvp())
+    }
+
+    /// Like [`Self::scan_with`], but with an explicit scan policy -- for a
+    /// test whose own property (not `OMITTED_COUNT_LIMIT`'s) needs an exact
+    /// omitted count past the default bound.
+    fn scan_with_policy(
+        &self,
+        handle: &ProjectRootHandle,
+        relative: &str,
+        env: &[(String, String)],
+        policy: &FileExplorerScanPolicy,
+    ) -> (ExplorerDirectoryScan, Vec<Vec<OsString>>) {
         let batches = RefCell::new(Vec::new());
         let oracle = |directory: &Path, names: &[OsString]| {
             batches.borrow_mut().push(names.to_vec());
             ignored_entries_in_environment(directory, names, "git", env)
         };
         let mut scan = FileExplorerScanner
-            .scan_directory(handle, relative, &FileExplorerScanPolicy::linux_mvp())
+            .scan_directory(handle, relative, policy)
             .expect("scans");
         scan.ask_git(handle, &oracle);
         (scan, batches.into_inner())
@@ -155,7 +168,16 @@ fn what_git_is_asked_about_tracks_the_rows_drawn_not_the_ignored_file_count() {
         fs::File::create(repo.repo.join("logs").join(format!("f{index:05}.log"))).unwrap();
     }
     let handle = repo.project("");
-    let (scan, batches) = repo.scan(&handle, "logs");
+    // This test's own property is exact-vs-rows-drawn, not the bounded-walk
+    // constant (review 612's `OMITTED_COUNT_LIMIT`, covered by its own test);
+    // an explicit, higher limit keeps 20,000 -- the exact figure named by
+    // RFC-055 measurement 5 -- counted exactly rather than clipped to "at
+    // least".
+    let policy = FileExplorerScanPolicy {
+        omitted_count_limit: 20_000,
+        ..FileExplorerScanPolicy::linux_mvp()
+    };
+    let (scan, batches) = repo.scan_with_policy(&handle, "logs", &repo.env, &policy);
 
     assert_eq!(batches.len(), 1, "one query per directory scanned");
     assert_eq!(scan.nodes.len(), 256, "the cap bounds the rows");

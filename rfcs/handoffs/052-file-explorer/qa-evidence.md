@@ -250,6 +250,26 @@ hidden silently; here nothing is dropped and a line says which rows are on scree
 keep. **D8 for the 100 000-entry folder:** the worker (scan + count) takes **25 ms**; the render thread
 (apply + flatten) takes **14.5 µs**, against a 16.7 ms frame.
 
+**Correction, 2026-10-20, review 612.** That 25 ms worker figure was `OMITTED_COUNT_LIMIT`
+(`project/root/explorer.rs`, introduced by PR-052-B, the same slice this section documents) bounding
+the *stats*, not the *walk*: counting every one of a directory's omitted entries past the per-level
+cap scaled with the real directory's size, not with the cap, so a capped scan cost as much as an
+uncapped one once the hidden tail passed about ten thousand entries. Found when the measurement
+crate's `Cargo.lock` was refreshed after sitting at `tekstide-core 0.23.0` for a month and the
+composition arm's own D8 check (`measurement/results-run2.txt`, `scan+model+set_tree 1.02 ms`)
+regressed to `24.44 ms` (`results-run3-2026-10-20.txt`) against `0.37.0` — the regression had been
+live and uncaught since PR-052-B itself; this section's own "25 ms" was the first time anyone wrote
+the cost down, not a baseline later lost. `OMITTED_COUNT_LIMIT` lowered `1_000_000` → `10_000`
+(worst case ~2.5 ms, measured at ~0.24 µs/entry), after which a directory with more hidden entries
+than the limit reports "at least `N`" rather than an exact count — the lower-bound machinery
+`omitted_is_lower_bound` already existed for exactly this and had simply never been exercised at
+this scale. Re-measured, same test: worker **4.46 ms** (was 25 ms), render thread **15.7 µs**
+(unchanged — never the part that was slow). `measurement/results-run4-2026-10-20.txt`: composition
+arm's D8 check **passes**, `4.82 ms` against the `16.67 ms` frame. The loose `< 2 s` test this
+regression hid behind (`a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it`)
+is now a machine-independent paired ratio instead, timing a 300-entry and a 100 000-entry scan in
+the same run and asserting the ratio between them stays under 15x — it would have caught this.
+
 ### Two defects the live capture found in my own first version, both fixed
 
 1. **A clipped row lost its Git word.** The sidebar draws each row on one line and clips at its edge, and

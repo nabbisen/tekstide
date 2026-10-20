@@ -268,31 +268,55 @@ fn a_directory_of_many_entries_is_capped_and_says_it_was_truncated() {
 
 #[test]
 fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it() {
-    let built = Instant::now();
-    let fixture = HostileFixture::build("breadth-full", BREADTH_ENTRIES);
-    let build_time = built.elapsed();
+    // Review 612: a flat wall-clock budget missed a 24x regression entirely
+    // (`OMITTED_COUNT_LIMIT` bounded the stats, not the walk -- counting
+    // every one of a huge directory's omitted entries cost ~24 ms against a
+    // small directory's ~0.5 ms, and a 2 s budget could not see either
+    // side). Machine-independent instead: a small and a huge directory are
+    // scanned in the *same run*, and it is the ratio between them that is
+    // asserted. "Bounded by the cap, not by the directory" means that ratio
+    // stays flat regardless of which machine runs it.
+    let small_fixture = HostileFixture::build("breadth-small-ratio", SMALL_BREADTH);
+    let big_fixture = HostileFixture::build("breadth-big-ratio", BREADTH_ENTRIES);
 
-    let mut worst = Duration::ZERO;
-    let mut last = None;
-    for _ in 0..5 {
-        let start = Instant::now();
-        let result = scan(&fixture, "breadth").expect("scans");
-        worst = worst.max(start.elapsed());
-        last = Some(result);
-    }
-    let result = last.unwrap();
-    assert_eq!(result.nodes.len(), 256, "the per-level cap bounds the rows");
-    assert!(result.truncated);
+    // Best-of-5, not worst-of-5: a ratio is a *scaling* assertion, not a
+    // *budget* one (the budget lives in qa-evidence.md and the measurement
+    // harness, which do use worst-of-N -- what a user can suffer). Worst-of-N
+    // amplifies noise into the ratio in both directions: one scheduler spike
+    // on the big side trips the assertion on its own, and a spike on the
+    // small side hides a real regression by inflating the denominator.
+    // Best-of-N discards both.
+    let best_of_5 = |fixture: &HostileFixture| -> Duration {
+        let mut best = Duration::MAX;
+        for _ in 0..5 {
+            let start = Instant::now();
+            let result = scan(fixture, "breadth").expect("scans");
+            best = best.min(start.elapsed());
+            assert_eq!(result.nodes.len(), 256, "the per-level cap bounds the rows");
+            assert!(result.truncated);
+        }
+        best
+    };
+
+    let small_best = best_of_5(&small_fixture);
+    let big_best = best_of_5(&big_fixture);
     eprintln!(
-        "PR-052-A measurement: fixture of {BREADTH_ENTRIES} built in {build_time:?}; \
-         capped scan of it: worst of 5 = {worst:?}"
+        "PR-052-A/review 612 measurement: best of 5, {SMALL_BREADTH} entries = {small_best:?}; \
+         {BREADTH_ENTRIES} entries = {big_best:?}"
     );
-    // Deliberately loose: this pins "bounded by the cap, not by the
-    // directory", not a machine's speed. D8's real budget is measured in
-    // qa-evidence.md.
+
+    // A floor under the small side: near-zero on a very fast machine would
+    // make the ratio meaningless. A capped scan's real floor is a few
+    // hundred microseconds; 1 ms is a generous margin above that. This
+    // loosens the ratio on a fast machine (a larger denominator shrinks it),
+    // which is the safe direction for a floor to err in.
+    let small_best = small_best.max(Duration::from_millis(1));
+    let ratio = big_best.as_secs_f64() / small_best.as_secs_f64();
     assert!(
-        worst < Duration::from_secs(2),
-        "a capped scan of a huge directory took {worst:?}"
+        ratio < 8.0,
+        "a capped scan's cost must not scale with the real directory's size: \
+         {BREADTH_ENTRIES} entries took {ratio:.1}x as long as {SMALL_BREADTH} entries \
+         ({big_best:?} vs {small_best:?})"
     );
 }
 

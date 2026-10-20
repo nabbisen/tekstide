@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed — a directory explorer scan was O(entries in the directory), not O(cap), past ~10,000 hidden entries
+
+Review 612: `OMITTED_COUNT_LIMIT` (`project/root/explorer.rs`, RFC-052 PR-052-B) bounded the number
+of omitted entries the scanner would *stat and count exactly*, not the number it would *walk* to
+produce that count — a directory with more hidden entries than the limit (`1_000_000`) still had
+every one of them pulled out of `read_dir` to be counted, even though none of them became a node.
+A 100,000-entry directory's capped scan cost ~24 ms instead of ~1 ms as a result, found only once
+the RFC-052 measurement crate's own month-stale `Cargo.lock` was refreshed and its D8 timing check
+regressed against the rebuilt product. Lowered `OMITTED_COUNT_LIMIT` to `10_000` (worst case ~2.5
+ms, measured at ~0.24 µs per entry pulled from `read_dir`); a directory with more hidden entries
+than that now reports "at least `N`" instead of an exact count, using lower-bound machinery
+(`omitted_is_lower_bound`) the scanner already had. The test that should have caught this
+(`a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it`) asserted a flat,
+2-second wall-clock budget — 80x too loose to see a 24x regression — and is now a machine-
+independent paired ratio instead, timing a 300-entry and a 100,000-entry scan in the same run and
+asserting the ratio between them stays under 15x. Dated corrections in `rfcs/done/052-*.md` and
+`rfcs/handoffs/052-file-explorer/qa-evidence.md`, naming PR-052-B as the origin.
+
 ### Fixed — 28 `EILSEQ` panics on APFS, at five locations; the fixture degrades and records, four single-purpose tests are `ignore`d
 
 RFC-028 review 596/609, item 4: five places in the test suite built a filename whose bytes are not

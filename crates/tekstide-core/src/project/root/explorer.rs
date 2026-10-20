@@ -268,7 +268,17 @@ impl ExplorerDirectoryScan {
 /// The most entries the scanner will count beyond the per-directory cap.
 /// A directory with more than this many hidden entries reports "at least
 /// this many": counting must stay bounded even for a hostile directory.
-pub const OMITTED_COUNT_LIMIT: usize = 1_000_000;
+///
+/// Review 612: `1_000_000` bounded the *stats*, not the *walk* -- pulling a
+/// bare `DirEntry` out of `read_dir` to count it costs about 0.24 us even
+/// with no `stat` at all, measured directly (a 100,000-entry directory's
+/// scan went from ~0.5 ms to ~24 ms once the count reached that many
+/// entries; reproduced outside the product with a standalone probe against
+/// the real syscalls). `10_000` keeps the worst case under ~2.5 ms,
+/// independent of how large the real directory is; exactness above ten
+/// thousand hidden entries buys a user nothing a bounded, responsive
+/// expansion does not already give them.
+pub const OMITTED_COUNT_LIMIT: usize = 10_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExplorerScanError {

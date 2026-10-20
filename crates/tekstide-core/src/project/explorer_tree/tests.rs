@@ -303,11 +303,16 @@ fn a_hundred_thousand_entries_are_capped_counted_and_never_reach_the_render_thre
 
     let breadth_rows = rows.iter().filter(|row| row.depth == 1).count();
     assert_eq!(breadth_rows, 256 + 1);
+    // Review 612: `OMITTED_COUNT_LIMIT` is now 10_000 (was 1_000_000, which
+    // bounded the stats but not the walk and cost ~24ms for exactly this
+    // 100,000-entry case). 99,744 real omissions exceed that limit, so the
+    // row now says "at least", not the exact count -- the intended new
+    // behaviour, not a loosened assertion.
     assert!(matches!(
         rows.iter().rev().find(|row| row.depth == 1).unwrap().kind,
         ExplorerTreeRowKind::Omitted {
-            count: 99_744,
-            at_least: false
+            count: 10_001,
+            at_least: true
         }
     ));
     eprintln!(

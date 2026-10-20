@@ -252,3 +252,20 @@ measured into a fresh `TMPDIR` three runs running.
 **Unplanned, owner-requested, and recorded rather than absorbed**: the Project Board's cards. It is in
 the delivery plan as unplanned work, and `0.24.0` corrects `0.23.0`'s claim that board legibility was
 "later work that no scheduled RFC covers".
+
+## Correction (2026-10-20, review 612)
+
+**PR-052-B's omitted-entry count (`OMITTED_COUNT_LIMIT`, `project/root/explorer.rs`) bounded the
+stats a capped scan takes, not the walk — a capped scan of a directory with more hidden entries
+than the limit cost as much as an uncapped one.** The limit was `1_000_000`; a 100 000-entry
+directory never reached it, so every scan past the 256-row cap still walked and counted all
+~99 700 remaining entries. Found via the RFC-052 measurement harness's own `Cargo.lock` finally
+being refreshed after a month pinned to an old `tekstide-core` — the composition arm's own D8
+timing check regressed from `1.02 ms` to `24.44 ms` against the refreshed build, which was the
+first signal anyone had that this RFC's own "D8 for the 100 000-entry folder: the worker (scan +
+count) takes 25 ms" line (above, under PR-052-B's own findings) was not a budget being met, it was
+the cost of a bug nobody had named. `OMITTED_COUNT_LIMIT` is now `10_000`; a directory with more
+hidden entries than that reports "at least `N`" rather than an exact count, using lower-bound
+machinery (`omitted_is_lower_bound`) this RFC's own scanner already had and had simply never been
+exercised past its old million-entry ceiling. Full detail, the measurement, and the test rewrite
+that would have caught it are in `qa-evidence.md`'s own dated correction.
