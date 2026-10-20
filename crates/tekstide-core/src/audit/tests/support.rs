@@ -29,6 +29,13 @@ impl TestAuditDirs {
         let project_root = base.join("project");
         fs::create_dir_all(&state_root).unwrap();
         fs::create_dir_all(&project_root).unwrap();
+        // Review 617/618/619: one class, three faces -- $TMPDIR is
+        // reached through a symlink on macOS, so `base` must be canonical
+        // before anything derived from it is compared against a path the
+        // OS resolves on its own.
+        let base = fs::canonicalize(&base).unwrap_or(base);
+        let state_root = base.join("state");
+        let project_root = base.join("project");
         let storage_path = AuditPathResolver
             .resolve(AuditPathRequest::new(
                 &state_root,
