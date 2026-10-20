@@ -166,3 +166,43 @@ by the library; our wrapper catches it per call.
 
 **Gate at adoption:** `cargo audit` — zero vulnerabilities; the warnings are the three already in this
 register (`paste`, `ttf-parser`, `lru`), with no new one.
+
+## Three new rows, 2026-10-20 (`0.38.0`'s cycle, 436 crates)
+
+**Zero vulnerabilities; six warnings.** The snora team's 0.53.0 letter named three new advisories
+they expected our scan to report. **Verified here by running the gate, not taken on their word** --
+`cargo audit` against this lock: `paste`, `ttf-parser` and `lru` as already registered, plus:
+
+| Advisory | Crate | Class | Reached by | Reachability here |
+| --- | --- | --- | --- | --- |
+| `RUSTSEC-2026-0370` | `zvariant 5.15.0` | unmaintained | `zbus` -> `mundy` -> `iced_winit` -> `iced` | **Linux only.** Run time, system colour-scheme detection. |
+| `RUSTSEC-2026-0371` | `zbus_names 4.3.4` | unmaintained | same chain, plus `zbus_macros` | **Linux only.** Same. |
+| `RUSTSEC-2026-0372` | `zvariant_derive 5.15.0` | unmaintained | same chain (proc-macro) | **Linux only.** Build time. |
+
+All three are dated 2026-10-16 and all three are `unmaintained`, not vulnerabilities. Their
+ID-to-crate mapping in snora's letter is correct.
+
+**The chain, printed rather than described** (`cargo tree --invert -p zvariant@5.15.0 -e normal`):
+
+```
+zvariant 5.15.0 <- zbus 5.19.0 <- mundy 0.2.3 <- iced_winit 0.14.0 <- iced 0.14.0 <- tekstide 0.37.0
+```
+
+`mundy` is the crate snora's letter does not name, and it is the one that matters: `iced_winit`
+declares it under `[target.'cfg(target_os = "linux")'.dependencies.mundy]`, so **these three are
+compiled on Linux only** -- the exact inverse of `paste`'s macOS-only shape above, and worth stating
+plainly now that macOS is about to ship: on a macOS build they are lock-only and never built.
+
+We reach them because `linux-theme-detection` is in **`iced` 0.14's own default feature list**
+(`iced/Cargo.toml`, mapping to `iced_winit/linux-theme-detection` = `dep:mundy` + `mundy/async-io` +
+`mundy/color-scheme`), and the workspace takes `iced` with defaults on
+(`features = ["tokio", "advanced"]`, no `default-features = false`).
+
+**Retirement conditions -- three, and one of them is ours.** (1) `zvariant`/`zbus_names` maintained
+again or replaced inside `mundy`; (2) `mundy` dropping `zbus`; or (3) **us** turning off
+`linux-theme-detection`. The third is available today and is *not* a cleanup: it would cost system
+light/dark following on Linux, which is product behaviour and therefore a decision, not a
+tidy-up. It is recorded here so nobody takes it as a quick win in a dependency slice.
+
+**Accepted by ID for `0.38.0`.** The gate's pass condition is now **zero vulnerabilities and exactly
+six warnings** -- `paste`, `ttf-parser`, `lru`, and these three. A seventh is a finding.
