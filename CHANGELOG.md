@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Fixed — review 620: `scanner_lists_folders_first_and_compares_names_without_case` degrades and records on a case-insensitive volume, instead of silently testing one fewer row
+
+APFS is case-insensitive (case-preserving) by default, where ext4 is case-sensitive.
+`TestSandbox::create_file` is a truncating write, not an exclusive create, so writing `a.txt` after
+`A.txt` on such a volume opens the same file by case-folded lookup instead of creating a sibling —
+confirmed directly (the path already exists, under that exact spelling, before the write that
+supposedly creates it, if and only if the volume folds case), not assumed. Case-insensitive
+coverage loses exactly one row: the tie-break where two names share a lowercase form and the exact
+bytes decide which sorts first. The two properties the test is actually named for — folders first,
+names compared without case — both still hold on such a volume; the test now detects the volume's
+own behavior and asserts the platform-correct list, naming the missing row rather than silently
+testing fewer cases. No product change: the comparator's own tie-break rule stays exactly as it is,
+since a macOS user cannot hold both spellings in one directory to exercise it in the first place.
+
+### Fixed — review 620: a read-only probe inside `vet_configuration` names which config key and origin triggered `AcceptedBranchOnly`, for `runtime::git::tests`'s 24 macOS failures
+
+`GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL` are already hardcoded to `/dev/null` in `spawn_git_command`
+(R6), applied last so nothing can override them — so the hypothesis that a stock macOS git carries
+unrecognized system-level config keys is not yet confirmed, only plausible. `git_gate_probe_origin_
+for_key`, `#[cfg(test)]`-only, re-runs `git config --list --show-origin --null` (a second, read-only
+subprocess; the first call never requests origins) and reports the real origin git names for the
+triggering key, the moment `vet_configuration` is about to downgrade to `AcceptedBranchOnly`.
+Deliberately not fixed by forwarding `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_SYSTEM=/dev/null` to the test
+fixtures yet: if a stock macOS install does carry such keys, every macOS user gets branch-only
+answers for reasons they would never see, which is a release-relevant product question this probe
+exists to answer with data rather than silence by making the suite look healthy. Proposes nothing;
+reports the key and its origin.
+
 ### Fixed — review 619: one class, three faces — ten more test helpers hit `SymlinkAmbiguous`, `SymlinkEscape`, or a bare `starts_with`, the same uncanonicalized-root cause under three different error shapes
 
 507 → 86 once review 618's own fix landed, but the residue was further from the predicted ~81 than

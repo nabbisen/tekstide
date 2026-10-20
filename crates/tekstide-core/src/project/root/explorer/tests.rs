@@ -44,8 +44,24 @@ fn scanner_lists_folders_first_and_compares_names_without_case() {
     for dir in ["Zed", "alpha", "Beta"] {
         sandbox.create_dir(&format!("project/{dir}"));
     }
-    for file in ["README.md", "b.txt", "A.txt", "a.txt"] {
+    for file in ["README.md", "b.txt", "A.txt"] {
         sandbox.create_file(&format!("project/{file}"));
+    }
+    // Review 620: APFS is case-insensitive (case-preserving) by default,
+    // where ext4 is case-sensitive. `TestSandbox::create_file` is a
+    // truncating write, not an exclusive create, so on such a volume
+    // writing "a.txt" after "A.txt" opens the *same* file by case-folded
+    // lookup instead of creating a sibling -- confirmed directly, not
+    // assumed: the path already exists, under this exact spelling, before
+    // this file ever writes it, if and only if the volume folds case.
+    // Case-insensitive coverage loses exactly one row, the tie-break
+    // where two names share a lowercase form and the exact bytes decide
+    // (`A.txt` before `a.txt`); "folders first" and "compares names
+    // without case" -- the two properties this test is named for -- both
+    // still hold either way.
+    let case_insensitive = project_dir.join("project/a.txt").exists();
+    if !case_insensitive {
+        sandbox.create_file("project/a.txt");
     }
     let root = root_handle(ProjectId::for_test(1), validate(&project_dir));
 
@@ -54,18 +70,20 @@ fn scanner_lists_folders_first_and_compares_names_without_case() {
         .expect("project root should scan");
 
     let names: Vec<_> = scan.nodes.iter().map(|node| node.name.as_str()).collect();
-    assert_eq!(
-        names,
-        [
+    let expected: &[&str] = if case_insensitive {
+        &["alpha", "Beta", "Zed", "A.txt", "b.txt", "README.md"]
+    } else {
+        &[
             "alpha",
             "Beta",
             "Zed",
             "A.txt",
             "a.txt",
             "b.txt",
-            "README.md"
+            "README.md",
         ]
-    );
+    };
+    assert_eq!(names, expected);
 }
 
 #[test]

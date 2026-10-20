@@ -425,10 +425,96 @@ fn vet_configuration(
         let lower = key.to_ascii_lowercase();
         let is_include = lower == "include.path" || lower.starts_with("includeif.");
         if is_include || !config_key_is_allowed(key) {
+            git_gate_probe_origin_for_key(repository_root, git_executable, forwarded_env, key);
             return Err(GitGateOutcome::AcceptedBranchOnly);
         }
     }
     Ok(())
+}
+
+/// Review 620's own named probe, for `runtime::git::tests`' 24 macOS
+/// failures: `vet_configuration` already knows *that* an unrecognised key
+/// downgraded the answer to `AcceptedBranchOnly`; this names *which* key
+/// and *where it came from*, so the next decision (an allowlist entry for
+/// something a stock macOS genuinely ships, a documented product caveat,
+/// or test-only isolation) rests on the real keys rather than a guess.
+/// `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL` are already hardcoded to
+/// `/dev/null` in `spawn_git_command` (R6), applied last so nothing can
+/// override them -- if a system-level key still reaches this gate on the
+/// real runner, that is itself part of the answer, not something this
+/// probe assumes going in.
+///
+/// Re-runs `git config --list --show-origin --null` in the same
+/// repository with the same environment -- a second, read-only
+/// subprocess, not a reparse of the first command's own output (which
+/// never asked for origins) -- and reports the origin the real `git`
+/// names for the triggering key. `#[cfg(test)]`-only, the same shape
+/// every other probe this round uses; a no-op in a shipped binary.
+/// Consumes nothing, proposes nothing: reports the pair and returns.
+#[cfg(test)]
+fn git_gate_probe_origin_for_key(
+    repository_root: &Path,
+    git_executable: &str,
+    forwarded_env: &[(String, String)],
+    triggering_key: &str,
+) {
+    let output = match run_bounded_git(
+        git_executable,
+        &["config", "--list", "--show-origin", "--null"],
+        Some(repository_root),
+        forwarded_env,
+    ) {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            eprintln!(
+                "[git-gate-probe] key={triggering_key:?}: --show-origin exited {:?}, origin \
+                 unknown",
+                output.status.code()
+            );
+            return;
+        }
+        Err(reason) => {
+            eprintln!(
+                "[git-gate-probe] key={triggering_key:?}: --show-origin failed to run: \
+                 {reason:?}, origin unknown"
+            );
+            return;
+        }
+    };
+    let Ok(text) = std::str::from_utf8(&output.stdout) else {
+        eprintln!("[git-gate-probe] key={triggering_key:?}: --show-origin output was not UTF-8");
+        return;
+    };
+    // Checked directly against a real `git config --list --show-origin
+    // --null`, not assumed from the non-`--null` format: with `--null`,
+    // `\0` is the separator for *every* field, not only between records.
+    // The byte stream is a flat, alternating sequence --
+    // `origin\0key\nvalue\0origin\0key\nvalue\0...` -- not one `origin\t
+    // key\nvalue` record per `\0`-terminated chunk. Pair the tokens up
+    // rather than split on tab.
+    let mut tokens = text.split('\0');
+    while let (Some(origin), Some(key_and_value)) = (tokens.next(), tokens.next()) {
+        let key = key_and_value
+            .split_once('\n')
+            .map_or(key_and_value, |(key, _value)| key);
+        if key.eq_ignore_ascii_case(triggering_key) {
+            eprintln!("[git-gate-probe] key={triggering_key:?} origin={origin:?}");
+            return;
+        }
+    }
+    eprintln!(
+        "[git-gate-probe] key={triggering_key:?}: not found in --show-origin's own output \
+         (origin unknown)"
+    );
+}
+
+#[cfg(not(test))]
+fn git_gate_probe_origin_for_key(
+    _repository_root: &Path,
+    _git_executable: &str,
+    _forwarded_env: &[(String, String)],
+    _triggering_key: &str,
+) {
 }
 
 /// PR-030-B: the gate decides what is safe; this turns that decision into
