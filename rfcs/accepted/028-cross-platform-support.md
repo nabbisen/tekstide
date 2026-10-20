@@ -433,6 +433,45 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   temporarily exercising the macOS branch itself on this Linux machine (FIFO/`EPIPE` semantics are
   POSIX-portable, unlike `getsid`/`proc_listallpids` above) before it was proposed for review —
   the one item in this list that could be fully validated without a real macOS runner.
+
+  **596's own item 5, and a correction to review 602's own hypothesis for it.** 602 proposed that
+  `project::watch`'s real `PermissionDenied` failures on macOS might trace to D2's own `kqueue`
+  choice: `notify`'s `kqueue` backend watches file descriptors (it must `open` every directory
+  watched) where Linux's `inotify` watches paths directly, never opening them — a plausible reason
+  a directory traversable-but-not-openable could surface differently across the two. Reading the
+  actual test file first, not the kernel: all 14 of this file's `/dev/shm` literals (12 fixed; the
+  other two are an operator's own documented manual setup for an `#[ignore]`d measurement) were a
+  Linux-only tmpfs mount absent from macOS (`devfs` there holds device nodes only, no such mount).
+  The real runner's own log names the exact mechanism, confirming the explanation rather than
+  merely permitting it: `mkdir("/dev/shm")` there fails `EACCES`, not `ENOENT` — `/dev` exists and
+  simply refuses a new directory, rather than a missing parent. 11 distinct tests failed this way,
+  every one of them trying to **create a directory** before any kernel watch, `kqueue` or
+  otherwise, was ever placed. The simpler cause was hiding behind the more interesting one. Fixed
+  with one shared helper (`watch_test_root()`, `watch/tests.rs`): `/dev/shm` unchanged on Linux,
+  `std::env::temp_dir()` elsewhere.
+
+  **A second, real macOS-shaped failure the fix's own first draft would have introduced**, found
+  by a Linux-runnable probe before it ever reached a real runner: `std::env::temp_dir()` on macOS
+  is reached through a symlink (`$TMPDIR` under `/var` -> `/private/var`), and `watch_test_root()`
+  returned it uncanonicalized. Forcing the same shape on Linux (the helper's own root hidden behind
+  a symlink) made `ProjectRootValidator::validate(..., SymlinkPolicy::FailClosed)` refuse every
+  project root four of this file's tests build under it, with `SymlinkAmbiguous` — its own selected
+  and canonical paths disagree, exactly the ambiguity that policy exists to catch, not a bug in it.
+  This is 596 item 3's own class (a `/tmp`-vs-`/private/tmp` trap, found three times in this RFC
+  already), rediscovered here independently rather than inherited knowingly. Fixed by
+  canonicalizing the helper's own output once, so every caller's root is already in the form the
+  validator accepts.
+
+  **The `kqueue`/`inotify` fd-semantics question itself stays open, not closed by this** — none of
+  this file's fixtures happen to exercise a traversable-but-unopenable directory, so neither finding
+  rules 602's own hypothesis in or out; together they only establish it was not needed to explain
+  what the CI log actually showed. One piece of evidence against it, found for free: all 27 tests
+  pass identically through the real `inotify` backend when `watch_test_root()` is forced to return
+  an ordinary, non-tmpfs directory instead of `/dev/shm` (unsymlinked) — the watch mechanism itself
+  does not depend on which kind of filesystem backs the watched directory, at least not on Linux.
+  D2's `macos_kqueue` choice is not revisited by either finding; it would need a macOS-specific
+  fixture deliberately exercising the fd-vs-path distinction to actually test the hypothesis, which
+  nothing here does.
 - **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
   fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
   gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real

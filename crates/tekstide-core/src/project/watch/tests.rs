@@ -3,6 +3,51 @@ use std::time::Instant;
 
 use super::{GIT_SUBPROCESSES_PER_SCAN, SCAN_WINDOW, ScanBatcher, ScanRequest};
 
+/// Review 596/602/615's own macOS triage, item 5: this file's many
+/// real-backend fixtures hardcoded `/dev/shm` directly. On macOS the real
+/// runner's own log names the exact mechanism, not merely "does not
+/// exist": `mkdir("/dev/shm")` there fails `EACCES`, not `ENOENT` -- `/dev`
+/// itself exists (devfs populates it with device nodes only) and simply
+/// refuses a new directory, rather than the parent being missing. Every
+/// test built on it failed outright trying to create a directory there,
+/// well before any kernel watch was placed. That is the actual, simpler
+/// cause of the `PermissionDenied` failures 602's own
+/// `kqueue`-opens-fds-where-`inotify`-doesn't hypothesis was framed to
+/// explain; nothing here rules that hypothesis out for a *real*
+/// hostile-permission row (none of this file's fixtures happen to exercise
+/// one), but it is not needed to explain what the CI log actually shows,
+/// and the real cause was hiding behind it.
+///
+/// `/dev/shm` on Linux specifically, not merely `std::env::temp_dir()`'s
+/// usual `/tmp`, for two reasons already load-bearing elsewhere in this
+/// project (`test-process-leak.md`): tmpfs speed, for the burst/reconcile
+/// timing this file measures, and a short path, to leave headroom under
+/// `AF_UNIX`'s 108-byte limit when a socket nests under the same root
+/// elsewhere in a full gate run. Neither reason holds on macOS, where
+/// `std::env::temp_dir()` (`$TMPDIR`) is simply the real, only answer.
+fn watch_test_root() -> PathBuf {
+    let root = watch_test_root_uncanonicalized();
+    // Review 615's own probe: forcing this root through a symlink (mirroring
+    // macOS's own $TMPDIR, reached via `/var` -> `/private/var`) makes
+    // `ProjectRootValidator::validate(..., SymlinkPolicy::FailClosed)`
+    // refuse every project root this file builds under it with
+    // `SymlinkAmbiguous` -- its own selected and canonical paths disagree,
+    // which is exactly the ambiguity that policy exists to catch, not a
+    // bug in it. Canonicalizing here, once, keeps every caller's root
+    // already in the form the validator accepts, rather than leaving each
+    // of this file's many fixtures to rediscover 596 item 3's own class on
+    // its own.
+    std::fs::canonicalize(&root).unwrap_or(root)
+}
+#[cfg(target_os = "linux")]
+fn watch_test_root_uncanonicalized() -> PathBuf {
+    PathBuf::from("/dev/shm")
+}
+#[cfg(not(target_os = "linux"))]
+fn watch_test_root_uncanonicalized() -> PathBuf {
+    std::env::temp_dir()
+}
+
 /// Feeds `events` (a change, given as the directory it happened in, already in time
 /// order) through a batcher, draining before each one as a real loop would, then once
 /// more at `end`. Returns every request issued.
@@ -339,12 +384,12 @@ fn a_panic_inside_a_watch_call_is_a_refusal_not_a_crash() {
 /// directory on this machine. The kernel answers; nothing is simulated.
 #[test]
 fn the_real_backend_places_and_removes_a_watch_on_a_real_directory() {
-    let directory = Path::new("/dev/shm/tekwatch-real");
+    let directory = &watch_test_root().join("tekwatch-real");
     let _ = std::fs::remove_dir_all(directory);
     std::fs::create_dir_all(directory).unwrap();
 
     let (sender, _receiver) = std::sync::mpsc::channel();
-    let mut backend = super::NotifyBackend::new(sender).expect("notify starts on Linux");
+    let mut backend = super::NotifyBackend::new(sender).expect("notify starts on this platform");
     backend
         .watch_directory(directory)
         .expect("the kernel places a watch on a directory this process owns");
@@ -405,13 +450,13 @@ fn a_watched_directory_that_is_deleted_later_is_dropped_without_stopping() {
 /// the existence question itself.
 #[test]
 fn a_real_directory_removed_before_reconciling_does_not_stop_watching() {
-    let base = Path::new("/dev/shm/tekwatch-gone");
+    let base = &watch_test_root().join("tekwatch-gone");
     let _ = std::fs::remove_dir_all(base);
     std::fs::create_dir_all(base.join("keep")).unwrap();
     std::fs::create_dir_all(base.join("build")).unwrap();
 
     let (sender, _receiver) = std::sync::mpsc::channel();
-    let mut backend = super::NotifyBackend::new(sender).expect("notify starts on Linux");
+    let mut backend = super::NotifyBackend::new(sender).expect("notify starts on this platform");
     let desired = desired_directories(base, &[PathBuf::from("keep"), PathBuf::from("build")], &[]);
     let mut scope = WatchScope::new();
 
@@ -452,14 +497,20 @@ fn measured_git_subprocesses_per_real_scan() {
     use std::path::Path;
     use std::process::Command;
 
+    // Left hardcoded, deliberately not routed through `watch_test_root()`:
+    // this is an operator's own manual setup (`cargo test ... --ignored`),
+    // and `qa-evidence.md` § PR-026-A already documents this exact path
+    // for a human to create the shim at. `repo`/`home` below have no such
+    // external document naming their path, so they go through the helper
+    // like everything else in this file.
     let shim = "/dev/shm/tekshim/git";
     let shim_log = Path::new("/dev/shm/tekshim/log");
     assert!(
         Path::new(shim).is_file() && shim_log.exists(),
         "the logging git shim must exist; see qa-evidence.md § PR-026-A"
     );
-    let repo = Path::new("/dev/shm/tekwatch-repo");
-    let home = Path::new("/dev/shm/tekwatch-home");
+    let repo = &watch_test_root().join("tekwatch-repo");
+    let home = &watch_test_root().join("tekwatch-home");
     let _ = std::fs::remove_dir_all(repo);
     std::fs::create_dir_all(repo.join("sub")).unwrap();
     std::fs::create_dir_all(home).unwrap();
@@ -532,7 +583,7 @@ fn real_session(label: &str) -> (crate::project::ProjectSession, PathBuf) {
     use crate::project::root::{ProjectRootValidator, SymlinkPolicy};
     use crate::project::{ProjectId, ProjectSession};
 
-    let base = PathBuf::from(format!("/dev/shm/tekadmit-{label}"));
+    let base = watch_test_root().join(format!("tekadmit-{label}"));
     let _ = std::fs::remove_dir_all(&base);
     let project = base.join("project");
     std::fs::create_dir_all(project.join("src")).unwrap();
@@ -625,7 +676,7 @@ fn a_change_in_a_watched_directory_reaches_the_owner_event_stream() {
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
-    let directory = Path::new("/dev/shm/tekwatch-owner-events");
+    let directory = &watch_test_root().join("tekwatch-owner-events");
     let _ = std::fs::remove_dir_all(directory);
     std::fs::create_dir_all(directory).unwrap();
 
@@ -637,7 +688,7 @@ fn a_change_in_a_watched_directory_reaches_the_owner_event_stream() {
 
     let mut events = watcher
         .events()
-        .expect("notify starts on Linux")
+        .expect("notify starts on this platform")
         .take()
         .expect("the receiver is handed out once, to the waiter");
     let (sender, reported) = channel();
@@ -663,7 +714,7 @@ fn dropping_the_owner_ends_its_event_stream() {
     let watcher = super::ProjectWatcher::open();
     let mut events = watcher
         .events()
-        .expect("notify starts on Linux")
+        .expect("notify starts on this platform")
         .take()
         .expect("the receiver is handed out once, to the waiter");
     let (sender, reported) = channel();
@@ -683,7 +734,7 @@ fn dropping_the_owner_ends_its_event_stream() {
 #[test]
 fn a_platform_that_never_started_stops_watching_on_the_first_reconcile() {
     // A directory that exists: a missing one is dropped before the platform is asked.
-    let root = Path::new("/dev/shm");
+    let root = &watch_test_root();
     let desired = desired_directories(root, &[], &[]);
     let mut watcher = super::ProjectWatcher::unavailable(WatchRefusal::new("no inotify"));
     assert!(watcher.events().is_none());
@@ -702,7 +753,7 @@ fn a_platform_that_never_started_stops_watching_on_the_first_reconcile() {
 #[test]
 fn the_event_receiver_is_handed_out_once_so_only_one_waiter_can_exist() {
     let watcher = super::ProjectWatcher::open();
-    let slot = watcher.events().expect("notify starts on Linux");
+    let slot = watcher.events().expect("notify starts on this platform");
     let clone = slot.clone();
 
     assert!(slot.take().is_some(), "the first taker gets the receiver");
@@ -742,7 +793,7 @@ fn measured_reconcile_cost_per_expanded_directory() {
 
     const TRIGGERS: usize = 40;
     for count in [1usize, 10, 100, 500] {
-        let base = PathBuf::from(format!("/dev/shm/tekmeasure-{count}"));
+        let base = watch_test_root().join(format!("tekmeasure-{count}"));
         let _ = std::fs::remove_dir_all(&base);
         let project = base.join("project");
         for index in 0..count {
@@ -795,7 +846,7 @@ fn a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request() {
     use std::sync::mpsc::channel;
     use std::time::{Duration, Instant};
 
-    let directory = Path::new("/dev/shm/tekfeed-real");
+    let directory = &watch_test_root().join("tekfeed-real");
     let _ = std::fs::remove_dir_all(directory);
     std::fs::create_dir_all(directory).unwrap();
 
@@ -833,7 +884,7 @@ fn a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request() {
     );
     let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
     assert_eq!(due.len(), 1, "one directory, one scan request");
-    assert_eq!(due[0].directory, directory);
+    assert_eq!(due[0].directory, *directory);
     drop(watcher);
     let _ = std::fs::remove_dir_all(directory);
 }
@@ -862,7 +913,7 @@ fn a_change_in_a_directory_we_do_not_watch_is_dropped() {
 fn a_failed_notice_rescans_every_watched_directory() {
     use std::time::Instant;
 
-    let root = Path::new("/dev/shm");
+    let root = &watch_test_root();
     let mut watcher = super::ProjectWatcher::open();
     watcher.reconcile(&desired_directories(root, &[], &[]), Vec::new());
     assert_eq!(watcher.scope().watched_count(), 1);
@@ -872,7 +923,7 @@ fn a_failed_notice_rescans_every_watched_directory() {
     let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
 
     assert_eq!(due.len(), watcher.scope().watched_count());
-    assert_eq!(due[0].directory, root);
+    assert_eq!(due[0].directory, *root);
 }
 
 /// B2 step 3, the session side: a drained window asks for a scan only for a folder the
@@ -904,7 +955,7 @@ fn the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses()
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
-    let base = PathBuf::from("/dev/shm/tekhostile");
+    let base = watch_test_root().join("tekhostile");
     let _ = std::fs::remove_dir_all(&base);
     let project = base.join("project");
     std::fs::create_dir_all(project.join("src")).unwrap();
@@ -1015,7 +1066,7 @@ fn reading_a_watched_file_is_not_reported_but_writing_it_is() {
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
-    let directory = Path::new("/dev/shm/tekread-watched");
+    let directory = &watch_test_root().join("tekread-watched");
     let _ = std::fs::remove_dir_all(directory);
     std::fs::create_dir_all(directory).unwrap();
     let file = directory.join("note.txt");

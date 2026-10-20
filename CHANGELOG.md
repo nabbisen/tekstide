@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Fixed — RFC-028 review 596's triage, item 5: `project::watch`'s tests hardcoded `/dev/shm`, which does not exist on macOS
+
+Not a product defect, and review 602's own `kqueue`-opens-file-descriptors-where-`inotify`-doesn't
+hypothesis for the `PermissionDenied` failures was not needed to explain them: this module's test
+fixtures (14 `/dev/shm` literals across the file, 12 replaced; the other two are an operator's own
+documented manual setup for an `#[ignore]`d measurement) hardcoded `/dev/shm` directly, a Linux
+tmpfs mount with no macOS equivalent at all. The real runner's own log names the exact mechanism:
+`mkdir("/dev/shm")` fails `EACCES`, not `ENOENT` — `/dev` exists (devfs populates it with device
+nodes only) and simply refuses a new directory there, rather than a missing parent. 11 of this
+file's tests failed this way, every one of them at setup, before any kernel watch was placed. One
+shared helper, `watch_test_root()`, replaces the literal: `/dev/shm` unchanged on Linux (tmpfs
+speed and a short path both already load-bearing reasons recorded elsewhere in this project),
+`std::env::temp_dir()`, canonicalized, on every other platform.
+
+Canonicalizing is not decoration: a second, Linux-runnable probe (forcing the helper through a
+symlink, mirroring macOS's own `$TMPDIR` reached via `/var` -> `/private/var`) found that an
+uncanonicalized root makes `ProjectRootValidator::validate(..., SymlinkPolicy::FailClosed)` refuse
+every project root this file builds under it with `SymlinkAmbiguous` — its own selected and
+canonical paths disagree, the exact ambiguity that policy exists to catch. Four tests hit this
+before the fix added canonicalization; none do after. The same probe, run without symlinking the
+root, also confirmed all 27 tests pass identically through the real `inotify` backend against an
+ordinary, non-tmpfs directory — further evidence against the `kqueue`/`inotify` fd-semantics
+hypothesis: the watch mechanism itself does not depend on which kind of filesystem backs the
+watched directory.
+
 ### Fixed — two macOS test gaps from RFC-028 review 596's triage, item 6: `setsid(1)` and `/dev/full` are both Linux-only
 
 Neither is a product defect; both are test fixtures that assumed a Linux-only command-line tool or
