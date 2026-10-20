@@ -1204,11 +1204,70 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
         None => "list_all_pids itself failed".to_owned(),
     };
 
+    // Review 627: `p_stat`, read through `sysctl(CTL_KERN, KERN_PROC,
+    // KERN_PROC_PID)` rather than through libproc -- the whole point of
+    // this reconciliation is that `proc_pidinfo` above has already
+    // failed `ESRCH` for this exact pid, so an independent kernel view
+    // is the only way to learn whether the "exiting" bash from review
+    // 627's own farewell finding is `SRUN`/`SSLEEP` (alive, blocked on
+    // something) or `SZOMB` (exited, unreaped).
+    //
+    // Offset 36, not a guess: measured directly off a real hex dump
+    // (`libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_
+    // view`'s own `--nocapture` measurement, review 627's required
+    // dedicated CI step) and cross-checked two ways against that same
+    // dump before trusting it -- the bytes at offset 0-15 decode as a
+    // plausible `timeval` (a Unix timestamp matching this project's own
+    // 2026 run dates, a microsecond count under 1,000,000), and, most
+    // tellingly, the four bytes at offset 40 decode as that exact
+    // child's own real pid, matching Darwin's long-stable `struct
+    // extern_proc` layout exactly (`p_un` timeval ∪ pointer-pair, 16
+    // bytes; `p_vmspace`/`p_sigacts`, two zeroed kernel pointers
+    // Apple's own sysctl redacts, 8 bytes each; `p_flag`, 4 bytes;
+    // `p_stat`, 1 byte, at offset 32+4=36; 3 bytes padding; `p_pid`,
+    // 4 bytes, at offset 40) -- a real, load-bearing field matching its
+    // own known position is a stronger check than the timestamp alone.
+    const P_STAT_OFFSET: usize = 36;
+    let mut mib: [libc::c_int; 4] = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+    let mut sysctl_buffer = vec![0_u8; 4096];
+    let mut sysctl_written_len: libc::size_t = sysctl_buffer.len();
+    // SAFETY: `sysctl_buffer` is valid and sized as declared for the
+    // duration of the call; reading `sysctl_buffer[P_STAT_OFFSET]`
+    // afterward is a plain byte read, bounds-checked by indexing, never
+    // a typed/aligned access into the buffer.
+    let sysctl_result = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            sysctl_buffer.as_mut_ptr().cast(),
+            &raw mut sysctl_written_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    let p_stat_label = if sysctl_result != 0 {
+        format!("sysctl failed: {:?}", io::Error::last_os_error())
+    } else if sysctl_written_len <= P_STAT_OFFSET {
+        format!("sysctl record too short ({sysctl_written_len} bytes written)")
+    } else {
+        let p_stat = sysctl_buffer[P_STAT_OFFSET];
+        let meaning = match u32::from(p_stat) {
+            libc::SIDL => "SIDL: being created",
+            libc::SRUN => "SRUN: runnable",
+            libc::SSLEEP => "SSLEEP: asleep, blocked on something",
+            libc::SSTOP => "SSTOP: stopped",
+            libc::SZOMB => "SZOMB: exited, unreaped",
+            _ => "unrecognized",
+        };
+        format!("{p_stat} ({meaning})")
+    };
+
     eprintln!(
         "[wait-for-exit-timeout] pid {pid}: kill(pid, 0) = {kill_result} (errno={kill_errno:?}); \
          proc_pidinfo: {proc_pidinfo_label}; proc_bsdshortinfo: {proc_bsdshortinfo_label}; \
          waitid(WNOHANG|WNOWAIT|WEXITED|WSTOPPED) = {waitid_label}; \
-         proc_pidinfo(getpid()) = {self_check_label}; in proc_listallpids = {in_pid_list_label}"
+         proc_pidinfo(getpid()) = {self_check_label}; in proc_listallpids = {in_pid_list_label}; \
+         sysctl(KERN_PROC_PID).p_stat = {p_stat_label}"
     );
 }
 

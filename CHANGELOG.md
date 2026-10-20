@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Found, not yet fixed — review 627: the bare `exit` in every re-sent probe's capture is bash's own farewell — the shell read and ran the real command, then got stuck leaving
+
+Review 625's own reading of the re-sent-probe data (`tek2 returned = false` on all 13 armed sites)
+was that input had stopped being honoured. Withdrawn: the capture's own middle fragment — a bare
+`exit`, with no trailing status digit, identical across every site regardless of what each site's
+own real command was (`exit 0`, `exit 7`, bare `exit`) — is not an echo of anything this crate's own
+code writes (checked by grep). It is **interactive bash's own farewell line**, printed once it has
+read and begun acting on the real command. So the shell is not ignoring input; it is **stuck inside
+its own exit**, after which the re-sent probe's command is echoed but — like everything after it —
+never run.
+
+This also reconciles the libproc datum differently than first read: `kill(pid, 0)` succeeding,
+`proc_pidinfo`/`proc_listallpids` reporting nothing, and `waitid(WNOWAIT)` reporting no state change
+are not three separate contradictions once the child may be mid-exit or already a zombie — they are
+three views of one state that needed naming, not three unrelated failures.
+
+Named it with the instrument already built: `p_stat`, read via `sysctl(CTL_KERN, KERN_PROC,
+KERN_PROC_PID)` (added in review 626) rather than through libproc, at `report_child_status_at_
+timeout`'s own timeout path. The byte offset (36, inside Darwin's `struct extern_proc`) was
+**measured off a real hex dump**, not reconstructed from headers — the same instrument review 626
+built for exactly this and that had gone unmeasured until a dedicated `--nocapture` CI step (this
+round's own fix for a silent `cargo test` default: a test that asserts nothing never prints its own
+`eprintln!`s unless it fails) finally surfaced its output. Confirmed twice over before being trusted:
+the bytes at offset 0–15 decode as a plausible `timeval` (a real Unix timestamp near this project's
+own run dates, a microsecond count under 1,000,000), and the four bytes at offset 40 decode as that
+exact child's own real pid — a known, independently-checkable field landing exactly where Darwin's
+own stable struct layout says it must.
+
+Proposes no fix for either finding; reports the data, per the reviewer's own standing instruction for
+this investigation.
+
 ### Fixed — review 626: the re-sent readiness probe was itself a consuming read that could release a deliberately stalled test child; armed explicitly instead
 
 Review 625's own re-sent-probe diagnostic fired at *every* `wait_for_child_outcome` timeout,
