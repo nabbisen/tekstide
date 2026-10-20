@@ -203,3 +203,25 @@ jobs:
           rm -rf "$CI_TMPDIR"
           mkdir -p "$CI_TMPDIR"
           TMPDIR="$CI_TMPDIR" cargo test --workspace --all-targets --no-fail-fast
+
+      - name: libproc-visibility measurement (--nocapture)
+        # Review 627: this crate's own test harness only prints a test's
+        # captured stdout/stderr when that test fails, and
+        # `libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_
+        # view` asserts nothing by design (a measurement, not a test) --
+        # so the step above ran it, it passed, and its own two `eprintln!`
+        # lines (the entire point of the experiment) went into a buffer
+        # this job's log never showed. A dedicated step, not a flag added
+        # to the suite-wide run above: `--nocapture` on the whole suite
+        # would drown this one measurement in every other test's own
+        # stdout, and this binary is already built by the step above, so
+        # this costs a handful of seconds, not a rebuild. The general
+        # rule, stated once rather than rediscovered: a measurement that
+        # is only visible when some other test fails is not a
+        # measurement; any future probe either asserts (and is a test,
+        # covered above) or gets its own step like this one.
+        run: |
+          set -euo pipefail
+          TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
+            runtime::terminal::tests::libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_view \
+            -- --exact --nocapture
