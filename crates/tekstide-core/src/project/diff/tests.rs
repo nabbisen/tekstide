@@ -38,6 +38,12 @@ impl Sandbox {
             std::process::id()
         ));
         fs::create_dir(&root).unwrap();
+        // Review 617/618: $TMPDIR is reached through a symlink on macOS
+        // (/tmp -> /private/tmp, or $TMPDIR itself under /var -> /private/
+        // var), and every caller that validates a root under this sandbox
+        // with SymlinkPolicy::FailClosed hits SymlinkAmbiguous without
+        // this -- the same class watch_test_root() was fixed for.
+        let root = fs::canonicalize(&root).unwrap_or(root);
         Self { root }
     }
 

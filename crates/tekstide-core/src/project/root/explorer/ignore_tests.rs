@@ -46,6 +46,13 @@ impl Repo {
         let home = base.join("home");
         fs::create_dir_all(&repo).unwrap();
         fs::create_dir_all(&home).unwrap();
+        // Review 617/618: canonicalize once `base` exists, before `repo`/
+        // `home` are read back out of it -- the same SymlinkAmbiguous
+        // class watch_test_root() was fixed for ($TMPDIR reached through
+        // a symlink on macOS).
+        let base = fs::canonicalize(&base).unwrap_or(base);
+        let repo = base.join("repo");
+        let home = base.join("home");
         fs::write(home.join(".gitconfig"), "").unwrap();
         let repository = Self {
             base,

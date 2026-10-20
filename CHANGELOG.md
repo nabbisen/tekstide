@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+### Fixed — review 617/618: the `SymlinkAmbiguous` class `watch_test_root()` was fixed for reaches 401 of 507 failures across both crates, not a handful in one
+
+Measured, not estimated: 122 of `tekstide-core`'s 220 failures and **279 of `tekstide`'s 287** carry
+this exact shape — 79% of everything still red on macOS. `TestSandbox` (six independent copies, in
+`tekstide-core`'s `app`, `content`, `project::recent`, `project::root`, `project::root::explorer`,
+and `project::tests::change_detection`, plus a seventh in `tekstide`'s own `surface::editor::tests`),
+`project::diff::tests`'s own `Sandbox` (`tekstide-core`), `project::root::explorer::ignore_tests`'s
+own `Repo` (`tekstide-core`), `HostileFixture::build` itself, and `fresh_project_dir` (independently
+duplicated in `tekstide`'s `shell::tests` and `tests` modules, the single dominant cause of the
+`tekstide` crate's own 279) all built a project root from `std::env::temp_dir()` without
+canonicalizing it first. On macOS, `$TMPDIR` is reached through a symlink (`/tmp` ->
+`/private/tmp`, or `$TMPDIR` itself under `/var` -> `/private/var`), so every caller that validates
+a root under one of these helpers with `SymlinkPolicy::FailClosed` hit `SymlinkAmbiguous` — not a
+product defect (`FailClosed`'s own containment check is correct and platform-independent; macOS
+only changes which paths reach a symlink a user's own project could reach too, on either platform,
+the ordinary case being `~/dev -> /mnt/data/dev`). Each helper now canonicalizes its root once,
+right after creating it, the same fix already applied to `watch_test_root()`.
+`ProjectRootValidator`/`SymlinkPolicy` themselves are unchanged. Nine near-identical sandbox
+builders across two crates is its own, separately recorded observation (not acted on this round):
+an input to RFC-074's own boundary work, not a task for this one.
+
+### Fixed — review 617/618: the hostile fixture's `depth` row cannot be built on macOS at `DEPTH_LEVELS` 1500; `ENAMETOOLONG`, not the `unreadable` row
+
+1500 single-byte directory levels is ~3 KB of path, fitting Linux's 4096-byte `PATH_MAX` but not
+Darwin's 1024-byte one — confirmed on the real runner (`Os { code: 63, kind: InvalidFilename,
+message: "File name too long" }`, Darwin's own `ENAMETOOLONG`; Linux's is `36`), 24 tests wide, all
+of them already known to fail from item 4's own `EILSEQ` finding and simply advancing to the next
+obstacle once that one cleared. Not a product gap: `FileExplorerScanner::scan_directory` and
+`ProjectFileAccessPolicy::resolve_existing` both already degrade *any* `read_dir`/`canonicalize`
+failure to a typed refusal via `map_err(|_| ...)`, discarding the specific `io::Error` rather than
+matching it by errno — confirmed by reading both call sites, so a real deep project already refuses
+cleanly on macOS rather than panicking. `DEPTH_LEVELS` is `200` there (computed with margin against
+the real runner's own observed path length, not guessed), `1500` unchanged on Linux; the two test
+files that sample specific depths now filter their sample points against whichever `DEPTH_LEVELS`
+applies, rather than assuming the Linux figure. **Named, not left implicit**: 1500 levels was
+chosen to guarantee a *recursive* walker would overflow its stack; 200 does not stress any stack, so
+on macOS this test still proves "one level per scan, nothing recurses" but is no longer the stack
+canary it is on Linux — recorded in the test's own doc comment.
+
+### Fixed — review 617/618: the `SSTOP` probe is extended with two more syscalls, after its first run falsified the hypothesis and raised a question about `is_zombie` itself
+
+The first run: 12 firings, all `proc_pidinfo` returning `ESRCH` — the pid does not exist by
+libproc's own account, while `try_wait` had just reported neither exited nor errored, which cannot
+both be true of a healthy process. `is_zombie` (`launch.rs`) rests on the same `proc_pidinfo` call;
+if libproc genuinely cannot see an unreaped child's own existence on macOS, `is_zombie` can never
+return `true` there, and the containment enumeration would treat an unreaped child as a live session
+member. `report_child_status_at_timeout` now also reports `kill(pid, 0)` (the kernel's own
+existence/permission check, independent of libproc) and `waitid(P_PID, pid, &info, WNOHANG |
+WNOWAIT | WEXITED | WSTOPPED)` (what `try_wait` is really seeing, including a stopped child, which
+`try_wait` cannot report) at the same instant — reports the three results; proposes nothing.
+**`WNOWAIT`, not a first-draft `waitpid`**: a plain `waitpid(..., WNOHANG | WUNTRACED)` reaps the
+child on a successful, non-zero return, and `RunningTerminal::drop` derives the session it
+`SIGKILL`s from this same pid (`setsid()` in `pre_exec` makes it the session id) — reaping here
+would free the pid for the kernel to recycle before that destructor runs, and a recycled pid handed
+to the containment sweep enumerates and kills an unrelated session. `WNOWAIT` reports the same
+state, including a stopped child, without the reap. Verified against Apple's real libc with a
+dependency-free standalone crate and `cargo check --target aarch64-apple-darwin/
+x86_64-apple-darwin --tests`, in all three shapes that matter (non-test Apple, test-profile Apple —
+the runner's own shape, test-profile Linux); only the kernel's actual runtime answer remains open.
+
 ### Fixed — RFC-028 review 596's triage, item 5: `project::watch`'s tests hardcoded `/dev/shm`, which does not exist on macOS
 
 Not a product defect, and review 602's own `kqueue`-opens-file-descriptors-where-`inotify`-doesn't

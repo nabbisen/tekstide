@@ -328,10 +328,26 @@ fn a_deeply_nested_tree_is_walked_one_level_per_scan_so_nothing_recurses() {
     // is linear in its depth, so a full walk of 1500 levels is quadratic
     // (about 30 s here, measured) -- which is a fact about the cost of
     // depth, recorded in qa-evidence.md, not something to pay on every run.
+    //
+    // Review 618: on macOS, `DEPTH_LEVELS` is 200, not 1500 (see its own
+    // doc comment in `hostile_fixture.rs`) -- a decision, named here so it
+    // is not mistaken for silently-equal coverage: 1500 was chosen to
+    // guarantee a *recursive* walker would overflow its stack; 200 does
+    // not stress any stack. On macOS this test still proves "one level per
+    // scan, nothing recurses" -- the property its own name states -- but
+    // it is no longer the stack canary the same test is on Linux.
+    // Review 617: sample points above `DEPTH_LEVELS` would sample past
+    // the tree's own bottom on a platform where that constant is smaller
+    // (macOS) -- filtered, not hardcoded, so the curve this measures
+    // narrows with the constant instead of needing its own platform split.
+    let samples: Vec<usize> = [0, 1, 10, 100, 500, 1000, DEPTH_LEVELS]
+        .into_iter()
+        .filter(|level| *level <= DEPTH_LEVELS)
+        .collect();
     let mut relative = String::from("depth");
     let mut timings = Vec::new();
     for level in 0..=DEPTH_LEVELS {
-        if [0, 1, 10, 100, 500, 1000, DEPTH_LEVELS].contains(&level) {
+        if samples.contains(&level) {
             let start = Instant::now();
             let scanned = scan(&fixture, &relative).unwrap_or_else(|error| {
                 panic!("level {level} ({} bytes): {error}", relative.len())

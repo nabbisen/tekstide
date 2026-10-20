@@ -49,8 +49,34 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const BIDI_NAME: &str = "invoice\u{202E}fdp.exe";
 /// A newline inside a name: rendered raw it splits one row into two.
 pub const NEWLINE_NAME: &str = "two\nlines.txt";
-/// Directory nesting, in levels of one-byte names. 1500 levels is ~3 KB of
-/// path -- deep enough to find any recursion limit, inside `PATH_MAX`.
+/// Directory nesting, in levels of one-byte names -- deep enough to find
+/// any recursion limit, inside each platform's own `PATH_MAX`.
+///
+/// Review 617: the single `1500` this constant used to be is ~3 KB of
+/// path, which fits Linux's 4096-byte `PATH_MAX` but not Darwin's
+/// 1024-byte one -- confirmed on the real runner, not assumed: building
+/// this fixture's own `depth` row there fails `fs::create_dir_all` with
+/// `ENAMETOOLONG` (errno **63**, Darwin's own value; Linux's is 36), 24
+/// tests wide, before the scanner this row exists to test is ever reached.
+/// Not a product gap: `FileExplorerScanner::scan_directory` already
+/// degrades *any* `read_dir`/`canonicalize` failure to a typed refusal
+/// (`ExplorerScanError::CannotReadDirectory` or `FileAccessError`,
+/// `explorer.rs`/`root.rs`, both via `map_err(|_| ...)` with the real
+/// `io::Error` discarded, not matched by errno) -- confirmed by reading
+/// both call sites, not inferred, so a real deep project on macOS already
+/// refuses cleanly rather than panicking; only this fixture's own
+/// construction needed a smaller number to stay testable at all.
+///
+/// `200` on macOS, computed with margin, not guessed: the real runner's
+/// own fixture path (`/tmp/tci/tekstide-hostile-<label>-<pid>-<nonce>/
+/// project/depth/`) measures ~80 bytes before any `d/` segment, leaving
+/// headroom for a label, pid and nonce several times longer than observed
+/// and for `$TMPDIR` reached through a deeper real path than CI's own
+/// short one, while 200 levels (400 bytes of `d/` pairs) is still far
+/// beyond any recursion limit a non-recursive walker needs to clear.
+#[cfg(target_os = "macos")]
+pub const DEPTH_LEVELS: usize = 200;
+#[cfg(not(target_os = "macos"))]
 pub const DEPTH_LEVELS: usize = 1500;
 /// The breadth row's size, named by RFC-052 D8.
 pub const BREADTH_ENTRIES: usize = 100_000;
@@ -107,10 +133,16 @@ impl HostileFixture {
             "tekstide-hostile-{label}-{}-{nonce}",
             std::process::id()
         ));
-        let project = base.join("project");
         let outside = base.join("outside");
 
         fs::create_dir_all(outside.join("nested")).unwrap();
+        // Review 617/618: canonicalize once `base` exists, before
+        // `project`/`outside` are read back out of it -- the same
+        // SymlinkAmbiguous class watch_test_root() was fixed for
+        // ($TMPDIR reached through a symlink on macOS).
+        let base = fs::canonicalize(&base).unwrap_or(base);
+        let project = base.join("project");
+        let outside = base.join("outside");
         fs::write(outside.join("secret.txt"), b"outside the project root\n").unwrap();
         fs::write(outside.join("nested/inner.txt"), b"also outside\n").unwrap();
 

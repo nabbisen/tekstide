@@ -161,6 +161,12 @@ fn fresh_project_dir(label: &str) -> PathBuf {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
+    // Review 617/618: $TMPDIR is reached through a symlink on macOS
+    // (/tmp -> /private/tmp, or $TMPDIR itself under /var -> /private/
+    // var), and every caller that validates a root under this directory
+    // with SymlinkPolicy::FailClosed hits SymlinkAmbiguous without this --
+    // the same class watch_test_root() (tekstide-core) was fixed for.
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
     super::scratch_for_this_test(dir)
 }
 
@@ -245,6 +251,9 @@ fn status_bar_summary_pluralizes_a_single_project_correctly() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&project_root).unwrap();
+    // Review 617/618: same SymlinkAmbiguous class fresh_project_dir is
+    // fixed for -- $TMPDIR is reached through a symlink on macOS.
+    let project_root = std::fs::canonicalize(&project_root).unwrap_or(project_root);
     let project_root = super::scratch_for_this_test(project_root);
     app_shell
         .add_project_from_path(&project_root)
@@ -20067,7 +20076,8 @@ fn fresh_project_dir_for_pin() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("tsp-dir-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("inner")).unwrap();
     std::fs::write(dir.join("inner/f"), b"x").unwrap();
-    dir
+    // Review 617/618: same SymlinkAmbiguous class as fresh_project_dir.
+    std::fs::canonicalize(&dir).unwrap_or(dir)
 }
 
 // ---------------------------------------------------------------------

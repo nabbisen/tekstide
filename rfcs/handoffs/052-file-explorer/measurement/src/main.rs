@@ -658,12 +658,19 @@ fn main() {
     let mut path = big.depth_dir();
     let started = Instant::now();
     __testing::scan_and_feed(&mut tree, path.clone());
+    // Review 617: filtered, not hardcoded, so this still makes sense on a
+    // platform where DEPTH_LEVELS is smaller than some of these points
+    // (macOS; see hostile_fixture.rs's own doc comment on the constant).
+    let sample_points: Vec<usize> = [1, 10, 100, 500, 1000, DEPTH_LEVELS]
+        .into_iter()
+        .filter(|level| *level <= DEPTH_LEVELS)
+        .collect();
     let mut sampled = Vec::new();
     for level in 1..=DEPTH_LEVELS {
         path.push("d");
         let one = Instant::now();
         __testing::scan_and_feed(&mut tree, path.clone());
-        if [1, 10, 100, 500, 1000, DEPTH_LEVELS].contains(&level) {
+        if sample_points.contains(&level) {
             sampled.push((level, ms(one.elapsed())));
         }
     }

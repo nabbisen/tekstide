@@ -97,6 +97,23 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   is inert on Linux/Windows (it only un-gates code behind `cfg(target_os = "macos")`). Carry the
   `cfg`-chain reasoning into the manifest as a comment, the same way the AUR `PKGBUILD`'s `CFLAGS`
   strip documents its own reason — a bare feature name is exactly what a later cleanup deletes.
+
+  **First real behavioral evidence toward reconsidering this choice, 2026-10-20, review 617/618 —
+  held, not acted on.** 602 proposed, for item 5's `PermissionDenied` failures, that `kqueue`
+  watches file descriptors (must `open` every watched directory) where `inotify` watches paths
+  (never opens them). That hypothesis was not needed to explain those specific failures (596 item
+  5's own entry below this RFC's D5 addenda: the cause was `/dev/shm` not existing on macOS, found
+  by reading the test file, not the kernel). But once that cause was fixed and the fixtures reached
+  real kernel event delivery on the real runner, two `project::watch::tests::*` tests failed at
+  genuine, substantive assertions about *what the kernel reported*, not at setup:
+  `the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses` ("a grandchild is
+  not watched: a change one level below src is not reported, in the whole window") and
+  `reading_a_watched_file_is_not_reported_but_writing_it_is` ("the write is reported, with its
+  path"). Both are about event delivery, not permissions — a different shape than 602's own
+  fd-vs-path hypothesis, but real, substantive evidence that `kqueue`'s backend disagrees with
+  `inotify`'s on what gets reported and when. **Left red, deliberately, not patched into silence**
+  — named here as the first concrete reason this choice might need revisiting, pending whatever
+  investigation the owner decides this merits; not a decision made by this entry.
 - **D3. A platform-dispatch convention is established before any macOS logic lands, and it is one
   convention, not one per type.** `ConfigPathProvider` and `AppStatePathProvider` both get a
   single dispatch point (e.g. `default_for_host()`); `AppStatePathProvider::macos_default()` is

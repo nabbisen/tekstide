@@ -3006,3 +3006,37 @@ own answer, not something a type-checker can give. Three tests may now exercise 
 path on the next `macos-measurement` run: the wake-notifier test above, and (per 614's own
 prediction) the two unwritable-transcript tests if they fail at their final `wait_for_exit`
 assertion rather than at the `EPIPE`-based setup those tests actually check.
+
+**The first run, 2026-10-20, review 617 -- the hypothesis falsified, and a bigger question raised.**
+12 firings, 12 distinct pids, every one `proc_pidinfo` returning `Os { code: 3, .. }` (`ESRCH`) --
+zero said `SSTOP` or anything else, because the call never once succeeded. The hypothesis as
+literally stated (a stopped child indistinguishable from running) is falsified: `proc_pidinfo`
+reports the pid does not exist at all, a different, odder state than either "running" or "stopped."
+**This threatens `is_zombie` itself, production code, not only this probe**: `try_wait` had just
+reported the same pid as neither exited nor errored, and both cannot be true of a healthy process.
+`is_zombie`'s own call is the identical `proc_pidinfo(PROC_PIDTBSDINFO)` -- if libproc genuinely
+cannot see an unreaped child's own existence on macOS, `is_zombie` can never return `true` there,
+and the containment enumeration (RFC-043's own guard) would treat an unreaped child as a live
+session member. The libproc port's own green run (afdf687, review 608) proved the *enumeration*
+works, not that a zombie was ever actually observed through it.
+
+**Extended, same day, review 617/618 -- two more syscalls, independent of libproc, at the same
+instant.** `kill(pid, 0)` (the kernel's own existence/permission check, no signal delivered) and,
+**corrected before this landed**, `waitid(P_PID, pid, &info, WNOHANG | WNOWAIT | WEXITED |
+WSTOPPED)` -- what `try_wait` is really seeing, including a stopped child (`try_wait` cannot report
+one). The first draft of this extension used `waitpid(pid, &mut status, WNOHANG | WUNTRACED)`
+instead, which reaps the child on a successful, non-zero return. **618's own required correction:
+`RunningTerminal::drop` does not merely `try_wait` its own child, it first sweeps the whole
+session** (`processes_in_session(session_id)`, `session_id` derived from this same pid via
+`setsid()` in `pre_exec`) and `SIGKILL`s every member -- reaping the pid here frees it for the
+kernel to recycle before that destructor runs, and a recycled pid handed to
+`processes_in_session` would enumerate and kill an unrelated session. Tolerating `try_wait`'s own
+already-reaped-child error (`drop`'s actual contract) says nothing about the pid being safe to free
+for reuse, which is the failure mode that matters. `WNOWAIT` is the fix the reviewer named: it still
+reports a stopped child via `WSTOPPED`, without the reap. Verified against Apple's real libc the
+same way as the first probe (a dependency-free standalone crate, `cargo check --target
+aarch64-apple-darwin/x86_64-apple-darwin --tests`, all three shapes); not yet run on the real
+runner. Reports the three results side by side; proposes nothing. `kill` saying "exists" while
+`proc_pidinfo` says `ESRCH` would mean libproc cannot see this state and `is_zombie` is unreliable
+on macOS; `kill` saying `ESRCH` while `waitid` reports a real state change would mean the
+contradiction is in std's own bookkeeping instead.

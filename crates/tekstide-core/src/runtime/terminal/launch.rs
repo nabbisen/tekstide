@@ -991,54 +991,121 @@ fn enumeration_forced_to_fail() -> bool {
     TEST_FORCE_ENUMERATION_FAILURE.with(std::cell::Cell::get)
 }
 
-/// Review 608's own named probe for the last item in 596's triage:
-/// whether `wait_for_exit` timing out on a real macOS run means the child
-/// is genuinely slow to exit, or is stopped (`SSTOP`) and will never be
+/// Review 608's own named probe for the last item in 596's triage, extended
+/// by review 617's own required triangulation after the first run: whether
+/// `wait_for_exit` timing out on a real macOS run means the child is
+/// genuinely slow to exit, or is stopped (`SSTOP`) and will never be
 /// reaped by `try_wait`, which passes no `WUNTRACED` -- a stopped child is
 /// indistinguishable from a running one to that call, and returns
 /// `Ok(None)` forever. Called from `termination.rs`'s platform-neutral
 /// `wait_for_child_outcome`, right before it gives up and returns `None`,
 /// so this is the exact moment the real runner's own symptom
-/// (`the_wake_notifier_wakes_when_real_pty_output_arrives` and, per 615,
-/// possibly the two unwritable-transcript tests too) would be caught in
-/// the act rather than inferred after the fact.
+/// (`the_wake_notifier_wakes_when_real_pty_output_arrives` and others) is
+/// caught in the act rather than inferred after the fact.
 ///
-/// Reuses `is_zombie`'s own `proc_pidinfo(PROC_PIDTBSDINFO)` call, reading
-/// `pbi_status` directly instead of comparing it against one value: this
-/// is a diagnostic naming what the child's own state actually is, not a
-/// yes/no classifier. `#[cfg(test)]`-only, the same shape
-/// `enumeration_progress` already uses, so this is never reachable in a
-/// shipped binary; a no-op on Linux or in a non-test build, so the
-/// platform-neutral caller never needs its own `cfg`.
+/// **The first run's own result forced this extension, not a plan.** Every
+/// one of 12 firings had `proc_pidinfo` answer `ESRCH` -- the pid does not
+/// exist, by libproc's own account, while `try_wait` had just reported
+/// neither exited nor errored. Both cannot be true of a healthy process,
+/// and `is_zombie` (below) rests on this exact call: if libproc genuinely
+/// cannot see an unreaped child's own existence, `is_zombie` can never
+/// return `true` on macOS, which would make the containment enumeration
+/// treat an unreaped child as a live session member -- a production
+/// concern, not only a test one. Two more syscalls, independent of
+/// libproc, triangulate which side the contradiction is on:
+///
+/// - `kill(pid, 0)`: the kernel's own existence/permission check, no
+///   signal actually delivered. `0` means the pid exists; `ESRCH` means it
+///   does not; `EPERM` means it exists and is not this process's own.
+/// - `waitid(P_PID, pid, &info, WNOHANG | WNOWAIT | WEXITED | WSTOPPED)`:
+///   what `try_wait` is really seeing, this time including a stopped child
+///   (`try_wait` passes no `WUNTRACED`/`WSTOPPED` equivalent and cannot
+///   report one) -- **`WNOWAIT` specifically**, so this answers the
+///   question without reaping. A first version of this probe used
+///   `waitpid(..., WNOHANG | WUNTRACED)` instead, which does reap on a
+///   successful, non-zero return. Review 618's own required correction:
+///   `RunningTerminal::drop` does not only `try_wait` its own child, it
+///   first sweeps the **session** (`processes_in_session(session_id)`,
+///   `session_id` derived from this same pid, `setsid()` in `pre_exec`
+///   makes the child's pid the session id) and `SIGKILL`s every member --
+///   reaping the pid here would free it for the kernel to recycle before
+///   that destructor runs, and a recycled pid handed to
+///   `processes_in_session` enumerates and kills an unrelated session.
+///   Tolerating `try_wait`'s own already-reaped-child error (which is all
+///   `drop`'s own comment actually establishes) says nothing about the pid
+///   being safe to free for reuse, which is the failure mode that matters.
+///   `WNOWAIT` is the fix: it still reports a stopped child via
+///   `WSTOPPED`, which was the entire point, but leaves the child waitable
+///   by whoever waits on it next.
+///
+/// `#[cfg(test)]`-only, the same shape `enumeration_progress` already
+/// uses, so this is never reachable in a shipped binary; a no-op on Linux
+/// or in a non-test build, so the platform-neutral caller never needs its
+/// own `cfg`. Reports the pairs; proposes nothing, per 617's own
+/// instruction -- and reads, prints, and consumes nothing, the rule 618
+/// restated as applying to the instruction as much as the implementation.
 #[cfg(all(test, target_os = "macos"))]
 pub(super) fn report_child_status_at_timeout(pid: u32) {
     let pid = pid as libc::pid_t;
+
+    // SAFETY: `kill` with signal `0` delivers nothing; it only asks the
+    // kernel whether `pid` exists and is signalable, which is safe to ask
+    // of any pid, including one that no longer exists.
+    let kill_result = unsafe { libc::kill(pid, 0) };
+    let kill_errno = (kill_result == -1).then(io::Error::last_os_error);
+
     // SAFETY: same as `is_zombie`'s own call -- `info` is a plain,
     // fully-zeroed `proc_bsdinfo` the call writes into, and `size`
     // matches its own real size exactly, the buffer `proc_pidinfo` is
     // documented to require.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    let result =
+    let proc_pidinfo_result =
         unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    if result != size {
-        let error = io::Error::last_os_error();
-        eprintln!(
-            "[wait-for-exit-timeout] proc_pidinfo({pid}) failed: {error:?} -- the errno, not a \
-             guess about it, decides whether this is a vanished process or something else"
-        );
-        return;
-    }
-    let status = info.pbi_status;
-    let label = if status == libc::SSTOP {
-        "SSTOP: stopped, not reaped by try_wait (it passes no WUNTRACED) -- the hypothesis is \
-         confirmed"
-    } else if status == libc::SZOMB {
-        "SZOMB: a zombie try_wait should already have reaped -- unexpected, not the hypothesis"
+    let proc_pidinfo_label = if proc_pidinfo_result != size {
+        format!("failed: {:?}", io::Error::last_os_error())
     } else {
-        "neither SSTOP nor SZOMB -- the hypothesis is falsified for this run"
+        let status = info.pbi_status;
+        let meaning = if status == libc::SSTOP {
+            "SSTOP: stopped, not reaped by try_wait (it passes no WUNTRACED)"
+        } else if status == libc::SZOMB {
+            "SZOMB: a zombie try_wait should already have reaped"
+        } else {
+            "neither SSTOP nor SZOMB"
+        };
+        format!("pbi_status = {status} ({meaning})")
     };
-    eprintln!("[wait-for-exit-timeout] pid {pid} pbi_status = {status} ({label})");
+
+    // SAFETY: `wait_info` is a plain, fully-zeroed `siginfo_t` the call
+    // writes into on a real state change; `WNOWAIT` is the property this
+    // entire call exists for -- see this function's own doc comment for
+    // why a reap here, which plain `waitpid` would risk, is not
+    // acceptable from a diagnostic.
+    let mut wait_info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let options = libc::WNOHANG | libc::WNOWAIT | libc::WEXITED | libc::WSTOPPED;
+    let waitid_result =
+        unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &raw mut wait_info, options) };
+    let waitid_label = if waitid_result == -1 {
+        format!("failed: {:?}", io::Error::last_os_error())
+    } else if wait_info.si_pid == 0 {
+        "no state change available right now".to_owned()
+    } else {
+        // Darwin's own si_code values for a child (not named constants in
+        // `libc`, the same shape `EILSEQ = 92` already took elsewhere in
+        // this file): 1 CLD_EXITED, 2 CLD_KILLED, 3 CLD_DUMPED,
+        // 4 CLD_TRAPPED, 5 CLD_STOPPED, 6 CLD_CONTINUED. `5` is the
+        // hypothesis; nothing here was reaped either way.
+        format!(
+            "si_pid={}, si_code={}, si_status={} -- not reaped",
+            wait_info.si_pid, wait_info.si_code, wait_info.si_status
+        )
+    };
+
+    eprintln!(
+        "[wait-for-exit-timeout] pid {pid}: kill(pid, 0) = {kill_result} (errno={kill_errno:?}); \
+         proc_pidinfo: {proc_pidinfo_label}; waitid(WNOHANG|WNOWAIT|WEXITED|WSTOPPED) = \
+         {waitid_label}"
+    );
 }
 
 #[cfg(not(all(test, target_os = "macos")))]
