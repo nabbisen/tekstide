@@ -2940,7 +2940,7 @@ purgeable. The product already distinguishes those two states deliberately
 (`transcripts_still_being_written_count`), so this is behaviour, not a defect; the only open
 question is how long the window is in practice, and nobody needs to answer that today.
 
-## Containment's own guard is inert on macOS, 2026-10-21 (review 625) -- read this before trusting any macOS row here
+## Containment's own guard is blind to departures on macOS, 2026-10-21 (reviews 625-629) -- narrower than this entry first claimed
 
 `assert_session_is_empty` (`runtime/terminal/launch.rs`), the PR-043-A guard that makes a leaked
 process **red**, asserts `session_confirmed_empty`, which is
@@ -2951,11 +2951,24 @@ from a complete 138-pid `proc_listallpids` list, and `ESRCH` from both `proc_pid
 predicate is **true** and the guard cannot fail there. `RunningTerminal::drop`'s `SIGKILL`
 escalation, gated on the same predicate, does not run either.
 
-**Consequence for this document:** a macOS run that shows no containment failure is not evidence of
-containment. Review 608's "~42 containment failures cleared" was the assertion losing the ability to
-fail. The full record is in RFC-028 D5's own dated correction (2026-10-21) and in
-`release-checklist.md`'s standing watch that every containment guard be shown **failing** per
-platform before a release claims it.
+**Corrected the same day, by review 628's own measurement.** This entry first said the guard "cannot
+fail" on macOS and that review 608's "~42 cleared" were vacuous passes. Both were too strong. A PTY
+child that is alive and *not* exiting is **fully visible** to libproc -- `proc_pidinfo` found it,
+`proc_listallpids` listed it, measured side by side with a plain child. The blindness is confined to
+the `P_WEXIT` window, which reviews 625-629 then explained: an exiting shell sits inside `proc_exit`
+while its PTY master is open and unread, and `proc_find` -- which both `proc_pidinfo` flavours use --
+refuses a process in that state.
+
+**So the honest size of the gap:** a real survivor, the live backgrounded job RFC-043 exists to
+catch, **is** visible and the guard **would** fire. What the guard cannot distinguish, during the
+window `RunningTerminal::drop` runs in, is "the session is empty" from "the session holds only
+processes on their way out". Unverifiable for departures; not inoperative for survivors. Whether
+608's cleared failures were genuinely-empty sessions or mid-exit ones is unmeasured either way.
+
+**Consequence for this document:** a macOS run showing no containment failure is weaker evidence than
+the same run on Linux, and the way to settle it is the ablation in `release-checklist.md`'s standing
+watch -- a live `trap '' HUP` survivor, guard must go red -- not an argument from either direction.
+RFC-028 D5 carries the dated correction.
 
 ## Reopened on macOS, 2026-10-19 -- `the_wake_notifier_wakes_when_real_pty_output_arrives`
 
