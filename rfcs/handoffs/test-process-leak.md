@@ -2940,6 +2940,23 @@ purgeable. The product already distinguishes those two states deliberately
 (`transcripts_still_being_written_count`), so this is behaviour, not a defect; the only open
 question is how long the window is in practice, and nobody needs to answer that today.
 
+## Containment's own guard is inert on macOS, 2026-10-21 (review 625) -- read this before trusting any macOS row here
+
+`assert_session_is_empty` (`runtime/terminal/launch.rs`), the PR-043-A guard that makes a leaked
+process **red**, asserts `session_confirmed_empty`, which is
+`processes_in_session(..).is_some_and(|s| s.is_empty())`. On macOS, review 625 measured a live PTY
+child that `kill(pid, 0)` can signal and `waitid` tracks, which libproc cannot see at all: absent
+from a complete 138-pid `proc_listallpids` list, and `ESRCH` from both `proc_pidinfo` flavours, while
+`proc_pidinfo(getpid())` succeeds. A blind-but-successful enumeration returns `Some(vec![])`, so the
+predicate is **true** and the guard cannot fail there. `RunningTerminal::drop`'s `SIGKILL`
+escalation, gated on the same predicate, does not run either.
+
+**Consequence for this document:** a macOS run that shows no containment failure is not evidence of
+containment. Review 608's "~42 containment failures cleared" was the assertion losing the ability to
+fail. The full record is in RFC-028 D5's own dated correction (2026-10-21) and in
+`release-checklist.md`'s standing watch that every containment guard be shown **failing** per
+platform before a release claims it.
+
 ## Reopened on macOS, 2026-10-19 -- `the_wake_notifier_wakes_when_real_pty_output_arrives`
 
 Row 33 said "still passes. Retired from active tracking." That was true of Linux and is **false on
