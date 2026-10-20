@@ -3064,8 +3064,21 @@ row 8's documented shape exactly; the assertion text says otherwise, and the pla
 Recorded here as a macOS recurrence of the same *test*, with a different proximate cause, and left
 unattributed rather than guessed at.
 
-**Plausibly the same family as this round's open shell question**, not confirmed: review 619's own
-`kill`/`waitid` triangulation proved a `/bin/sh` child on this runner was alive and running five
-seconds after `exit\n` was written to its PTY. A shell that does not act on written input within
-seconds would also fail this test exactly this way. Both stay open; neither is evidence for the
-other yet.
+**Attributed, 2026-10-20 (review 622): this is not an intermittent on macOS, it is one member of a
+cluster of 18.** The evidence is in run `39421585292`'s own log, and needed no further measurement.
+`capture_real_sgr_output` (`transcript/reader/tests.rs:379-398`) writes
+`printf '\033[31mred\033[0m\n'` as *literal backslash-033 text*, so the tty's own echo contains
+the word `red` -- which is why its `read_until_contains(b"red")` succeeds -- and contains no `0x1b`,
+which is why `.expect("captured output must contain a real control sequence")` fails. An `ESC` byte
+there can only come from `printf` actually running, and it never appeared. Meanwhile the
+wake-notifier's marker is literally present in the bytes it writes, so the kernel's line discipline
+satisfies that assertion with no process on the slave at all.
+
+So on macOS: input reaches the line discipline (it is echoed), the echo comes back as "output", and
+**nothing executes**. This row's own failure -- only the echoed command line, never the
+`descendant-pid:` line -- is that same cause, which is also why row 8's Linux entry above already
+described this exact shape years of flakes ago: *"the read having returned only the shell's echo of
+the command line"*. The Linux occurrences remain intermittent and remain fixed; the macOS one is
+deterministic and belongs to the cluster, so it is **not counted as a flake recurrence** and is not
+tracked here beyond this note. Review 619's `kill`/`waitid` triangulation (child alive, running,
+never stopped, five seconds after `exit\n`) is consistent with it and was the first signal.
