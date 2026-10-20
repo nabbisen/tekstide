@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Fixed — review 630: the macOS session-member check no longer trusts `list_all_pids` to always see the leader — a real `OrphanedUnknown` miscount, not only a wedge
+
+`linux_runtime_terminates_session_leader_with_sighup` surfaced a second, distinct consequence of the
+same `proc_exit` blindness (reviews 625-629): `wait_for_session_outcome` reads `session_confirmed_
+empty` as its own signal that the session has nothing left to report on, and that predicate is built
+on `processes_in_session`'s own bulk `list_all_pids` enumeration — which, measured directly, omits
+a pid that is genuinely alive but mid-`proc_exit`. For an ordinary, healthy close, the session leader
+*is* `proc_exit`'s own target, so the session could read "confirmed empty" microseconds before the
+leader's own real exit status exists, reporting a clean `exit 0` as `OrphanedUnknown` instead.
+
+Fixed at the two places that make this true rather than assumed: `is_zombie` now falls back to
+`sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID)`'s own `p_stat` field when `proc_pidinfo` cannot answer
+(the same `proc_find` refusal reviews 627-629 already measured, reused here as a production fallback
+rather than only a test-only diagnostic), and `processes_in_session` now checks the session leader's
+own pid directly — via `kill`/`sysctl`, never `getsid`, since only the first two were actually
+measured to answer correctly during `proc_exit` — whenever the bulk scan never visited it at all,
+rather than treating its absence from the enumeration as departure. Both offsets (`p_flag` at 32,
+`p_stat` at 36) are the same ones measured off a real hex dump in review 627, now shared between the
+`#[cfg(test)]` diagnostic that first measured them and this production code, rather than duplicated.
+
+Not yet measured on the real runner: this push is held for review before going to CI, since it
+changes production containment logic, not only test instrumentation. The before/after `OrphanedUnknown`
+rate on `linux_runtime_terminates_session_leader_with_sighup` is the confirmation this fix needs.
+
 ### Fixed — review 629: the cluster's own remedy, generalised — `wait_for_exit_draining` at the remaining 12 sites, and the production ordering that already avoided this documented as deliberate
 
 Both halves of review 628's experiment came back positive: `P_WEXIT` set and stable over three

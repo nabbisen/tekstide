@@ -832,6 +832,20 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// diagnosed afterward from `/proc/<pid>/task/*/wchan` on the hung
 /// process -- information that does not exist once a CI job is
 /// cancelled. If this attempt hangs too, the last line printed is where.
+///
+/// **Review 630's own required correction: the session leader's own pid
+/// can be absent from `list_all_pids`'s own bulk output while it is
+/// mid-`proc_exit`**, measured directly -- `proc_listallpids` omitted it
+/// on 13 of 13 real firings, the same window `is_zombie`'s own `sysctl`
+/// fallback (above) was added for, not merely failing to confirm it once
+/// visited but never presenting it as a candidate at all. A pid this
+/// loop never visits cannot be added to `members` no matter what
+/// [`live_member_of_session`] would have said about it. The session
+/// leader's own pid is not a pid this function has to discover, though
+/// -- it already *is* `session_id`, by construction (`setsid()` in
+/// `pre_exec` makes the child's own pid the session id) -- so its
+/// membership is never in question, only its existence and zombie
+/// status, checked directly below when the bulk scan never visited it.
 #[cfg(target_os = "macos")]
 pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::pid_t>> {
     if enumeration_forced_to_fail() {
@@ -844,10 +858,23 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
         pids.len()
     ));
     let mut members = Vec::new();
+    let mut session_leader_visited = false;
     for pid in pids {
+        if pid == session_id {
+            session_leader_visited = true;
+        }
         enumeration_progress(&format!("processes_in_session: checking pid {pid}"));
         if live_member_of_session(pid, session_id)? {
             members.push(pid);
+        }
+    }
+    if !session_leader_visited {
+        enumeration_progress(&format!(
+            "processes_in_session: session leader {session_id} absent from list_all_pids's own \
+             bulk output -- checking it directly rather than treating absence as departure"
+        ));
+        if session_leader_still_alive(session_id)? {
+            members.push(session_id);
         }
     }
     enumeration_progress(&format!(
@@ -855,6 +882,48 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
         members.len()
     ));
     Some(members)
+}
+
+/// The session leader's own pid is always a known quantity to this
+/// module -- it *is* `session_id` -- so, unlike [`live_member_of_session`],
+/// this never calls `getsid`: whether this exact pid belongs to its own
+/// session is true by construction, not something to ask the kernel
+/// again. What remains genuinely unknown when the bulk scan omits it is
+/// only existence and zombie status, both answered without libproc:
+/// `kill(pid, 0)` (existence, the same `proc_find`-independent check
+/// [`is_zombie`]'s own fallback reuses) and `p_stat` via
+/// [`p_stat_via_sysctl`] (zombie exclusion, response 340's own rule).
+///
+/// `getsid`'s own behaviour against a pid mid-`proc_exit` has not been
+/// measured here, unlike `kill` and `sysctl` (review 628's own
+/// `--nocapture` measurement confirmed both, 13 of 13); this function
+/// deliberately never calls it, rather than assume it behaves like the
+/// two mechanisms that were actually checked.
+#[cfg(target_os = "macos")]
+fn session_leader_still_alive(pid: libc::pid_t) -> Option<bool> {
+    // SAFETY: `kill` with signal `0` delivers nothing; it only asks the
+    // kernel whether `pid` exists and is signalable, which is safe to
+    // ask of any pid, including one that no longer exists.
+    let kill_result = unsafe { libc::kill(pid, 0) };
+    if kill_result == -1 {
+        return match io::Error::last_os_error().raw_os_error() {
+            Some(libc::ESRCH) => Some(false),
+            _ => {
+                enumeration_progress(&format!(
+                    "session_leader_still_alive: kill({pid}, 0) failed unexpectedly, failing \
+                     the whole enumeration rather than silently excluding this pid"
+                ));
+                None
+            }
+        };
+    }
+    match p_stat_via_sysctl(pid) {
+        Some(p_stat) => Some(u32::from(p_stat) != libc::SZOMB),
+        // `kill` already confirmed existence; an unqueryable `p_stat`
+        // stays counted as live rather than excluded, the same direction
+        // `is_zombie`'s own last-resort default already takes.
+        None => Some(true),
+    }
 }
 
 /// A pid counts as a live member of `session_id` only if its own
@@ -922,6 +991,66 @@ fn live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> Option<b
     Some(!is_zombie(pid))
 }
 
+/// Offsets into `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID)`'s own
+/// `struct kinfo_proc` reply, inside Darwin's `struct extern_proc`
+/// (`p_un` timeval ∪ pointer-pair, 16 bytes; `p_vmspace`/`p_sigacts`, two
+/// zeroed kernel pointers Apple's own sysctl redacts, 8 bytes each;
+/// `p_flag`, 4 bytes; `p_stat`, 1 byte). **Measured, not read from a
+/// header this project has no way to compile against**: review 627's own
+/// `--nocapture` CI step dumped the plain child's first 64 bytes, and the
+/// offsets were cross-checked from two independent fields before being
+/// trusted here -- offset 32 decoded to `0x00004004` (`P_EXEC |
+/// P_LP64`), exactly what a freshly `exec`'d 64-bit process carries, and
+/// offset 40 decoded to that exact child's own real pid. Reused here,
+/// production code, not only the `#[cfg(test)]` diagnostic that first
+/// measured it (`report_child_status_at_timeout`), because review 630's
+/// own fix needs the identical field this project already trusts enough
+/// to report in CI.
+#[cfg(target_os = "macos")]
+const P_FLAG_OFFSET: usize = 32;
+#[cfg(target_os = "macos")]
+const P_STAT_OFFSET: usize = 36;
+
+/// `p_stat`, read through `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID)`
+/// rather than through libproc. `None` only when the kernel itself says
+/// there is no such pid (a genuinely absent process) or the reply itself
+/// is malformed/too short to reach the field -- treated as
+/// "unconfirmable," the same direction every other unqueryable case in
+/// this file already takes, never as a silent "must be fine."
+///
+/// **Why this call, and not `proc_pidinfo`, for review 630's own fix**:
+/// `proc_pidinfo`/`proc_listallpids` both route through `proc_find`,
+/// which refuses a process mid-`proc_exit` (`P_WEXIT` set in its own
+/// `p_flag`) -- measured directly, 13 of 13 firings, `ESRCH` from both
+/// flavours while `kill(pid, 0)` and this same `sysctl` call both still
+/// answered, with `p_stat` reading `SRUN`, stable over three samples
+/// 100ms apart. `sysctl` does not go through `proc_find`, so it is the
+/// one mechanism proven to answer correctly in exactly the state this
+/// fix exists for.
+#[cfg(target_os = "macos")]
+fn p_stat_via_sysctl(pid: libc::pid_t) -> Option<u8> {
+    let mut mib: [libc::c_int; 4] = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+    let mut buffer = vec![0_u8; 4096];
+    let mut written_len: libc::size_t = buffer.len();
+    // SAFETY: `buffer` is valid and sized as declared for the duration
+    // of the call; the read below is a plain, bounds-checked byte index,
+    // never a typed/aligned access into the buffer.
+    let result = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            buffer.as_mut_ptr().cast(),
+            &raw mut written_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if result != 0 || written_len <= P_STAT_OFFSET {
+        return None;
+    }
+    Some(buffer[P_STAT_OFFSET])
+}
+
 /// `proc_pidinfo`'s own documented way to read a process's `p_stat`
 /// field without `/proc` -- `result != size` covers both an outright
 /// failure (the pid is already gone) and a short read, treated the same
@@ -930,6 +1059,19 @@ fn live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> Option<b
 /// direction regardless (review 598 confirmed this arm, not the one
 /// that needed fixing): an unqueryable process stays counted as live
 /// rather than excluded.
+///
+/// **Review 630's own required addition: when `proc_pidinfo` cannot
+/// answer, ask `sysctl` before falling back to the weak default.**
+/// `proc_pidinfo` failing is not only "the pid is already gone" --
+/// review 628/629 measured it also meaning "the pid is mid-`proc_exit`,
+/// which `proc_find` refuses to answer about at all, though the process
+/// is alive." `sysctl` does not route through `proc_find`, so it can
+/// resolve what `proc_pidinfo` could not: `SZOMB` is still excluded (the
+/// exact response-340 rule this function exists to apply), anything
+/// else is confirmed alive by a kernel-authoritative read rather than
+/// merely presumed. Only when `sysctl` *also* cannot answer does this
+/// fall back to the original, weaker "unqueryable, so presume alive"
+/// default.
 #[cfg(target_os = "macos")]
 fn is_zombie(pid: libc::pid_t) -> bool {
     // SAFETY: `info` is a plain, fully-zeroed `proc_bsdinfo` the call
@@ -939,7 +1081,13 @@ fn is_zombie(pid: libc::pid_t) -> bool {
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     let result =
         unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    result == size && info.pbi_status == libc::SZOMB
+    if result == size {
+        return info.pbi_status == libc::SZOMB;
+    }
+    match p_stat_via_sysctl(pid) {
+        Some(p_stat) => u32::from(p_stat) == libc::SZOMB,
+        None => false,
+    }
 }
 
 /// Bounded enumeration, not sized-to-fit -- see [`processes_in_session`]'s
@@ -1228,24 +1376,9 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
     // review 627's own farewell finding is `SRUN`/`SSLEEP` (alive,
     // blocked on something) or `SZOMB` (exited, unreaped) -- and, review
     // 628's own falsifier for its `proc_exit` hypothesis, whether
-    // `P_WEXIT` (`0x2000`) is set in `p_flag`.
-    //
-    // Both offsets measured, not guessed, off a real hex dump
-    // (`libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_
-    // view`'s own `--nocapture` measurement, review 627's required
-    // dedicated CI step), and cross-checked from two independent
-    // directions before being trusted: offset 32 (`p_flag`) decoded to
-    // `0x00004004` (`P_EXEC | P_LP64`), exactly what a freshly `exec`'d
-    // 64-bit process carries, and offset 40 (`p_pid`, 4 bytes past
-    // `p_stat`'s own single byte plus 3 bytes of alignment padding)
-    // decoded to that exact child's own real pid -- matching Darwin's
-    // long-stable `struct extern_proc` layout (`p_un` timeval ∪
-    // pointer-pair, 16 bytes; `p_vmspace`/`p_sigacts`, two zeroed kernel
-    // pointers Apple's own sysctl redacts, 8 bytes each; `p_flag`, 4
-    // bytes, at offset 32; `p_stat`, 1 byte, at offset 36) from two
-    // independent fields at once, not one.
-    const P_FLAG_OFFSET: usize = 32;
-    const P_STAT_OFFSET: usize = 36;
+    // `P_WEXIT` (`0x2000`) is set in `p_flag`. `P_FLAG_OFFSET`/
+    // `P_STAT_OFFSET` are this file's own module-level constants -- see
+    // their own doc comment, by `is_zombie`, for how they were measured.
     const P_WEXIT: u32 = 0x2000;
 
     // Review 628: three samples, 100ms apart, not one -- a single
