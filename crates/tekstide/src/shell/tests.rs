@@ -1695,18 +1695,46 @@ fn poll_demo_pane_until_parsed<T>(
 /// fix, review 623's, copied here rather than shared across the crate
 /// boundary: this test drives a `TerminalPane`, this crate's own
 /// UI-level wrapper around a terminal session, not the `TerminalRuntime`
-/// the core crate's helper operates on directly. Same mechanism, same
-/// discriminator: `echo tek$((1+1))` answers `tek2` only once a real
-/// shell evaluates the arithmetic expansion, where the rendered pane's
-/// own echo of the unexpanded command contains no such substring.
+/// the core crate's helper operates on directly. The probe command, its
+/// marker and the timeout are the one thing shared, via `tekstide-core`'s
+/// own `pub` `test_support` constants (review 624) -- so the two copies
+/// cannot quietly drift apart on what "ready" means.
+///
+/// **The criterion for where this belongs, from review 624:** a test
+/// that writes after launch and expects the write to be *executed*
+/// should call this first; it must not go where the test's own property
+/// under test is silence, an exact byte count, or reader/pane timing.
+///
+/// **Re-sends the probe every poll, not once:** a single write is itself
+/// a write landing before the shell has set its terminal modes -- the
+/// exact race this helper exists to detect -- so writing once risks the
+/// handshake being eaten by that same race and panicking after the full
+/// timeout having learned nothing. `echo` is idempotent; the first send
+/// that survives ends the loop.
 fn wait_for_shell_ready(state: &mut State) {
-    state.terminal_panes[0].write_input(b"echo tek$((1+1))\n");
-    let ready =
-        poll_demo_pane_until_parsed(state, |rendered| rendered.contains("tek2").then_some(()));
-    assert!(
-        ready.is_some(),
-        "shell did not become ready before the readiness deadline"
-    );
+    use tekstide_core::test_support::{
+        SHELL_READINESS_MARKER, SHELL_READINESS_PROBE_COMMAND, SHELL_READINESS_TIMEOUT,
+    };
+    let marker =
+        std::str::from_utf8(SHELL_READINESS_MARKER).expect("the readiness marker is plain ASCII");
+
+    let started = std::time::Instant::now();
+    loop {
+        state.terminal_panes[0].write_input(SHELL_READINESS_PROBE_COMMAND);
+        for pane in &mut state.terminal_panes {
+            pane.poll();
+        }
+        let rendered = rendered_demo_pane_text(state);
+        if rendered.contains(marker) {
+            return;
+        }
+        if started.elapsed() >= SHELL_READINESS_TIMEOUT {
+            panic!(
+                "shell did not become ready before the readiness deadline; captured: {rendered}"
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }
 
 /// `active_terminal_focus` is `Some` only when both halves of its own

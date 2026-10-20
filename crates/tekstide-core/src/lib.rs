@@ -29,5 +29,14 @@ pub mod transcript;
 /// a single static from, so the cap is genuinely process-wide rather
 /// than two independent per-module pools that would do nothing to
 /// reduce concurrent forks *across* modules.
-#[cfg(test)]
-pub(crate) mod test_support;
+/// Review 624: `pub`, not `pub(crate)`, and gated on the same
+/// `#[cfg(any(test, feature = "test-support"))]` this crate's own D4 leak
+/// guard and `ProjectSession::add_transcript` already use -- a bare
+/// `#[cfg(test)]` module path is invisible to a consuming crate's own
+/// tests, the same lesson those two record, and `tekstide`'s own
+/// `shell/tests.rs` is exactly such a caller now (the PTY-startup-race
+/// readiness handshake's shared constants, below). Every pre-existing
+/// item in this module stays `pub(crate)`: this only widens *when* the
+/// module compiles, not *what in it* a consuming crate can reach.
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;

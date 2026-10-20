@@ -286,6 +286,7 @@ fn linux_runtime_reads_output_through_bounded_buffer() {
         .launch_project_shell(&project, spec)
         .expect("plain shell launch should succeed");
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
 
     runtime
         .write_input(
@@ -298,6 +299,17 @@ fn linux_runtime_reads_output_through_bounded_buffer() {
         .expect("bounded PTY read should succeed");
 
     assert_eq!(output.len(), 256);
+    // Review 624: the echo of the command's own unexpanded `printf`
+    // format string carries the literal text `%03d`, which satisfies a
+    // bare length assertion whether or not the shell ever ran it --
+    // exactly the debt review 622 named. Only a running shell expands
+    // `"$i"` and produces the real first line.
+    assert!(
+        contains_subsequence(&output, b"tekstide-output-000-"),
+        "flood output should contain the real, expanded first line, not just enough echoed \
+         bytes to fill the buffer; captured: {}",
+        String::from_utf8_lossy(&output)
+    );
     assert!(matches!(
         event,
         TerminalRuntimeEvent::OutputBuffered {

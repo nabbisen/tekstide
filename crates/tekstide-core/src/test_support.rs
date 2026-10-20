@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::sync::{Condvar, Mutex, OnceLock};
 
 /// Removes `path` (a directory or a file) when the current test's thread
@@ -8,6 +9,15 @@ use std::sync::{Condvar, Mutex, OnceLock};
 /// the thread-local's destructor is the end of the test. Before this the
 /// suite left about 43 000 entries in `/tmp` (review 421/422). Not for a
 /// path another thread or process must outlive the test's own thread.
+///
+/// `#[cfg(test)]`, explicitly: review 624 broadened this module's own
+/// gate to `#[cfg(any(test, feature = "test-support"))]` so `tekstide`'s
+/// consuming tests could reach the new `SHELL_READINESS_*` constants
+/// below; every item that was relying on the module's own old, narrower
+/// `#[cfg(test)]` needs that cfg restated on itself now, or it compiles
+/// (and, being `pub(crate)` and unreachable, lints as dead code) in a
+/// `feature = "test-support"`-only build too.
+#[cfg(test)]
 pub(crate) fn remove_when_this_test_ends(path: std::path::PathBuf) -> std::path::PathBuf {
     struct Remove(std::path::PathBuf);
     impl Drop for Remove {
@@ -72,11 +82,13 @@ pub(crate) fn remove_when_this_test_ends(path: std::path::PathBuf) -> std::path:
 /// **What this removes**: wall-clock overlap between *different test
 /// functions'* real processes -- nothing else. It does not remove any
 /// coverage of concurrent readers *within* a single test.
+#[cfg(test)]
 pub(crate) struct RealProcessLimiter {
     count: Mutex<usize>,
     freed: Condvar,
 }
 
+#[cfg(test)]
 impl RealProcessLimiter {
     const CAP: usize = 6;
 
@@ -107,8 +119,10 @@ impl RealProcessLimiter {
 /// declaration order, so binding it first makes it drop *last*, holding
 /// the slot for the test's entire real-process lifetime rather than
 /// releasing early while cleanup is still in flight.
+#[cfg(test)]
 pub(crate) struct RealProcessSlot(&'static RealProcessLimiter);
 
+#[cfg(test)]
 impl Drop for RealProcessSlot {
     fn drop(&mut self) {
         let mut count = self
@@ -152,8 +166,10 @@ impl Drop for RealProcessSlot {
 /// platform (`ESRCH`, ignored) -- simpler than tracking "already cleaned
 /// up" state to skip it, and correctness does not depend on which caller
 /// (this `Drop` impl, or a test's own explicit call) cleans up first.
+#[cfg(test)]
 pub(crate) struct KillOnDropChild(Option<std::process::Child>);
 
+#[cfg(test)]
 impl KillOnDropChild {
     pub(crate) fn new(child: std::process::Child) -> Self {
         Self(Some(child))
@@ -181,6 +197,7 @@ impl KillOnDropChild {
     }
 }
 
+#[cfg(test)]
 impl Drop for KillOnDropChild {
     fn drop(&mut self) {
         if let Some(mut child) = self.0.take() {
@@ -208,6 +225,33 @@ pub(crate) fn process_is_alive(pid: u32) -> bool {
     }
     std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
+
+/// Review 623/624: the readiness handshake for the macOS PTY-startup
+/// race (`/bin/sh` is `bash` there, which reconfigures its own terminal
+/// modes at startup, and a terminal-mode change can discard input the
+/// kernel's line discipline has *already echoed*). `pub`, not
+/// `pub(crate)`: `tekstide-core`'s own `runtime::terminal::launch::
+/// wait_for_shell_ready` and `tekstide`'s `shell::tests::
+/// wait_for_shell_ready` (which drives `TerminalPane`, not
+/// `TerminalRuntime`, so it cannot share that function itself) both
+/// build their own read loop around these same three values, so "what
+/// readiness means" has one definition instead of two that can drift.
+///
+/// `$((1+1))` is arithmetic expansion: only a shell that actually
+/// evaluates the command produces the digit `2`; the unexpanded text
+/// `echo tek$((1+1))` an unread terminal merely echoes back contains no
+/// such substring. Idempotent and side-effect-free, so a caller may
+/// (and, per review 624's correction, must) resend it on every polling
+/// iteration rather than once -- a single send can itself be the write
+/// that gets discarded by the exact race this handshake exists to work
+/// around, which would otherwise turn a real race into a flat panic
+/// after the full timeout with nothing learned.
+pub const SHELL_READINESS_PROBE_COMMAND: &[u8] = b"echo tek$((1+1))\n";
+/// See [`SHELL_READINESS_PROBE_COMMAND`]. Never present in the probe's
+/// own unexpanded, echoed text.
+pub const SHELL_READINESS_MARKER: &[u8] = b"tek2";
+/// See [`SHELL_READINESS_PROBE_COMMAND`].
+pub const SHELL_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[cfg(test)]
 mod tests {

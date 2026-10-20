@@ -1232,6 +1232,34 @@ pub(super) fn report_child_status_at_timeout(_pid: u32) {}
 /// sites that happened to be seen failing always misses the ones that
 /// didn't fail in that particular run.
 ///
+/// **Review 624's own required correction: the probe is re-sent every
+/// iteration, not written once.** A single write is itself a write
+/// landing before the shell has set its terminal modes -- exactly the
+/// race this helper exists to detect -- so a first version that wrote
+/// once could be eaten by the same race and panic after a flat timeout,
+/// turning 18 informative assertion failures into 18 uninformative
+/// handshake panics and adding the full timeout to every run that hit
+/// it. `echo` is idempotent and side-effect-free, so resending it costs
+/// nothing and the first send that survives ends the loop.
+///
+/// **The criterion for where this belongs, from review 624:** a test
+/// that writes after launch and expects the write to be *executed*
+/// should call this first. It must **not** go where the test's own
+/// property under test is silence, an exact byte count, or reader-thread
+/// timing -- this helper's whole purpose is to guarantee output has
+/// already arrived, which is the negation of what such a test asserts.
+/// `runtime::terminal::reader::tests` is the one call site that needed
+/// this judged test by test rather than applied file-wide: its wake
+/// notifier test needed the handshake (it expects execution), its other
+/// ten `spawn_output_reader` sites do not (several assert that *no*
+/// output has arrived yet).
+///
+/// The probe command, marker and timeout are shared with `tekstide`'s own
+/// `shell::tests::wait_for_shell_ready` (a separate copy, since that one
+/// drives `TerminalPane`, not `TerminalRuntime`, and nothing reaches
+/// across the crate boundary here) via `crate::test_support`'s own `pub`
+/// constants, so "what readiness means" has one definition.
+///
 /// `#[cfg(test)]`, not `pub(super)`: every call site is in a different
 /// test module across this crate (`agent::tests`, `audit::tests::
 /// integration`, `transcript::reader::tests`, `runtime::terminal::reader::
@@ -1239,18 +1267,24 @@ pub(super) fn report_child_status_at_timeout(_pid: u32) {}
 /// test-only reach `super::tests` already has, re-exported by `mod.rs`.
 #[cfg(test)]
 pub(crate) fn wait_for_shell_ready(runtime: &mut TerminalRuntime, handle: &TerminalRuntimeHandle) {
-    runtime
-        .write_input(handle, b"echo tek$((1+1))\n")
-        .expect("readiness probe should write to PTY");
+    use crate::test_support::{
+        SHELL_READINESS_MARKER, SHELL_READINESS_PROBE_COMMAND, SHELL_READINESS_TIMEOUT,
+    };
 
     let started = Instant::now();
     let mut output = Vec::new();
-    while started.elapsed() < Duration::from_secs(5) {
+    while started.elapsed() < SHELL_READINESS_TIMEOUT {
+        runtime
+            .write_input(handle, SHELL_READINESS_PROBE_COMMAND)
+            .expect("readiness probe should write to PTY");
         let (chunk, _) = runtime
-            .read_available_bounded_for(handle, Duration::from_millis(50), 16 * 1024)
+            .read_available_bounded_for(handle, Duration::from_millis(250), 16 * 1024)
             .expect("readiness probe read should succeed");
         output.extend_from_slice(&chunk);
-        if output.windows(4).any(|window| window == b"tek2") {
+        if output
+            .windows(SHELL_READINESS_MARKER.len())
+            .any(|window| window == SHELL_READINESS_MARKER)
+        {
             return;
         }
     }

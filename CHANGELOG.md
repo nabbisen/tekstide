@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Fixed — review 624: the readiness handshake could itself be eaten by the race it detects; a 25th site; the two copies now share one definition
+
+Review 623's own handshake wrote its probe once and read for up to 5s — but the race under test is
+exactly "a write landing before the shell sets its terminal modes is discarded," and the probe is
+such a write. A discarded probe would have replaced an informative assertion failure with an
+uninformative handshake panic, learning nothing and costing the full timeout. Fixed: both
+`wait_for_shell_ready` copies now re-send the probe every poll (`echo` is idempotent) instead of
+once, and the first send that survives ends the loop.
+
+Found while fixing it: `runtime::terminal::tests::linux_runtime_reads_output_through_bounded_buffer`
+writes after launch too, and its `assert_eq!(output.len(), 256)` is satisfied by the echo of its own
+over-256-byte command line whether or not the shell ever ran — the exact debt review 622 named, the
+clearest instance of it found yet. Given the handshake, plus a
+`contains_subsequence(&output, b"tekstide-output-000-")` alongside the length assertion, which only a
+real, expanded first line can satisfy.
+
+The probe command, marker and timeout are now one definition, not two that could silently drift:
+`tekstide-core`'s own `test_support` module is `pub`, gated
+`#[cfg(any(test, feature = "test-support"))]` rather than bare `#[cfg(test)]` (the same reason this
+project's D4 leak guard and `ProjectSession::add_transcript` already use that gate — a consuming
+crate's own tests cannot see a dependency's plain `#[cfg(test)]`), and both `wait_for_shell_ready`
+copies build their own read loop around its new `SHELL_READINESS_PROBE_COMMAND`/`_MARKER`/`_TIMEOUT`
+constants. Every pre-existing `test_support` item needed its own, now-explicit `#[cfg(test)]`
+restated, since the module's own broadened gate no longer implies it for free.
+
+The criterion for where the handshake belongs — and, as importantly, where it must not — is now
+stated directly in `wait_for_shell_ready`'s own doc comment in both crates: it belongs at any site
+that writes after launch and expects the write to be *executed*, and it must not go where a test's
+own property under test is silence, an exact byte count, or reader-thread timing, since the
+handshake's whole purpose is to guarantee output has already arrived — the negation of what such a
+test asserts.
+
 ### Fixed — review 623: the macOS PTY-startup race — a readiness handshake before every write-after-launch site, in both crates
 
 Review 622's own 18-test cluster was half right: on macOS `/bin/sh` is `bash`, which reconfigures its
