@@ -949,7 +949,7 @@ const MAX_ENUMERATED_PIDS: usize = 65536;
 /// file's own `processes_in_session` uses, not a second copy that could
 /// drift from it.
 #[cfg(target_os = "macos")]
-pub(super) fn list_all_pids() -> Option<Vec<libc::pid_t>> {
+pub(crate) fn list_all_pids() -> Option<Vec<libc::pid_t>> {
     let mut buffer: Vec<libc::pid_t> = vec![0; MAX_ENUMERATED_PIDS];
     let capacity_bytes = std::mem::size_of_val(buffer.as_slice()) as libc::c_int;
     // SAFETY: `buffer` is valid for `capacity_bytes` for the duration
