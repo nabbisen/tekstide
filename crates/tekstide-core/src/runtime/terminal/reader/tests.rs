@@ -1248,17 +1248,72 @@ fn wait_for_summary_state(
     }
 }
 
-/// Same shape as [`launch_with_transcript_capture`], except the
-/// resolved transcript path is replaced on disk with a symlink to
-/// `/dev/full` before launch. `TranscriptStoragePath::is_safe_for_write`
-/// checks containment with a lexical `Path::starts_with`, not a
-/// symlink-resolving one, so the resolved path still passes it; opening
-/// it (`OpenOptions::open`, which follows symlinks) reaches the real
-/// device instead. `BoundedTranscriptWriter::create`'s own `open()`
-/// call succeeds against `/dev/full` (only writes to it fail), so the
-/// shell launch itself succeeds -- the failure genuinely happens
+/// Review 596/609's own macOS triage, item 6: makes `transcript_file`
+/// always fail a `write(2)`, while its preflight `open()` always succeeds --
+/// `BoundedTranscriptWriter::create`'s own `open()` call must succeed so the
+/// shell launch itself succeeds, with the failure genuinely happening
 /// mid-stream, inside the reader thread's first write attempt, not at
 /// preflight.
+///
+/// **Linux**: a symlink to `/dev/full`, a real kernel character device that
+/// always fails `write(2)` with `ENOSPC` -- the identical failure a truly
+/// full filesystem produces, needing no root or filesystem setup of its
+/// own, isolated to just this one path. Nothing further to hold open or
+/// close.
+///
+/// **macOS**: `/dev/full` does not exist there at all. A FIFO at the
+/// transcript path instead, with this function opening its read end
+/// *non-blocking* and returning it -- a blocking read-end open with no
+/// writer yet would hang, which is exactly why non-blocking is required
+/// here and not merely convenient. That reader is what lets the real
+/// writer's own plain, blocking `open()` for write complete immediately
+/// (mirroring `/dev/full`'s "open always succeeds") rather than blocking
+/// forever waiting for a reader that was never going to come from
+/// elsewhere. The caller must drop the returned reader immediately after
+/// the real writer's `open()` has happened (right after `launch_project_
+/// shell` returns, before any input is sent or the reader thread is
+/// spawned) -- every write after that point fails with `EPIPE`, the
+/// identical `io::Error` shape `BoundedTranscriptWriter::append` already
+/// maps uniformly regardless of which errno produced it, since it never
+/// discriminates by errno. Verified directly, not assumed: a standalone
+/// probe (`mkfifo`, open read non-blocking, open write blocking, write
+/// once successfully, drop the reader, write again) reproduces exactly
+/// `Os { code: 32, kind: BrokenPipe }` on this sequence.
+#[cfg(target_os = "linux")]
+fn make_path_always_fail_writes(transcript_file: &Path) {
+    std::os::unix::fs::symlink("/dev/full", transcript_file)
+        .expect("symlinking the resolved transcript path to /dev/full should succeed");
+}
+
+#[cfg(target_os = "macos")]
+fn make_path_always_fail_writes(transcript_file: &Path) -> fs::File {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let c_path = CString::new(transcript_file.as_os_str().as_bytes())
+        .expect("a fresh test path never contains a NUL byte");
+    // SAFETY: `c_path` is a valid, NUL-terminated C string for the
+    // lifetime of this call, and `mkfifo` makes no promise it keeps past
+    // returning.
+    let result = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) };
+    assert_eq!(
+        result,
+        0,
+        "mkfifo should succeed at a fresh test path: {}",
+        io::Error::last_os_error()
+    );
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(transcript_file)
+        .expect("non-blocking read-end open of the fresh FIFO should succeed")
+}
+
+/// Same shape as [`launch_with_transcript_capture`], except the resolved
+/// transcript path is made to always fail a write first -- see
+/// [`make_path_always_fail_writes`] for the platform-specific mechanism and
+/// why the shell launch itself still succeeds.
 fn launch_with_unwritable_transcript_capture(
     label: &str,
     mode: TranscriptCaptureMode,
@@ -1287,8 +1342,10 @@ fn launch_with_unwritable_transcript_capture(
         .expect("test storage path should resolve");
     std::fs::create_dir_all(storage_path.transcript_dir())
         .expect("transcript dir should be creatable");
-    std::os::unix::fs::symlink("/dev/full", storage_path.transcript_file())
-        .expect("symlinking the resolved transcript path to /dev/full should succeed");
+    #[cfg(target_os = "linux")]
+    make_path_always_fail_writes(storage_path.transcript_file());
+    #[cfg(target_os = "macos")]
+    let write_failure_guard = make_path_always_fail_writes(storage_path.transcript_file());
     spec.set_transcript_writer_config(Some(TranscriptWriterConfig::new(
         storage_path.clone(),
         TranscriptRetentionLimits::agent_run_default(),
@@ -1298,8 +1355,14 @@ fn launch_with_unwritable_transcript_capture(
     let mut runtime = TerminalRuntime::new();
     let (terminal, _) = runtime.launch_project_shell(&project, spec).expect(
         "shell launch should succeed even though the transcript path is unwritable -- \
-         opening /dev/full for write succeeds; only later writes to it fail",
+         its preflight open succeeds; only later writes to it fail",
     );
+    // Closes the FIFO's read end, which is what turns every later write
+    // into EPIPE -- see `make_path_always_fail_writes`'s own doc comment
+    // for why this must happen here and not earlier. Nothing to do on
+    // Linux, which held nothing open.
+    #[cfg(target_os = "macos")]
+    drop(write_failure_guard);
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
     (runtime, handle, storage_path, dirs)
 }

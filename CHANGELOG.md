@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Fixed — two macOS test gaps from RFC-028 review 596's triage, item 6: `setsid(1)` and `/dev/full` are both Linux-only
+
+Neither is a product defect; both are test fixtures that assumed a Linux-only command-line tool or
+device exists.
+
+- **`setsid(1)` does not exist on macOS at all** (it is a `util-linux` command; only the
+  `setsid(2)` syscall is POSIX). `a_job_that_leaves_the_session_via_setsid_survives_a_real_close`
+  now detaches via `perl -e 'fork and exit; use POSIX; POSIX::setsid() ... ; exec @ARGV'` instead
+  — `perl`'s `POSIX::setsid()` reaches the same syscall directly and ships on both platforms by
+  default (confirmed present on the real macOS CI runner image, an image-provided tool rather than
+  an OS guarantee, so the test now checks for it by name first, rather than inferring it from a
+  timeout). The same fork-before-`setsid` shape as `setsid --fork` (avoiding `EPERM` on a process
+  that already leads its own group, from bash's own job-control backgrounding), with a failure
+  printed as a parseable marker — and, review 614: `read_until_parsed`'s own timeout now returns
+  what it actually captured (`Err(Vec<u8>)`, not `None`), so that marker (or any other unexpected
+  output) reaches the panic message instead of being silently discarded, which is the whole reason
+  it was worth adding.
+- **`/dev/full` does not exist on macOS either.** The two tests exercising a genuinely-unwritable
+  transcript now use a platform-specific mechanism behind one shared helper
+  (`make_path_always_fail_writes`): Linux keeps the existing symlink to `/dev/full`; macOS creates
+  a FIFO at the transcript path, opens its read end non-blocking (letting the real writer's own
+  blocking `open()` for write complete immediately, mirroring `/dev/full`'s "open always
+  succeeds"), and the caller drops that reader right after the real `open()` has happened — every
+  write after that fails with `EPIPE`, the identical `io::Error` shape the writer already maps
+  uniformly regardless of which errno produced it. Verified directly (not assumed) with a
+  standalone probe reproducing `Os { code: 32, kind: BrokenPipe }` on this exact sequence, and by
+  temporarily exercising the macOS code path itself on Linux (both are POSIX-portable mechanisms)
+  before this landed.
+
 ### Fixed — a directory explorer scan was O(entries in the directory), not O(cap), past ~10,000 hidden entries
 
 Review 612: `OMITTED_COUNT_LIMIT` (`project/root/explorer.rs`, RFC-052 PR-052-B) bounded the number

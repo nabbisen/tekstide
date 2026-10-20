@@ -418,6 +418,21 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   `Uncategorized` for this failure on the real toolchain, confirmed, not assumed) — the fixture is
   standard-library only on purpose, shared with the standalone
   `rfcs/handoffs/052-file-explorer/measurement` crate.
+
+  **596's own item 6, same place for the same reason: two more Linux-only test assumptions, both
+  fixed rather than gated away.** `setsid(1)` is a `util-linux` command, absent from macOS
+  entirely (only the `setsid(2)` syscall is POSIX); `a_job_that_leaves_the_session_via_setsid_
+  survives_a_real_close` now detaches via `perl`'s `POSIX::setsid()` instead, forking first the
+  same way `setsid --fork` does (avoiding `EPERM` on a process already leading its own group) —
+  portable, since `perl` ships by default on both platforms. `/dev/full` likewise does not exist on
+  macOS; the two tests exercising a genuinely-unwritable transcript now go through one
+  platform-split helper, `make_path_always_fail_writes` (`runtime/terminal/reader/tests.rs`): the
+  Linux symlink unchanged, macOS a FIFO whose read end is opened non-blocking and dropped right
+  after the real writer's own blocking `open()` succeeds, turning every subsequent write into
+  `EPIPE`. Verified by a standalone probe reproducing the exact `BrokenPipe` error, and by
+  temporarily exercising the macOS branch itself on this Linux machine (FIFO/`EPIPE` semantics are
+  POSIX-portable, unlike `getsid`/`proc_listallpids` above) before it was proposed for review —
+  the one item in this list that could be fully validated without a real macOS runner.
 - **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
   fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
   gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real

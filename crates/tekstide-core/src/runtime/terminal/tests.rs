@@ -620,8 +620,14 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     runtime
         .write_input(&handle, b"sleep 300 & echo BGPID=$!\n")
         .expect("backgrounded sleep command should write to PTY");
-    let background_pid = read_until_parsed(&mut runtime, &handle, parse_bgpid)
-        .expect("real backgrounded job's own pid should be parseable from PTY output");
+    let background_pid =
+        read_until_parsed(&mut runtime, &handle, parse_bgpid).unwrap_or_else(|output| {
+            panic!(
+                "real backgrounded job's own pid should be parseable from PTY output; \
+                 captured: {}",
+                String::from_utf8_lossy(&output)
+            )
+        });
     assert!(
         crate::test_support::process_is_alive(background_pid),
         "test precondition: the real backgrounded job must be alive before the close"
@@ -663,6 +669,23 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
 /// load-bearing, not a nicety."
 #[test]
 fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
+    // Named precondition, not an inferred one: `perl` is an image-provided
+    // tool on the macOS CI runner (confirmed present, `actions/runner-
+    // images`'s own `macos-26-arm64-Readme.md` lists it), not an OS
+    // guarantee -- Apple has been removing scripting-language runtimes
+    // from the base system for several releases, so a developer's own Mac
+    // may not have it. Checked here so a missing `perl` is a sentence
+    // before the clock starts, not a five-second timeout to explain.
+    assert!(
+        std::process::Command::new("perl")
+            .arg("-e")
+            .arg("exit 0")
+            .status()
+            .is_ok_and(|status| status.success()),
+        "this test needs `perl` for `POSIX::setsid()`; `setsid(1)` is util-linux and absent on \
+         macOS"
+    );
+
     let root = CleanupOnDrop(test_root("terminate-setsid-survives"));
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &*root, "/bin/sh");
@@ -673,29 +696,52 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
         .expect("plain shell launch should succeed");
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
 
-    // `setsid --fork`, not a bare `setsid sleep 300 &`: this job is
-    // already its own process group leader by the time it runs (bash's
-    // own job-control backgrounding put it there), and `setsid(2)`
-    // itself refuses to run on a process that already leads its own
-    // group -- confirmed directly, not assumed (a first attempt without
-    // `--fork` had the job die immediately with no visible error, since
-    // `setsid`'s own failure message went to a stderr write that raced
-    // past this test's own read). `--fork` is `setsid`'s own answer to
-    // exactly this case. `$!` from the outer `setsid` invocation would
-    // only be *its* pid, which exits the moment it forks -- `sh -c
-    // 'echo ...; exec sleep 300'` inside the forked child reports its
-    // own pid before `exec` replaces it with `sleep`, keeping the same
-    // pid throughout, which is the one this test actually needs.
+    // review 596/609's own macOS triage, item 6: `setsid(1)` is a
+    // util-linux command and does not exist on macOS at all -- only the
+    // `setsid(2)` syscall does. `perl`'s `POSIX::setsid()` reaches the
+    // same syscall directly and ships on both platforms (a core module,
+    // present by default on every Linux distribution this project
+    // targets and on macOS/the GitHub `macos-latest` runner image),
+    // making it the portable replacement rather than a Linux-only one.
+    //
+    // `fork and exit` before calling it, not a bare `POSIX::setsid()` in
+    // the backgrounded process itself: this job is already its own
+    // process group leader by the time it runs (bash's own job-control
+    // backgrounding put it there), and `setsid(2)` refuses to run on a
+    // process that already leads its own group -- the same reason
+    // `setsid(1)`'s own `--fork` flag exists, confirmed directly on
+    // Linux with the bare form first (it died immediately with no
+    // visible error, `setsid`'s own failure message racing past this
+    // test's own read). Forking first and calling `setsid` from the
+    // child mirrors `--fork` exactly: the child inherits the parent's
+    // process group (not its own), so it is not yet a leader and the
+    // call succeeds. A failure prints a parseable, distinctly-named
+    // marker to the same stream this test reads and exits before
+    // `exec`, rather than proceeding to fake a detached job anyway --
+    // so a real failure times out at the pid-parse below with a message
+    // in the captured output, not a confusing assertion failure further
+    // down from a job that was never actually detached. `sh -c 'echo
+    // ...; exec sleep 300'` inside the forked child reports its own pid
+    // before `exec` replaces it with `sleep`, keeping the same pid
+    // throughout, which is the one this test actually needs.
     runtime
         .write_input(
             &handle,
-            b"setsid --fork sh -c 'echo DETACHEDPID=$$; exec sleep 300' &\n",
+            b"perl -e 'fork and exit; use POSIX; POSIX::setsid() \
+              or do { print \"SETSIDFAILED=$!\\n\"; exit 1 }; \
+              exec @ARGV' -- sh -c 'echo DETACHEDPID=$$; exec sleep 300' &\n",
         )
         .expect("setsid-detached command should write to PTY");
     let detached_pid = read_until_parsed(&mut runtime, &handle, |output| {
         parse_pid_after(output, "DETACHEDPID=")
     })
-    .expect("real setsid-detached job's own pid should be parseable from PTY output");
+    .unwrap_or_else(|output| {
+        panic!(
+            "real setsid-detached job's own pid should be parseable from PTY output; \
+             captured: {}",
+            String::from_utf8_lossy(&output)
+        )
+    });
     assert!(
         crate::test_support::process_is_alive(detached_pid),
         "test precondition: the real detached job must be alive before the close"
@@ -959,11 +1005,18 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
 /// weaker than the condition the caller actually needs. This polls the *parse* itself, not a
 /// substring, so it keeps reading until a real value is extractable or the deadline passes,
 /// never returning on a marker that is merely present.
+///
+/// Review 614: returns the captured output on failure (`Err`), not `None` --
+/// a timeout used to drop everything the PTY had produced on the floor, so
+/// an unexpected line (a shell error, a missing command, this file's own
+/// `SETSIDFAILED=` marker) never reached a human on a platform where
+/// nobody can attach a debugger. Every caller must read `Err`'s own payload
+/// into its panic message, not merely name the timeout.
 fn read_until_parsed<T>(
     runtime: &mut TerminalRuntime,
     handle: &TerminalRuntimeHandle,
     mut parse: impl FnMut(&[u8]) -> Option<T>,
-) -> Option<T> {
+) -> Result<T, Vec<u8>> {
     let started = Instant::now();
     let mut output = Vec::new();
 
@@ -973,11 +1026,11 @@ fn read_until_parsed<T>(
             .expect("PTY read should succeed");
         output.extend_from_slice(&chunk);
         if let Some(value) = parse(&output) {
-            return Some(value);
+            return Ok(value);
         }
     }
 
-    None
+    Err(output)
 }
 
 /// Parses the real pid a shell's own `$!` reported, out of raw PTY
