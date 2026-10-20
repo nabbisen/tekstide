@@ -709,6 +709,45 @@ fn the_users_own_global_configuration_does_not_affect_the_outcome() {
     assert_eq!(fixture.evaluate(), GitGateOutcome::Accepted);
 }
 
+/// R6, review 621's own addition: `GIT_CONFIG_SYSTEM=/dev/null` alone did
+/// not suppress Apple's own bundled `gitconfig` on the real runner --
+/// measured, not inferred: `credential.helper`, from Xcode's own
+/// `git-core/gitconfig`, reached `evaluate` on every firing despite that
+/// override already being in force. `GIT_CONFIG_NOSYSTEM=1` is the
+/// absolute switch that does not depend on relocating a path, added
+/// alongside it. This repository's own bundled config cannot be faked
+/// from a Linux test the way the global test above fakes `$HOME`'s --
+/// there is no fixture-controlled path a real `git` reads as "the system
+/// layer" the same way it reads `$HOME/.gitconfig` as the global one, and
+/// faking one would only prove this test's own fake, not Apple's real
+/// binary. So this pins the one thing a Linux CI run *can* verify: that
+/// `spawn_git_command` still asks for all three overrides, on every
+/// command it spawns, unconditionally. Before this test, removing or
+/// typoing any of the three lines failed nothing -- a real security-
+/// relevant regression with no gate on it.
+#[test]
+fn the_three_config_isolation_overrides_are_set_on_every_spawned_command() {
+    let command = spawn_git_command(GIT_EXECUTABLE, &["status"], None, &[]);
+    let value_of = |name: &str| {
+        command
+            .get_envs()
+            .find(|(key, _value)| *key == std::ffi::OsStr::new(name))
+            .and_then(|(_key, value)| value)
+    };
+    assert_eq!(
+        value_of("GIT_CONFIG_GLOBAL"),
+        Some(std::ffi::OsStr::new("/dev/null"))
+    );
+    assert_eq!(
+        value_of("GIT_CONFIG_SYSTEM"),
+        Some(std::ffi::OsStr::new("/dev/null"))
+    );
+    assert_eq!(
+        value_of("GIT_CONFIG_NOSYSTEM"),
+        Some(std::ffi::OsStr::new("1"))
+    );
+}
+
 /// R7: the allowlist grows by pattern for ordinary tool-written data keys
 /// -- each added as its own reviewed safety judgment (module doc comment),
 /// not a blanket loosening. A repository carrying exactly these, and

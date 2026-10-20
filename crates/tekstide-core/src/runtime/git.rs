@@ -40,10 +40,30 @@
 //! being read.** R6 -- the developer's own global/system git
 //! configuration was being forwarded into every read, so a personal
 //! `user.signingkey` or `commit.gpgsign` refused *every* repository on
-//! that machine, forever; `spawn_git_command` now hardcodes
+//! that machine, forever; `spawn_git_command` hardcodes
 //! `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` to `/dev/null` instead of
-//! forwarding them, so only the repository's own effective configuration
-//! is ever read. R7 -- an unrecognised key (including `include`/
+//! forwarding them, which is sufficient on Linux -- confirmed by R6's own
+//! original fix and every Linux CI run since.
+//!
+//! **Review 621 found R6's own claim false on macOS**, through a second
+//! door onto the identical defect: `GIT_CONFIG_SYSTEM=/dev/null`
+//! relocates the system config path, but Apple's git build (Xcode's
+//! command-line tools, which `PATH=/usr/bin:/bin` always resolves to on
+//! macOS) reads its own bundled `gitconfig` as a distinct, earlier layer
+//! that relocation does not reach -- measured, not inferred, on the real
+//! runner, via `git_gate_probe_origin_for_key`'s own `#[cfg(test)]`-only
+//! diagnostic: `credential.helper`, from `/Applications/Xcode_*.app/
+//! Contents/Developer/usr/share/git-core/gitconfig`, every firing, every
+//! run, withholding the content answer for every macOS repository the
+//! same way a personal `user.signingkey` once did for every Linux one.
+//! `GIT_CONFIG_NOSYSTEM=1` -- git's older, absolute switch, suppressing
+//! the system layer outright rather than naming a replacement path for
+//! it -- is now set alongside the two overrides above to close this.
+//! **Only the repository's own effective configuration is ever read is
+//! the property this module aims for on every platform it runs on; say
+//! which mechanism closes the gap on which platform, rather than one
+//! claim covering both, since the two needed different tools to reach the
+//! same guarantee.** R7 -- an unrecognised key (including `include`/
 //! `includeIf`) used to refuse the repository outright; it now withholds
 //! only the content answer (`GitGateOutcome::AcceptedBranchOnly`), since
 //! nothing a repository names is ever executed by the scan itself either
@@ -435,14 +455,15 @@ fn vet_configuration(
 /// Review 620's own named probe, for `runtime::git::tests`' 24 macOS
 /// failures: `vet_configuration` already knows *that* an unrecognised key
 /// downgraded the answer to `AcceptedBranchOnly`; this names *which* key
-/// and *where it came from*, so the next decision (an allowlist entry for
-/// something a stock macOS genuinely ships, a documented product caveat,
-/// or test-only isolation) rests on the real keys rather than a guess.
-/// `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL` are already hardcoded to
-/// `/dev/null` in `spawn_git_command` (R6), applied last so nothing can
-/// override them -- if a system-level key still reaches this gate on the
-/// real runner, that is itself part of the answer, not something this
-/// probe assumes going in.
+/// and *where it came from*. Review 621's own result, kept rather than
+/// deleted once answered: `credential.helper`, from Xcode's own bundled
+/// `gitconfig`, every one of 36 firings -- `GIT_CONFIG_SYSTEM`/
+/// `GIT_CONFIG_GLOBAL` being hardcoded to `/dev/null` in
+/// `spawn_git_command` (R6) does not reach that layer, which is why
+/// `GIT_CONFIG_NOSYSTEM=1` was added there alongside them. Left in place
+/// rather than removed now that the question is answered: a regression in
+/// either mechanism, or a *new* key from a layer neither override
+/// reaches, shows up here the same way, named rather than silent.
 ///
 /// Re-runs `git config --list --show-origin --null` in the same
 /// repository with the same environment -- a second, read-only
@@ -1615,6 +1636,17 @@ fn spawn_git_command(
     // guarantee by accident.
     command.env("GIT_CONFIG_GLOBAL", "/dev/null");
     command.env("GIT_CONFIG_SYSTEM", "/dev/null");
+    // Review 621: `GIT_CONFIG_SYSTEM=/dev/null` does not suppress the
+    // Xcode command-line-tools' own bundled `gitconfig` -- measured, not
+    // inferred: `git_gate_probe_origin_for_key` named `credential.helper`
+    // from `/Applications/Xcode_*.app/Contents/Developer/usr/share/
+    // git-core/gitconfig` on every one of 36 firings, with both overrides
+    // above already in force. Apple's git build reads that path as a
+    // distinct, earlier layer `GIT_CONFIG_SYSTEM` does not reach by
+    // relocating the system config path; `GIT_CONFIG_NOSYSTEM=1` is git's
+    // older, absolute switch, which suppresses the system layer outright
+    // rather than naming a replacement path for it.
+    command.env("GIT_CONFIG_NOSYSTEM", "1");
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Fixed — review 621: R6's own guarantee ("only the repository's own effective configuration is ever read") was false on macOS; `GIT_CONFIG_NOSYSTEM=1` closes it, pinned with a test
+
+Measured, not inferred: `GIT_CONFIG_SYSTEM=/dev/null` (R6, review 407) relocates where git looks
+for system-level config, but Apple's own git build (the Xcode command-line tools, which
+`PATH=/usr/bin:/bin` always resolves to on macOS) reads its own bundled `gitconfig` as a distinct,
+earlier layer that relocation does not reach. `git_gate_probe_origin_for_key`'s own read-only probe
+named the exact mechanism: `credential.helper`, from `/Applications/Xcode_*.app/Contents/Developer/
+usr/share/git-core/gitconfig`, on every one of 36 firings across `runtime::git::tests`'s 24 macOS
+failures. Review 407's own defect, through a new door: a configuration layer outside the repository
+withholds the content answer for every repository on the affected platform, forever — the same
+blast radius `user.signingkey` once had on Linux, closed by the fix that did not anticipate this
+second door. `GIT_CONFIG_NOSYSTEM=1` (git's own absolute switch, suppressing the system layer
+outright rather than naming a replacement path for it) is now set alongside the two existing
+overrides, applied last with them. The module's own R6 doc comment corrected to say which mechanism
+closes the gap on which platform, rather than one claim covering both. Pinned with a new test
+(`the_three_config_isolation_overrides_are_set_on_every_spawned_command`) asserting all three
+overrides directly on the spawned `Command`'s own environment — before this, removing or typoing
+any of the three failed nothing.
+
 ### Fixed — review 620: `scanner_lists_folders_first_and_compares_names_without_case` degrades and records on a case-insensitive volume, instead of silently testing one fewer row
 
 APFS is case-insensitive (case-preserving) by default, where ext4 is case-sensitive.
