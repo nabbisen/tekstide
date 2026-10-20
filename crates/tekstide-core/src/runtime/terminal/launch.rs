@@ -1155,15 +1155,110 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
         )
     };
 
+    // Review 623's own correction to review 622's restatement of 619:
+    // narrowing the probe to `pbsi_comm` alone dropped the pairing that
+    // decides whether `proc_pidinfo` itself is sound in this environment,
+    // or only this one pid is unreachable through it -- and 623's own run
+    // found `proc_pidinfo` failing `ESRCH` on all 18 firings, so the
+    // question is live, not hypothetical.
+    //
+    // 1. The same flavour, on this process's own pid. A pid this call
+    //    must be able to read if the binding or its usage is sound at
+    //    all, since it is asking about its own caller.
+    // SAFETY: `self_info` is a plain, fully-zeroed `proc_bsdinfo` the
+    // call writes into; `getpid()` has no preconditions and is always
+    // valid for the duration of this call.
+    let mut self_info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let self_pid = unsafe { libc::getpid() };
+    let self_result = unsafe {
+        libc::proc_pidinfo(
+            self_pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&raw mut self_info).cast(),
+            size,
+        )
+    };
+    let self_check_label = if self_result == size {
+        "ok".to_owned()
+    } else {
+        format!("failed: {:?}", io::Error::last_os_error())
+    };
+
+    // 2. Whether the child's own pid appears in `proc_listallpids`'s own
+    //    enumeration -- the same call the containment sweep already
+    //    relies on and already confirmed working on this runner (its own
+    //    progress log prints pid counts). If the child is in the list but
+    //    `proc_pidinfo` on it still fails, the failure is narrower than
+    //    "libproc cannot see this child" at all.
+    let in_pid_list = list_all_pids().map(|pids| pids.contains(&pid));
+    let in_pid_list_label = match in_pid_list {
+        Some(true) => "yes".to_owned(),
+        Some(false) => "no".to_owned(),
+        None => "list_all_pids itself failed".to_owned(),
+    };
+
     eprintln!(
         "[wait-for-exit-timeout] pid {pid}: kill(pid, 0) = {kill_result} (errno={kill_errno:?}); \
          proc_pidinfo: {proc_pidinfo_label}; proc_bsdshortinfo: {proc_bsdshortinfo_label}; \
-         waitid(WNOHANG|WNOWAIT|WEXITED|WSTOPPED) = {waitid_label}"
+         waitid(WNOHANG|WNOWAIT|WEXITED|WSTOPPED) = {waitid_label}; \
+         proc_pidinfo(getpid()) = {self_check_label}; in proc_listallpids = {in_pid_list_label}"
     );
 }
 
 #[cfg(not(all(test, target_os = "macos")))]
 pub(super) fn report_child_status_at_timeout(_pid: u32) {}
+
+/// Review 623's own fix for the PTY-startup race review 622 first found as
+/// an 18-test cluster, then partly retracted: every member of that cluster
+/// writes to a just-launched shell's PTY and expects it to act on that
+/// input immediately. `/bin/sh` is `bash` on macOS, which reconfigures its
+/// own terminal modes at startup; a terminal-mode change can discard input
+/// the kernel's line discipline has *already echoed* -- which is exactly
+/// why these tests see their own marker and conclude the command ran: the
+/// echo is indistinguishable from real output to any assertion whose
+/// marker also appears in the written command itself. Row 8's own register
+/// entry (`test-process-leak.md`) describes the identical shape from a
+/// Linux flake, which is why this helper is not `target_os`-gated: one
+/// mechanism, two platforms, different window widths.
+///
+/// Writes a command whose answer the echo cannot produce --
+/// `echo tek$((1+1))` answers `tek2` only once a real shell evaluates the
+/// arithmetic expansion, where the echo of the command itself contains the
+/// literal text `tek$((1+1))` -- and waits for that answer before
+/// returning. Callers write their own, real input only after this
+/// returns, which is the choke-point this project already applies to
+/// process creation, for the same reason: a guard placed at only the
+/// sites that happened to be seen failing always misses the ones that
+/// didn't fail in that particular run.
+///
+/// `#[cfg(test)]`, not `pub(super)`: every call site is in a different
+/// test module across this crate (`agent::tests`, `audit::tests::
+/// integration`, `transcript::reader::tests`, `runtime::terminal::reader::
+/// tests`, `runtime::terminal::tests`), so this needs the same crate-wide
+/// test-only reach `super::tests` already has, re-exported by `mod.rs`.
+#[cfg(test)]
+pub(crate) fn wait_for_shell_ready(runtime: &mut TerminalRuntime, handle: &TerminalRuntimeHandle) {
+    runtime
+        .write_input(handle, b"echo tek$((1+1))\n")
+        .expect("readiness probe should write to PTY");
+
+    let started = Instant::now();
+    let mut output = Vec::new();
+    while started.elapsed() < Duration::from_secs(5) {
+        let (chunk, _) = runtime
+            .read_available_bounded_for(handle, Duration::from_millis(50), 16 * 1024)
+            .expect("readiness probe read should succeed");
+        output.extend_from_slice(&chunk);
+        if output.windows(4).any(|window| window == b"tek2") {
+            return;
+        }
+    }
+    panic!(
+        "shell did not become ready before the readiness deadline; captured: {}",
+        String::from_utf8_lossy(&output)
+    );
+}
 
 #[cfg(test)]
 #[cfg(target_os = "macos")]

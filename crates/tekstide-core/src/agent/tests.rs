@@ -16,6 +16,7 @@ use crate::project::{
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntime,
     TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome, TerminationSignal,
+    wait_for_shell_ready,
 };
 use crate::transcript::{
     TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver, TranscriptRetentionLimits,
@@ -555,6 +556,7 @@ fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
         ]
     ));
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to AgentRun PTY");
@@ -648,6 +650,7 @@ fn a_launch_whose_transcript_file_is_locked_starts_without_capture() {
     );
 
     let handle = TerminalRuntimeHandle::new(run.terminal_id.clone().unwrap(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
     let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
     drop(holder);
@@ -786,6 +789,7 @@ fn a_launch_whose_budget_is_exhausted_starts_without_capture() {
     );
 
     let handle = TerminalRuntimeHandle::new(run.terminal_id.clone().unwrap(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
     let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
     cleanup_root(root);
@@ -881,6 +885,7 @@ fn a_transcript_from_an_earlier_run_is_counted_and_purged_after_a_real_restart()
             .storage_path
             .clone();
         let handle = TerminalRuntimeHandle::new(terminal_id, project.id().clone());
+        wait_for_shell_ready(&mut runtime, &handle);
         runtime
             .write_input(&handle, b"printf 'from-the-earlier-run\\n'\nexit 0\n")
             .unwrap();
@@ -1011,6 +1016,7 @@ fn local_bounded_agent_run_transcript_capture_attaches_metadata_and_writes_outpu
     assert!(!transcript.storage_path.starts_with(&root));
 
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"printf 'tekstide-transcript-ok\\n'\nexit 0\n")
         .expect("transcript marker command should write to PTY");
@@ -1068,6 +1074,7 @@ fn transcript_capture_retains_pty_bytes_dropped_from_ui_buffer() {
         .storage_path
         .clone();
     let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
 
     runtime
         .write_input(
@@ -1146,6 +1153,7 @@ fn transcript_opt_out_launches_without_transcript_metadata() {
     );
     assert!(project.transcripts().is_empty());
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to opted-out AgentRun PTY");
@@ -1226,6 +1234,7 @@ fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
     assert!(project.transcripts().is_empty());
     assert!(!state_root.join("transcripts").exists());
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to local bounded AgentRun PTY");
@@ -1292,6 +1301,7 @@ fn project_session_launches_validated_managed_agent_run_through_terminal_runtime
     );
     assert_eq!(project.runtime_summary().running_processes, 1);
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to Managed AgentRun PTY");
@@ -1679,6 +1689,7 @@ fn active_clean_text_document_permits_agent_runtime_launch() {
         TextDocumentState::Clean
     );
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to AgentRun PTY");
@@ -1875,6 +1886,7 @@ fn safe_save_blocks_external_change_while_agent_run_is_active() {
     );
     assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Running);
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to AgentRun PTY");
@@ -1978,6 +1990,7 @@ fn project_session_maps_nonzero_agent_run_exit_to_failed() {
         .expect("runtime-launched AgentRun should have terminal id");
     let handle = TerminalRuntimeHandle::new(terminal_id.clone(), project.id().clone());
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit 7\n")
         .expect("nonzero exit should write to AgentRun PTY");

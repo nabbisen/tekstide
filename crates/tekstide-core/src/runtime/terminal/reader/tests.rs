@@ -76,6 +76,11 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
         .launch_project_shell(&project, spec)
         .expect("plain shell launch should succeed");
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    // The readiness handshake's own read must happen before
+    // `spawn_output_reader` hands the master fd to its dedicated reader
+    // thread -- `wait_for_shell_ready` reads directly through `runtime`,
+    // which would otherwise race the reader thread for the same bytes.
+    wait_for_shell_ready(&mut runtime, &handle);
     let reader = runtime
         .spawn_output_reader(&handle)
         .expect("reader thread should spawn against a real PTY master");

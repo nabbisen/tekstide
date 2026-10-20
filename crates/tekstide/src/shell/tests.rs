@@ -1691,6 +1691,24 @@ fn poll_demo_pane_until_parsed<T>(
     None
 }
 
+/// `tekstide-core`'s own `runtime::terminal::launch::wait_for_shell_ready`
+/// fix, review 623's, copied here rather than shared across the crate
+/// boundary: this test drives a `TerminalPane`, this crate's own
+/// UI-level wrapper around a terminal session, not the `TerminalRuntime`
+/// the core crate's helper operates on directly. Same mechanism, same
+/// discriminator: `echo tek$((1+1))` answers `tek2` only once a real
+/// shell evaluates the arithmetic expansion, where the rendered pane's
+/// own echo of the unexpanded command contains no such substring.
+fn wait_for_shell_ready(state: &mut State) {
+    state.terminal_panes[0].write_input(b"echo tek$((1+1))\n");
+    let ready =
+        poll_demo_pane_until_parsed(state, |rendered| rendered.contains("tek2").then_some(()));
+    assert!(
+        ready.is_some(),
+        "shell did not become ready before the readiness deadline"
+    );
+}
+
 /// `active_terminal_focus` is `Some` only when both halves of its own
 /// stated condition hold (`FocusZone::MainArea` *and* `TerminalImmersion`
 /// mode) -- proven against all four combinations with one real pane,
@@ -14896,6 +14914,7 @@ fn closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_clos
         test_audit_state_dir(&temp_audit_state_dir("close-backgrounded-descendant"));
     let (mut state, project_id, terminal_id) =
         state_with_a_real_terminal_on_its_own_project("close-backgrounded-descendant");
+    wait_for_shell_ready(&mut state);
 
     // `$!` from the *parent* shell, not `$$` inside the subshell --
     // `$$` inside `(...)` is not reliably the subshell's own PID across

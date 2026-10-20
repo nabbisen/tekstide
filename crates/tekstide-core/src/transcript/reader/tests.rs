@@ -7,6 +7,7 @@ use crate::domain::AgentRunId;
 use crate::project::{ProjectId, ProjectSession};
 use crate::runtime::terminal::{
     TerminalLaunchSpec, TerminalRuntime, TerminalRuntimeHandle, TerminalSecurityParser,
+    wait_for_shell_ready,
 };
 use crate::transcript::{
     BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver,
@@ -386,6 +387,7 @@ fn capture_real_sgr_output() -> Vec<u8> {
         .launch_project_shell(&project, spec)
         .expect("plain shell launch should succeed");
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
 
     runtime
         .write_input(&handle, b"printf '\\033[31mred\\033[0m\\n'\nexit\n")

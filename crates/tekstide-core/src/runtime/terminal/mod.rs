@@ -7,6 +7,8 @@ mod termination;
 pub(crate) mod tests;
 mod types;
 
+#[cfg(test)]
+pub(crate) use launch::wait_for_shell_ready;
 pub use launch::{TerminalLaunchError, TerminalRuntime, TerminalRuntimeError};
 pub use reader::{TerminalReader, TerminalReaderDrain, WakeNotifier};
 pub(crate) use security::next_token_len;

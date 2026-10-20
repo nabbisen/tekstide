@@ -221,6 +221,7 @@ fn linux_runtime_launches_project_shell_and_reads_marker() {
         ]
     );
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"printf 'tekstide-runtime-ok\\n'\nexit\n")
         .expect("marker command should write to PTY");
@@ -263,6 +264,7 @@ fn linux_runtime_rejects_cross_project_input_handle() {
         }
     );
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit\n")
         .expect("cleanup exit should write to PTY");
@@ -490,6 +492,7 @@ fn linux_runtime_rejects_cross_project_termination_handle() {
         }
     );
 
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime
         .write_input(&handle, b"exit\n")
         .expect("cleanup exit should write to PTY");

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Fixed — review 623: the macOS PTY-startup race — a readiness handshake before every write-after-launch site, in both crates
+
+Review 622's own 18-test cluster was half right: on macOS `/bin/sh` is `bash`, which reconfigures its
+own terminal modes at startup, and a terminal-mode change can discard input the kernel's line
+discipline has *already echoed* — which is exactly why these tests saw their own marker and
+concluded the command ran. Review 623's own run falsified the stronger claim ("the shell is not
+executing anything"): `transcript::reader::tests`' two `capture_real_sgr_output()` callers passed
+and failed in the *same run*, so the shell executes *sometimes* — a race, not broken wiring.
+
+Fixed with one shared helper (`runtime::terminal::launch::wait_for_shell_ready`, `tekstide-core`;
+a second, `tekstide`-local copy driving `TerminalPane` instead of `TerminalRuntime` directly, for the
+one call site on that side of the crate boundary), used at every write-after-launch site in both
+crates: `agent::tests` (12 sites), `audit::tests::integration` (6), `transcript::reader::tests` (one
+shared helper, both callers), `runtime::terminal::reader::tests` (the wake notifier — inserted before
+`spawn_output_reader` takes over the master fd, not after, since the handshake's own direct read
+would otherwise race the reader thread for the same bytes), `runtime::terminal::tests` (3), and
+`tekstide`'s own row 8. Writes `echo tek$((1+1))\n` and waits for `tek2` — an answer the echo of the
+unexpanded command cannot itself produce — before any caller's real input goes in. This also pays
+down the test-design debt review 622 named: every assertion in this suite that greps for a marker
+which also appears in the written command can be satisfied by the echo alone; the readiness probe is
+the first thing in this suite to test something the terminal cannot fake.
+
+Not fixed here, and not yet understood: why `proc_pidinfo` (both `PROC_PIDTBSDINFO` and
+`PROC_PIDT_SHORTBSDINFO`) answered `ESRCH` on all 18 of review 623's own firings while `kill(pid, 0)`
+said the pid exists — `report_child_status_at_timeout` now also reads `proc_pidinfo(getpid())` on
+this process's own pid and whether the child's pid appears in `proc_listallpids`'s own enumeration,
+to discriminate "the binding or its usage is unsound" from "libproc genuinely cannot see this one
+child" — reported, not resolved, per review 623's own order not to chase this ahead of the handshake.
+
 ### Fixed — review 622: `run_directories_in_other_uuid_spellings_are_skipped_and_still_present` degrades and records on a case-insensitive volume, the same class as review 620's explorer test
 
 Two of the fixture's own UUID spellings differ only in case; on a case-folding volume the second

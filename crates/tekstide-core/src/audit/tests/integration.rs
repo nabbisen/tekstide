@@ -27,6 +27,7 @@ use crate::domain::{
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeHandle, TerminationOutcome,
+    wait_for_shell_ready,
 };
 
 use super::support::TestAuditDirs;
@@ -120,6 +121,7 @@ fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
     assert_eq!(launched.audit_status, AuditObservationStatus::Persisted);
     let handle =
         TerminalRuntimeHandle::new(launched.value.terminal_id().clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
     let outcome = runtime
         .wait_for_exit(&handle, Duration::from_secs(5))
@@ -998,6 +1000,7 @@ fn termination_truth_survives_observational_audit_failure() {
             .unwrap();
         let handle =
             TerminalRuntimeHandle::new(launched.value.terminal_id().clone(), project.id().clone());
+        wait_for_shell_ready(&mut runtime, &handle);
         runtime.write_input(&handle, b"exit 0\n").unwrap();
         let outcome = runtime
             .wait_for_exit(&handle, Duration::from_secs(5))
@@ -1046,6 +1049,7 @@ fn a_run_that_exits_records_terminated_with_no_payload_from_the_outcome() {
             .unwrap();
         let identity = launched.value.identity();
         let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
+        wait_for_shell_ready(&mut runtime, &handle);
         runtime.write_input(&handle, b"exit 0\n").unwrap();
         let outcome = runtime
             .wait_for_exit(&handle, Duration::from_secs(5))
@@ -1152,6 +1156,7 @@ fn a_run_killed_by_a_signal_records_process_terminated_without_the_signal() {
     );
 
     let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
     let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
 }
@@ -1203,6 +1208,7 @@ fn a_post_start_runtime_failure_records_runtime_failure_without_its_summary() {
     );
 
     let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
     let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
 }
@@ -1282,6 +1288,7 @@ fn orphaned_runtime_truth_is_not_mislabeled_as_durable_termination() {
         TerminalStatus::OrphanedUnknown
     );
     assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Detached);
+    wait_for_shell_ready(&mut runtime, &handle);
     runtime.write_input(&handle, b"exit 0\n").unwrap();
     runtime
         .wait_for_exit(&handle, Duration::from_secs(5))
