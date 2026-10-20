@@ -220,6 +220,15 @@ jobs:
         # is only visible when some other test fails is not a
         # measurement; any future probe either asserts (and is a test,
         # covered above) or gets its own step like this one.
+        #
+        # `if: always()`: the suite-wide run above is expected to carry
+        # real, unrelated failures on this job -- that is this job's own
+        # stated purpose (`continue-on-error: true` at the job level) --
+        # and a step whose own predecessor failed is *skipped* by default
+        # regardless of that job-level setting, which is exactly why this
+        # measurement went missing the first time this step existed: it
+        # never ran at all, on a run where the prior step did fail.
+        if: always()
         run: |
           set -euo pipefail
           TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
