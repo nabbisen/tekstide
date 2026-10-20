@@ -59,7 +59,7 @@ fn scanner_lists_folders_first_and_compares_names_without_case() {
     // (`A.txt` before `a.txt`); "folders first" and "compares names
     // without case" -- the two properties this test is named for -- both
     // still hold either way.
-    let case_insensitive = project_dir.join("project/a.txt").exists();
+    let case_insensitive = project_dir.join("a.txt").exists();
     if !case_insensitive {
         sandbox.create_file("project/a.txt");
     }
