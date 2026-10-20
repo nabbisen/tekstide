@@ -369,6 +369,7 @@ configuration page carries three, and that asymmetry is why one drifted and the 
 Checked every release, because a watch that depends on someone remembering is not a watch.
 
 - [ ] **Accessibility: has `iced` gained an accessibility bridge?** One command: `cargo tree -p tekstide | grep -i accesskit`. A non-empty result means RFC-014 R2 is reopenable and the owner should be told — screen-reader support is a real social need, not a nice-to-have, and the only reason it is out of scope is that the substrate offers no path to it. If the result is empty, tick this having *run* it, not having assumed it.
+- [ ] **Every committed measurement harness re-run against the build being shipped.** `ls -d rfcs/handoffs/*/measurement` names them. For each: `cargo run --release --locked`, compare its `CHECK` lines against the newest committed `results-run*.txt`, and commit a new dated results file. A harness whose `Cargo.lock` pins an old `tekstide-core` cannot be built with `--locked` at all, and that refusal is itself the finding: review 612 found a 24x regression in the explorer's capped scan that had been live and uncaught for a month, because the only check measuring it had last run against `0.23.0` while the product shipped `0.37.0`. A measurement nobody re-runs is a number, not a check.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
 ## Review
