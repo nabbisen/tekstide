@@ -16,7 +16,9 @@ fn test_root(label: &str) -> PathBuf {
     let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!("ta-{label}-{}-{sequence}", std::process::id()));
     fs::create_dir_all(&root).expect("test root should be created");
-    root
+    // Review 617/618: same SymlinkAmbiguous class as watch_test_root() --
+    // $TMPDIR is reached through a symlink on macOS.
+    fs::canonicalize(&root).unwrap_or(root)
 }
 
 fn cleanup_root(root: PathBuf) {

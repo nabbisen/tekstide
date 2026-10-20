@@ -329,14 +329,14 @@ fn a_hundred_thousand_entries_are_capped_counted_and_never_reach_the_render_thre
 /// The row bound. Forty directories of 300 entries, all open, is 40 x 257
 /// rows -- over [`MAX_TREE_ROWS`].
 fn wide_tree() -> (std::path::PathBuf, ExplorerTree, ProjectRootHandle) {
-    let base = crate::test_support::remove_when_this_test_ends(std::env::temp_dir().join(format!(
-            "tekstide-wide-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        )));
+    let base = std::env::temp_dir().join(format!(
+        "tekstide-wide-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     let project = base.join("project");
     for dir in 0..40 {
         let dir = project.join(format!("d{dir:02}"));
@@ -345,6 +345,12 @@ fn wide_tree() -> (std::path::PathBuf, ExplorerTree, ProjectRootHandle) {
             std::fs::File::create(dir.join(format!("f{file:03}"))).unwrap();
         }
     }
+    // Review 617/618: canonicalize once `base` exists (the loop above
+    // already created it), before `project` is read back out of it --
+    // the same SymlinkAmbiguous class watch_test_root() was fixed for.
+    let base = std::fs::canonicalize(&base).unwrap_or(base);
+    let project = base.join("project");
+    let base = crate::test_support::remove_when_this_test_ends(base);
     let root = handle(&project);
     let mut tree = ExplorerTree::default();
     tree.request_scan(Path::new(""));

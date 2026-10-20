@@ -274,6 +274,9 @@ fn outside_a_repository_the_floor_list_decides_and_the_scan_says_so() {
     fs::create_dir_all(project.join("target")).unwrap();
     fs::create_dir_all(project.join("src")).unwrap();
     fs::write(project.join("a.log"), "x").unwrap();
+    // Review 617/618: same SymlinkAmbiguous class watch_test_root() was
+    // fixed for -- $TMPDIR is reached through a symlink on macOS.
+    let project = fs::canonicalize(&project).unwrap_or(project);
     let root = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .unwrap();
@@ -721,6 +724,9 @@ fn the_worker_entry_point_asks_git_and_says_what_it_learned() {
     let project = base.join("project");
     fs::create_dir_all(project.join("target")).unwrap();
     fs::write(project.join("a.txt"), "x").unwrap();
+    // Review 617/618: same SymlinkAmbiguous class watch_test_root() was
+    // fixed for -- $TMPDIR is reached through a symlink on macOS.
+    let project = fs::canonicalize(&project).unwrap_or(project);
     let root = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .unwrap();

@@ -162,6 +162,15 @@ impl TestDirs {
         let project_root = base.join("project");
         fs::create_dir_all(&state_root).unwrap();
         fs::create_dir_all(&project_root).unwrap();
+        // Review 617/618/619: same one class, three faces -- $TMPDIR is
+        // reached through a symlink on macOS, so `base` (and everything
+        // derived from it) must be canonical before any containment or
+        // equality check compares it against a path the OS resolves on
+        // its own (`SymlinkAmbiguous` from the validator, `SymlinkEscape`
+        // from the access policy, a bare `starts_with` here).
+        let base = fs::canonicalize(&base).unwrap_or(base);
+        let state_root = base.join("state");
+        let project_root = base.join("project");
         Self {
             base,
             state_root,

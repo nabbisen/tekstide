@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed — review 619: one class, three faces — ten more test helpers hit `SymlinkAmbiguous`, `SymlinkEscape`, or a bare `starts_with`, the same uncanonicalized-root cause under three different error shapes
+
+507 → 86 once review 618's own fix landed, but the residue was further from the predicted ~81 than
+expected: `grep -c "SymlinkAmbiguous"` found only 5 remaining matches, yet 23 more failures carried
+the identical root cause under a different name, `FileAccessError { .. reason: SymlinkEscape }` —
+a file textually under its own root, refused because the root's own recorded "canonical" path was
+never actually canonicalized, so `resolve_existing`'s real canonicalization of the file no longer
+`starts_with` it. A third face, a bare `path.starts_with(&root)` assertion comparing the two
+spellings directly, found in `audit::tests::path`. Ten more independently-built roots fixed the same
+way: eight copies of a bare `fn test_root(name) -> PathBuf` (`runtime::terminal::tests`,
+`recovery::tests`, `project::tests::content`, `agent::tests`, `project_lock::tests`,
+`runtime::terminal::reader::tests`, `project_lock::attention::tests`, `config::tests::profile`),
+two standalone functions in `ignore_tests.rs` separate from its own `Repo` struct already fixed,
+`explorer_tree::tests::wide_tree`'s own inline construction, and `audit::tests::path`'s own
+`TestDirs`. The tell, recorded for next time: any macOS-only failure naming a `/tmp` path together
+with a containment or equality check is this class until proven otherwise, regardless of which of
+the three error shapes it surfaces as.
+
 ### Fixed — review 617/618: the `SymlinkAmbiguous` class `watch_test_root()` was fixed for reaches 401 of 507 failures across both crates, not a handful in one
 
 Measured, not estimated: 122 of `tekstide-core`'s 220 failures and **279 of `tekstide`'s 287** carry
