@@ -27,7 +27,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `approval::tests::coordinator::is_still_answerable_reflects_the_real_connection_state` | request 326 (2026-08-25) — **row 5. `drop(peer)` closes the socket locally; the coordinator's own end observes it on the kernel's own schedule, not instantly — a defect in the test's single post-drop assertion, not in the product. Fixed, disposition 2026-10-07: replaced with a bounded poll for `is_still_answerable` to become `false` (seconds, not milliseconds). Retired from active tracking; the recurrence sections below stay as history.** |
 | `shell::tests::change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | request 329 (2026-08-26) — **row 6. Candidate confirmed closed by the test-flake-disposition pass (2026-10-09): the same shared-SQLite-audit-store fix (2026-08-26) directly observed reaching it, per the "ROOT CAUSE, CONFIRMED" section's own reachability audit; no recurrence anywhere in this document since. Retired from active tracking.** |
 | `shell::tests::change_review_content_view_build_cost_by_line_count_measurement` | review 338 (2026-08-26) — **not this document's own cause; see below. Fixed, `0.29.0`: rewritten as a paired ratio against a reference workload timed in the same run, so load no longer decides it; see the dated entry. Re-confirmed closed by the test-flake-disposition pass (2026-10-09): still passes, no recurrence since the fix.** |
-| `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **row 8, PTY read timing, not process leak or audit store.** The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. **Fixed by the test-flake-disposition pass (2026-10-09), the same shape as review 478's two backgrounded-job tests: polls the parse itself (`poll_demo_pane_until_parsed`) instead of a substring followed by a separate parse. See the dated disposition entry.** |
+| `shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close` | `0.16.0` release gate (2026-08-28) — **row 8, PTY read timing, not process leak or audit store.** The assertion message was captured: *"the marker must be followed by a real, parseable PID"*, with the read having returned only the shell's **echo of the command line** and not yet the `descendant-pid:` line it prints. **Fixed by the test-flake-disposition pass (2026-10-09), the same shape as review 478's two backgrounded-job tests: polls the parse itself (`poll_demo_pane_until_parsed`) instead of a substring followed by a separate parse. See the dated disposition entry.** **Recurred on macOS 2026-10-20 (review 619), with the post-fix poll's *own* message, not the pre-fix one -- so the fix is in place and the poll itself timed out. Recorded as a platform recurrence, not as the Linux row reopening; see the dated entry at the end.** |
 | `transcript::tests::a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | request 388 (2026-09-13) — **new test; fork-duplicated descriptor keeps an `flock` alive past the drop. Fixed in the test, see the dated entry. Confirmed by the test-flake-disposition pass (2026-10-09): still passes. Retired from active tracking.** |
 | `runtime::terminal::reader::tests::local_bounded_marks_capture_failed_and_keeps_reading_when_the_transcript_is_genuinely_unwritable` and `…required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | request 388 (2026-09-13) — **caused by PR-050-A, not load: the two tests share `/dev/full`'s lock. First attributed to load, wrongly; see the dated entry's correction. First masked by a test mutex; fixed at response 388 by locking regular files only, and the mutex removed. Confirmed by the test-flake-disposition pass (2026-10-09): both still pass, no test mutex anywhere in the file. Retired from active tracking.** |
 | `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. **Confirmed by the test-flake-disposition pass (2026-10-09): still passes on Linux. Retired from active tracking there.** **Reopened for macOS (2026-10-19): the same test fails deterministically on `macos-measurement` at a different assertion -- `wait_for_exit` returns `None` where `Exited { exit_status: 0 }` is expected (`reader/tests.rs:115`). Not the 2026-09-15 race, not an intermittent. See the dated entry at the end.** |
@@ -3040,3 +3040,32 @@ runner. Reports the three results side by side; proposes nothing. `kill` saying 
 `proc_pidinfo` says `ESRCH` would mean libproc cannot see this state and `is_zombie` is unreliable
 on macOS; `kill` saying `ESRCH` while `waitid` reports a real state change would mean the
 contradiction is in std's own bookkeeping instead.
+
+## Recurrence on macOS, 2026-10-20 -- row 8, after the 2026-10-09 fix
+
+Run `39413461188` (`977b8c7`), the `macos-measurement` job, the **only** `tekstide`-crate failure in
+that run (1 of 507 -> 86). Captured:
+
+```
+thread 'shell::tests::closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close'
+panicked at crates/tekstide/src/shell/tests.rs:14928:6:
+the backgrounded descendant must report its own, real, parseable PID before the close attempt begins
+```
+
+**Read the message carefully: it is the post-fix assertion, not the pre-fix one.** Every Linux
+recurrence above reported *"the marker must be followed by a real, parseable PID"* with the pane
+holding only the echoed command line. The 2026-10-09 disposition replaced that with
+`poll_demo_pane_until_parsed`, which polls the parse itself; this failure is that poll **exhausting
+its budget**. So the fix is present and working as designed, and what failed is the underlying
+assumption that the backgrounded descendant prints its pid within the budget *on this platform*.
+
+**Not filed as the Linux row reopening.** The dev team's own report (review 619) read it as matching
+row 8's documented shape exactly; the assertion text says otherwise, and the platform is new.
+Recorded here as a macOS recurrence of the same *test*, with a different proximate cause, and left
+unattributed rather than guessed at.
+
+**Plausibly the same family as this round's open shell question**, not confirmed: review 619's own
+`kill`/`waitid` triangulation proved a `/bin/sh` child on this runner was alive and running five
+seconds after `exit\n` was written to its PTY. A shell that does not act on written input within
+seconds would also fail this test exactly this way. Both stay open; neither is evidence for the
+other yet.
