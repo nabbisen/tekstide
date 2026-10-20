@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Found, not yet fixed — review 628: a hypothesis with its falsifier, and a one-test experiment to test it — `proc_exit`, wedged for lack of a draining reader
+
+Review 627's own visibility experiment settled which half of review 625's open question was true:
+both a plain child and a PTY child are fully visible to libproc at a normal point in their life (the
+PTY child checked right after `wait_for_shell_ready` confirms it executes), so the earlier blindness
+is a *state*, not a property of PTY children as a class.
+
+Review 628 names the state and gives it a falsifier. On Darwin, a process that has called `exit` sets
+`P_WEXIT` in `p_flag` and works through `proc_exit` before `p_stat` ever becomes `SZOMB`; `proc_pidinfo`
+and `proc_listallpids` both route through `proc_find`, which refuses a process mid-exit, while
+`sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID)` still reports it. Every one of this investigation's own
+observations lines up with "inside `proc_exit`": `kill` succeeding, both libproc entry points failing
+`ESRCH`, `waitid(WNOWAIT)` reporting no state change, `sysctl`'s own `p_stat = SRUN` (alive, not yet a
+zombie), and the bash farewell line itself (627's own finding — exit has begun).
+
+Added, this push: `p_flag` read alongside `p_stat` (same `sysctl` record, offset 32, cross-checked
+against the plain child's own hex dump — decodes to `P_EXEC | P_LP64`, exactly what a freshly `exec`'d
+64-bit process carries, confirming the offset from a second field independent of `p_pid`'s own match),
+with the `P_WEXIT` (`0x2000`) bit checked explicitly; three samples 100ms apart rather than one, since
+a single `SRUN` cannot tell a genuinely spinning child from one merely caught runnable by sampling
+luck. And a one-test throwaway measurement (`agent::tests::project_session_launches_agent_run_
+through_terminal_runtime_and_completes` only, not applied across the cluster): spawn the output reader
+— which every test the handshake actually *fixed* already has, and every one of the 13 still-failing
+sites lacks — before writing the exit command, testing whether an exiting shell wedges specifically
+when nothing is draining its PTY master. If both come back positive, this is a real product finding
+(a pane closed while output is pending could wedge the same way), not only a harness one.
+
+Proposes no fix; reports the data, per the reviewer's own standing instruction for this
+investigation.
+
 ### Found, not yet fixed — review 627: the bare `exit` in every re-sent probe's capture is bash's own farewell — the shell read and ran the real command, then got stuck leaving
 
 Review 625's own reading of the re-sent-probe data (`tek2 returned = false` on all 13 armed sites)

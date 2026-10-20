@@ -559,6 +559,20 @@ fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
     ));
 
     wait_for_shell_ready(&mut runtime, &handle);
+    // Review 628's own throwaway measurement, this one site only: review
+    // 627/628's own hypothesis is that an exiting shell can wedge inside
+    // `proc_exit` when nobody is draining its PTY master -- every test
+    // the handshake actually fixed has a reader thread already draining
+    // it (the wake notifier, both `transcript::reader` members), and
+    // every one of the 13 still-failing sites does not. Spawning the
+    // reader thread here, before the exit command goes in, is the one
+    // change this measurement tests; nothing reads from the reader
+    // itself, since the mechanism under test is the background thread's
+    // own continuous `read()` keeping the master's kernel buffer from
+    // filling, not anything this test does with the bytes.
+    let _draining_reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
     runtime
         .write_input(&handle, b"exit 0\n")
         .expect("cleanup exit should write to AgentRun PTY");
