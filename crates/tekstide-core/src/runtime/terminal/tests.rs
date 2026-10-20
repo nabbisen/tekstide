@@ -1441,3 +1441,144 @@ fn process_comm(pid: u32) -> Option<String> {
         .ok()
         .map(|comm| comm.trim().to_string())
 }
+
+/// Review 625's own named experiment, decisive before any repair: review
+/// 623's libproc datum (`proc_pidinfo`/`proc_listallpids` both blind to a
+/// live, signalable PTY child, uniform across 13 real firings) could mean
+/// libproc cannot see *this crate's PTY children specifically* (the
+/// difference would then be inside `spawn_pty_child` -- `setsid`,
+/// `TIOCSCTTY`, or review 614's own `fcntl` loop), or it could mean
+/// libproc cannot see *any child this process spawns*, which is a
+/// different repair (the enumeration mechanism itself would need
+/// replacing, not debugging). A plain, PTY-less child
+/// (`std::process::Command::spawn`, no `setsid`, no `TIOCSCTTY`) and a
+/// normal PTY child are queried the identical way, side by side, in the
+/// same real run -- not two separate runs that could each be measuring a
+/// different moment of CI contention.
+///
+/// A third, non-libproc view of the same question:
+/// `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID, pid)`. `CTL_KERN`,
+/// `KERN_PROC` and `KERN_PROC_PID` are all in Apple's own `libc` crate
+/// (confirmed against real Apple targets the standalone-crate way, the
+/// same method this project already uses for every macOS-only syscall
+/// this session added); `kinfo_proc`, the struct the real kernel would
+/// fill in, is **not** -- confirmed the same way. Review 625 asked for it
+/// declared by hand, the `ptsname_r` precedent (`pty.rs`) for a real
+/// symbol `libc` omits. This experiment deliberately does **not** declare
+/// it: `kinfo_proc`'s own real layout is a large, nested, version-stable
+/// but entirely unverified-here struct, and getting a hand-reconstructed
+/// field layout wrong (not merely a wrong numeric constant, `ptsname_r`'s
+/// own rejected alternative) risks reading garbage silently on real
+/// hardware this project cannot reach to check. The question this
+/// experiment asks -- *does the kernel have a record of this pid at
+/// all* -- does not need any field inside the struct: `sysctl` always
+/// writes the same fixed, non-negotiable size for a pid it has a record
+/// of, and reports exactly `0` bytes (or an error) when it does not. An
+/// oversized, untyped byte buffer as `oldp` answers that question
+/// completely, without parsing a single field of a struct this project
+/// has no way to verify.
+///
+/// Proposes nothing. Prints both children's three-way answer; asserts
+/// nothing about what they say.
+#[test]
+#[cfg(target_os = "macos")]
+fn libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_view() {
+    /// SAFETY: `kill` with signal `0` delivers nothing; `proc_pidinfo`'s
+    /// `info` is a plain, fully-zeroed `proc_bsdinfo` the call writes
+    /// into, `size` matches its own real size exactly; `sysctl`'s own
+    /// `buffer` is valid and sized as declared for the duration of the
+    /// call, and nothing here reads a single byte of it back as a typed
+    /// field -- only whether a nonzero length came back at all.
+    fn describe_pid_three_ways(pid: libc::pid_t) -> String {
+        let kill_result = unsafe { libc::kill(pid, 0) };
+        let kill_label = if kill_result == 0 {
+            "exists/signalable".to_owned()
+        } else {
+            format!("{:?}", std::io::Error::last_os_error())
+        };
+
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let proc_pidinfo_result = unsafe {
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
+        };
+        let proc_pidinfo_label = if proc_pidinfo_result == size {
+            "found".to_owned()
+        } else {
+            format!("failed: {:?}", std::io::Error::last_os_error())
+        };
+
+        let in_pid_list = list_all_pids().map(|pids| pids.contains(&pid));
+        let in_pid_list_label = match in_pid_list {
+            Some(true) => "yes".to_owned(),
+            Some(false) => "no".to_owned(),
+            None => "list_all_pids itself failed".to_owned(),
+        };
+
+        let mut mib: [libc::c_int; 4] = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+        // Generously over the real `struct kinfo_proc`'s own documented
+        // size (a few hundred bytes on every Darwin release this
+        // project has read about) -- see this function's own doc
+        // comment for why the contents are never parsed.
+        let mut buffer = vec![0_u8; 4096];
+        let mut written_len: libc::size_t = buffer.len();
+        let sysctl_result = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as libc::c_uint,
+                buffer.as_mut_ptr().cast(),
+                &raw mut written_len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        let sysctl_label = if sysctl_result != 0 {
+            format!("failed: {:?}", std::io::Error::last_os_error())
+        } else if written_len == 0 {
+            "no record (0 bytes written)".to_owned()
+        } else {
+            format!("found ({written_len} bytes written)")
+        };
+
+        format!(
+            "kill={kill_label}; proc_pidinfo={proc_pidinfo_label}; in_proc_listallpids=\
+             {in_pid_list_label}; sysctl(KERN_PROC_PID)={sysctl_label}"
+        )
+    }
+
+    let mut plain_child = std::process::Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .expect("a plain, PTY-less child should spawn");
+    let plain_pid = plain_child.id() as libc::pid_t;
+
+    let root = test_root("libproc-visibility");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = TerminalRuntime::new();
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
+    let pty_pid = runtime
+        .session(&handle)
+        .expect("the just-launched session should still be findable")
+        .child
+        .id() as libc::pid_t;
+
+    eprintln!(
+        "[libproc-visibility] plain child (pid {plain_pid}): {}",
+        describe_pid_three_ways(plain_pid)
+    );
+    eprintln!(
+        "[libproc-visibility] pty child (pid {pty_pid}): {}",
+        describe_pid_three_ways(pty_pid)
+    );
+
+    let _ = plain_child.kill();
+    let _ = plain_child.wait();
+    let _ = runtime.write_input(&handle, b"exit\n");
+    let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
+    cleanup_root(root);
+}

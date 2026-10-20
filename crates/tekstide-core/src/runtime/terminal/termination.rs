@@ -4,7 +4,8 @@ use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
 use super::launch::{
-    processes_in_session, report_child_status_at_timeout, session_confirmed_empty, session_id_of,
+    processes_in_session, report_child_status_at_timeout, report_pty_responsiveness_at_timeout,
+    session_confirmed_empty, session_id_of,
 };
 use super::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
@@ -211,6 +212,13 @@ impl TerminalRuntime {
                 // right at the moment that distinction would otherwise be
                 // lost.
                 report_child_status_at_timeout(child_pid);
+                // Review 625: a second, independent diagnostic at the
+                // same moment -- re-sending the readiness probe, not
+                // re-deriving the session or touching the child's own
+                // process state, so it carries none of 618's own hazard.
+                // See `report_pty_responsiveness_at_timeout`'s own doc
+                // comment for why this is safe here.
+                report_pty_responsiveness_at_timeout(self, handle);
                 return Ok(None);
             }
 

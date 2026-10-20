@@ -942,8 +942,14 @@ const MAX_ENUMERATED_PIDS: usize = 65536;
 /// confidence `what-containment-must-not-become.md` §4 forbids. Real
 /// machines are nowhere near this bound; hitting it at all is itself
 /// worth surfacing as a failure rather than quietly tolerating.
+///
+/// `pub(super)`, review 625: the libproc-visibility experiment in
+/// `terminal::tests` (a plain, PTY-less child against a normal PTY
+/// child, queried the same way) needs the identical enumeration this
+/// file's own `processes_in_session` uses, not a second copy that could
+/// drift from it.
 #[cfg(target_os = "macos")]
-fn list_all_pids() -> Option<Vec<libc::pid_t>> {
+pub(super) fn list_all_pids() -> Option<Vec<libc::pid_t>> {
     let mut buffer: Vec<libc::pid_t> = vec![0; MAX_ENUMERATED_PIDS];
     let capacity_bytes = std::mem::size_of_val(buffer.as_slice()) as libc::c_int;
     // SAFETY: `buffer` is valid for `capacity_bytes` for the duration
@@ -1208,6 +1214,74 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
 
 #[cfg(not(all(test, target_os = "macos")))]
 pub(super) fn report_child_status_at_timeout(_pid: u32) {}
+
+/// Review 625's own required datum, at the exact moment
+/// `wait_for_child_outcome` is about to give up: **re-send the readiness
+/// probe, right there, rather than guess from the 13-firing shape alone.**
+/// Every surviving member of the former 18-cluster now does
+/// `wait_for_shell_ready` (confirmed: `tek2` came back, so the shell was
+/// reading and executing), then writes its own real command, then times
+/// out with the child still alive -- which means the failure moved from
+/// "the first write is discarded at startup" to "the shell executed one
+/// command and did not act on the next." One more send of the exact same
+/// probe, at the timeout, settles which half: `tek2` returning again means
+/// the shell is still alive and reading, and the question becomes the
+/// real command's own fate (did it ever reach the input queue, was it
+/// echoed); `tek2` not returning means input stopped being honoured
+/// sometime after the first command, and the suspect moves to what this
+/// crate's own reads do to the terminal between two writes.
+///
+/// Deliberately reports the **raw captured bytes**, not a yes/no verdict
+/// on whether the caller's own real command was echoed: this function has
+/// no way to know what text any given caller wrote (`"exit 0\n"`,
+/// `"exit 7\n"`, a `printf` marker, …), and guessing at one would be
+/// exactly the unearned narrative `what-containment-must-not-become.md`
+/// §4 forbids. The dump itself answers that question for whoever reads
+/// it, for every call site, without this function needing to know which
+/// one it is.
+///
+/// **Why this is safe against review 616/618's own rule** ("a diagnostic
+/// must not be able to change the result it is diagnosing"): the result
+/// being diagnosed is `wait_for_child_outcome`'s return value, which is
+/// already decided (`Ok(None)`) by the time this runs -- nothing here
+/// changes that. Writing an idempotent, side-effect-free probe command
+/// and draining whatever the master has queued is not the hazard 618
+/// found: that hazard was specifically reaping the child (freeing its pid
+/// for reuse before `RunningTerminal::drop`'s own session-wide sweep,
+/// which derives the session id from that same pid), and nothing here
+/// calls anything that reaps. Every fallible step here is caught and
+/// reported, never `.expect`-ed or propagated -- a failure in the probe
+/// itself is one more datum, not a new way for this path to panic.
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn report_pty_responsiveness_at_timeout(
+    runtime: &mut TerminalRuntime,
+    handle: &TerminalRuntimeHandle,
+) {
+    if let Err(error) = runtime.write_input(handle, b"echo tek$((1+1))\n") {
+        eprintln!("[wait-for-exit-timeout] re-sent readiness probe: write failed: {error:?}");
+        return;
+    }
+    match runtime.read_available_bounded_for(handle, Duration::from_millis(250), 4096) {
+        Ok((chunk, _)) => {
+            let tek2_returned = chunk.windows(4).any(|window| window == b"tek2");
+            eprintln!(
+                "[wait-for-exit-timeout] re-sent readiness probe: tek2 returned = \
+                 {tek2_returned}; captured: {:?}",
+                String::from_utf8_lossy(&chunk)
+            );
+        }
+        Err(error) => {
+            eprintln!("[wait-for-exit-timeout] re-sent readiness probe: read failed: {error:?}");
+        }
+    }
+}
+
+#[cfg(not(all(test, target_os = "macos")))]
+pub(super) fn report_pty_responsiveness_at_timeout(
+    _runtime: &mut TerminalRuntime,
+    _handle: &TerminalRuntimeHandle,
+) {
+}
 
 /// Review 623's own fix for the PTY-startup race review 622 first found as
 /// an 18-test cluster, then partly retracted: every member of that cluster

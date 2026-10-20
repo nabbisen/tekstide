@@ -489,6 +489,42 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   D2's `macos_kqueue` choice is not revisited by either finding; it would need a macOS-specific
   fixture deliberately exercising the fd-vs-path distinction to actually test the hypothesis, which
   nothing here does.
+
+  **Required correction, 2026-10-21, review 625 — the libproc port's own "~42 containment
+  failures cleared" (review 608) was the guard becoming unable to fail, not containment beginning
+  to work, and this is a release-relevant gap, not a test-only one.** Review 623's own diagnostic
+  (`report_child_status_at_timeout`) found `proc_pidinfo`/`proc_listallpids` both blind to a live,
+  signalable PTY child — `kill(pid, 0)` says it exists, libproc's own two separate query paths say
+  it does not — uniform across every firing measured. Followed to where it actually lands:
+  `session_confirmed_empty(session_id)` is `processes_in_session(session_id).is_some_and(|s|
+  s.is_empty())`, and `processes_in_session` is built on the same `list_all_pids()` enumeration.
+  **A successful-but-blind enumeration returns `Some(vec![])`, which `is_some_and(.is_empty())`
+  reads as "confirmed empty."** So on macOS, for a session libproc cannot enumerate:
+  `RunningTerminal::drop`'s `wait_briefly_for_session_empty` returns `true` immediately after the
+  `SIGHUP`, the `SIGKILL` escalation and the `signal_candidates` sweep **never run**, and
+  `assert_session_is_empty` — the `#[cfg(any(test, feature = "test-support"))]` guard PR-043-A
+  built specifically so a leak would be *red* — asserts a predicate that **cannot fire false** on
+  this platform. Review 608's own "42 cleared" was this: before the libproc port, the enumeration
+  itself failed, `session_confirmed_empty` was `false`, and the guard correctly went red; after the
+  port, the enumeration succeeds, sees nobody (because it cannot see anybody), and the guard passes
+  without having verified anything. Forty-two tests turned green because the assertion lost the
+  ability to fail, not because RFC-043's containment began working on this platform.
+
+  **This is a product gap, not only a test one.** RFC-043 exists because a backgrounded job can
+  outlive a terminal's close; the sequence meant to catch that on macOS stops after an unverified
+  `SIGHUP`, with nothing to escalate to if the shell does not act on it. A shell that ignores
+  `SIGHUP`, or a job under `trap '' HUP` (precisely the fixture `tekstide`'s own row 8 already
+  builds), would survive a close on macOS with nothing escalating — silently, since the guard that
+  exists to make this loud cannot fire. **Not fixed by this correction; the decision about scope
+  and remedy for `0.38.0` is the owner's**, per review 625.
+
+  Review 625 also added the standing watch this gap needs to
+  `rfcs/handoffs/release-checklist.md`'s own "Standing Watches" section: *every containment guard
+  must be shown to FAIL, on every supported platform*, since a guard only ever seen passing is not
+  known to work — it may simply be unable to fail. The libproc plain-child-vs-PTY-child experiment
+  and the re-sent-probe-at-timeout diagnostic this correction's own investigation added (both
+  `#[cfg(test)]`-only, proposing no fix) are recorded in `test-process-leak.md`'s own thread for
+  this failure, not duplicated here.
 - **D6. Clipboard, fonts, and locale resolution need no GUI-layer work.** All three are already
   fully cross-platform through dependencies; stated explicitly so this is not rediscovered as a
   gap. **Narrower than "no GUI-layer work at all"** — corrected by D9, below, which is real

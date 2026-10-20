@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Found, not yet fixed — review 625: RFC-043's containment guard cannot fail on macOS; review 608's "42 cleared" was the guard going vacuous, not containment working
+
+The readiness handshake (reviews 623/624) isolated a second, distinct failure cleanly: every
+surviving `agent::tests`/`audit::tests::integration` member now confirms the shell is alive and
+executing (`wait_for_shell_ready` succeeds), writes its own real command, and still times out with
+the child alive. Review 623's own libproc diagnostic, extended, found why: `proc_pidinfo` and
+`proc_listallpids` are both blind to a live, signalable PTY child (`kill(pid, 0)` succeeds while both
+separate libproc query paths report `ESRCH`/omit the pid), uniform across every firing measured, with
+`proc_pidinfo(getpid())` succeeding on this same process — ruling out a bad binding or call, not a bad
+target.
+
+Followed to where it actually lands: `session_confirmed_empty` is
+`processes_in_session(id).is_some_and(|s| s.is_empty())`, built on the same blind enumeration — a
+**successful but blind** enumeration returns `Some(vec![])`, which reads as "confirmed empty." So on
+macOS, for a session libproc cannot enumerate, `RunningTerminal::drop`'s `SIGKILL` escalation never
+runs after the `SIGHUP`, and `assert_session_is_empty` (the `#[cfg(any(test, feature =
+"test-support"))]` guard built specifically so a leak would be *red*) cannot fire false. Review 608's
+own "~42 containment failures cleared" was this: the enumeration started succeeding and seeing
+nobody, not containment beginning to work. Dated correction in RFC-028 D5's own notes.
+
+Added, this push, each proposing no fix: a `#[cfg(test, target_os = "macos")]` experiment
+(`libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_view`) comparing a plain, PTY-less
+child against a normal PTY child through the identical three views — `proc_pidinfo`,
+`proc_listallpids`, and a new, independent `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID, pid)` view
+that does not touch libproc at all (an oversized, untyped byte buffer as the `sysctl` output target,
+deliberately not a hand-declared `kinfo_proc` — that struct's own real field layout is unverified
+here and a wrong one risks silently reading garbage on real hardware this project cannot reach,
+where a wrong numeric constant would simply fail to compile or load); and a second diagnostic,
+`report_pty_responsiveness_at_timeout`, re-sending the readiness probe at the exact moment
+`wait_for_child_outcome` gives up, to tell "the shell is still alive and declined to act on the next
+command" from "input stopped being honoured after the first command" — the question the handshake's
+own placement made askable for the first time.
+
+A new standing watch, added by the reviewer to `rfcs/handoffs/release-checklist.md`: every
+containment guard must be shown to **fail**, on every supported platform, before it is trusted —
+a guard only ever seen passing may simply be unable to fail.
+
 ### Fixed — review 624: the readiness handshake could itself be eaten by the race it detects; a 25th site; the two copies now share one definition
 
 Review 623's own handshake wrote its probe once and read for up to 5s — but the race under test is
