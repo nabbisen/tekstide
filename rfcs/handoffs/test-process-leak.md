@@ -2980,3 +2980,29 @@ run.
 
 **Standing constraint on the fix:** widening the 5 s timeout is not a fix and is not accepted as
 one unless a probe shows a real exit arriving late *and* how late. A stopped child never arrives.
+
+**The named probe, implemented 2026-10-20 (review 608/615/616) -- not yet run on Apple hardware.**
+`report_child_status_at_timeout` (`launch.rs`, `#[cfg(all(test, target_os = "macos"))]`, a no-op
+everywhere else) wraps `is_zombie`'s own `proc_pidinfo(PROC_PIDTBSDINFO)` call and reports
+`pbi_status` directly rather than testing it against one value, called from
+`wait_for_child_outcome` (`termination.rs`) at the exact moment it gives up and returns `None`.
+The pid is read once, before the loop, not inside the timeout branch -- review 616's own required
+correction, since reading it there added a second, fallible call to a path that is otherwise
+infallible on every platform but a `#[cfg(test)]` macOS build: a diagnostic must not be able to
+change the result it is diagnosing. The failure message prints the real `io::Error::last_os_error()`
+rather than guessing the cause, the same correction 607/608 already forced once this round.
+
+**The verification gap closed further than believed, by the reviewer's own method (review 616).** A
+dependency-free standalone crate (`libc` only, no native build step) with the function body copied
+verbatim type-checks cleanly against Apple's real libc with `cargo check --target
+aarch64-apple-darwin --tests` (and `x86_64-apple-darwin`) -- no cross toolchain needed, since `libc`
+is pure Rust. Every *shape* risk in this FFI is closed this way: `proc_bsdinfo`/`pbi_status` exist
+and `pbi_status` is `u32` (matching `SSTOP: u32`), `PROC_PIDTBSDINFO` is `c_int`, `proc_pidinfo`'s
+signature matches every argument passed to it, and the `cfg` pair resolves to exactly one
+definition in all three shapes that matter (non-test Apple, test-profile Apple -- the runner's own
+shape, test-profile Linux). What remains open is runtime behaviour only: whether `proc_pidinfo`
+returns exactly `size` for a stopped child, and whether `pbi_status` then reads `4` -- the kernel's
+own answer, not something a type-checker can give. Three tests may now exercise this same timeout
+path on the next `macos-measurement` run: the wake-notifier test above, and (per 614's own
+prediction) the two unwritable-transcript tests if they fail at their final `wait_for_exit`
+assertion rather than at the `EPIPE`-based setup those tests actually check.

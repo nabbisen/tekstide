@@ -991,6 +991,59 @@ fn enumeration_forced_to_fail() -> bool {
     TEST_FORCE_ENUMERATION_FAILURE.with(std::cell::Cell::get)
 }
 
+/// Review 608's own named probe for the last item in 596's triage:
+/// whether `wait_for_exit` timing out on a real macOS run means the child
+/// is genuinely slow to exit, or is stopped (`SSTOP`) and will never be
+/// reaped by `try_wait`, which passes no `WUNTRACED` -- a stopped child is
+/// indistinguishable from a running one to that call, and returns
+/// `Ok(None)` forever. Called from `termination.rs`'s platform-neutral
+/// `wait_for_child_outcome`, right before it gives up and returns `None`,
+/// so this is the exact moment the real runner's own symptom
+/// (`the_wake_notifier_wakes_when_real_pty_output_arrives` and, per 615,
+/// possibly the two unwritable-transcript tests too) would be caught in
+/// the act rather than inferred after the fact.
+///
+/// Reuses `is_zombie`'s own `proc_pidinfo(PROC_PIDTBSDINFO)` call, reading
+/// `pbi_status` directly instead of comparing it against one value: this
+/// is a diagnostic naming what the child's own state actually is, not a
+/// yes/no classifier. `#[cfg(test)]`-only, the same shape
+/// `enumeration_progress` already uses, so this is never reachable in a
+/// shipped binary; a no-op on Linux or in a non-test build, so the
+/// platform-neutral caller never needs its own `cfg`.
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn report_child_status_at_timeout(pid: u32) {
+    let pid = pid as libc::pid_t;
+    // SAFETY: same as `is_zombie`'s own call -- `info` is a plain,
+    // fully-zeroed `proc_bsdinfo` the call writes into, and `size`
+    // matches its own real size exactly, the buffer `proc_pidinfo` is
+    // documented to require.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let result =
+        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    if result != size {
+        let error = io::Error::last_os_error();
+        eprintln!(
+            "[wait-for-exit-timeout] proc_pidinfo({pid}) failed: {error:?} -- the errno, not a \
+             guess about it, decides whether this is a vanished process or something else"
+        );
+        return;
+    }
+    let status = info.pbi_status;
+    let label = if status == libc::SSTOP {
+        "SSTOP: stopped, not reaped by try_wait (it passes no WUNTRACED) -- the hypothesis is \
+         confirmed"
+    } else if status == libc::SZOMB {
+        "SZOMB: a zombie try_wait should already have reaped -- unexpected, not the hypothesis"
+    } else {
+        "neither SSTOP nor SZOMB -- the hypothesis is falsified for this run"
+    };
+    eprintln!("[wait-for-exit-timeout] pid {pid} pbi_status = {status} ({label})");
+}
+
+#[cfg(not(all(test, target_os = "macos")))]
+pub(super) fn report_child_status_at_timeout(_pid: u32) {}
+
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 thread_local! {

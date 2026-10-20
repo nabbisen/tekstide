@@ -3,7 +3,9 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
-use super::launch::{processes_in_session, session_confirmed_empty, session_id_of};
+use super::launch::{
+    processes_in_session, report_child_status_at_timeout, session_confirmed_empty, session_id_of,
+};
 use super::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
     TerminalRuntimeHandle, TerminationOutcome, TerminationRequest, TerminationSignal,
@@ -176,6 +178,15 @@ impl TerminalRuntime {
         timeout: Duration,
     ) -> Result<Option<TerminationOutcome>, TerminalRuntimeError> {
         let started = Instant::now();
+        // Captured once, before the loop: review 616's own correction --
+        // a diagnostic must not be able to change the result it is
+        // diagnosing. `session(handle)?` inside the timeout branch below
+        // would add a second, fallible call to a path that is otherwise
+        // infallible on every platform except a `#[cfg(test)]` macOS
+        // build; reading the pid once here, while the same `?` the
+        // `try_wait` call below already needs is the only fallible call
+        // left, keeps the production path byte-for-byte what it was.
+        let child_pid = self.session_mut(handle)?.child.id();
 
         loop {
             if let Some(status) = self
@@ -193,6 +204,13 @@ impl TerminalRuntime {
             }
 
             if started.elapsed() > timeout {
+                // Review 608/615: a no-op everywhere except a `#[cfg(test)]`
+                // macOS build (see its own doc comment) -- the last item in
+                // 596's triage, probing whether the child this call is
+                // giving up on is genuinely slow or stopped (`SSTOP`),
+                // right at the moment that distinction would otherwise be
+                // lost.
+                report_child_status_at_timeout(child_pid);
                 return Ok(None);
             }
 
