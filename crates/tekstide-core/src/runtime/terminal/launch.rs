@@ -1245,18 +1245,41 @@ pub(super) fn report_child_status_at_timeout(_pid: u32) {}
 /// being diagnosed is `wait_for_child_outcome`'s return value, which is
 /// already decided (`Ok(None)`) by the time this runs -- nothing here
 /// changes that. Writing an idempotent, side-effect-free probe command
-/// and draining whatever the master has queued is not the hazard 618
-/// found: that hazard was specifically reaping the child (freeing its pid
-/// for reuse before `RunningTerminal::drop`'s own session-wide sweep,
-/// which derives the session id from that same pid), and nothing here
-/// calls anything that reaps. Every fallible step here is caught and
-/// reported, never `.expect`-ed or propagated -- a failure in the probe
-/// itself is one more datum, not a new way for this path to panic.
+/// is not the hazard 618 found: that hazard was specifically reaping the
+/// child (freeing its pid for reuse before `RunningTerminal::drop`'s own
+/// session-wide sweep, which derives the session id from that same
+/// pid), and nothing here calls anything that reaps.
+///
+/// **But the rule is wider than reaping, review 626's own required
+/// correction: a diagnostic must not consume state the subject under
+/// test depends on, and reading a PTY is a consuming operation.**
+/// `runtime::terminal::reader::tests::required_local_bounded_marks_
+/// capture_failed_stops_reading_and_stalls_the_child_without_killing_it`
+/// returns through this exact `Ok(None)` path *on purpose* -- its own
+/// precondition is a child deliberately stalled on a `write(2)` into a
+/// full PTY buffer, and this probe's own 250ms read would drain that
+/// buffer and release it, destroying the state the test's own assertion
+/// is about (and, in passing, could change the shape of the still-parked
+/// `RequiredLocalBounded` 43-byte finding before anyone has looked at
+/// it). So: **armed explicitly, not fired on every timeout** --
+/// [`arm_pty_responsiveness_probe_for_test`] opts a specific test in, the
+/// same `#[cfg(test)]` thread-local-guard shape
+/// [`force_session_enumeration_failure_for_test`] already uses for the
+/// identical reason (a default production path must not gain a new,
+/// always-on side effect just because a handful of tests need to probe
+/// it). A test that expects a timeout and keeps its own state unarmed
+/// gets exactly that; an armed site gets the probe's answer. Every
+/// fallible step here is still caught and reported, never `.expect`-ed
+/// or propagated -- a failure in the probe itself is one more datum, not
+/// a new way for this path to panic.
 #[cfg(all(test, target_os = "macos"))]
 pub(super) fn report_pty_responsiveness_at_timeout(
     runtime: &mut TerminalRuntime,
     handle: &TerminalRuntimeHandle,
 ) {
+    if !pty_responsiveness_probe_armed() {
+        return;
+    }
     if let Err(error) = runtime.write_input(handle, b"echo tek$((1+1))\n") {
         eprintln!("[wait-for-exit-timeout] re-sent readiness probe: write failed: {error:?}");
         return;
@@ -1281,6 +1304,53 @@ pub(super) fn report_pty_responsiveness_at_timeout(
     _runtime: &mut TerminalRuntime,
     _handle: &TerminalRuntimeHandle,
 ) {
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Default off, same reasoning as [`TEST_FORCE_ENUMERATION_FAILURE`]:
+    /// the re-sent readiness probe is a consuming read on a PTY, which a
+    /// handful of tests (reader-thread stall/backpressure tests
+    /// specifically) depend on *not* happening at their own timeout. Not
+    /// `target_os`-gated: the arming function and guard are plain
+    /// `#[cfg(test)]` so every call site across the crate can bind the
+    /// guard unconditionally, the same ergonomics `wait_for_shell_ready`
+    /// already has; only [`report_pty_responsiveness_at_timeout`]'s own
+    /// macOS-only real body ever reads the flag.
+    static TEST_PTY_RESPONSIVENESS_PROBE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+// Only `report_pty_responsiveness_at_timeout`'s own macOS-only real body
+// ever reads this; on every other platform/profile shape the thread-local
+// above is written (by the arming guard, below) but never read, which is
+// correct, not dead code left over -- the flag is still load-bearing
+// there, for whichever platform a given CI run actually measures.
+#[cfg(all(test, target_os = "macos"))]
+fn pty_responsiveness_probe_armed() -> bool {
+    TEST_PTY_RESPONSIVENESS_PROBE.with(std::cell::Cell::get)
+}
+
+/// Opts the calling test into [`report_pty_responsiveness_at_timeout`]'s
+/// real probe for the guard's lifetime. Bind the returned guard to a
+/// local that lives for the whole test -- dropping it early re-disarms
+/// the probe before the timeout this test is waiting for ever fires.
+#[cfg(test)]
+pub(crate) fn arm_pty_responsiveness_probe_for_test() -> PtyResponsivenessProbeGuard {
+    TEST_PTY_RESPONSIVENESS_PROBE.with(|cell| cell.set(true));
+    PtyResponsivenessProbeGuard { _private: () }
+}
+
+#[cfg(test)]
+pub(crate) struct PtyResponsivenessProbeGuard {
+    _private: (),
+}
+
+#[cfg(test)]
+impl Drop for PtyResponsivenessProbeGuard {
+    fn drop(&mut self) {
+        TEST_PTY_RESPONSIVENESS_PROBE.with(|cell| cell.set(false));
+    }
 }
 
 /// Review 623's own fix for the PTY-startup race review 622 first found as

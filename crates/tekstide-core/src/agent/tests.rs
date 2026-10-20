@@ -16,7 +16,7 @@ use crate::project::{
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntime,
     TerminalRuntimeEvent, TerminalRuntimeHandle, TerminationOutcome, TerminationSignal,
-    wait_for_shell_ready,
+    arm_pty_responsiveness_probe_for_test, wait_for_shell_ready,
 };
 use crate::transcript::{
     TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver, TranscriptRetentionLimits,
@@ -518,6 +518,8 @@ fn project_session_records_explicit_environment_allowlist_metadata() {
 
 #[test]
 fn project_session_launches_agent_run_through_terminal_runtime_and_completes() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("agent-runtime-launch-root");
     let mut project = restricted_project(ProjectId::for_test(1), &root);
     let profile = built_in_profile(Path::new("/bin/sh"));
@@ -1116,6 +1118,8 @@ fn transcript_capture_retains_pty_bytes_dropped_from_ui_buffer() {
 
 #[test]
 fn transcript_opt_out_launches_without_transcript_metadata() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("agent-transcript-opt-out-root");
     let state_root = test_root("agent-transcript-opt-out-state");
     let mut project = restricted_project(ProjectId::for_test(1), &root);
@@ -1204,6 +1208,8 @@ fn required_transcript_capture_rejects_project_local_state_root_before_runtime_l
 
 #[test]
 fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("agent-transcript-local-disabled-root");
     let state_root = root.join(".tekstide-state");
     std::fs::create_dir_all(&state_root).unwrap();
@@ -1251,6 +1257,8 @@ fn local_bounded_transcript_capture_disables_when_path_preflight_fails() {
 
 #[test]
 fn project_session_launches_validated_managed_agent_run_through_terminal_runtime() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("agent-runtime-managed-root");
     // Deliberately not `test_root`: this test binds a real
     // `ApprovalChannelEndpoint` socket under this root, and a Unix
@@ -1659,6 +1667,10 @@ fn authorized_supervised_plan_spec_cannot_be_mutated_to_managed_runtime_launch()
 
 #[test]
 fn active_clean_text_document_permits_agent_runtime_launch() {
+    // Review 626: armed because this site is under investigation for
+    // review 625's libproc-blindness finding -- see
+    // `arm_pty_responsiveness_probe_for_test`'s own doc comment.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("agent-active-clean-root");
     std::fs::write(root.join("note.txt"), "original\n").expect("active file should be written");
     let mut project = restricted_project(ProjectId::for_test(1), &root);
@@ -1842,6 +1854,8 @@ fn active_save_error_text_document_blocks_agent_runtime_launch_before_process_st
 
 #[test]
 fn safe_save_blocks_external_change_while_agent_run_is_active() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("agent-active-safe-save-root");
     std::fs::write(root.join("note.txt"), "original\n").expect("active file should be written");
     let mut project = restricted_project(ProjectId::for_test(1), &root);
@@ -1975,6 +1989,8 @@ fn runtime_launch_rejects_non_minimal_environment_policy_for_the_adapter_path_to
 
 #[test]
 fn project_session_maps_nonzero_agent_run_exit_to_failed() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("agent-runtime-nonzero-root");
     let mut project = restricted_project(ProjectId::for_test(1), &root);
     let profile = built_in_profile(Path::new("/bin/sh"));

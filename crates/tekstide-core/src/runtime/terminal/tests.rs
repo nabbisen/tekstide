@@ -241,6 +241,8 @@ fn linux_runtime_launches_project_shell_and_reads_marker() {
 
 #[test]
 fn linux_runtime_rejects_cross_project_input_handle() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("cross-project-input");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -472,6 +474,8 @@ fn linux_runtime_terminates_session_leader_with_sighup() {
 
 #[test]
 fn linux_runtime_rejects_cross_project_termination_handle() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let root = test_root("cross-project-terminate");
     let project = project_session(ProjectId::for_test(1), &root);
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
@@ -1487,9 +1491,22 @@ fn libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_view() {
     /// `info` is a plain, fully-zeroed `proc_bsdinfo` the call writes
     /// into, `size` matches its own real size exactly; `sysctl`'s own
     /// `buffer` is valid and sized as declared for the duration of the
-    /// call, and nothing here reads a single byte of it back as a typed
-    /// field -- only whether a nonzero length came back at all.
-    fn describe_pid_three_ways(pid: libc::pid_t) -> String {
+    /// call.
+    ///
+    /// Review 626's own two required additions: the written length is
+    /// reported as its own datum (distinct from an error -- with an
+    /// oversized buffer `ENOMEM` cannot occur, so "failed", "0 bytes"
+    /// and "N bytes" are the whole outcome space, and a plausible N is
+    /// itself a sanity check that this is really talking to the call it
+    /// thinks it is); and, for `dump_hex_prefix` callers only, the first
+    /// 64 raw bytes are printed as hex -- not parsed as any field, read
+    /// back only as opaque bytes, so this is not the struct-layout risk
+    /// this function's own doc comment above already declined. If
+    /// `is_zombie` ever needs replacing, this dump lets a future reader
+    /// learn `kinfo_proc`'s real layout **off the real hardware** instead
+    /// of reconstructing it from headers -- the plain child only, which
+    /// is expected to have a record; the PTY child may not.
+    fn describe_pid_three_ways(pid: libc::pid_t, dump_hex_prefix: bool) -> String {
         let kill_result = unsafe { libc::kill(pid, 0) };
         let kill_label = if kill_result == 0 {
             "exists/signalable".to_owned()
@@ -1535,14 +1552,26 @@ fn libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_view() {
         let sysctl_label = if sysctl_result != 0 {
             format!("failed: {:?}", std::io::Error::last_os_error())
         } else if written_len == 0 {
-            "no record (0 bytes written)".to_owned()
+            "0 bytes written (no record)".to_owned()
         } else {
-            format!("found ({written_len} bytes written)")
+            format!("{written_len} bytes written (found)")
+        };
+
+        let hex_prefix = if dump_hex_prefix && sysctl_result == 0 && written_len > 0 {
+            let prefix_len = written_len.min(64);
+            let hex = buffer[..prefix_len]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("; first {prefix_len} bytes (hex): {hex}")
+        } else {
+            String::new()
         };
 
         format!(
             "kill={kill_label}; proc_pidinfo={proc_pidinfo_label}; in_proc_listallpids=\
-             {in_pid_list_label}; sysctl(KERN_PROC_PID)={sysctl_label}"
+             {in_pid_list_label}; sysctl(KERN_PROC_PID)={sysctl_label}{hex_prefix}"
         )
     }
 
@@ -1569,11 +1598,11 @@ fn libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_view() {
 
     eprintln!(
         "[libproc-visibility] plain child (pid {plain_pid}): {}",
-        describe_pid_three_ways(plain_pid)
+        describe_pid_three_ways(plain_pid, true)
     );
     eprintln!(
         "[libproc-visibility] pty child (pid {pty_pid}): {}",
-        describe_pid_three_ways(pty_pid)
+        describe_pid_three_ways(pty_pid, false)
     );
 
     let _ = plain_child.kill();

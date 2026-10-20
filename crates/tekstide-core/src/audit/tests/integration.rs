@@ -27,7 +27,7 @@ use crate::domain::{
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeHandle, TerminationOutcome,
-    wait_for_shell_ready,
+    arm_pty_responsiveness_probe_for_test, wait_for_shell_ready,
 };
 
 use super::support::TestAuditDirs;
@@ -108,6 +108,8 @@ fn post_authorization_failure_preserves_applied_trust_and_degrades_health_once()
 
 #[test]
 fn managed_launch_persists_authorized_started_and_terminated_runtime_truth() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let dirs = TestAuditDirs::new("integration-managed-launch");
     let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
     let mut health = AuditHealth::default();
@@ -987,6 +989,8 @@ fn plain_agent_launch_is_not_relabelled_as_durably_authorized() {
 
 #[test]
 fn termination_truth_survives_observational_audit_failure() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let dirs = TestAuditDirs::new("integration-termination-audit-failure");
     let mut health = AuditHealth::default();
     let mut writer = RecordingWriter::fail_on(3);
@@ -1035,6 +1039,8 @@ fn termination_truth_survives_observational_audit_failure() {
 /// `BoundedRuntimeSummary` could have reached.
 #[test]
 fn a_run_that_exits_records_terminated_with_no_payload_from_the_outcome() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let dirs = TestAuditDirs::new("integration-agent-termination-exited");
     let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
     let mut health = AuditHealth::default();
@@ -1258,6 +1264,8 @@ fn the_store_refuses_a_termination_for_a_run_that_never_started() {
 
 #[test]
 fn orphaned_runtime_truth_is_not_mislabeled_as_durable_termination() {
+    // Review 626: armed, under investigation for review 625's finding.
+    let _pty_probe_guard = arm_pty_responsiveness_probe_for_test();
     let dirs = TestAuditDirs::new("integration-orphaned-runtime");
     let mut health = AuditHealth::default();
     let mut writer = RecordingWriter::fail_on(usize::MAX);

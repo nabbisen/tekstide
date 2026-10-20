@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Fixed — review 626: the re-sent readiness probe was itself a consuming read that could release a deliberately stalled test child; armed explicitly instead
+
+Review 625's own re-sent-probe diagnostic fired at *every* `wait_for_child_outcome` timeout,
+including `runtime::terminal::reader::tests::required_local_bounded_marks_capture_failed_stops_
+reading_and_stalls_the_child_without_killing_it`, whose own precondition is a child deliberately
+stalled on a `write(2)` into a full PTY buffer. A 250ms read drains exactly that buffer, releasing
+the stall the test's own assertion is about — review 616/618's rule is wider than "do not reap": a
+diagnostic must not consume state the subject under test depends on, and a PTY read is a consuming
+operation. Fixed with the same `#[cfg(test)]` thread-local-guard shape
+`force_session_enumeration_failure_for_test` already uses: `arm_pty_responsiveness_probe_for_test`,
+default off, bound explicitly at the 13 `agent::tests`/`audit::tests::integration`/
+`runtime::terminal::tests` sites under investigation for review 625's libproc-blindness finding.
+Every other `Ok(None)` timeout — including the stall test above — now sees no behavior change at
+all.
+
+Also, review 626's correction to 625's own `sysctl` instruction: **do not** hand-declare `kinfo_proc`
+(withdrawn, on the reviewer's own second look) — the probe's question ("does the kernel have a
+record of this pid") is answered by the reply's presence and size alone, and a wrong
+hand-reconstructed field layout of a large nested struct reads garbage silently on hardware this
+project cannot reach, unlike a wrong numeric constant, which simply fails to compile or load. Two
+additions instead: the written length reported as its own three-way datum (`failed: errno` / `0
+bytes` / `N bytes`, the whole outcome space once the buffer is generously oversized), and a hex dump
+of the plain child's own first 64 raw bytes — never parsed as a field, read back only as opaque
+bytes — so a future reader who needs `kinfo_proc`'s real layout can read it off real hardware instead
+of reconstructing it from headers.
+
 ### Found, not yet fixed — review 625: RFC-043's containment guard cannot fail on macOS; review 608's "42 cleared" was the guard going vacuous, not containment working
 
 The readiness handshake (reviews 623/624) isolated a second, distinct failure cleanly: every
