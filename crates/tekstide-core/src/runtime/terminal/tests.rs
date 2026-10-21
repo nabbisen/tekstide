@@ -654,16 +654,11 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
                 String::from_utf8_lossy(&output)
             )
         });
-    // Review 639's own required correction: `kill(pid, 0)` alone reads
-    // `true` for a zombie too, so this precondition would have passed on
-    // exactly the case it exists to exclude -- a backgrounded job that
-    // was never really alive going into the close (e.g. `sleep 300`
-    // failing to start and dying immediately, unreaped). `!is_gone_or_going`
-    // is the same gone-or-departing exclusion the corrected post-close
-    // assertion below now also uses.
+    // Review 639 patched this precondition directly against the
+    // zombie-reads-alive defect; review 640 fixed it in `process_is_alive`
+    // itself instead, so this site needs nothing extra of its own now.
     assert!(
-        crate::test_support::process_is_alive(background_pid)
-            && !super::launch::is_gone_or_going(background_pid as libc::pid_t),
+        crate::test_support::process_is_alive(background_pid),
         "test precondition: the real backgrounded job must be alive before the close"
     );
     // Review 635's own required control: fired here, against a pid known
@@ -697,7 +692,6 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         }),
         "the session must be confirmed empty by a real re-enumeration: {events:?}"
     );
-    let background_job_still_signalable = crate::test_support::process_is_alive(background_pid);
     // Review 637's own required correction: fired in *both* branches, not
     // only the failing one. This test is intermittent -- it has failed
     // suite-wide and passed on an isolated re-run seconds later -- so a
@@ -705,20 +699,17 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     // control ("no record") that makes a `SZOMB` reading on a failing run
     // trustworthy rather than merely assumed.
     super::launch::report_pid_p_stat_via_sysctl(background_pid as libc::pid_t);
-    // Review 638's own required correction: `kill(pid, 0)` alone cannot
-    // tell a real survivor from an unreaped zombie -- it succeeds against
-    // both (proved deterministically, no runner needed, in
+    // Review 638 corrected this assertion directly, against the defect
+    // `kill(pid, 0)` alone has -- it succeeds against an unreaped zombie
+    // too (proved deterministically, no runner needed, in
     // `test_support::tests::kill_signal_zero_succeeds_against_an_unreaped_zombie`).
-    // "Gone or departing" is the property RFC-043 actually asks for: a
+    // Review 640 moved that correction into `process_is_alive` itself, so
+    // this plain call is the complete, honest check now: `false` means
+    // gone *or* departing, the property RFC-043 actually asks for -- a
     // corpse satisfies "closing a project kills the backgrounded
-    // descendant" exactly as hard reaping does. This is a correction of
-    // the assertion, not a relaxation of the guarantee -- the same
-    // distinction production's own containment already draws
-    // (`is_gone_or_going`, response 340's zombie exclusion), now applied
-    // here too.
-    let background_job_gone_or_departing = !background_job_still_signalable
-        || super::launch::is_gone_or_going(background_pid as libc::pid_t);
-    if !background_job_gone_or_departing {
+    // descendant" exactly as hard reaping does.
+    let background_job_alive = crate::test_support::process_is_alive(background_pid);
+    if background_job_alive {
         // Review 634's own named measurement, fired only in the branch it
         // answers: does `KERN_PROC_SESSION` see this exact pid when the
         // bulk `proc_listallpids` scan and the ordinary member check did
@@ -732,7 +723,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         );
     }
     assert!(
-        background_job_gone_or_departing,
+        !background_job_alive,
         "the real backgrounded job's own pid ({background_pid}) must be gone or departing after \
          a real close, not merely 'kill(pid, 0) failed' -- kill(pid, 0) alone cannot tell a real \
          survivor from a SIGKILLed corpse sitting unreaped for a moment under load"

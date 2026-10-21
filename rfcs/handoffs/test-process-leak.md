@@ -3182,3 +3182,11 @@ this test), surfaced only because this run happened to hit the timing window.
 Not yet fixed. Candidate for the same `!process_is_alive(pid) || is_gone_or_going(pid)` correction,
 reported rather than applied this round, since review 639's own order was to report what still
 fails after its push, not to expand scope unilaterally.
+
+**Closed, review 640 -- not by a fix at this call site, by a fix to the helper every call site
+goes through.** The 639 grep that found two sites and this run's own third were both reading a
+*capped* `grep` output as complete; the real, uncapped count was fourteen call sites, most never
+examined. `process_is_alive` itself now excludes `is_gone_or_going` (`kill(pid, 0) == 0 &&
+!is_gone_or_going(pid)`), so this test's own `!process_is_alive(pid)` assertion is correct again
+with no change to this test's own code. Retired from active tracking: the cause this row describes
+no longer exists anywhere in the crate, not only here.

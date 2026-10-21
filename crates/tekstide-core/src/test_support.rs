@@ -217,13 +217,27 @@ impl Drop for KillOnDropChild {
 /// `EPERM`, which would mean the process exists but this test cannot
 /// signal it) is treated as "still alive" rather than modelled separately,
 /// unlike the production runtime code this mirrors.
+///
+/// **Review 640's own required correction: a bare `kill(pid, 0)` also
+/// reads `true` for an unreaped zombie** (the pid table entry still
+/// exists; the kernel simply discards the signal), proved deterministically
+/// in `kill_signal_zero_succeeds_against_an_unreaped_zombie` below. Reviews
+/// 638/639 each patched one or two call sites that needed to exclude this
+/// case; a real, uncapped grep for every caller found **fourteen**, most
+/// of which had never been examined. "A guard placed at the sites that
+/// call it always misses sites; a guard placed where the process is
+/// *created* cannot" (`RunningTerminal::drop`'s own rule, applied here to
+/// a check instead of a guard): this function is the one place every
+/// caller already goes through, so the exclusion belongs here, once, not
+/// repeated at every call site under a name (`process_is_alive`) that
+/// would otherwise keep lying about a corpse.
 #[cfg(test)]
 pub(crate) fn process_is_alive(pid: u32) -> bool {
     let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if result == 0 {
-        return true;
+    if result != 0 {
+        return std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
     }
-    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    !crate::runtime::terminal::is_gone_or_going(pid as libc::pid_t)
 }
 
 /// Review 623/624: the readiness handshake for the macOS PTY-startup
@@ -373,18 +387,29 @@ mod tests {
     }
 
     /// Review 638's own deterministic proof, local, no runner needed:
-    /// `kill(pid, 0)` (what [`process_is_alive`] is) succeeds against an
-    /// **unreaped zombie** -- the pid table entry still exists; the
-    /// kernel simply discards the signal rather than delivering it to
-    /// anything. This is a statement about POSIX, not about any one
-    /// test, which is why it is provable here instead of waiting for
-    /// `runtime::terminal::tests::
+    /// `kill(pid, 0)` succeeds against an **unreaped zombie** -- the pid
+    /// table entry still exists; the kernel simply discards the signal
+    /// rather than delivering it to anything. This is a statement about
+    /// POSIX, not about any one test, which is why it is provable here
+    /// instead of waiting for `runtime::terminal::tests::
     /// a_real_backgrounded_job_is_dead_after_a_real_close`'s own
-    /// intermittent macOS failure to demonstrate it: that test's
-    /// `process_is_alive`-based assertion ("...must find it gone") is
-    /// unsound by construction, on every platform, because a
-    /// `SIGKILL`ed job sitting unreaped for a moment satisfies
-    /// `process_is_alive` exactly as a genuine survivor would.
+    /// intermittent macOS failure to demonstrate it.
+    ///
+    /// **Review 640's own required correction: proves both halves, not
+    /// only the kernel fact.** The first version of this test stopped at
+    /// "`process_is_alive` reads `true` for a zombie" -- true at the
+    /// time, because [`process_is_alive`] was a bare `kill(pid, 0)`. That
+    /// shape invited exactly the bug review 640 found at fourteen call
+    /// sites: every caller had to remember to also exclude
+    /// `is_gone_or_going` itself, and most did not. [`process_is_alive`]
+    /// is now the honest answer on its own (`kill(pid, 0) == 0 &&
+    /// !is_gone_or_going(pid)`), so this test now proves *both* the raw
+    /// kernel fact (`kill` alone still succeeds -- that part of POSIX
+    /// has not changed) *and* that the now-corrected helper is immune to
+    /// it (`process_is_alive` itself reads `false`). The second
+    /// assertion is what actually matters to every caller; the first is
+    /// what makes the helper's own body something other than a bare
+    /// `kill` worth having.
     ///
     /// Deliberately does not reap the child through [`KillOnDropChild`]
     /// or any other automatic path -- staying unreaped is the entire
@@ -431,11 +456,17 @@ mod tests {
              SIGKILL above), observed without reaping it"
         );
 
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            0,
+            "kill(pid, 0) must still succeed against this unreaped zombie -- the raw POSIX fact \
+             that made process_is_alive unsafe to use bare, review 638"
+        );
         assert!(
-            process_is_alive(pid as u32),
-            "kill(pid, 0) must succeed against this unreaped zombie -- proving the hypothesis \
-             behind review 638: process_is_alive cannot tell a real survivor from a SIGKILLed \
-             corpse sitting unreaped, on any platform"
+            !process_is_alive(pid as u32),
+            "process_is_alive itself must read false for this unreaped zombie -- review 640's \
+             own correction, excluding on is_gone_or_going so every caller is covered without \
+             needing to remember to"
         );
 
         // Manual cleanup through the `Child` API itself, not another raw

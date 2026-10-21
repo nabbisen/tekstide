@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Fixed — review 640: `process_is_alive` itself is now honest — a capped `grep` had read "two sites" where there were fourteen
+
+Review 639's own `grep` for `process_is_alive`'s callers was piped through `head -12` and read as
+complete; it was not. The real, uncapped count was fourteen call sites across four files, most
+never examined for this defect. Rather than keep patching individual sites as each new failure
+surfaced them (639 fixed two, a third surfaced for free in the very next CI run), the exclusion
+moved into `process_is_alive` itself: `kill(pid, 0) == 0 && !is_gone_or_going(pid)`. Every caller —
+the two 639 already fixed, the one that failed between rounds, and the eleven nobody had looked at
+— is corrected at once, including `runtime::terminal::tests::
+signal_candidates_never_signals_a_pid_outside_the_target_session`'s own security-property check:
+a false pass there would have hidden containment killing an unrelated stranger process behind a
+corpse that still answered `kill(pid, 0)`, the worst possible failure mode in this area. Read and
+confirmed load-bearing before this change, not assumed.
+
+The two call sites 639 patched directly, and the setsid-detached-job test's precondition, now call
+the plain helper again — the exclusion they were each carrying belongs in one place, not repeated
+at every caller. `kill_signal_zero_succeeds_against_an_unreaped_zombie` now proves both halves:
+the raw POSIX fact (`kill` alone still succeeds against a zombie) and that the corrected helper is
+immune to it (`process_is_alive` itself reads `false`).
+
+`dropping_a_running_terminal_kills_the_real_process_group`'s new failure (test-process-leak.md,
+2026-10-21) needed no separate fix — closed by this same change, since its own assertion was
+already the correct shape and only the helper underneath it was dishonest.
+
 ### Fixed — review 639: the same blind spot ran the other way, in two assertions that pass on exactly what they exist to exclude
 
 Review 638's fix corrected a false *failure*; two other `process_is_alive` callers had the same
