@@ -234,3 +234,21 @@ jobs:
           TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
             runtime::terminal::tests::libproc_visibility_plain_child_vs_pty_child_and_a_non_libproc_view \
             -- --exact --nocapture
+
+      - name: kern-proc-session measurement (--nocapture)
+        # Review 635's own control call fires unconditionally, not only
+        # in the failure branch -- but the suite-wide run above only
+        # prints a test's captured stdout/stderr when that test fails,
+        # so a *passing* run of
+        # `a_real_backgrounded_job_is_dead_after_a_real_close` produces
+        # the control's own `eprintln!` output and then discards it,
+        # exactly the libproc-visibility step's own lesson above: a
+        # measurement that is only visible on failure is not a
+        # measurement. Separate step, same reasoning, same `if:
+        # always()`.
+        if: always()
+        run: |
+          set -euo pipefail
+          TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
+            runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close \
+            -- --exact --nocapture
