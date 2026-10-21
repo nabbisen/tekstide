@@ -722,6 +722,18 @@ pub enum ApprovalChannelErrorReason {
 pub struct ApprovalChannelError {
     pub reason: ApprovalChannelErrorReason,
     source: Option<io::Error>,
+    /// Review 642's own required addition: which call produced this error,
+    /// when `reason` is `Io` -- `None` for every other reason, which
+    /// already names itself. Five of six failures in the macOS
+    /// `oscillating noise pool` (review 641) shared the identical `Os {
+    /// code: 22, kind: InvalidInput }` from at least two different calls
+    /// (`set_read_timeout` and, suspected but unconfirmed, a `read_exact`
+    /// somewhere in `read_frame`) -- `reason: Io` alone cannot tell them
+    /// apart, which is why five rounds of guessing at *this error's own
+    /// cause* were possible at all. An IO error that cannot say what it
+    /// was doing is a defect in the error type, not merely an
+    /// inconvenience for diagnosis.
+    operation: Option<&'static str>,
 }
 
 impl ApprovalChannelError {
@@ -729,6 +741,7 @@ impl ApprovalChannelError {
         Self {
             reason,
             source: None,
+            operation: None,
         }
     }
 
@@ -741,11 +754,20 @@ impl ApprovalChannelError {
         Self {
             reason,
             source: Some(source),
+            operation: None,
         }
     }
 
-    fn io(error: io::Error) -> Self {
-        Self::with_source(ApprovalChannelErrorReason::Io, error)
+    /// `operation` names the call that produced `error` (`"set_read_timeout"`,
+    /// `"read_frame_header"`, `"peer_credentials"`, ...) -- a short, stable
+    /// label, not a full sentence, so it stays useful as a `match`/`grep`
+    /// target rather than free-form prose.
+    fn io(operation: &'static str, error: io::Error) -> Self {
+        Self {
+            reason: ApprovalChannelErrorReason::Io,
+            source: Some(error),
+            operation: Some(operation),
+        }
     }
 
     /// The underlying OS error, when `reason` is `Io`. OS error messages
@@ -754,6 +776,13 @@ impl ApprovalChannelError {
     /// content-free.
     pub fn source(&self) -> Option<&io::Error> {
         self.source.as_ref()
+    }
+
+    /// The call that produced this error, when `reason` is `Io`. Review
+    /// 642's own required addition -- see this type's own `operation`
+    /// field doc comment for why.
+    pub fn operation(&self) -> Option<&'static str> {
+        self.operation
     }
 }
 
@@ -902,10 +931,12 @@ impl ApprovalChannelEndpoint {
         // once and never re-resolves its own pathname again, closing
         // that too.
         let (anchor_fd, subdir_name) = channel_anchor(directory);
-        mkdirat_if_missing(anchor_fd, subdir_name, 0o700).map_err(ApprovalChannelError::io)?;
-        let dir_fd =
-            openat_dir_no_follow(anchor_fd, subdir_name).map_err(ApprovalChannelError::io)?;
-        fchmod(dir_fd.as_raw_fd(), 0o700).map_err(ApprovalChannelError::io)?;
+        mkdirat_if_missing(anchor_fd, subdir_name, 0o700)
+            .map_err(|error| ApprovalChannelError::io("mkdir_channel_dir", error))?;
+        let dir_fd = openat_dir_no_follow(anchor_fd, subdir_name)
+            .map_err(|error| ApprovalChannelError::io("open_channel_dir", error))?;
+        fchmod(dir_fd.as_raw_fd(), 0o700)
+            .map_err(|error| ApprovalChannelError::io("fchmod_channel_dir", error))?;
 
         // Response 113 Q1 item 1 (Linux) / RFC-028 D4 review 597/599
         // (macOS): this fd-relative approach depends on a per-platform
@@ -924,7 +955,8 @@ impl ApprovalChannelEndpoint {
 
         clear_stale_socket(bind_path, &socket_path)?;
 
-        let listener = UnixListener::bind(bind_path).map_err(ApprovalChannelError::io)?;
+        let listener = UnixListener::bind(bind_path)
+            .map_err(|error| ApprovalChannelError::io("bind", error))?;
         // Empirically, `fchmod` on the *listening socket's own fd* does
         // not reliably update the bound special file's mode bits (tried
         // first; the socket file kept its umask-derived default despite
@@ -937,7 +969,7 @@ impl ApprovalChannelEndpoint {
         // already-verified directory fd instead of re-resolving a
         // separate pathname.
         fs::set_permissions(bind_path, fs::Permissions::from_mode(0o600))
-            .map_err(ApprovalChannelError::io)?;
+            .map_err(|error| ApprovalChannelError::io("set_socket_permissions", error))?;
         // `bind_context` drops here, after every operation that needed
         // its path -- on macOS, this is where the calling thread's cwd
         // reverts.
@@ -981,7 +1013,10 @@ impl ApprovalChannelEndpoint {
     /// this triage slice's own scope.
     #[cfg(test)]
     pub fn accept_proposal(&self) -> Result<AcceptedProposal, ApprovalChannelError> {
-        let (stream, _addr) = self.listener.accept().map_err(ApprovalChannelError::io)?;
+        let (stream, _addr) = self
+            .listener
+            .accept()
+            .map_err(|error| ApprovalChannelError::io("accept", error))?;
         self.authenticate_and_read(stream)
     }
 
@@ -1107,9 +1142,10 @@ impl ApprovalChannelEndpoint {
         // after it -- forever.
         stream
             .set_read_timeout(Some(self.read_timeout))
-            .map_err(ApprovalChannelError::io)?;
+            .map_err(|error| ApprovalChannelError::io("set_read_timeout", error))?;
 
-        let peer_uid = peer_uid(&stream).map_err(ApprovalChannelError::io)?;
+        let peer_uid = peer_uid(&stream)
+            .map_err(|error| ApprovalChannelError::io("peer_credentials", error))?;
         if peer_uid != self.owner_uid {
             // Deliberately no message is sent back; the connection is
             // simply dropped. Treat as a possible spoofing attempt, per
@@ -1281,7 +1317,8 @@ fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), Appro
             ))
         }
         Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-            fs::remove_file(removal_path).map_err(ApprovalChannelError::io)
+            fs::remove_file(removal_path)
+                .map_err(|error| ApprovalChannelError::io("remove_stale_socket", error))
         }
         Err(error) => {
             // Any other error (permission denied, etc.) is treated the
@@ -1299,7 +1336,10 @@ fn clear_stale_socket(bind_path: &Path, removal_path: &Path) -> Result<(), Appro
             // `ApprovalChannelError::io`, so this was the one place the
             // evidence a repeated flake needed was thrown away before it
             // could ever reach the panic that reported it.
-            Err(ApprovalChannelError::io(error))
+            Err(ApprovalChannelError::io(
+                "stale_socket_connect_probe",
+                error,
+            ))
         }
     }
 }
@@ -1768,13 +1808,17 @@ fn write_frame(stream: &mut UnixStream, bytes: &[u8]) -> Result<(), ApprovalChan
     }
     stream
         .write_all(&len.to_be_bytes())
-        .map_err(ApprovalChannelError::io)?;
-    stream.write_all(bytes).map_err(ApprovalChannelError::io)
+        .map_err(|error| ApprovalChannelError::io("write_frame_header", error))?;
+    stream
+        .write_all(bytes)
+        .map_err(|error| ApprovalChannelError::io("write_frame_body", error))
 }
 
 fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, ApprovalChannelError> {
     let mut len_bytes = [0_u8; 4];
-    stream.read_exact(&mut len_bytes).map_err(map_read_error)?;
+    stream
+        .read_exact(&mut len_bytes)
+        .map_err(|error| map_read_error("read_frame_header", error))?;
     let len = u32::from_be_bytes(len_bytes);
     if len > MAX_MESSAGE_FRAME_BYTES {
         return Err(ApprovalChannelError::new(
@@ -1782,15 +1826,20 @@ fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, ApprovalChannelError> 
         ));
     }
     let mut buffer = vec![0_u8; len as usize];
-    stream.read_exact(&mut buffer).map_err(map_read_error)?;
+    stream
+        .read_exact(&mut buffer)
+        .map_err(|error| map_read_error("read_frame_body", error))?;
     Ok(buffer)
 }
 
 /// A read timeout (response 112 Defect 3) can surface as either
 /// `WouldBlock` or `TimedOut` depending on platform, so both are treated
 /// as the same distinguished, expected outcome rather than a generic I/O
-/// error.
-fn map_read_error(error: io::Error) -> ApprovalChannelError {
+/// error. `operation` names which of `read_frame`'s own two `read_exact`
+/// calls this came from (review 642): both used to fall into the same
+/// bare `Io` otherwise, indistinguishable from each other or from
+/// `set_read_timeout`'s own `Io`.
+fn map_read_error(operation: &'static str, error: io::Error) -> ApprovalChannelError {
     match error.kind() {
         io::ErrorKind::UnexpectedEof => {
             ApprovalChannelError::new(ApprovalChannelErrorReason::ConnectionClosed)
@@ -1798,7 +1847,7 @@ fn map_read_error(error: io::Error) -> ApprovalChannelError {
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => {
             ApprovalChannelError::new(ApprovalChannelErrorReason::ReadTimedOut)
         }
-        _ => ApprovalChannelError::io(error),
+        _ => ApprovalChannelError::io(operation, error),
     }
 }
 

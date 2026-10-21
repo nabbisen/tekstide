@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added — review 642: `ApprovalChannelError` now names which call produced an `Io` reason
+
+An uncapped grep for every `approval::tests::channel` test exercising `accept_proposal`/
+`serve_concurrently` split the macOS results five-pass/five-fail through the same functions, with
+the happy path green — not a release blocker, and the `SO_RCVTIMEO`-duration theory dead twice over
+(`silent_peer_triggers_a_read_timeout_rather_than_blocking_forever` passes, proving the timeout is
+settable and fires on that exact path). The real question: `ApprovalChannelError { reason: Io,
+source: Some(Os { code: 22 }) }` could not say *which* call produced it, so five rounds of guessing
+at the same ambiguous error were possible.
+
+`ApprovalChannelError` gained a new `operation: Option<&'static str>` field (`pub fn operation(&self)`),
+set at every one of the thirteen `Io`-reason construction sites in `channel.rs` with a short, stable
+label (`"set_read_timeout"`, `"accept"`, `"peer_credentials"`, `"read_frame_header"`,
+`"read_frame_body"`, `"write_frame_header"`, `"write_frame_body"`, `"bind"`, and others) —
+`map_read_error` in particular used to fold both of `read_frame`'s own `read_exact` calls into one
+indistinguishable `Io`, which is now two. A production error-reporting fix, not a test probe: the
+error type itself could not previously say what it was doing, on any platform, not only this one.
+
 ### Found, not yet fixed — review 641: the "oscillating noise pool" was two named causes, not noise, in six rounds of mislabeling
 
 Six `approval::tests::channel` failures held as noise since review 629 are, grouped by panic
