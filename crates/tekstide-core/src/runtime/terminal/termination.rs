@@ -129,7 +129,15 @@ impl TerminalRuntime {
             after_signal: TerminationSignal::Sighup,
         });
 
-        let signalled = signal_session_survivors(session_id, libc::SIGKILL);
+        // THROWAWAY ABLATION (RFC-028 D5 piece 3, review 647's own Order
+        // item 2) -- suppresses the containment action itself to confirm
+        // `assert_session_is_empty`'s own guard goes red on the real
+        // macOS runner with a live survivor present. This commit is
+        // expected to be reverted by the very next one; do not build on
+        // it, and if you are reading this on `main` outside that pair of
+        // commits, something went wrong.
+        let signalled = 0usize;
+        let _ = signal_session_survivors; // silence the now-unused import
         if signalled > 0 {
             events.push(TerminalRuntimeEvent::TerminationSignalSent {
                 handle: handle.clone(),
