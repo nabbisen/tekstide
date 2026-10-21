@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### Fixed — review 632: one predicate was answering two different questions about the session leader — now each call site asks its own
+
+Review 630's own fix measurably closed the `OrphanedUnknown` miscount (confirmed 1 → 0 on the real
+runner) but moved the failure rather than removing it: six `assert_session_is_empty` guard firings
+appeared on ordinary, clean closes, every one naming the session's own leader as the lingering
+"survivor." Both effects traced to the same root cause — `session_confirmed_empty` was being asked
+two genuinely different questions through one predicate: *"may I stop waiting and report an
+outcome?"* (`wait_for_session_outcome`, which must keep waiting while the leader is still inside
+`proc_exit`) and *"is anything still a survivor to signal?"* (`assert_session_is_empty`/the
+`SIGKILL` sweep, for which a process demonstrably leaving is not a survivor, the same response-340
+reasoning that already excludes a zombie, one step earlier in the same story).
+
+Split rather than reconciled into one shared answer: `is_zombie`'s own exclusion now covers
+`p_stat == SZOMB` **or** `p_flag & P_WEXIT != 0` (a process demonstrably leaving), applied uniformly
+to every session member through the existing bulk-scan path. The session leader's own direct check
+(`session_leader_still_alive`, added in review 630) stays narrower on purpose — existence and
+not-yet-reaped only — because `wait_for_session_outcome` needs that narrower answer specifically: a
+leader with `P_WEXIT` set has emphatically not finished leaving, and excluding it there would
+reinstate the exact defect just fixed. `processes_in_session`'s own survivor decision for the leader
+applies the stricter, `P_WEXIT`-aware exclusion as a second, separate condition
+(`session_leader_demonstrably_leaving`) rather than folding it into the narrower function a
+different caller depends on. **The distinction that keeps this from drifting back toward the
+original bug, stated in the code, not only here: exclusion happens on evidence of departure, never
+on absence of evidence** — the defect this whole investigation started from was treating "libproc
+cannot see it" as "it is gone"; this treats "the kernel affirmatively says it has begun exiting" as
+"it is going," from a call measured to answer correctly in exactly that window, 13 of 13.
+
+Also fixed in the same touch, found by the same investigation: `assert_session_is_empty`'s own
+`assert!` evaluated its condition and its diagnostic message as two independent, non-atomic calls to
+the same live-process enumeration — a real race that previously could not manifest (the enumeration
+essentially never found anything during this window at all) but did once this fix made the
+leader visible again, producing a failed assertion whose own message showed an empty survivor list.
+Fixed the same way `BoundedTranscriptWriter::create` already does (RFC-050 D3, review 388): one
+observation, both the condition and the message derived from it.
+
+Not yet measured on the real runner: held for review before pushing, per this project's own standing
+rule for substantial macOS-only containment changes. The next run needs to show the six guard
+firings gone, `OrphanedUnknown` still at 0 — both together, since either alone would just be the
+previous round repeated — and the three held sets plus row 8 visibly unchanged.
+
 ### Fixed — review 630: the macOS session-member check no longer trusts `list_all_pids` to always see the leader — a real `OrphanedUnknown` miscount, not only a wedge
 
 `linux_runtime_terminates_session_leader_with_sighup` surfaced a second, distinct consequence of the

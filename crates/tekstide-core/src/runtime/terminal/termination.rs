@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use super::launch::{
     processes_in_session, report_child_status_at_timeout, report_pty_responsiveness_at_timeout,
-    session_confirmed_empty, session_id_of,
+    session_confirmed_empty, session_id_of, session_leader_known_to_still_exist,
 };
 use super::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
@@ -290,14 +290,30 @@ impl TerminalRuntime {
                 if child_outcome.is_none() {
                     child_outcome = self.try_child_outcome(handle)?;
                 }
-                return Ok(Some(child_outcome.unwrap_or_else(|| {
-                    TerminationOutcome::OrphanedUnknown {
+                if let Some(outcome) = child_outcome {
+                    return Ok(Some(outcome));
+                }
+                // Review 632: the session reading "empty" no longer
+                // means the leader is gone -- `processes_in_session`'s
+                // own `P_WEXIT` exclusion (review 632) can now read
+                // "empty" *because* the leader is demonstrably still
+                // mid-`proc_exit`, which is correct for the survivor
+                // question but means `child_outcome` being `None` here
+                // no longer implies the leader's real status will never
+                // arrive. Ask the leader's own existence directly,
+                // bypassing the survivor question this predicate no
+                // longer answers for this purpose: if the kernel still
+                // has it, keep polling for the real status rather than
+                // reporting a guess; only report `OrphanedUnknown` once
+                // the leader is confirmed actually gone.
+                if !session_leader_known_to_still_exist(session_id) {
+                    return Ok(Some(TerminationOutcome::OrphanedUnknown {
                         summary: BoundedRuntimeSummary::new(
                             "session became empty before the leader's own exit status was \
                              collected",
                         ),
-                    }
-                })));
+                    }));
+                }
             }
 
             if started.elapsed() > timeout {
