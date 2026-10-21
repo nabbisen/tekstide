@@ -1227,10 +1227,9 @@ fn p_stat_and_flag_via_sysctl(pid: libc::pid_t) -> Option<(u8, u32)> {
     Some((buffer[P_STAT_OFFSET], p_flag))
 }
 
-/// Review 636's own required measurement, one call, one word: at the
-/// exact moment `a_real_backgrounded_job_is_dead_after_a_real_close`'s
-/// own `kill(pid, 0)`-based assertion is about to fail, what does the
-/// job's real `p_stat` say?
+/// Review 636's own required measurement: at the exact moment
+/// `a_real_backgrounded_job_is_dead_after_a_real_close` checks its own
+/// `kill(pid, 0)`-based condition, what does the job's real `p_stat` say?
 ///
 /// **Why `kill(pid, 0)` alone cannot settle this.** `kill` with signal
 /// `0` succeeds against a zombie: the pid table entry still exists, and
@@ -1239,12 +1238,35 @@ fn p_stat_and_flag_via_sysctl(pid: libc::pid_t) -> Option<(u8, u32)> {
 /// live backgrounded job that escaped containment) from a job that was
 /// `SIGKILL`ed exactly as designed and is sitting unreaped for a few
 /// more milliseconds because its own parent shell is already dead and
-/// the reparenting reaper is behind under load. `SZOMB` here means the
-/// test's own assertion is the wrong instrument -- the same confusion
-/// response 340 already corrected in the production enumeration,
-/// *"it holds no resources beyond a pid table slot and cannot execute
-/// code"* -- not that containment failed. Anything else keeps the
-/// containment question open.
+/// the reparenting reaper is behind under load.
+///
+/// **Review 637's own required correction: called in *both* branches,
+/// not only the failing one**, and its own three readings, not the two
+/// 636 first wrote:
+///
+/// 1. `SZOMB` -- a corpse. Nothing escaped; the test's own assertion is
+///    the wrong instrument, the same confusion response 340 already
+///    corrected in the production enumeration (*"it holds no resources
+///    beyond a pid table slot and cannot execute code"*), not containment
+///    failing.
+/// 2. `SRUN`/`SSLEEP` with `P_WEXIT` clear -- a live survivor containment
+///    missed. A real escape; the enumeration question reopens.
+/// 3. `P_WEXIT` set -- wedged mid-`proc_exit`. For a *non-leader*,
+///    `is_gone_or_going`'s own `sysctl` fallback arm already treats this
+///    as "going" and excludes it from `members`, so a non-leader in this
+///    state is never signalled at all -- the same hole review 634 first
+///    raised and then set aside, now possibly reachable through the
+///    fallback arm instead of the bulk path. Flagged loudest of the
+///    three: this is not a test defect, it would be the 632 exclusion
+///    converting a wedged leaver into a permanent survivor for anything
+///    that is not the session leader.
+///
+/// On a *passing* run the job should be genuinely reaped -- `p_pid` no
+/// longer exists at all, so this call returns `None` ("no record"),
+/// which is itself the control that makes a `SZOMB` reading on a failing
+/// run trustworthy rather than merely assumed about what `KERN_PROC_PID`
+/// does to a corpse. A `None` is reported as "could not read," never
+/// folded into one of the three readings above.
 ///
 /// `#[cfg(test)]`-only, a no-op everywhere else, the same shape every
 /// diagnostic in this file already takes.
@@ -1272,7 +1294,7 @@ pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t) {
         }
         None => {
             eprintln!(
-                "[p-stat-at-assertion] pid {pid}: p_stat_and_flag_via_sysctl could not answer"
+                "[p-stat-at-assertion] pid {pid}: could not read -- no record (p_stat_and_flag_via_sysctl returned None)"
             );
         }
     }

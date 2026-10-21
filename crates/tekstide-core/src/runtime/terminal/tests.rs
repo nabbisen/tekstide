@@ -690,6 +690,13 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         "the session must be confirmed empty by a real re-enumeration: {events:?}"
     );
     let background_job_alive = crate::test_support::process_is_alive(background_pid);
+    // Review 637's own required correction: fired in *both* branches, not
+    // only the failing one. This test is intermittent -- it has failed
+    // suite-wide and passed on an isolated re-run seconds later -- so a
+    // failure-branch-only diagnostic never produces the passing-run
+    // control ("no record") that makes a `SZOMB` reading on a failing run
+    // trustworthy rather than merely assumed.
+    super::launch::report_pid_p_stat_via_sysctl(background_pid as libc::pid_t);
     if background_job_alive {
         // Review 634's own named measurement, fired only in the branch it
         // answers: does `KERN_PROC_SESSION` see this exact pid when the
@@ -702,11 +709,6 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
             session_id,
             background_pid as libc::pid_t,
         );
-        // Review 636's own required measurement: `kill(pid, 0)` succeeds
-        // on a zombie too, so this one call answers whether the job is a
-        // real survivor or a `SIGKILL`ed corpse not yet reaped -- see the
-        // function's own doc comment.
-        super::launch::report_pid_p_stat_via_sysctl(background_pid as libc::pid_t);
     }
     assert!(
         !background_job_alive,
