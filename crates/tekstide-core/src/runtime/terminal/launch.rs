@@ -850,7 +850,7 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// **Review 630's own required correction: the session leader's own pid
 /// can be absent from `list_all_pids`'s own bulk output while it is
 /// mid-`proc_exit`**, measured directly -- `proc_listallpids` omitted it
-/// on 13 of 13 real firings, the same window `is_zombie`'s own `sysctl`
+/// on 13 of 13 real firings, the same window `is_gone_or_going`'s own `sysctl`
 /// fallback (above) was added for, not merely failing to confirm it once
 /// visited but never presenting it as a candidate at all. A pid this
 /// loop never visits cannot be added to `members` no matter what
@@ -887,17 +887,22 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
             "processes_in_session: session leader {session_id} absent from list_all_pids's own \
              bulk output -- checking it directly rather than treating absence as departure"
         ));
-        // Review 632: two separate questions about the same pid, not
-        // one -- [`session_leader_still_alive`]'s own doc comment names
-        // why it must not also decide survivorship. "Exists, not yet a
-        // zombie" and "is not demonstrably leaving" (`P_WEXIT`) are
-        // checked here as two conditions, matching [`is_zombie`]'s own
-        // `SZOMB`-or-`P_WEXIT` exclusion for every other member, so the
-        // leader is not held to a looser containment standard than
-        // anyone else in the session.
-        if session_leader_still_alive(session_id)?
-            && !session_leader_demonstrably_leaving(session_id)
-        {
+        // Review 633: one `sysctl` observation, not two independent ones
+        // composed after the fact -- see [`SessionLeaderState`]'s own doc
+        // comment for why the two-boolean version this replaced was
+        // itself a race of the same shape `assert_session_is_empty`'s own
+        // fix (below) was just needed for. Only `Alive` is a survivor to
+        // contain, matching [`is_gone_or_going`]'s own `SZOMB`-or-`P_WEXIT`
+        // exclusion for every other member, so the leader is not held to
+        // a looser containment standard than anyone else in the session.
+        let Some(leader_state) = session_leader_state(session_id) else {
+            enumeration_progress(&format!(
+                "processes_in_session: session_leader_state({session_id}) could not be \
+                 confirmed, failing the whole enumeration rather than silently excluding it"
+            ));
+            return None;
+        };
+        if matches!(leader_state, SessionLeaderState::Alive) {
             members.push(session_id);
         }
     }
@@ -908,36 +913,65 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
     Some(members)
 }
 
+/// The session leader's own existence and departure state, from **one**
+/// measured instant, not two independent kernel reads composed after the
+/// fact.
+///
+/// **Review 633's own required correction to review 632's own fix**: the
+/// two-boolean version this replaced (`session_leader_still_alive` plus
+/// `session_leader_demonstrably_leaving`, each its own separate `sysctl`
+/// call) was two independent observations a process could cross
+/// `P_WEXIT` *between* -- the same defect class as the `assert_session_is_
+/// empty` message race fixed in the same round, now reappearing one layer
+/// up in the code that fix produced. One observation, three states,
+/// rather than two booleans whose conjunction every caller must assemble
+/// correctly:
+#[cfg(target_os = "macos")]
+enum SessionLeaderState {
+    /// Confirmed gone: `kill(pid, 0)` failed with `ESRCH`, or the
+    /// kernel's own `p_stat` already reads `SZOMB`. Has finished leaving;
+    /// not a survivor.
+    Gone,
+    /// Alive, and demonstrably mid-`proc_exit` (`P_WEXIT` set in its own
+    /// `p_flag`): has **not** finished leaving -- its real exit status
+    /// does not exist yet, so a caller deciding "may I stop waiting" must
+    /// not treat this as `Gone` -- but it "holds no resources beyond a
+    /// pid table slot and cannot execute code" (response 340's own rule
+    /// for a zombie, one step earlier in the same story), so a caller
+    /// deciding "is this a survivor to contain" must not treat it as
+    /// `Alive` either.
+    Leaving,
+    /// Alive, and not demonstrably leaving: a survivor to contain.
+    Alive,
+}
+
 /// The session leader's own pid is always a known quantity to this
 /// module -- it *is* `session_id` -- so, unlike [`live_member_of_session`],
 /// this never calls `getsid`: whether this exact pid belongs to its own
 /// session is true by construction, not something to ask the kernel
 /// again. What remains genuinely unknown when the bulk scan omits it is
-/// only existence and zombie status, both answered without libproc:
+/// existence and departure state, both answered without libproc:
 /// `kill(pid, 0)` (existence, the same `proc_find`-independent check
-/// [`is_zombie`]'s own fallback reuses) and `p_stat` via
-/// [`p_stat_and_flag_via_sysctl`] (`SZOMB` exclusion only -- see below
-/// for why this function deliberately stops there, one step short of
-/// [`is_zombie`]'s own `P_WEXIT` exclusion).
+/// [`is_gone_or_going`]'s own fallback reuses) and `p_stat`/`p_flag`,
+/// read in the same [`p_stat_and_flag_via_sysctl`] call, together
+/// deciding which [`SessionLeaderState`] applies.
 ///
-/// **Review 632's own required correction: this function answers one
-/// question ("has this pid finished leaving") and must not also answer
-/// a second, different one ("is this pid a survivor to act on"), because
-/// two call sites need two different answers from the same measured
-/// state.** `termination.rs`'s own `wait_for_session_outcome` calls this
-/// to decide whether to keep polling for the leader's own real exit
-/// status rather than giving up early -- a leader with `P_WEXIT` set has
-/// most emphatically *not* finished leaving yet, so excluding it here
-/// would reintroduce the exact `OrphanedUnknown` defect reviews 625-630
-/// found and fixed (the session reading "empty" before the real status
-/// exists). [`processes_in_session`]'s own containment decision -- is
-/// this pid a *survivor* to keep in `members` -- is a different
-/// question with a different, stricter answer (`P_WEXIT` excludes,
-/// matching [`is_zombie`]'s own rule for every other member), checked
-/// separately at that call site rather than folded in here. One
-/// predicate, used for two questions, is the mistake this correction
-/// exists to undo; this function and its own caller each ask their own
-/// question now.
+/// **Review 632 found that "has this pid finished leaving" and "is this
+/// pid a survivor to act on" are two different questions a single
+/// predicate cannot answer at once** -- `termination.rs`'s own
+/// `wait_for_session_outcome` needs the first (a leader with `P_WEXIT`
+/// set has most emphatically *not* finished leaving, so treating it as
+/// gone here would reintroduce the exact `OrphanedUnknown` defect
+/// reviews 625-630 found and fixed), while [`processes_in_session`]'s own
+/// containment decision needs the second (`P_WEXIT` excludes, matching
+/// [`is_gone_or_going`]'s own rule for every other member). **Review
+/// 633's own correction: both questions are answered from the single
+/// [`SessionLeaderState`] this function returns, read from one
+/// observation, rather than from two separately-read booleans** -- each
+/// caller matches on the variants it cares about (`Gone` vs. the rest,
+/// or `Alive` vs. the rest), so the two questions stay visibly distinct
+/// in the type without needing two separate kernel reads that could
+/// disagree with each other.
 ///
 /// `getsid`'s own behaviour against a pid mid-`proc_exit` has not been
 /// measured here, unlike `kill` and `sysctl` (review 628's own
@@ -948,10 +982,10 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// never reached for a mid-exit pid at all (`live_member_of_session`
 /// only runs over what `proc_listallpids` already returned, and a
 /// mid-exit pid is exactly what that list omits), or, if a process
-/// enters this window mid-scan, `getsid` failing `ESRCH` yields
-/// `Some(false)` -- treated as departed, which matches response 340's
-/// own deliberate zombie exclusion (a process on its way out is not a
-/// survivor) rather than contradicting it.
+/// enters this window mid-scan, `getsid` failing `ESRCH` yields `Gone` --
+/// treated as departed, which matches response 340's own deliberate
+/// zombie exclusion (a process on its way out is not a survivor) rather
+/// than contradicting it.
 ///
 /// **This function is deliberately asymmetric with
 /// [`live_member_of_session`], and that asymmetry is the point, not an
@@ -978,60 +1012,55 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// only this one); this function's own safety now depends on it too,
 /// which is why both are named together, here, rather than left for a
 /// future reader to rediscover the coupling by accident.
+///
+/// `None` only when existence itself could not be confirmed (`kill`
+/// failing with something other than `ESRCH`) -- propagated out of the
+/// whole enumeration by callers, the same direction every other
+/// unqueryable case in this file already takes, never silently read as
+/// any one variant.
 #[cfg(target_os = "macos")]
-pub(super) fn session_leader_still_alive(pid: libc::pid_t) -> Option<bool> {
+fn session_leader_state(pid: libc::pid_t) -> Option<SessionLeaderState> {
     // SAFETY: `kill` with signal `0` delivers nothing; it only asks the
     // kernel whether `pid` exists and is signalable, which is safe to
     // ask of any pid, including one that no longer exists.
     let kill_result = unsafe { libc::kill(pid, 0) };
     if kill_result == -1 {
         return match io::Error::last_os_error().raw_os_error() {
-            Some(libc::ESRCH) => Some(false),
+            Some(libc::ESRCH) => Some(SessionLeaderState::Gone),
             _ => {
                 enumeration_progress(&format!(
-                    "session_leader_still_alive: kill({pid}, 0) failed unexpectedly, failing \
-                     the whole enumeration rather than silently excluding this pid"
+                    "session_leader_state: kill({pid}, 0) failed unexpectedly, failing the \
+                     whole enumeration rather than silently excluding this pid"
                 ));
                 None
             }
         };
     }
     match p_stat_and_flag_via_sysctl(pid) {
-        Some((p_stat, _)) => Some(u32::from(p_stat) != libc::SZOMB),
+        Some((p_stat, p_flag)) => Some(if u32::from(p_stat) == libc::SZOMB {
+            SessionLeaderState::Gone
+        } else if p_flag & P_WEXIT != 0 {
+            SessionLeaderState::Leaving
+        } else {
+            SessionLeaderState::Alive
+        }),
         // `kill` already confirmed existence; an unqueryable record
-        // stays counted as live rather than excluded, the same direction
-        // `is_zombie`'s own last-resort default already takes.
-        None => Some(true),
+        // stays counted as `Alive` rather than excluded, the same
+        // direction `is_gone_or_going`'s own last-resort default already
+        // takes.
+        None => Some(SessionLeaderState::Alive),
     }
 }
 
-/// [`processes_in_session`]'s own second condition on the session
-/// leader, kept deliberately separate from
-/// [`session_leader_still_alive`] -- see that function's own doc comment
-/// for why one predicate cannot answer both "has it finished leaving"
-/// and "is it a survivor." `P_WEXIT` set is the same evidence-of-
-/// departure `is_zombie` already excludes every other member on; this
-/// is that exact condition, named for its one caller rather than folded
-/// into a function another, incompatible caller also needs.
-///
-/// Conservative on an unqueryable record, same direction as every other
-/// "cannot confirm" case in this file: absence of evidence that a
-/// process is leaving is not evidence that it is not, but it is also not
-/// grounds to exclude it from containment -- a pid this unsure about
-/// stays counted as a survivor rather than silently dropped.
-#[cfg(target_os = "macos")]
-fn session_leader_demonstrably_leaving(pid: libc::pid_t) -> bool {
-    p_stat_and_flag_via_sysctl(pid).is_some_and(|(_, p_flag)| p_flag & P_WEXIT != 0)
-}
-
 /// `termination.rs`'s own cross-platform entry point for
-/// [`session_leader_still_alive`] -- a plain `bool`, not an
-/// `Option<bool>`, because its one caller (`wait_for_session_outcome`)
-/// only needs "keep waiting or not," bounded by that caller's own
-/// timeout regardless of the answer; an unconfirmable result (`None`)
-/// is treated the same as "yes, keep waiting" rather than as a reason to
-/// fail anything, since the alternative is reporting a guess early,
-/// which is the defect this exists to stop.
+/// [`session_leader_state`] -- answers only "has the leader finished
+/// leaving" (`Gone`), the question [`wait_for_session_outcome`] actually
+/// needs: both `Alive` and `Leaving` mean "keep waiting," since a leader
+/// mid-`proc_exit` has not finished leaving yet even though it is also
+/// not a survivor to contain. An unconfirmable result (`None`) is treated
+/// the same as "keep waiting" rather than as a reason to fail anything,
+/// bounded by the caller's own timeout either way, since the alternative
+/// is reporting a guess early, which is the defect this exists to stop.
 ///
 /// A no-op on every other platform: the `OrphanedUnknown` race this
 /// unblocks is specifically libproc's own `proc_find` refusing a pid
@@ -1041,7 +1070,10 @@ fn session_leader_demonstrably_leaving(pid: libc::pid_t) -> bool {
 /// behaviour already covers it correctly and must not change there.
 #[cfg(target_os = "macos")]
 pub(super) fn session_leader_known_to_still_exist(session_id: libc::pid_t) -> bool {
-    session_leader_still_alive(session_id).unwrap_or(true)
+    !matches!(
+        session_leader_state(session_id),
+        Some(SessionLeaderState::Gone)
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1111,7 +1143,7 @@ fn live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> Option<b
     if real_session_id != session_id {
         return Some(false);
     }
-    Some(!is_zombie(pid))
+    Some(!is_gone_or_going(pid))
 }
 
 /// Offsets into `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID)`'s own
@@ -1221,7 +1253,7 @@ fn p_stat_and_flag_via_sysctl(pid: libc::pid_t) -> Option<(u8, u32)> {
 /// `sysctl` *also* cannot answer does this fall back to the original,
 /// weaker "unqueryable, so presume alive" default.
 #[cfg(target_os = "macos")]
-fn is_zombie(pid: libc::pid_t) -> bool {
+fn is_gone_or_going(pid: libc::pid_t) -> bool {
     // SAFETY: `info` is a plain, fully-zeroed `proc_bsdinfo` the call
     // writes into; `size` matches its own real size exactly, the
     // buffer `proc_pidinfo` is documented to require.
@@ -1325,8 +1357,8 @@ fn enumeration_forced_to_fail() -> bool {
 /// one of 12 firings had `proc_pidinfo` answer `ESRCH` -- the pid does not
 /// exist, by libproc's own account, while `try_wait` had just reported
 /// neither exited nor errored. Both cannot be true of a healthy process,
-/// and `is_zombie` (below) rests on this exact call: if libproc genuinely
-/// cannot see an unreaped child's own existence, `is_zombie` can never
+/// and `is_gone_or_going` (below) rests on this exact call: if libproc genuinely
+/// cannot see an unreaped child's own existence, `is_gone_or_going` can never
 /// return `true` on macOS, which would make the containment enumeration
 /// treat an unreaped child as a live session member -- a production
 /// concern, not only a test one. Two more syscalls, independent of
@@ -1365,7 +1397,7 @@ fn enumeration_forced_to_fail() -> bool {
 /// itself is not reading or acting on its controlling terminal; anything
 /// else, most plausibly this test binary's own name: `pre_exec` never
 /// finished, between `fork` and `exec`). The less-privileged flavour,
-/// not the full `PROC_PIDTBSDINFO` `is_zombie` already uses above, on the
+/// not the full `PROC_PIDTBSDINFO` `is_gone_or_going` already uses above, on the
 /// chance it answers where the full one does not -- the same
 /// `comm == "sleep"` discriminator this project already used once, in
 /// the fork/exec `CLOEXEC` work.
@@ -1386,7 +1418,7 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
     let kill_result = unsafe { libc::kill(pid, 0) };
     let kill_errno = (kill_result == -1).then(io::Error::last_os_error);
 
-    // SAFETY: same as `is_zombie`'s own call -- `info` is a plain,
+    // SAFETY: same as `is_gone_or_going`'s own call -- `info` is a plain,
     // fully-zeroed `proc_bsdinfo` the call writes into, and `size`
     // matches its own real size exactly, the buffer `proc_pidinfo` is
     // documented to require.
@@ -1419,7 +1451,7 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
     // FD_CLOEXEC)` loop over `close_range_upper_bound()`, all between
     // `fork` and `exec` in `spawn_pty_child`). `PROC_PIDT_SHORTBSDINFO`
     // (13) into `proc_bsdshortinfo`, not the full `PROC_PIDTBSDINFO`
-    // flavour `is_zombie` already uses above -- the short flavour is the
+    // flavour `is_gone_or_going` already uses above -- the short flavour is the
     // less-privileged one, so it may answer where the full one does not,
     // the same reasoning this project used for `comm == "sleep"` in the
     // fork/exec `CLOEXEC` work.
@@ -1526,7 +1558,7 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
     // 628's own falsifier for its `proc_exit` hypothesis, whether
     // `P_WEXIT` (`0x2000`) is set in `p_flag`. `P_FLAG_OFFSET`/
     // `P_STAT_OFFSET`/`P_WEXIT` are this file's own module-level
-    // constants -- see their own doc comment, by `is_zombie`, for how
+    // constants -- see their own doc comment, by `is_gone_or_going`, for how
     // they were measured.
 
     // Review 628: three samples, 100ms apart, not one -- a single

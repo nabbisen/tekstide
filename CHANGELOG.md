@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Fixed — review 633: the two-predicate split never reached CI — collapsed into one observation with three states before it could race itself
+
+Review 632's own two-predicate design below (`session_leader_still_alive` plus a new, separate
+`session_leader_demonstrably_leaving`) was caught before it was ever pushed: it answered its two
+questions from **two independent `sysctl` reads**, and a process can cross `P_WEXIT` between them —
+the identical defect shape as the `assert!` message race fixed in the same round, one layer up in
+the code that fix produced. Collapsed into `SessionLeaderState { Gone, Leaving, Alive }`, read from a
+single `kill` + `sysctl` observation: `processes_in_session`'s own survivor check now matches on
+`Alive` alone, and `wait_for_session_outcome`'s own "may I stop waiting" check matches on anything
+other than `Gone` (`Alive` and `Leaving` both mean "keep waiting," since a leader mid-`proc_exit`
+has not finished leaving even though it is also not a survivor to contain). One kernel read, one
+decision point in the type, instead of two booleans whose conjunction every caller had to assemble
+correctly by hand.
+
+Also renamed `is_zombie` to `is_gone_or_going`: it had read `true` for a `P_WEXIT` process that is
+not, in fact, a zombie, since review 632's own extension — the same "a name that asserts something
+the code no longer does" defect already caught once this round on the hundred-thousand-entry scan
+test.
+
+Not yet measured on the real runner: held for review before pushing, same standing rule as every
+macOS-only containment change this round. Report after the push, together: the six
+`assert_session_is_empty` guard firings gone, and `OrphanedUnknown` still 0 — either alone is the
+previous round repeated.
+
 ### Fixed — review 632: one predicate was answering two different questions about the session leader — now each call site asks its own
 
 Review 630's own fix measurably closed the `OrphanedUnknown` miscount (confirmed 1 → 0 on the real
