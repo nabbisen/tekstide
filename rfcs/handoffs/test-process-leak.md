@@ -3248,8 +3248,13 @@ contradicting, the confirmed mechanism: whether the peer's close lands before or
 occurrence the earlier sample did not.
 
 **Fixed, same commit as the confirmation's own report**: `authenticate_and_read`'s
-`set_read_timeout` call now maps a macOS `io::ErrorKind::InvalidInput` to
-`ApprovalChannelErrorReason::ConnectionClosed` -- the same verdict a zero-byte read already
-produces for an identical disconnected peer -- rather than `Io`. Scoped to macOS only (measured
-there, not observed on Linux); scoped to this one operation and this one error kind, not a general
-`InvalidInput`-means-disconnected rule.
+`set_read_timeout` call now maps a macOS `EINVAL` to `ApprovalChannelErrorReason::ConnectionClosed`
+-- the same verdict a zero-byte read already produces for an identical disconnected peer -- rather
+than `Io`. **Review 644's own required narrowing**: matched on `error.raw_os_error() ==
+Some(libc::EINVAL)`, not `io::ErrorKind::InvalidInput` -- `std` raises that same `ErrorKind` itself
+for a zero `Duration`, before any syscall runs, with no `raw_os_error` attached, so the wider match
+would have reported a future zero-duration bug to the peer as "connection closed" instead of the
+programming error it is. Documented as an inference, not an observation: acceptable because it
+fails closed (a wrong inference only drops a proposal, never grants one), with the `operation`
+label as its own falsifier if a genuinely live peer is ever observed producing this errno. Scoped
+to macOS only (measured there, not observed on Linux).

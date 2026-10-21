@@ -11,12 +11,15 @@ every passing one keeps its peer alive across the call — six of six, not five,
 (`wrong_token_is_rejected_without_a_dialog`) joined the failing set under this exact mechanism on
 a later run.
 
-`authenticate_and_read`'s `set_read_timeout` call now maps that specific macOS condition
-(`io::ErrorKind::InvalidInput`) to `ApprovalChannelErrorReason::ConnectionClosed` — the same
-verdict a zero-byte read already produces for an identical disconnected peer — rather than
-`Io`. A peer that connects and immediately disappears is not an internal fault for this function to
-abandon the accept over, and a caller must not be left to misunderstand it as one. Scoped to macOS
-only and to this one operation's own error kind, not a general reinterpretation of `InvalidInput`.
+`authenticate_and_read`'s `set_read_timeout` call now maps that specific macOS condition — matched
+on the raw `EINVAL` errno, not `io::ErrorKind::InvalidInput` (which `std` also raises itself for a
+zero `Duration`, before any syscall, with no `raw_os_error` attached — the wider match would have
+reported a future zero-duration bug to the peer as "connection closed") — to
+`ApprovalChannelErrorReason::ConnectionClosed`, the same verdict a zero-byte read already produces
+for an identical disconnected peer, rather than `Io`. An inference, not an observation, documented
+as such: it fails closed (a wrongly-inferred `ConnectionClosed` only drops a proposal, never grants
+one), and the `operation` label is what would make a wrong inference diagnosable if a genuinely
+live peer were ever observed producing this errno. Scoped to macOS only.
 
 ### Added — review 642: `ApprovalChannelError` now names which call produced an `Io` reason
 

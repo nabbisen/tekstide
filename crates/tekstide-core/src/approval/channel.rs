@@ -1147,26 +1147,61 @@ impl ApprovalChannelEndpoint {
         // fault in this call, a disconnected peer wearing the wrong errno.
         // Confirmed, not guessed: `operation: Some("set_read_timeout")`
         // appeared in the one failing test whose assertion prints the
-        // full error, and every one of the six (not five -- `wrong_token_
-        // is_rejected_without_a_dialog` failed under this exact mechanism
-        // too, on a later run, the same load-dependent race) failing
-        // tests has a peer that writes and disconnects quickly, while
-        // every passing one keeps its peer alive across this call. A
-        // disconnected peer is a verdict this module already has a name
-        // for -- the same `ConnectionClosed` a zero-byte read already
-        // produces for the identical situation a few lines below, in
-        // `read_frame`'s own `map_read_error` -- not an `Io` fault to
-        // abandon the accept over. The owner's own bar: a user must not
-        // be left to misunderstand a peer going away as an internal
-        // error. Scoped to macOS only: this is a measured quirk of that
-        // platform's own `setsockopt`, not a general reinterpretation of
-        // `InvalidInput` -- Linux has not been observed to need it, and
-        // silently swallowing a genuinely wrong duration there would be
-        // the opposite mistake.
+        // full error. The property is "the peer writes and disconnects
+        // before this call", not any fixed list of tests -- membership in
+        // the failing set varies with load (whether the peer's own close
+        // lands before this line), which is why a sixth test
+        // (`wrong_token_is_rejected_without_a_dialog`) joined it on a
+        // later run without changing the mechanism at all. A disconnected
+        // peer is a verdict this module already has a name for -- the
+        // same `ConnectionClosed` a zero-byte read already produces for
+        // the identical situation a few lines below, in `read_frame`'s
+        // own `map_read_error` -- not an `Io` fault to abandon the accept
+        // over. The owner's own bar: a user must not be left to
+        // misunderstand a peer going away as an internal error.
+        //
+        // **Matched on the raw errno, not `io::ErrorKind` -- review 644's
+        // own required narrowing.** `io::ErrorKind::InvalidInput` is wider
+        // than the measured mechanism: `std` itself raises that same kind
+        // for `Duration::ZERO`, *before any syscall runs*, with no
+        // `raw_os_error` attached. Matching on the `ErrorKind` alone would
+        // report a future caller's own zero-duration bug to the peer as
+        // "the connection closed" -- a programming error silently
+        // rendered as a protocol verdict, in the approval channel of all
+        // places. `raw_os_error() == Some(libc::EINVAL)` is the kernel's
+        // own answer, not `std`'s pre-syscall guess, and excludes the
+        // zero-duration case exactly.
+        //
+        // **This is an inference, not an observation -- say why it is
+        // acceptable, and what it would look like if it is wrong.** This
+        // code does not ask the socket whether the peer is actually gone;
+        // it infers that from the measured mechanism above. Acceptable
+        // because it fails *closed*: a wrongly-inferred `ConnectionClosed`
+        // only drops a proposal, never grants one, and dropping a
+        // legitimate proposal is the right direction to be wrong in here.
+        // If the inference is ever wrong -- a genuinely *live* peer
+        // somehow producing this same `EINVAL` -- its proposal would be
+        // silently dropped instead of accepted; the `operation` label
+        // above is what would make that diagnosable rather than invisible
+        // if it ever happens.
+        //
+        // **Considered and rejected: ignore the failed `set_read_timeout`
+        // and let the next read observe EOF instead, producing the real
+        // verdict through the existing path with no inference at all.**
+        // Rejected because the timeout is load-bearing for a different
+        // reason: if it genuinely cannot be set on a *live* connection,
+        // the read that follows has no bound, and an unbounded read in
+        // the approval path is the five-hour-hang lesson wearing a new
+        // hat. `silent_peer_triggers_a_read_timeout_rather_than_blocking_
+        // forever` exists precisely because this timeout must actually be
+        // in effect before that read runs.
+        // Scoped to macOS only: this is a measured quirk of that
+        // platform's own `setsockopt`; Linux has not been observed to
+        // need it.
         stream
             .set_read_timeout(Some(self.read_timeout))
             .map_err(|error| {
-                if cfg!(target_os = "macos") && error.kind() == io::ErrorKind::InvalidInput {
+                if cfg!(target_os = "macos") && error.raw_os_error() == Some(libc::EINVAL) {
                     ApprovalChannelError::new(ApprovalChannelErrorReason::ConnectionClosed)
                 } else {
                     ApprovalChannelError::io("set_read_timeout", error)
