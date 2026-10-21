@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Added — RFC-028 D5's standing watch, ablation pieces 1 and 2: containment confirmed working end-to-end on macOS, pinned in code rather than inferred
+
+Two new macOS-only tests, deliberately built on a backgrounded job immune to `SIGHUP` (`trap ''
+HUP`), not the plain `sleep 300 &` the project's existing tests already use: a terminal hangup can
+reach a background job two ways, not one — this project's own explicit `SIGHUP` to the session
+leader, and, independently, the kernel's own TTY hangup potentially reaching every process still
+attached to the controlling terminal. A plain, non-trapping job dying after a real close does not
+rule out the second path having done the killing instead of the first; trapping `SIGHUP` away
+removes that confound, so the only way a `SIGHUP`-immune survivor can die afterward is `SIGKILL`
+from this project's own containment sweep.
+
+`a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member` pins in code what review 628's
+own libproc-visibility table only showed "in spirit": a live, `SIGHUP`-immune backgrounded job is
+correctly reported as a session member by `processes_in_session`. `a_real_close_kills_a_live_hup_
+immune_backgrounded_job` proves the full sequence against that same survivor end-to-end — `SIGHUP`
+trapped away, the enumeration sees it, `SIGKILL` reaches it anyway, `assert_session_is_empty`'s own
+guard passes because the sweep genuinely worked.
+
+Verified, not assumed, by the project's own temporary-cfg-flip technique (both macOS-only test
+bodies run for real against Linux's identically-shaped `processes_in_session`): both pass clean, 5
+of 5 repeats each. Also verified the second test is not a tautology — temporarily suppressing the
+containment sweep's own `SIGKILL` call and re-running it produces a real, correctly-diagnosed
+`OrphanedUnknown` failure, confirming the test can actually fail when containment is genuinely
+broken, not only when it works.
+
 ### Fixed — review 645 (continued): a fifth site, the same race on the well-behaved peer this time
 
 The very next CI run found `serve_concurrently_accepts_a_second_connection_while_the_first_stalls`

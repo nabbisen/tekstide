@@ -860,6 +860,154 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
     }
 }
 
+/// Shared setup for RFC-028 D5's own standing watch
+/// (`rfcs/handoffs/release-checklist.md`), ablation pieces 1 and 2: a
+/// live backgrounded job, deliberately immune to `SIGHUP` (`trap ''
+/// HUP`), in the same session as the launched shell.
+///
+/// **Why `SIGHUP`-immunity specifically, and why it matters that this is
+/// not the same shape `a_real_backgrounded_job_is_dead_after_a_real_
+/// close` already uses**: that test's own backgrounded job is a plain
+/// `sleep 300 &`, with no trap -- and a terminal hangup can reach a
+/// background job two ways, not one: `request_terminate`'s own explicit
+/// `SIGHUP` to the session *leader* (this project's own containment
+/// mechanism), and, independently, the kernel's own TTY hangup
+/// potentially reaching every process still attached to the controlling
+/// terminal, not only the leader, depending on platform and job-control
+/// details this project has not measured. A plain `sleep` dying after a
+/// real close does not, by itself, rule out the second path having done
+/// the killing instead of the first -- the existing test's own green
+/// result is consistent with containment working *or* with an
+/// unrelated OS mechanism happening to produce the same outcome. Trapping
+/// `SIGHUP` away removes that confound entirely: the only signal this
+/// job can die from afterward is `SIGKILL`, which only this project's
+/// own containment sweep sends. Ablation pieces 1 and 2, built on this,
+/// are the first tests in this project to rule that confound out rather
+/// than share it unexamined.
+#[cfg(target_os = "macos")]
+fn spawn_hup_immune_background_job(
+    runtime: &mut TerminalRuntime,
+    handle: &TerminalRuntimeHandle,
+) -> u32 {
+    runtime
+        .write_input(handle, b"(trap '' HUP; sleep 300) & echo BGPID=$!\n")
+        .expect("backgrounded hup-immune job should write to PTY");
+    read_until_parsed(runtime, handle, parse_bgpid).unwrap_or_else(|output| {
+        panic!(
+            "hup-immune backgrounded job's own pid should be parseable from PTY output; \
+             captured: {}",
+            String::from_utf8_lossy(&output)
+        )
+    })
+}
+
+/// Ablation piece 1 (RFC-028 D5's own standing watch,
+/// `rfcs/handoffs/release-checklist.md`): pins in code what review 628's
+/// own libproc-visibility table only showed "in spirit" -- a live,
+/// `SIGHUP`-immune backgrounded job is correctly reported as a member of
+/// its own session by [`super::launch::processes_in_session`], the exact
+/// enumeration `request_terminate`'s own containment sweep depends on.
+///
+/// No manual cleanup of `background_pid`: this job stays inside its own
+/// session (unlike the `setsid`-detached job above), so dropping
+/// `runtime` at the end of this function runs `RunningTerminal::drop`'s
+/// own real containment sequence (`SIGHUP` the leader, enumerate,
+/// `SIGKILL` the remainder) exactly as a real close would -- `SIGKILL`
+/// is not something this `trap` can ignore.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member() {
+    let root = CleanupOnDrop(test_root("ablation-piece-1-enumeration"));
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &*root, "/bin/sh");
+    let mut runtime = TerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let session_id = runtime
+        .sessions
+        .get(&terminal.id)
+        .expect("just-launched session must be present")
+        .process_group_id;
+
+    let background_pid = spawn_hup_immune_background_job(&mut runtime, &handle);
+    assert!(
+        crate::test_support::process_is_alive(background_pid),
+        "test precondition: the backgrounded job must be alive before the enumeration check"
+    );
+
+    let members = super::launch::processes_in_session(session_id)
+        .expect("a real enumeration against a live session must not fail");
+    assert!(
+        members.contains(&(background_pid as libc::pid_t)),
+        "processes_in_session must report the live, HUP-immune backgrounded job (pid \
+         {background_pid}) as a member of session {session_id}: {members:?}"
+    );
+}
+
+/// Ablation piece 2 (RFC-028 D5's own standing watch): the real close
+/// sequence against the identical live, `SIGHUP`-immune survivor piece 1
+/// already proved is enumerated -- containment confirmed working
+/// end-to-end on macOS, not merely inferred from the enumeration alone.
+/// `SIGHUP` reaches the leader and is trapped away by the backgrounded
+/// job (by design, and by any other path a hangup might otherwise take --
+/// see [`spawn_hup_immune_background_job`]'s own doc comment for why that
+/// matters); the enumeration sees the survivor; `SIGKILL` reaches it
+/// anyway, because nothing can trap that; `assert_session_is_empty`'s own
+/// guard passes because the sweep genuinely worked, not because nothing
+/// was ever really there to sweep or because an unrelated OS mechanism
+/// happened to remove it first.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
+    let root = CleanupOnDrop(test_root("ablation-piece-2-real-close"));
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &*root, "/bin/sh");
+    let mut runtime = TerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+
+    let background_pid = spawn_hup_immune_background_job(&mut runtime, &handle);
+    assert!(
+        crate::test_support::process_is_alive(background_pid),
+        "test precondition: the backgrounded job must be alive before the close"
+    );
+
+    let request = TerminationRequest {
+        source: TerminationRequestSource::TestHarness,
+        reason: BoundedRuntimeSummary::new(
+            "ablation piece 2: real close against a HUP-immune survivor",
+        ),
+    };
+    let events = runtime
+        .request_terminate(
+            &handle,
+            request,
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        )
+        .expect("termination request should complete");
+
+    assert!(
+        events.contains(&TerminalRuntimeEvent::SessionConfirmedEmpty {
+            handle: handle.clone(),
+            confirmed: true,
+        }),
+        "the session must be confirmed empty by a real re-enumeration: {events:?}"
+    );
+    assert!(
+        !crate::test_support::process_is_alive(background_pid),
+        "containment confirmed working on macOS: a live backgrounded job that ignores SIGHUP \
+         must still be gone after a real close -- SIGKILL, not SIGHUP or any other path a \
+         hangup might take, is what must have reached it"
+    );
+}
+
 /// RFC-043 security document §1's own required property: "the session
 /// id is re-verified immediately before every signal... if you cannot
 /// establish a pid is still in the target session, do not signal it."
