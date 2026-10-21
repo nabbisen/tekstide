@@ -37,13 +37,7 @@ libc                        = "0.2"
 # never needed `FSEvents`' native recursive-tree behaviour anyway. Inert on
 # Linux/Windows -- every gate it un-gates in `notify`'s own source is additionally
 # `cfg(target_os = "macos")`.
-notify                      = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
-# THROWAWAY MEASUREMENT (review 647 Round 2, Order item 2) -- the line
-# above is temporarily `macos_fsevent`, not `macos_kqueue`, to measure
-# whether the `FSEvents` backend reports a content write to an existing
-# file where `kqueue` does not (`reading_a_watched_file_is_not_reported_
-# but_writing_it_is`'s own macOS failure). Expected to be reverted by the
-# very next commit; do not build on it.
+notify                      = { version = "8.2.0", default-features = false, features = ["macos_kqueue"] }
 
 serde                       = { version = "1", features = ["derive"] }
 serde_json                  = "1"
