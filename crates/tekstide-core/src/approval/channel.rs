@@ -1140,9 +1140,38 @@ impl ApprovalChannelEndpoint {
         // connects and then sends nothing (or a partial frame) blocks
         // this call -- and, before `serve_concurrently`, every connection
         // after it -- forever.
+        //
+        // **Review 644's own confirmed mechanism, review 642/643's own
+        // measurement: on macOS, `setsockopt(SO_RCVTIMEO)` on an `AF_UNIX`
+        // stream whose peer has already closed returns `EINVAL`** -- not a
+        // fault in this call, a disconnected peer wearing the wrong errno.
+        // Confirmed, not guessed: `operation: Some("set_read_timeout")`
+        // appeared in the one failing test whose assertion prints the
+        // full error, and every one of the six (not five -- `wrong_token_
+        // is_rejected_without_a_dialog` failed under this exact mechanism
+        // too, on a later run, the same load-dependent race) failing
+        // tests has a peer that writes and disconnects quickly, while
+        // every passing one keeps its peer alive across this call. A
+        // disconnected peer is a verdict this module already has a name
+        // for -- the same `ConnectionClosed` a zero-byte read already
+        // produces for the identical situation a few lines below, in
+        // `read_frame`'s own `map_read_error` -- not an `Io` fault to
+        // abandon the accept over. The owner's own bar: a user must not
+        // be left to misunderstand a peer going away as an internal
+        // error. Scoped to macOS only: this is a measured quirk of that
+        // platform's own `setsockopt`, not a general reinterpretation of
+        // `InvalidInput` -- Linux has not been observed to need it, and
+        // silently swallowing a genuinely wrong duration there would be
+        // the opposite mistake.
         stream
             .set_read_timeout(Some(self.read_timeout))
-            .map_err(|error| ApprovalChannelError::io("set_read_timeout", error))?;
+            .map_err(|error| {
+                if cfg!(target_os = "macos") && error.kind() == io::ErrorKind::InvalidInput {
+                    ApprovalChannelError::new(ApprovalChannelErrorReason::ConnectionClosed)
+                } else {
+                    ApprovalChannelError::io("set_read_timeout", error)
+                }
+            })?;
 
         let peer_uid = peer_uid(&stream)
             .map_err(|error| ApprovalChannelError::io("peer_credentials", error))?;

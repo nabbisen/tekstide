@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Fixed — review 644: a disconnected peer on macOS was reported as an internal `Io` error instead of the verdict it is
+
+Review 642's own `operation` label confirmed the mechanism behind the macOS "oscillating noise
+pool": `setsockopt(SO_RCVTIMEO)` on an `AF_UNIX` stream whose peer has already closed returns
+`EINVAL` on that platform. Every failing test has a peer that writes and disconnects quickly;
+every passing one keeps its peer alive across the call — six of six, not five, once a sixth
+(`wrong_token_is_rejected_without_a_dialog`) joined the failing set under this exact mechanism on
+a later run.
+
+`authenticate_and_read`'s `set_read_timeout` call now maps that specific macOS condition
+(`io::ErrorKind::InvalidInput`) to `ApprovalChannelErrorReason::ConnectionClosed` — the same
+verdict a zero-byte read already produces for an identical disconnected peer — rather than
+`Io`. A peer that connects and immediately disappears is not an internal fault for this function to
+abandon the accept over, and a caller must not be left to misunderstand it as one. Scoped to macOS
+only and to this one operation's own error kind, not a general reinterpretation of `InvalidInput`.
+
 ### Added — review 642: `ApprovalChannelError` now names which call produced an `Io` reason
 
 An uncapped grep for every `approval::tests::channel` test exercising `accept_proposal`/

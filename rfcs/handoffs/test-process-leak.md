@@ -3228,3 +3228,28 @@ is evidence of several things that are each load-sensitive. "Noise" is a claim a
 needs the same grouping-by-panic-location that closed the 18-test `proc_exit` cluster in one pass
 (reviews 622-629) -- this pool had that evidence (three different first-message shapes) since
 review 622 and was mislabeled anyway.
+
+## Mechanism confirmed, review 644 -- `set_read_timeout` on a closed peer, and a sixth test joins the set
+
+Review 642 added an `operation: Option<&'static str>` label to `ApprovalChannelError`'s `Io` reason.
+Run `39609294330` (`60a8ef4`): `serve_concurrently_accepts_a_second_connection_while_the_first_
+stalls`'s own full-error print read `operation: Some("set_read_timeout")`, confirming the
+reviewer's own mechanism -- on macOS, `setsockopt(SO_RCVTIMEO)` on an `AF_UNIX` stream whose peer
+has already closed returns `EINVAL`. All five originally-grouped failures, read individually, have
+a peer that writes and disconnects quickly; all five originally-passing tests keep their peer
+alive across the call.
+
+**A sixth test joined the failing set on this same run**: `wrong_token_is_rejected_without_a_
+dialog`, previously sampled as passing, failed with the identical `left: Io, right: TokenMismatch`
+shape. Its own impersonator thread has the identical "write then drop the stream" pattern as
+`cross_process_impersonation_with_wrong_token_is_rejected`'s python script -- consistent with, not
+contradicting, the confirmed mechanism: whether the peer's close lands before or after
+`set_read_timeout` is exactly the race load decides, and this run's own timing caught a sixth
+occurrence the earlier sample did not.
+
+**Fixed, same commit as the confirmation's own report**: `authenticate_and_read`'s
+`set_read_timeout` call now maps a macOS `io::ErrorKind::InvalidInput` to
+`ApprovalChannelErrorReason::ConnectionClosed` -- the same verdict a zero-byte read already
+produces for an identical disconnected peer -- rather than `Io`. Scoped to macOS only (measured
+there, not observed on Linux); scoped to this one operation and this one error kind, not a general
+`InvalidInput`-means-disconnected rule.
