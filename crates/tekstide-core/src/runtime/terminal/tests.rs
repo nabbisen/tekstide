@@ -622,6 +622,18 @@ fn linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup() {
 /// since the interesting question after this RFC is no longer "does the
 /// report lie," it's "is the job actually gone," which is what RFC-043's
 /// own acceptance claim asks for directly.
+///
+/// **A plain, non-trapping job proves less than this test's own name
+/// claims**: its dying after a real close is consistent with containment
+/// working *or* with the shell's own possible `SIGHUP` propagation to
+/// its jobs having done the killing instead (see
+/// `spawn_hup_immune_background_job`'s own doc comment). Ablation pieces
+/// 1 and 2 (`a_live_hup_immune_backgrounded_job_is_reported_as_a_session_
+/// member`, `a_real_close_kills_a_live_hup_immune_backgrounded_job`) are
+/// the stronger property, with that confound removed by signal semantics
+/// rather than ruled out by assumption. This test still earns its place
+/// as the ordinary case -- not rewritten, since an untrapped job is a
+/// real scenario too, just not the one that isolates containment alone.
 #[test]
 fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     let root = CleanupOnDrop(test_root("terminate-real-backgrounded-job"));
@@ -868,20 +880,24 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
 /// **Why `SIGHUP`-immunity specifically, and why it matters that this is
 /// not the same shape `a_real_backgrounded_job_is_dead_after_a_real_
 /// close` already uses**: that test's own backgrounded job is a plain
-/// `sleep 300 &`, with no trap -- and a terminal hangup can reach a
-/// background job two ways, not one: `request_terminate`'s own explicit
-/// `SIGHUP` to the session *leader* (this project's own containment
-/// mechanism), and, independently, the kernel's own TTY hangup
-/// potentially reaching every process still attached to the controlling
-/// terminal, not only the leader, depending on platform and job-control
-/// details this project has not measured. A plain `sleep` dying after a
-/// real close does not, by itself, rule out the second path having done
-/// the killing instead of the first -- the existing test's own green
-/// result is consistent with containment working *or* with an
-/// unrelated OS mechanism happening to produce the same outcome. Trapping
-/// `SIGHUP` away removes that confound entirely: the only signal this
-/// job can die from afterward is `SIGKILL`, which only this project's
-/// own containment sweep sends. Ablation pieces 1 and 2, built on this,
+/// `sleep 300 &`, with no trap. The kernel's own terminal hangup does
+/// *not* by itself confound that test -- it goes to the controlling
+/// terminal's own *foreground* process group and to the session leader,
+/// and a backgrounded job sitting in its own, non-foreground group is
+/// not automatically included. **The real confound arrives by a
+/// different route: the exiting shell itself may propagate `SIGHUP` to
+/// its own jobs** (shell-level job-control behaviour, not a kernel
+/// mechanism) -- which `request_terminate`'s own explicit `SIGHUP` to the
+/// session leader could trigger just as well as a real, unassisted
+/// hangup would. A plain `sleep` dying after a real close does not, by
+/// itself, rule out the shell's own propagation having done the killing
+/// instead of this project's own containment sweep -- the existing
+/// test's own green result is consistent with containment working *or*
+/// with that unmeasured shell behaviour producing the same outcome.
+/// Trapping `SIGHUP` away removes that confound entirely, by signal
+/// semantics rather than by timing: `SIGKILL` cannot be trapped, so once
+/// `SIGHUP` is trapped away, the only thing that can still kill this job
+/// is this project's own sweep. Ablation pieces 1 and 2, built on this,
 /// are the first tests in this project to rule that confound out rather
 /// than share it unexamined.
 #[cfg(target_os = "macos")]
@@ -913,7 +929,13 @@ fn spawn_hup_immune_background_job(
 /// `runtime` at the end of this function runs `RunningTerminal::drop`'s
 /// own real containment sequence (`SIGHUP` the leader, enumerate,
 /// `SIGKILL` the remainder) exactly as a real close would -- `SIGKILL`
-/// is not something this `trap` can ignore.
+/// is not something this `trap` can ignore. A bonus of relying on the
+/// real drop path rather than a manual `kill`: that `Drop` impl's own
+/// guard re-checks the session after its sweep, so this test silently
+/// exercises the containment path too, on top of the enumeration this
+/// test is actually named for -- if that guard ever panics here, the
+/// failure is informative rather than a leak this test's own name gave
+/// no warning about.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member() {
@@ -952,13 +974,22 @@ fn a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member() {
 /// already proved is enumerated -- containment confirmed working
 /// end-to-end on macOS, not merely inferred from the enumeration alone.
 /// `SIGHUP` reaches the leader and is trapped away by the backgrounded
-/// job (by design, and by any other path a hangup might otherwise take --
-/// see [`spawn_hup_immune_background_job`]'s own doc comment for why that
-/// matters); the enumeration sees the survivor; `SIGKILL` reaches it
-/// anyway, because nothing can trap that; `assert_session_is_empty`'s own
-/// guard passes because the sweep genuinely worked, not because nothing
-/// was ever really there to sweep or because an unrelated OS mechanism
-/// happened to remove it first.
+/// job (by design, and against the shell's own possible `SIGHUP`
+/// propagation to its jobs too -- see
+/// [`spawn_hup_immune_background_job`]'s own doc comment for why that
+/// confound, not a kernel one, is the one this matters against);
+/// the enumeration sees the survivor; `SIGKILL` reaches it anyway,
+/// because nothing can trap that; `assert_session_is_empty`'s own guard
+/// passes because the sweep genuinely worked, not because nothing was
+/// ever really there to sweep or because the shell's own hangup
+/// propagation happened to remove it first.
+///
+/// **This assertion's own trustworthiness depends on reviews 638-640**:
+/// before `process_is_alive` was made zombie-aware there, `kill(pid, 0)`
+/// alone would have read `true` for a `SIGKILL`ed corpse sitting
+/// unreaped for a moment, exactly the false-failure shape those reviews
+/// corrected project-wide. This test inherits that correction rather
+/// than re-deriving it.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
@@ -1003,8 +1034,8 @@ fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
     assert!(
         !crate::test_support::process_is_alive(background_pid),
         "containment confirmed working on macOS: a live backgrounded job that ignores SIGHUP \
-         must still be gone after a real close -- SIGKILL, not SIGHUP or any other path a \
-         hangup might take, is what must have reached it"
+         must still be gone after a real close -- SIGKILL, not SIGHUP or the shell's own \
+         possible propagation of it, is what must have reached it"
     );
 }
 
