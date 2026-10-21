@@ -658,6 +658,16 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         crate::test_support::process_is_alive(background_pid),
         "test precondition: the real backgrounded job must be alive before the close"
     );
+    // Review 635's own required control: fired here, against a pid known
+    // alive and known in the session, before trusting the same call's
+    // negative answer in the failure branch below. `FOUND` is the
+    // expected answer; anything else indicts the instrument rather than
+    // the hypothesis under test.
+    super::launch::report_session_members_via_kern_proc_session(
+        "control, pre-close",
+        session_id,
+        background_pid as libc::pid_t,
+    );
 
     let request = TerminationRequest {
         source: TerminationRequestSource::TestHarness,
@@ -688,6 +698,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         // doc comment for the mechanism and what it does and does not
         // establish.
         super::launch::report_session_members_via_kern_proc_session(
+            "failure branch, post-close",
             session_id,
             background_pid as libc::pid_t,
         );

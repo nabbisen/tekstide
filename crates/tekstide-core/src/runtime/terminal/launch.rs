@@ -1674,8 +1674,33 @@ pub(super) fn report_child_status_at_timeout(_pid: u32) {}
 /// every diagnostic in this file follows. `#[cfg(test)]`-only, a no-op
 /// everywhere else, the same shape `report_child_status_at_timeout`
 /// above already takes.
+///
+/// **Review 635's own two required corrections.**
+///
+/// 1. **A truncated reply must not read as `ABSENT`.** The same rule
+///    [`list_all_pids`]'s own doc comment already states for the bulk
+///    scan -- a reply that exactly fills the buffer cannot be
+///    distinguished from "there were more records and the rest were
+///    silently dropped" -- applies here with higher stakes, since this
+///    probe's entire output is a single pid's `FOUND`/`ABSENT`. If
+///    `session_len` reaches `session_buffer.len()`, this reports
+///    "could not enumerate", never `ABSENT`, so a buffer that was too
+///    small is never read as "the kernel does not see it either."
+/// 2. **`label` distinguishes the control call from the one under
+///    investigation.** Fired once against a pid known alive and known
+///    in the session (before the close, where `FOUND` is the expected
+///    answer and anything else indicts the instrument, not the
+///    hypothesis) and once in the failure branch -- the same discipline
+///    626's plain-child-vs-PTY-child control already used: measure the
+///    instrument against a known positive before trusting its negative.
+///    An `ABSENT` with no control beside it cannot tell "the mechanism
+///    cannot see a mid-exit process either" apart from "the job
+///    genuinely left the session," so this function no longer answers
+///    that question alone -- both calls' own output must be read
+///    together.
 #[cfg(all(test, target_os = "macos"))]
 pub(super) fn report_session_members_via_kern_proc_session(
+    label: &str,
     session_id: libc::pid_t,
     looked_for_pid: libc::pid_t,
 ) {
@@ -1702,10 +1727,13 @@ pub(super) fn report_session_members_via_kern_proc_session(
         )
     };
     if single_result != 0 || single_len == 0 {
+        // Guards the division below too: `stride` is never 0 past this
+        // point, so this probe fails loudly here rather than panicking
+        // on a zero-length divisor later.
         eprintln!(
-            "[kern-proc-session] KERN_PROC_PID({self_pid}) (this test process, to learn the \
-             array's own record stride) failed: {:?} -- cannot interpret KERN_PROC_SESSION \
-             without it",
+            "[kern-proc-session] {label}: KERN_PROC_PID({self_pid}) (this test process, to \
+             learn the array's own record stride) failed: {:?} -- cannot interpret \
+             KERN_PROC_SESSION without it",
             io::Error::last_os_error()
         );
         return;
@@ -1738,8 +1766,23 @@ pub(super) fn report_session_members_via_kern_proc_session(
     };
     if session_result != 0 {
         eprintln!(
-            "[kern-proc-session] sysctl(KERN_PROC_SESSION, {session_id}) failed: {:?}",
+            "[kern-proc-session] {label}: sysctl(KERN_PROC_SESSION, {session_id}) failed: {:?}",
             io::Error::last_os_error()
+        );
+        return;
+    }
+    if session_len >= session_buffer.len() {
+        // Review 635's required correction: a reply that exactly fills
+        // the buffer cannot be told apart from a reply that was
+        // silently truncated, the same reasoning `list_all_pids`'s own
+        // doc comment states for the bulk scan. Reported distinctly
+        // from `ABSENT` so a buffer that was too small is never read as
+        // "the kernel does not see this pid either."
+        eprintln!(
+            "[kern-proc-session] {label}: could not enumerate -- the reply filled the entire \
+             {}-byte buffer (stride={stride}), indistinguishable from a truncated one; looked_for_pid \
+             {looked_for_pid} is UNKNOWN, not ABSENT",
+            session_buffer.len()
         );
         return;
     }
@@ -1780,7 +1823,7 @@ pub(super) fn report_session_members_via_kern_proc_session(
     }
 
     eprintln!(
-        "[kern-proc-session] session {session_id}: stride={stride} bytes, \
+        "[kern-proc-session] {label}: session {session_id}: stride={stride} bytes, \
          written_len={session_len}, {record_count} record(s), looked_for_pid {looked_for_pid} \
          {}: [{}]",
         if found_looked_for_pid {
@@ -1800,6 +1843,7 @@ pub(super) fn report_session_members_via_kern_proc_session(
 // was written.
 #[cfg(all(test, not(target_os = "macos")))]
 pub(super) fn report_session_members_via_kern_proc_session(
+    _label: &str,
     _session_id: libc::pid_t,
     _looked_for_pid: libc::pid_t,
 ) {
