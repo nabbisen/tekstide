@@ -3306,3 +3306,45 @@ rather than letting it drop when the closure ends; the test holds it until well 
 has already been obtained and asserted, so nothing closes the peer's own end while the server might
 still be calling `set_read_timeout` on it. Confirmed passing, 5 of 5 repeats, and the full channel
 module's own 26 tests clean together.
+
+## RFC-028 D5 ablation pieces 1-3, 2026-10-21/22 -- containment confirmed working, and confirmed able to fail, on the real macOS runner
+
+**Piece 1 and 2** (`a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member`,
+`a_real_close_kills_a_live_hup_immune_backgrounded_job`, run `39689672223`, both green on the real
+runner): a live backgrounded job, deliberately immune to `SIGHUP` (`trap '' HUP`, not the plain
+`sleep 300 &` `a_real_backgrounded_job_is_dead_after_a_real_close` already uses), is correctly
+enumerated by `processes_in_session` and correctly killed by a real `request_terminate` sequence.
+The trap removes a confound neither test family had ruled out before: the exiting shell may itself
+propagate `SIGHUP` to its own jobs, so a plain job dying after a close is consistent with
+containment working *or* with that shell-level propagation having done it instead. `SIGKILL` cannot
+be trapped, so once `SIGHUP` is trapped away the only thing that can still kill this job is this
+project's own sweep -- the two pieces' own conclusion follows from signal semantics, not timing.
+Verified before landing by the project's own temporary-cfg-flip technique (both bodies run for real
+against Linux's identically-shaped `processes_in_session`, 5 of 5 repeats each) and by a local
+negative control on Linux (temporarily suppressing the sweep produced the identical `OrphanedUnknown`
+shape piece 3, below, later confirmed for real on macOS).
+
+**Piece 3** (discharges `release-checklist.md`'s own standing watch): `termination.rs`'s own
+`signal_session_survivors(session_id, libc::SIGKILL)` call temporarily replaced with `let signalled
+= 0usize;` (commit `3d6d589`, clearly marked `THROWAWAY ABLATION`, pushed to the real runner, then
+reverted by the very next commit). Run `39690374830`: `gate` (Linux) failed its own required check
+for the first time this entire investigation, at exactly the one test that needs the fallback path
+(`linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup`); `macos-measurement`'s own
+`a_real_close_kills_a_live_hup_immune_backgrounded_job` failed with:
+
+```
+SessionConfirmedEmpty { ..., confirmed: false }
+Terminated { ..., outcome: OrphanedUnknown { summary: "session still has live process(es) after SIGKILL and the grace period" } }
+```
+
+-- the exact red the standing watch asks for, on the real runner, with the containment action
+itself suppressed and nothing else changed. `a_real_backgrounded_job_is_dead_after_a_real_close`
+(the plain, non-trapping job) failed too, in the same run, for the same reason -- consistent with,
+not contradicting, review 647's own point that it proves less than its name claims: it cannot tell
+"containment is off" apart from "the shell's own hangup propagation didn't happen to fire this
+time," but it still correctly goes red when containment really is off. The trap-based pieces are
+what isolate the claim; this one corroborates it.
+
+Blast radius matched the local prediction exactly: 5 of the core binary's own tests affected, not a
+cascade -- most tests close jobs that respond to `SIGHUP` and never reach the suppressed path at
+all. Reverted immediately in the very next commit; confirmed back to green on the following CI run.

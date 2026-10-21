@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Confirmed — RFC-028 D5's standing watch discharged: the containment guard shown able to FAIL, on the real macOS runner, not only to pass
+
+Ablation piece 3: `termination.rs`'s own `SIGKILL` sweep temporarily suppressed, pushed to the real
+runner, reverted by the very next commit. The guard went red exactly as the standing watch
+requires — `SessionConfirmedEmpty { confirmed: false }`, `OrphanedUnknown` — on the same
+`SIGHUP`-immune survivor pieces 1 and 2 already proved is correctly enumerated and correctly killed
+when containment is left on. A guard that has only ever been seen passing is not known to work; it
+may be unable to fail. This one, now, has been seen doing both.
+
 ### Added — RFC-028 D5's standing watch, ablation pieces 1 and 2: containment confirmed working end-to-end on macOS, pinned in code rather than inferred
 
 Two new macOS-only tests, deliberately built on a backgrounded job immune to `SIGHUP` (`trap ''
