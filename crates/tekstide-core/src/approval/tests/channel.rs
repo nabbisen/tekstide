@@ -1344,7 +1344,14 @@ fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
         // (review 644) otherwise risks firing on *this* connection's own
         // `set_read_timeout`, which is what a later run of this test
         // showed (`reason: ConnectionClosed` where `proposal-1` was
-        // expected).
+        // expected). **Same race, same cause, two fixes -- the
+        // difference is whose hand the stream ends up in**: a rejected
+        // proposal ends with the server dropping its own end, so that
+        // peer can block on a bounded read and exit only after the
+        // server is done (the other four fixes); a successful one keeps
+        // the stream alive in `AcceptedProposal`, so this peer must
+        // instead outlive the assertions that use it, which is what
+        // returning it here, rather than letting it drop, achieves.
         stream
     });
 
