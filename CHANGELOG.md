@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed — review 639: the same blind spot ran the other way, in two assertions that pass on exactly what they exist to exclude
+
+Review 638's fix corrected a false *failure*; two other `process_is_alive` callers had the same
+defect producing a false *pass* instead, which is worse — it costs no CI cycle and nothing flags
+it: `app::tests::HeldProbe::assert_still_holding` ("the held probe must still be running") and
+`runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close`'s own precondition
+("the real backgrounded job must be alive before the close"). Both now require `process_is_alive
+(pid) && !is_gone_or_going(pid)`, the same gone-or-departing exclusion review 638 already built.
+
+`is_gone_or_going` widened `pub(super)` → `pub(crate)` (both platform bodies) plus a `terminal::
+mod`-level re-export, since `app::tests` is outside `runtime::terminal` entirely — the same
+re-export shape `list_all_pids` already needed for the same reason.
+
+Documented, not left for a reader to "complete": the macOS and Linux bodies share a name but not a
+semantic — macOS excludes on `SZOMB` *or* `P_WEXIT` (a real, measured, seconds-long exiting-but-
+not-corpse window); Linux has no observed analogue of that window, so its body stays `SZOMB`-only
+rather than padding in an unverified `X`-state exclusion to look symmetric.
+
 ### Fixed — review 638: `kill(pid, 0)` cannot tell a survivor from a corpse, proved deterministically and corrected without waiting for the macOS flake to recur
 
 Proved locally, on Linux, with no runner needed: `kill(pid, 0)` succeeds against an unreaped

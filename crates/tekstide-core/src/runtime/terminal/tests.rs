@@ -654,8 +654,16 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
                 String::from_utf8_lossy(&output)
             )
         });
+    // Review 639's own required correction: `kill(pid, 0)` alone reads
+    // `true` for a zombie too, so this precondition would have passed on
+    // exactly the case it exists to exclude -- a backgrounded job that
+    // was never really alive going into the close (e.g. `sleep 300`
+    // failing to start and dying immediately, unreaped). `!is_gone_or_going`
+    // is the same gone-or-departing exclusion the corrected post-close
+    // assertion below now also uses.
     assert!(
-        crate::test_support::process_is_alive(background_pid),
+        crate::test_support::process_is_alive(background_pid)
+            && !super::launch::is_gone_or_going(background_pid as libc::pid_t),
         "test precondition: the real backgrounded job must be alive before the close"
     );
     // Review 635's own required control: fired here, against a pid known

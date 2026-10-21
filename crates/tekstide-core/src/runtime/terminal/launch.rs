@@ -1336,8 +1336,19 @@ pub(super) fn report_pid_p_stat_via_sysctl(_pid: libc::pid_t) {}
 /// exactly this window, 13 of 13, not a presumption at all. Only when
 /// `sysctl` *also* cannot answer does this fall back to the original,
 /// weaker "unqueryable, so presume alive" default.
+///
+/// **Review 639's own required note: this body and the Linux one below
+/// share a name but not a semantic, and that is deliberate, not an
+/// oversight to "complete" later.** This one excludes on `SZOMB` *or*
+/// `P_WEXIT` because macOS has a real, measured, seconds-long window
+/// where a process has begun exiting but has not yet become a corpse
+/// (reviews 625-629, 13 of 13 real firings); Linux has no observed
+/// analogue of that window (its own nearly-unobservable `X` state is not
+/// treated as one -- padding this predicate to match would say something
+/// untrue about what was actually measured, worse than the two bodies
+/// looking asymmetric).
 #[cfg(target_os = "macos")]
-pub(super) fn is_gone_or_going(pid: libc::pid_t) -> bool {
+pub(crate) fn is_gone_or_going(pid: libc::pid_t) -> bool {
     // SAFETY: `info` is a plain, fully-zeroed `proc_bsdinfo` the call
     // writes into; `size` matches its own real size exactly, the
     // buffer `proc_pidinfo` is documented to require.
@@ -1379,8 +1390,14 @@ pub(super) fn is_gone_or_going(pid: libc::pid_t) -> bool {
 /// shipped binary regardless; this one's only caller is itself a test,
 /// so a plain (non-test) Linux build would otherwise flag it as dead
 /// code.
+///
+/// **This body is `SZOMB`-only and deliberately not the macOS body's
+/// equal**: it has no `P_WEXIT`-style exclusion because this platform
+/// has no measured, observable "exiting but not yet a corpse" window to
+/// exclude on -- only a real one, not a presumed absence of one, would
+/// justify matching the other body's wider exclusion.
 #[cfg(all(test, target_os = "linux"))]
-pub(super) fn is_gone_or_going(pid: libc::pid_t) -> bool {
+pub(crate) fn is_gone_or_going(pid: libc::pid_t) -> bool {
     process_stat(pid).is_some_and(|stat| stat.state == 'Z')
 }
 

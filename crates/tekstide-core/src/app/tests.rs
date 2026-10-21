@@ -1260,9 +1260,18 @@ impl HeldProbe {
     /// Review 513's own required proof, not an assumption: this pid is still
     /// in the process table right now, via the same `libc::kill(.., 0)`
     /// liveness check `runtime::terminal::termination` uses in production.
+    ///
+    /// **Review 639's own required correction: `kill(pid, 0)` alone
+    /// reads `true` for a zombie too**, so a probe that already exited
+    /// and sits unreaped would have passed this exact assertion despite
+    /// being the condition it exists to exclude ("the held probe must
+    /// still be running"). `!is_gone_or_going(pid)` is the same
+    /// gone-or-departing exclusion `runtime::terminal`'s own containment
+    /// draws, now also required here.
     fn assert_still_holding(&self) {
         assert!(
-            crate::test_support::process_is_alive(self.pid),
+            crate::test_support::process_is_alive(self.pid)
+                && !crate::runtime::terminal::is_gone_or_going(self.pid as libc::pid_t),
             "the held probe (pid {}) must still be running -- it must not have exited before \
              the second process even started",
             self.pid
