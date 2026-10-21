@@ -674,6 +674,21 @@ fn malformed_frame_is_rejected_not_partially_parsed() {
         stream
             .write_all(&frame_with_length_prefix(&garbage))
             .expect("send garbage frame");
+        // Review 645's own required fix: without this, the race is "server
+        // reads the frame" versus "this thread ends and the stream drops",
+        // and the client's own close can win on a loaded runner -- on
+        // macOS, `set_read_timeout` on the *server's* accepted stream then
+        // fails `EINVAL` because the peer is already gone (review 644), so
+        // the server reports `ConnectionClosed` instead of exercising the
+        // malformed-frame path this test is named for. Set while the peer
+        // is certainly still alive, then block on one byte: the server
+        // reads the frame, reaches its verdict, and drops its own end,
+        // which is what makes this `read` return `0` -- strictly after
+        // the server has finished, every time, no `sleep` anywhere.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set the sender's own bound");
+        let _ = stream.read(&mut [0_u8; 1]);
     });
 
     let result = endpoint.accept_proposal();
@@ -704,6 +719,16 @@ fn oversized_declared_length_is_rejected_before_reading_the_body() {
         // up front.
         let oversized_len: u32 = u32::MAX;
         let _ = stream.write_all(&oversized_len.to_be_bytes());
+        // Review 645's own required fix -- see `malformed_frame_is_
+        // rejected_not_partially_parsed`'s own identical addition for why:
+        // without this, this thread's own close can race ahead of the
+        // server's read and win, reporting `ConnectionClosed` instead of
+        // exercising the oversized-length rejection this test is named
+        // for.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set the sender's own bound");
+        let _ = stream.read(&mut [0_u8; 1]);
     });
 
     let result = endpoint.accept_proposal();
@@ -760,6 +785,19 @@ payload = json.dumps({{
     "declared_effects": None,
 }}).encode()
 s.sendall(struct.pack(">I", len(payload)) + payload)
+# Review 645's own required fix -- same reason as the Rust-side sender
+# threads' own identical addition: without this, this process's own exit
+# (closing its socket) can race ahead of the server's read and win,
+# reporting ConnectionClosed instead of exercising the token-mismatch
+# rejection this test is named for. Block on one byte while the peer is
+# certainly still alive; the server reads the frame, reaches its
+# verdict, and drops its own end, which is what makes this recv return
+# b"" -- strictly after the server has finished, every time.
+s.settimeout(5)
+try:
+    s.recv(1)
+except socket.timeout:
+    pass
 s.close()
 "#
     );
@@ -1384,8 +1422,26 @@ fn serve_concurrently_refuses_connections_beyond_the_concurrency_cap() {
     // Open well beyond the cap (32) worth of connections, all silent, and
     // hold them open -- if the cap were not enforced, this would spawn
     // one authentication thread per connection with no limit.
+    //
+    // Review 645's own required fix: the read timeout used to be set
+    // *after* the 300ms sleep below, by which time the endpoint had
+    // already refused and closed the surplus connections -- on macOS,
+    // `set_read_timeout` on a stream whose peer is already gone returns
+    // `EINVAL` (review 644's own finding, the same platform rule the
+    // production fix is built on), which is exactly what this test's own
+    // panic was. Set here instead, in the same loop as `connect`, while
+    // every peer this test owns is certainly still alive -- identical
+    // semantics either way, since the timeout only governs the later
+    // reads below, but now the option can never be set after the close
+    // that would make it fail.
     let held: Vec<UnixStream> = (0..40)
-        .map(|_| UnixStream::connect(&socket_path).expect("connect within/beyond the cap"))
+        .map(|_| {
+            let stream = UnixStream::connect(&socket_path).expect("connect within/beyond the cap");
+            stream
+                .set_read_timeout(Some(Duration::from_millis(30)))
+                .expect("set the check's read timeout while the peer is still connected");
+            stream
+        })
         .collect();
 
     // Give the accept loop time to actually accept and process all of
@@ -1396,18 +1452,14 @@ fn serve_concurrently_refuses_connections_beyond_the_concurrency_cap() {
     // The connections beyond the cap must have been closed by the
     // endpoint (refused) rather than left open waiting on a spawned
     // authentication thread -- reading from them must observe EOF
-    // (0 bytes) rather than blocking or returning data.
-    // A short per-stream timeout: an accepted-and-held connection blocks
-    // for the full timeout on every check (nothing arrives, the server
-    // hasn't closed it), so this value directly multiplies by up to 32
-    // held connections -- kept small so the test does not spend most of
-    // its time waiting out timeouts on the connections that were
+    // (0 bytes) rather than blocking or returning data. The read timeout
+    // itself (kept small, 30ms) is what bounds the held-but-accepted
+    // connections' own checks below, which directly multiplies by up to
+    // 32 held connections -- kept small so the test does not spend most
+    // of its time waiting out timeouts on the connections that were
     // correctly accepted rather than refused.
     let mut refused_count = 0;
     for mut stream in held {
-        stream
-            .set_read_timeout(Some(Duration::from_millis(30)))
-            .expect("set short read timeout for the check");
         let mut buffer = [0_u8; 1];
         if let Ok(0) = stream.read(&mut buffer) {
             refused_count += 1;

@@ -3258,3 +3258,31 @@ programming error it is. Documented as an inference, not an observation: accepta
 fails closed (a wrong inference only drops a proposal, never grants one), with the `operation`
 label as its own falsifier if a genuinely live peer is ever observed producing this errno. Scoped
 to macOS only (measured there, not observed on Linux).
+
+## Closed, review 645 -- the three remaining failures were a different race in the tests' own client threads, not a gap in the fix
+
+Run `39614670716` (`9899dfb`) confirmed the `ConnectionClosed` mapping working exactly as designed:
+two tests closed, and three others (`malformed_frame_is_rejected_not_partially_parsed`,
+`oversized_declared_length_is_rejected_before_reading_the_body`,
+`cross_process_impersonation_with_wrong_token_is_rejected`) now failed with `left: ConnectionClosed`
+where they expect their own named reason -- correctly reported, for the first time, instead of
+hiding behind `Io`. Each of the three has a client (two Rust threads, one real `python3` process)
+that writes its frame and exits immediately, racing its own close against the server's read; on a
+loaded runner the close sometimes wins, and `set_read_timeout` on the now-peerless accepted stream
+then hits the identical `EINVAL` review 644 already named.
+
+**Rejected explicitly: letting these three tests tolerate `ConnectionClosed` as an acceptable
+outcome.** A test named for one property that passes on a run where that property was never
+exercised is the fifth occurrence of the single defect this investigation keeps finding in new
+disguises (PTY markers satisfied by echo, a byte count satisfied by an echoed command line,
+`kill(pid, 0)` satisfied by a corpse, `session_confirmed_empty` satisfied by a libproc-invisible
+survivor) -- not a sixth to add.
+
+**Fixed deterministically instead, no `sleep`**: each sender now blocks on one byte (`recv(1)` for
+the Python script) after writing, with a bounding timeout set while its own peer is certainly still
+connected -- the server reads the frame, reaches its verdict, and drops its own end, which is what
+unblocks the sender, strictly after the server has finished every time.
+`serve_concurrently_refuses_connections_beyond_the_concurrency_cap`'s own `set_read_timeout` moved
+into its connect loop (identical semantics; it only ever governed later reads) instead of after a
+300ms sleep that let the endpoint close the surplus connections first. All four confirmed passing
+locally, 5 of 5 repeats each, and the full channel module's own 26 tests clean together.

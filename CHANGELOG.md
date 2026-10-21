@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed — review 645: four `approval::tests::channel` tests had their own client-closes-too-early race, closed deterministically rather than tolerated
+
+Review 644's `ConnectionClosed` mapping worked exactly as designed — and, in working, turned an
+opaque `Io` failure into an honest one on three tests whose own client thread (or, for one, a real
+`python3` process) wrote its frame and exited immediately: the race between "server reads the
+frame" and "client's own close" could make the client win, correctly reporting `ConnectionClosed`
+but never exercising what each test was actually named to prove (a malformed frame, an oversized
+declared length, a wrong token). Tolerating `ConnectionClosed` as an acceptable outcome was
+rejected outright: a test that passes on an outcome that never exercised its own property is the
+same defect this investigation has already corrected four other times in different disguises
+(satisfiable PTY markers, an echoed-command-line byte count, a corpse satisfying `kill(pid, 0)`, a
+libproc-invisible process satisfying `session_confirmed_empty`).
+
+Closed deterministically instead, no `sleep` in any of the four: `malformed_frame_is_rejected_not_
+partially_parsed` and `oversized_declared_length_is_rejected_before_reading_the_body`'s own sender
+threads now set a read timeout and block on one byte after writing, so the thread's own exit
+cannot happen before the server has read the frame and dropped its own end (`cross_process_
+impersonation_with_wrong_token_is_rejected`'s python script gets the identical shape — a bounded
+`recv(1)` before `close()`). `serve_concurrently_refuses_connections_beyond_the_concurrency_cap`'s
+own read timeout moved from after a 300ms sleep (by which time the endpoint had already refused
+and closed the surplus connections) to inside the connect loop, while every peer this test owns is
+still certainly alive — identical semantics, since the timeout only ever governed the later reads.
+
 ### Fixed — review 644: a disconnected peer on macOS was reported as an internal `Io` error instead of the verdict it is
 
 Review 642's own `operation` label confirmed the mechanism behind the macOS "oscillating noise
