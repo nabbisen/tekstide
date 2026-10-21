@@ -907,6 +907,55 @@ fn a_change_in_a_directory_we_do_not_watch_is_dropped() {
     assert!(!watcher.has_pending_scans());
 }
 
+/// Response 647's own required defense-in-depth: `the_hostile_tree_is_watched_only_where_
+/// the_policy_admits_and_never_recurses` measured the platform itself (macOS `kqueue`)
+/// reporting a change inside a *grandchild* of an admitted directory -- an unwatched
+/// subdirectory one level below the watched one -- in violation of D2's own
+/// never-recurses design. That test reads the kernel's raw notices directly, by design, so
+/// it cannot by itself say whether the *application* ever acts on such a leak.
+///
+/// This test answers that, platform-independently: it constructs the notice directly,
+/// the same way `a_change_in_a_directory_we_do_not_watch_is_dropped` above already does,
+/// rather than depending on what any one kernel actually reports, and drives it straight
+/// through [`super::ProjectWatcher::record_changed_paths`] -- the one real consumer of a
+/// [`super::WatchNotice`] (`shell.rs`'s own event loop). `record_changed_paths`'s existing
+/// `self.scope.is_watched(parent)` check already enforces exactly the boundary
+/// `WatchedDirectory::admit` drew: a path one level below the admitted-but-unwatched
+/// subdirectory has a parent that was never added to the watched set, so it is dropped
+/// here regardless of what the platform itself reported. No code change was needed to make
+/// this pass -- the filter already existed; this pins it down as a standing property
+/// rather than an accidental one, now that review 647 measured a backend that can violate
+/// the boundary on the kernel side.
+#[test]
+fn record_changed_paths_drops_a_grandchild_of_an_admitted_directory() {
+    use std::time::Instant;
+
+    let directory = &watch_test_root().join("tekadmitted-grandchild");
+    let _ = std::fs::remove_dir_all(directory);
+    std::fs::create_dir_all(directory.join("deeper")).unwrap();
+
+    let mut watcher = super::ProjectWatcher::open();
+    watcher.reconcile(
+        &BTreeSet::from([WatchedDirectory::for_test(directory)]),
+        Vec::new(),
+    );
+    assert_eq!(
+        watcher.scope().watched_count(),
+        1,
+        "test precondition: only the top directory is admitted, not its own subdirectory"
+    );
+
+    let at = Instant::now();
+    watcher.record_changed_paths(&[directory.join("deeper").join("inside.txt")], at);
+    assert!(
+        !watcher.has_pending_scans(),
+        "a change inside an admitted directory's own unwatched subdirectory must not reach \
+         the batcher, regardless of what the platform itself reports"
+    );
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
 /// B2 step 3, the fallback: a failed notice rescans every watched directory, so nothing is
 /// trusted to have been quiet after events may have been lost.
 #[test]

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added — a standing test pins the admitted-set boundary `record_changed_paths` already enforces
+
+`the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses` measured macOS
+`kqueue` itself reporting a change inside a grandchild of an admitted directory — an unwatched
+subdirectory one level below the watched one — violating RFC-026 D2's own never-recurses design at
+the platform level. That test reads the kernel's raw notices directly, by design, so it cannot by
+itself say whether the application ever acts on such a leak.
+
+`record_changed_paths_drops_a_grandchild_of_an_admitted_directory` answers that,
+platform-independently: it drives a synthetic grandchild path straight through
+`ProjectWatcher::record_changed_paths` — the one real consumer of a `WatchNotice` — and confirms it
+produces no pending scan. **No production code change was needed**: `record_changed_paths`'s
+existing `self.scope.is_watched(parent)` check already enforces exactly the boundary
+`WatchedDirectory::admit` drew, regardless of what the platform itself reports. The gap measured in
+the hostile-tree test is real at the kernel level but was already closed one layer up; this test
+pins that down as a standing, verified property rather than an accidental or unconfirmed one.
+
 ### Confirmed — RFC-028 D5's standing watch discharged: the containment guard shown able to FAIL, on the real macOS runner, not only to pass
 
 Ablation piece 3: `termination.rs`'s own `SIGKILL` sweep temporarily suppressed, pushed to the real
