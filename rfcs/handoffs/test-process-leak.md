@@ -3112,3 +3112,52 @@ the command line"*. The Linux occurrences remain intermittent and remain fixed; 
 deterministic and belongs to the cluster, so it is **not counted as a flake recurrence** and is not
 tracked here beyond this note. Review 619's `kill`/`waitid` triangulation (child alive, running,
 never stopped, five seconds after `exit\n`) is consistent with it and was the first signal.
+
+## Recurrence on macOS, 2026-10-21 -- review 633's run, two tests, neither touched by that commit's own diff
+
+Run `39532589671` (`ad2c0a7`, review 633 -- the `SessionLeaderState` collapse plus the `is_zombie`
+rename), `macos-measurement` job. Both of the required items held (six `assert_session_is_empty`
+guard firings gone, `OrphanedUnknown` still 0 -- confirmed by direct `grep` against the log, zero
+`launch.rs:7xx` panics anywhere in it), but two tests failed that passed in both of the two prior
+runs checked (`39515933593`, review 629; `39519057201`, review 631) and are not among the three
+previously-named held sets (`approval::tests::channel`'s pool, `project::watch`'s `kqueue` pair,
+`runtime::git`'s linked worktree).
+
+- **`runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives`** --
+  the same assertion this document's own "Reopened on macOS, 2026-10-19" section names
+  (`wait_for_exit` returns `None` where `Exited { exit_status: 0 }` is expected), with the
+  review-628-era `sysctl` sample attached this time: `p_stat=2 (SRUN)`, `p_flag=0x6006` (`P_WEXIT`
+  set), stable across three samples 100 ms apart -- the identical signature the whole reviews
+  625-629 investigation chain measured for the cluster this row already says it belongs to.
+  **That 2026-10-19 entry calls this failure "not an intermittent... fails every run."** This run's
+  own data contradicts the "every run" part directly: the test passed on `macos-measurement` in
+  both of the two runs immediately prior (629, 631) and failed in this one. Recorded as a
+  correction to that claim, not a new row -- the cause named there (a shell wedged in `proc_exit`)
+  is unchanged and still the best-supported explanation; only "deterministic" is wrong. This test's
+  own `spawn_output_reader` is running and draining the master throughout, including across the
+  `exit\n` write, so the review-629 remedy ("drain the master") being absent is not the explanation
+  here -- draining alone did not prevent this occurrence, which the existing entry's own
+  investigation had not yet had a data point against.
+- **`runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close`** -- **a
+  different failure from the one this document already tracks for this test** (review 478's
+  PID-parse-timing cause, verdict Fix, closed 2026-10-09). This run's panic is at `tests.rs:673`:
+  *"an OS-level kill(pid, 0) on the real backgrounded job's own pid, after a real close, must find
+  it gone -- not inferred from the returned events."* The PID parsed fine; the job was still alive
+  after the close sequence finished. Immediately before the panic, the log shows
+  `processes_in_session: ... done, 0 member(s) found` for that session -- the containment sweep's
+  own enumeration saw no survivors to signal, yet the backgrounded job's own pid answered `kill`
+  afterward. Not yet investigated further: whether the bulk `list_all_pids` scan simply missed the
+  backgrounded job's own pid at that instant (a timing gap unrelated to the session leader) or
+  something else. New row, not folded into the existing (closed, different-cause) entry for the
+  same test name.
+
+**Neither failure's own code path runs through anything review 633 changed.** That commit's diff is
+confined to `session_leader_state`/`SessionLeaderState`/`session_leader_known_to_still_exist`
+(`launch.rs`) and the `is_zombie` -> `is_gone_or_going` rename (no logic change, confirmed by
+`diff`) -- all reachable only from the *session leader's* own direct check and from
+`is_gone_or_going`'s existing call sites, none of which either failing test's assertion depends on
+(`wait_for_exit` here is `termination.rs`'s bare per-child `try_wait` loop, not the session-wide
+path; `a_real_backgrounded_job...`'s own subject is a non-leader session member, found or not
+through the unchanged bulk-scan path). Reported as two recurrences of macOS CI's own already-known
+timing class, not as evidence against this round's fix -- the pair the reviewer asked for held, and
+these are additional data, not a regression attributed to this commit.
