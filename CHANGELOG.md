@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Found, not yet fixed — review 641: the "oscillating noise pool" was two named causes, not noise, in six rounds of mislabeling
+
+Six `approval::tests::channel` failures held as noise since review 629 are, grouped by panic
+location and message, two distinct causes: `UnixStream::set_read_timeout` failing `EINVAL` on this
+macOS runner independent of the requested duration (30ms and 2s both trip the identical errno,
+falsifying the "sub-millisecond timeval" hypothesis; five of six failures share this one
+mechanism, confirmed by reading rather than assumed for the three that don't set their own
+timeout), and `dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname`, an already-understood
+platform fact (RFC-028 D4) rather than an open failure.
+
+Given `#[ignore]` with its own reason, so it stops being counted as a failure every round (still
+runnable via `cargo test --ignored`). The `EINVAL` mechanism itself is not yet fixed — its root
+cause is unmeasured, and the duration-value hypothesis that motivated this investigation is now
+known to be wrong; recorded in `test-process-leak.md` with a candidate next measurement (comparing
+the raw `libc::setsockopt` call against `std`'s own wrapper) rather than guessed at further.
+
 ### Fixed — review 640: `process_is_alive` itself is now honest — a capped `grep` had read "two sites" where there were fourteen
 
 Review 639's own `grep` for `process_is_alive`'s callers was piped through `head -12` and read as

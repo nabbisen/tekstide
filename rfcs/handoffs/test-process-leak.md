@@ -3190,3 +3190,41 @@ examined. `process_is_alive` itself now excludes `is_gone_or_going` (`kill(pid, 
 !is_gone_or_going(pid)`), so this test's own `!process_is_alive(pid)` assertion is correct again
 with no change to this test's own code. Retired from active tracking: the cause this row describes
 no longer exists anywhere in the crate, not only here.
+
+## New row, 2026-10-21 -- the "oscillating noise pool" was never noise, review 641's own correction to six rounds of mislabeling
+
+Six `approval::tests::channel` failures held as "oscillating noise" since review 629 are, read by
+panic location and message rather than membership churn alone, **two distinct, named causes, not
+noise**:
+
+1. **`UnixStream::set_read_timeout` fails `EINVAL` on this macOS runner, independent of the
+   requested duration.** `serve_concurrently_refuses_connections_beyond_the_concurrency_cap`
+   (`channel.rs:1410`) sets `Duration::from_millis(30)` on a client-connected stream and gets `Os {
+   code: 22, kind: InvalidInput }`. `serve_concurrently_accepts_a_second_connection_while_the_
+   first_stalls` (`channel.rs:1310`) sets `Duration::from_secs(2)` -- via `self.read_timeout`
+   inside `accept_proposal`'s own internal call (`channel.rs:1109`), on a server-accepted stream --
+   and gets the **identical** `Os { code: 22, kind: InvalidInput }`. Two different durations, two
+   different socket roles, the same errno: the original "sub-millisecond/unrepresentable timeval"
+   hypothesis (review 641's own response) is falsified by the second case alone -- 2 full seconds
+   is not sub-millisecond and converts to a perfectly ordinary `timeval`. `malformed_frame_is_
+   rejected_not_partially_parsed`, `oversized_declared_length_is_rejected_before_reading_the_body`,
+   and `cross_process_impersonation_with_wrong_token_is_rejected` all report the same `reason: Io`
+   shape through `accept_proposal`'s own default `PROPOSAL_READ_TIMEOUT` (5s) -- read, not
+   instrumented, confirmed none of the three sets its own read timeout, so all three go through the
+   identical `channel.rs:1109` call. Five of six "noise" failures are this one mechanism, not three
+   or four separate ones. **Root cause of the `EINVAL` itself is unmeasured** -- not the duration
+   value, since both 30ms and 2s trip it identically; candidate next step: isolate whether this is
+   a Rust-`std`/`libc` ABI mismatch for `struct timeval` on this runner's specific macOS SDK/kernel
+   combination, versus a genuine kernel-level restriction, by calling the raw `setsockopt` directly
+   via `libc` alongside the `std` call and comparing.
+2. **`dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname`**: not a failure at all, a measured
+   platform fact (`/dev/fd/<fd>/<name>` does not resolve on this BSD-derived `/dev/fd`) with its own
+   design consequence already recorded (RFC-028 D4). Given `#[ignore]` with the finding and D4's
+   answer as its own reason, so it stops counting as an open failure; still runnable with
+   `cargo test --ignored`.
+
+**The standing correction**: a set that oscillates within a fixed pool is not evidence of noise; it
+is evidence of several things that are each load-sensitive. "Noise" is a claim about a cause and
+needs the same grouping-by-panic-location that closed the 18-test `proc_exit` cluster in one pass
+(reviews 622-629) -- this pool had that evidence (three different first-message shapes) since
+review 622 and was mislabeled anyway.
