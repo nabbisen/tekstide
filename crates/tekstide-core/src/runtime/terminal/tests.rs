@@ -689,7 +689,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         }),
         "the session must be confirmed empty by a real re-enumeration: {events:?}"
     );
-    let background_job_alive = crate::test_support::process_is_alive(background_pid);
+    let background_job_still_signalable = crate::test_support::process_is_alive(background_pid);
     // Review 637's own required correction: fired in *both* branches, not
     // only the failing one. This test is intermittent -- it has failed
     // suite-wide and passed on an isolated re-run seconds later -- so a
@@ -697,7 +697,20 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     // control ("no record") that makes a `SZOMB` reading on a failing run
     // trustworthy rather than merely assumed.
     super::launch::report_pid_p_stat_via_sysctl(background_pid as libc::pid_t);
-    if background_job_alive {
+    // Review 638's own required correction: `kill(pid, 0)` alone cannot
+    // tell a real survivor from an unreaped zombie -- it succeeds against
+    // both (proved deterministically, no runner needed, in
+    // `test_support::tests::kill_signal_zero_succeeds_against_an_unreaped_zombie`).
+    // "Gone or departing" is the property RFC-043 actually asks for: a
+    // corpse satisfies "closing a project kills the backgrounded
+    // descendant" exactly as hard reaping does. This is a correction of
+    // the assertion, not a relaxation of the guarantee -- the same
+    // distinction production's own containment already draws
+    // (`is_gone_or_going`, response 340's zombie exclusion), now applied
+    // here too.
+    let background_job_gone_or_departing = !background_job_still_signalable
+        || super::launch::is_gone_or_going(background_pid as libc::pid_t);
+    if !background_job_gone_or_departing {
         // Review 634's own named measurement, fired only in the branch it
         // answers: does `KERN_PROC_SESSION` see this exact pid when the
         // bulk `proc_listallpids` scan and the ordinary member check did
@@ -711,9 +724,10 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         );
     }
     assert!(
-        !background_job_alive,
-        "an OS-level kill(pid, 0) on the real backgrounded job's own pid ({background_pid}), \
-         after a real close, must find it gone -- not inferred from the returned events"
+        background_job_gone_or_departing,
+        "the real backgrounded job's own pid ({background_pid}) must be gone or departing after \
+         a real close, not merely 'kill(pid, 0) failed' -- kill(pid, 0) alone cannot tell a real \
+         survivor from a SIGKILLed corpse sitting unreaped for a moment under load"
     );
 }
 

@@ -372,6 +372,80 @@ mod tests {
         );
     }
 
+    /// Review 638's own deterministic proof, local, no runner needed:
+    /// `kill(pid, 0)` (what [`process_is_alive`] is) succeeds against an
+    /// **unreaped zombie** -- the pid table entry still exists; the
+    /// kernel simply discards the signal rather than delivering it to
+    /// anything. This is a statement about POSIX, not about any one
+    /// test, which is why it is provable here instead of waiting for
+    /// `runtime::terminal::tests::
+    /// a_real_backgrounded_job_is_dead_after_a_real_close`'s own
+    /// intermittent macOS failure to demonstrate it: that test's
+    /// `process_is_alive`-based assertion ("...must find it gone") is
+    /// unsound by construction, on every platform, because a
+    /// `SIGKILL`ed job sitting unreaped for a moment satisfies
+    /// `process_is_alive` exactly as a genuine survivor would.
+    ///
+    /// Deliberately does not reap the child through [`KillOnDropChild`]
+    /// or any other automatic path -- staying unreaped is the entire
+    /// point under test -- so this test reaps it manually at the end,
+    /// the same shape
+    /// `a_bare_child_leaks_across_a_panic_this_fix_exists_to_prevent`
+    /// above already uses for its own deliberately-unreaped child.
+    /// `waitid(..., WNOWAIT)` confirms the child has actually finished
+    /// exiting, without reaping it, before the real assertion runs --
+    /// otherwise a slow kernel could let this test observe "signalled,
+    /// not yet dead" rather than the zombie state the hypothesis is
+    /// about.
+    #[test]
+    fn kill_signal_zero_succeeds_against_an_unreaped_zombie() {
+        let _real_process_slot = RealProcessLimiter::acquire();
+        let mut child = spawn_real_sleep();
+        let pid = child.id() as libc::pid_t;
+
+        // SAFETY: `pid` is this test's own just-spawned child; `SIGKILL`
+        // delivers a real, fatal signal to it.
+        let kill_result = unsafe { libc::kill(pid, libc::SIGKILL) };
+        assert_eq!(
+            kill_result, 0,
+            "test precondition: SIGKILL must be delivered to this test's own child"
+        );
+
+        // SAFETY: `info` is a plain, fully-zeroed `siginfo_t` the call
+        // writes into; `WNOWAIT` is the property this call exists for --
+        // it reports the state change without reaping, which is exactly
+        // what distinguishes "confirmed exited" from "confirmed exited
+        // *and reaped*" below.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let waitid_result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &raw mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        assert_eq!(
+            waitid_result, 0,
+            "test precondition: the child must be confirmed to have actually exited (via the \
+             SIGKILL above), observed without reaping it"
+        );
+
+        assert!(
+            process_is_alive(pid as u32),
+            "kill(pid, 0) must succeed against this unreaped zombie -- proving the hypothesis \
+             behind review 638: process_is_alive cannot tell a real survivor from a SIGKILLed \
+             corpse sitting unreaped, on any platform"
+        );
+
+        // Manual cleanup through the `Child` API itself, not another raw
+        // `libc` call: deliberately unreaped until now, so nothing else
+        // in the process will reap it, and this is also what satisfies
+        // `clippy::zombie_processes`'s own static check that every
+        // spawned `Child` is eventually `wait()`ed on.
+        let _ = child.wait();
+    }
+
     /// `wait_with_output` must not double-kill/-wait through `Drop` in any
     /// way that turns success into a failure -- the real exit status and
     /// stdout must still come back correctly after the value has passed

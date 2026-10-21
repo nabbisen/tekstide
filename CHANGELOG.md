@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Fixed — review 638: `kill(pid, 0)` cannot tell a survivor from a corpse, proved deterministically and corrected without waiting for the macOS flake to recur
+
+Proved locally, on Linux, with no runner needed: `kill(pid, 0)` succeeds against an unreaped
+zombie — the pid table entry still exists; the signal is simply discarded. New test,
+`test_support::tests::kill_signal_zero_succeeds_against_an_unreaped_zombie`, `SIGKILL`s a real
+child and deliberately does not reap it (confirming the exit via `waitid(..., WNOWAIT)` without
+reaping), then asserts `process_is_alive` still reads true. Clean, 5 of 5 local repeats.
+
+This makes `runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close`'s own
+assertion — *"an OS-level `kill(pid, 0)` ... must find it gone"* — unsound by construction, on
+every platform, not only intermittently on a loaded macOS runner: a `SIGKILL`ed job sitting
+unreaped for a moment satisfies that assertion exactly as a genuine containment escape would. The
+same confusion response 340 already corrected in the production enumeration, arriving in a test's
+own assertion a year later.
+
+Corrected to assert **gone or departing**, the same distinction production's own containment
+already draws — `is_gone_or_going` on macOS (`SZOMB` or `P_WEXIT`), a new Linux counterpart of the
+identical name (`process_stat`'s own `state == 'Z'`, mirroring `session_id_of`'s existing
+same-name-two-bodies pattern) — not a relaxation of the guarantee: a corpse satisfies "closing a
+project kills the backgrounded descendant" exactly as hard reaping does. Keeps the review
+636/637 instrumentation in place, now gated on the corrected failure condition; any failure that
+survives this fix gets a decisive three-way reading instead of an ambiguous one.
+
+Deferred, not forgotten: the macOS-coverage gap in the layout-budget test's own load-average
+message (reads empty on macOS, `getloadavg` being Linux-only there) — out of scope for the files
+this round touches; folds in whenever `surface/explorer/tests.rs` is next open.
+
 ### Found, not yet fixed — review 636: `KERN_PROC_SESSION` is unusable on the real runner, and `kill(pid, 0)` may be the wrong instrument in the test that found it
 
 Measured, not assumed: `report_session_members_via_kern_proc_session`'s own control call (fired

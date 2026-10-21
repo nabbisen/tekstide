@@ -1337,7 +1337,7 @@ pub(super) fn report_pid_p_stat_via_sysctl(_pid: libc::pid_t) {}
 /// `sysctl` *also* cannot answer does this fall back to the original,
 /// weaker "unqueryable, so presume alive" default.
 #[cfg(target_os = "macos")]
-fn is_gone_or_going(pid: libc::pid_t) -> bool {
+pub(super) fn is_gone_or_going(pid: libc::pid_t) -> bool {
     // SAFETY: `info` is a plain, fully-zeroed `proc_bsdinfo` the call
     // writes into; `size` matches its own real size exactly, the
     // buffer `proc_pidinfo` is documented to require.
@@ -1352,6 +1352,36 @@ fn is_gone_or_going(pid: libc::pid_t) -> bool {
         Some((p_stat, p_flag)) => u32::from(p_stat) == libc::SZOMB || p_flag & P_WEXIT != 0,
         None => false,
     }
+}
+
+/// Linux's own counterpart to the macOS `is_gone_or_going` above, same
+/// name and same question (is this pid a corpse, not a survivor),
+/// mirroring [`session_id_of`]'s existing two-body-same-name pattern
+/// rather than inventing a second name for one cross-platform caller to
+/// branch on. Linux has no `proc_exit`-window equivalent to `P_WEXIT`
+/// (reviews 625-630's own finding has no Linux side), so this is exactly
+/// [`is_live_member_of_session`]'s own zombie check, read directly: a
+/// zombie's real `/proc/<pid>/stat` state field really is `Z` (response
+/// 340, confirmed directly, not inferred).
+///
+/// **Review 638's own required use**: `runtime::terminal::tests::
+/// a_real_backgrounded_job_is_dead_after_a_real_close`'s own assertion
+/// needed exactly this, cross-platform, to stop trusting `kill(pid, 0)`
+/// alone -- `kill(pid, 0)` succeeds against an unreaped zombie on every
+/// platform (`test_support::tests::
+/// kill_signal_zero_succeeds_against_an_unreaped_zombie` proves it
+/// deterministically, no runner needed), so a test built only on it
+/// cannot tell a real survivor from a `SIGKILL`ed corpse sitting
+/// unreaped for a moment under load.
+///
+/// `#[cfg(test)]`, unlike the macOS body above: that one has a real,
+/// non-test caller (`live_member_of_session`), so it is built into every
+/// shipped binary regardless; this one's only caller is itself a test,
+/// so a plain (non-test) Linux build would otherwise flag it as dead
+/// code.
+#[cfg(all(test, target_os = "linux"))]
+pub(super) fn is_gone_or_going(pid: libc::pid_t) -> bool {
+    process_stat(pid).is_some_and(|stat| stat.state == 'Z')
 }
 
 /// Bounded enumeration, not sized-to-fit -- see [`processes_in_session`]'s
