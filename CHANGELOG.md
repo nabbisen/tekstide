@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Found, not yet fixed — review 636: `KERN_PROC_SESSION` is unusable on the real runner, and `kill(pid, 0)` may be the wrong instrument in the test that found it
+
+Measured, not assumed: `report_session_members_via_kern_proc_session`'s own control call (fired
+against the backgrounded job while it was certainly alive and certainly a session member, before
+the close) returned `ENOENT` from `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_SESSION, session_id)` —
+not `ABSENT`, not truncated, an outright failure to answer at all, 3 of 3 firings including one in
+an isolated `--nocapture` re-run where the test itself passed. The identical 4-int MIB shape
+succeeds against `KERN_PROC_PID` moments earlier in the same function, so MIB construction is not
+in question; the selector itself does not resolve on this kernel. Rules out review 634's own
+proposed remedy (retiring the bulk-scan-plus-leader-special-case enumeration in favor of one
+uniform `KERN_PROC_SESSION` call) before it was ever built.
+
+The `checking pid` trail in the same run showed the backgrounded job's own pid visited by the bulk
+scan 51 times across the test's own close sequence (interleaved with other concurrently running
+tests' own output, so read as suggestive, not conclusive) — the wrong shape for "never enumerated,"
+which weakens review 634's own "no pid to check directly" story for this specific failure. The
+likelier explanation: `kill(pid, 0)` succeeds against a zombie (the pid table entry still exists;
+the signal is simply discarded), so the test's own assertion cannot tell a real escaped survivor
+apart from a `SIGKILL`ed job sitting unreaped for a few more milliseconds under load — the identical
+confusion response 340 already corrected in the production enumeration, now possibly present in a
+test's own assertion instead. Added `report_pid_p_stat_via_sysctl` (`launch.rs`,
+`#[cfg(all(test, target_os = "macos"))]`, reusing the existing offset-verified `sysctl` reader, no
+new FFI surface) to read the job's real `p_stat` at the exact moment the assertion is about to fail:
+`SZOMB` would mean the test's own instrument is wrong, not the product; anything else keeps the
+containment question open. Held for review before pushing, measurement only.
+
 ### Found, not yet fixed — review 634: the leader-only fix leaves a backgrounded job's own exit invisible the same way, and there is no pid to check directly for it
 
 Review 633's own run surfaced a second, genuinely new failure in

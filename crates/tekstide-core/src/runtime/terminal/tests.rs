@@ -702,6 +702,11 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
             session_id,
             background_pid as libc::pid_t,
         );
+        // Review 636's own required measurement: `kill(pid, 0)` succeeds
+        // on a zombie too, so this one call answers whether the job is a
+        // real survivor or a `SIGKILL`ed corpse not yet reaped -- see the
+        // function's own doc comment.
+        super::launch::report_pid_p_stat_via_sysctl(background_pid as libc::pid_t);
     }
     assert!(
         !background_job_alive,

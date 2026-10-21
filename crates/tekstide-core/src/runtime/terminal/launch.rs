@@ -1227,6 +1227,60 @@ fn p_stat_and_flag_via_sysctl(pid: libc::pid_t) -> Option<(u8, u32)> {
     Some((buffer[P_STAT_OFFSET], p_flag))
 }
 
+/// Review 636's own required measurement, one call, one word: at the
+/// exact moment `a_real_backgrounded_job_is_dead_after_a_real_close`'s
+/// own `kill(pid, 0)`-based assertion is about to fail, what does the
+/// job's real `p_stat` say?
+///
+/// **Why `kill(pid, 0)` alone cannot settle this.** `kill` with signal
+/// `0` succeeds against a zombie: the pid table entry still exists, and
+/// the kernel simply discards the signal rather than delivering it to
+/// anything. So that assertion cannot distinguish a real survivor (a
+/// live backgrounded job that escaped containment) from a job that was
+/// `SIGKILL`ed exactly as designed and is sitting unreaped for a few
+/// more milliseconds because its own parent shell is already dead and
+/// the reparenting reaper is behind under load. `SZOMB` here means the
+/// test's own assertion is the wrong instrument -- the same confusion
+/// response 340 already corrected in the production enumeration,
+/// *"it holds no resources beyond a pid table slot and cannot execute
+/// code"* -- not that containment failed. Anything else keeps the
+/// containment question open.
+///
+/// `#[cfg(test)]`-only, a no-op everywhere else, the same shape every
+/// diagnostic in this file already takes.
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t) {
+    match p_stat_and_flag_via_sysctl(pid) {
+        Some((p_stat, p_flag)) => {
+            let meaning = match u32::from(p_stat) {
+                libc::SIDL => "SIDL: being created",
+                libc::SRUN => "SRUN: runnable",
+                libc::SSLEEP => "SSLEEP: asleep, blocked on something",
+                libc::SSTOP => "SSTOP: stopped",
+                libc::SZOMB => "SZOMB: exited, unreaped -- kill(pid, 0) still succeeds on this",
+                _ => "unrecognized",
+            };
+            eprintln!(
+                "[p-stat-at-assertion] pid {pid}: p_stat={p_stat} ({meaning}), p_flag=0x{p_flag:x} \
+                 (P_WEXIT {})",
+                if p_flag & P_WEXIT != 0 {
+                    "set"
+                } else {
+                    "not set"
+                }
+            );
+        }
+        None => {
+            eprintln!(
+                "[p-stat-at-assertion] pid {pid}: p_stat_and_flag_via_sysctl could not answer"
+            );
+        }
+    }
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+pub(super) fn report_pid_p_stat_via_sysctl(_pid: libc::pid_t) {}
+
 /// `proc_pidinfo`'s own documented way to read a process's `p_stat`
 /// field without `/proc` -- `result != size` covers both an outright
 /// failure (the pid is already gone) and a short read, treated the same
