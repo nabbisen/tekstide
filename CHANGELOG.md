@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Found, not yet fixed — review 634: the leader-only fix leaves a backgrounded job's own exit invisible the same way, and there is no pid to check directly for it
+
+Review 633's own run surfaced a second, genuinely new failure in
+`a_real_backgrounded_job_is_dead_after_a_real_close`: not its already-tracked, already-fixed
+PID-parse-timing cause, but a real OS-level `kill(pid, 0)` finding the job still alive after a real
+close. Reviews 625-633's own recovery works only because the session *leader's* pid is known a
+priori — it *is* `session_id`, by construction — so a direct check is possible when the bulk
+`proc_listallpids` scan omits it. A non-leader member (a backgrounded job) has no such handle: if
+the bulk scan omits it, there is no pid to check directly, because nothing else in the enumeration
+ever learned it. RFC-043's own target case — a backgrounded job outliving a close — is exactly what
+stays open.
+
+Added, as a measurement, not yet a fix: `report_session_members_via_kern_proc_session` (`launch.rs`,
+`#[cfg(all(test, target_os = "macos"))]`) asks `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_SESSION,
+session_id)` directly — the kernel's own session-scoped view, not assembled from
+`proc_listallpids`'s bulk one — and reports every record's `p_pid`/`p_stat`/`p_flag`, flagging
+whether the backgrounded job's own pid appears. No `kinfo_proc` declaration needed (review 626's
+own deviation, reused): the record stride is measured at runtime from a single-pid
+`KERN_PROC_PID` call against this test process's own (always-alive) pid, then the session-wide
+reply's own length divided by that stride gives the element count. Wired into
+`a_real_backgrounded_job_is_dead_after_a_real_close`, firing only in the branch where the job is
+found still alive, with the job's own pid now also named in the assertion message.
+
+Not yet measured on the real runner: held for review before pushing. If `KERN_PROC_SESSION` lists
+the job libproc omitted, it justifies retiring the bulk-scan-plus-leader-special-case enumeration in
+favor of one uniform `KERN_PROC_SESSION`-based mechanism for both leader and ordinary members. If it
+does not, the gap is stranger than the omission theory alone explains.
+
 ### Fixed — review 633: the two-predicate split never reached CI — collapsed into one observation with three states before it could race itself
 
 Review 632's own two-predicate design below (`session_leader_still_alive` plus a new, separate

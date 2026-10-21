@@ -633,6 +633,15 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         .launch_project_shell(&project, spec)
         .expect("plain shell launch should succeed");
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    // Captured before the close, not derived from `background_pid` after
+    // it -- review 634's own measurement needs the real session id even
+    // if the backgrounded job's own `getsid` became unanswerable by the
+    // time the diagnostic runs.
+    let session_id = runtime
+        .sessions
+        .get(&terminal.id)
+        .expect("just-launched session must be present")
+        .process_group_id;
 
     runtime
         .write_input(&handle, b"sleep 300 & echo BGPID=$!\n")
@@ -670,10 +679,23 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
         }),
         "the session must be confirmed empty by a real re-enumeration: {events:?}"
     );
+    let background_job_alive = crate::test_support::process_is_alive(background_pid);
+    if background_job_alive {
+        // Review 634's own named measurement, fired only in the branch it
+        // answers: does `KERN_PROC_SESSION` see this exact pid when the
+        // bulk `proc_listallpids` scan and the ordinary member check did
+        // not stop it from surviving the close? See the function's own
+        // doc comment for the mechanism and what it does and does not
+        // establish.
+        super::launch::report_session_members_via_kern_proc_session(
+            session_id,
+            background_pid as libc::pid_t,
+        );
+    }
     assert!(
-        !crate::test_support::process_is_alive(background_pid),
-        "an OS-level kill(pid, 0) on the real backgrounded job's own pid, after a real close, \
-         must find it gone -- not inferred from the returned events"
+        !background_job_alive,
+        "an OS-level kill(pid, 0) on the real backgrounded job's own pid ({background_pid}), \
+         after a real close, must find it gone -- not inferred from the returned events"
     );
 }
 

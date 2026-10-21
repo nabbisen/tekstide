@@ -1165,6 +1165,14 @@ fn live_member_of_session(pid: libc::pid_t, session_id: libc::pid_t) -> Option<b
 const P_FLAG_OFFSET: usize = 32;
 #[cfg(target_os = "macos")]
 const P_STAT_OFFSET: usize = 36;
+/// The same hex dump's own offset 40, decoded to the child's real pid
+/// (review 627) -- never reused as a module constant until review 634's
+/// own `KERN_PROC_SESSION` measurement needed to read which pid each
+/// array record belongs to, unlike `P_FLAG_OFFSET`/`P_STAT_OFFSET`,
+/// which production code already needed. Test-only scope reflects that:
+/// nothing outside the measurement probe below reads it.
+#[cfg(all(test, target_os = "macos"))]
+const P_PID_OFFSET: usize = 40;
 /// Darwin's own `P_WEXIT`: set in `p_flag` the moment a process has
 /// called `exit` and begun `proc_exit`, before `p_stat` ever reaches
 /// `SZOMB`. Reviews 628/629 measured it set and stable (three samples,
@@ -1631,6 +1639,171 @@ pub(super) fn report_child_status_at_timeout(pid: u32) {
 
 #[cfg(not(all(test, target_os = "macos")))]
 pub(super) fn report_child_status_at_timeout(_pid: u32) {}
+
+/// Review 634's own named measurement: does `sysctl(CTL_KERN, KERN_PROC,
+/// KERN_PROC_SESSION, session_id)` see a session member the bulk
+/// `proc_listallpids` scan omitted?
+///
+/// **Why this question has no answer yet.** Reviews 625-633's own
+/// recovery for the session *leader* works only because the leader's pid
+/// is known a priori -- it *is* `session_id`, by construction -- so
+/// [`session_leader_state`] can check it directly when the bulk scan
+/// never visits it. A non-leader member (a backgrounded job, most
+/// plausibly) has no such handle: if the bulk scan omits it, there is no
+/// pid to check directly, because nothing else in this enumeration ever
+/// learned it. `KERN_PROC_SESSION` is the kernel's own session-scoped
+/// view, asked directly rather than assembled from `proc_listallpids`'s
+/// bulk (and, per review 628, sometimes blind) one.
+///
+/// **One `sysctl` call for the array, one more to learn its own record
+/// stride.** `kinfo_proc` is not declared anywhere in this project
+/// (review 626's own deviation, adopted: a wrong hand-reconstructed
+/// struct layout reads garbage silently, unlike a wrong constant), so
+/// the only way to know how many bytes one array record occupies is to
+/// ask for exactly one record and measure the reply:
+/// `sysctl(..., KERN_PROC_PID, ...)` against this *test process's own*
+/// pid (`getpid()`, always alive, always answerable, unlike the pid
+/// under investigation) returns exactly one record, and its own
+/// `written_len` *is* that record's stride. `KERN_PROC_SESSION`'s own
+/// reply is documented as an array of the identical record type, so
+/// dividing its own `written_len` by that measured stride gives the
+/// element count without ever needing the struct's real shape.
+///
+/// Reports every record's `p_pid`/`p_stat`/`p_flag` and whether
+/// `looked_for_pid` appears among them; proposes nothing, the same rule
+/// every diagnostic in this file follows. `#[cfg(test)]`-only, a no-op
+/// everywhere else, the same shape `report_child_status_at_timeout`
+/// above already takes.
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn report_session_members_via_kern_proc_session(
+    session_id: libc::pid_t,
+    looked_for_pid: libc::pid_t,
+) {
+    // SAFETY: `single_buffer` is valid and sized as declared for the
+    // duration of the call; this process's own pid always exists for
+    // the duration of its own call into itself.
+    let self_pid = unsafe { libc::getpid() };
+    let mut single_mib: [libc::c_int; 4] = [
+        libc::CTL_KERN,
+        libc::KERN_PROC,
+        libc::KERN_PROC_PID,
+        self_pid,
+    ];
+    let mut single_buffer = vec![0_u8; 4096];
+    let mut single_len: libc::size_t = single_buffer.len();
+    let single_result = unsafe {
+        libc::sysctl(
+            single_mib.as_mut_ptr(),
+            single_mib.len() as libc::c_uint,
+            single_buffer.as_mut_ptr().cast(),
+            &raw mut single_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if single_result != 0 || single_len == 0 {
+        eprintln!(
+            "[kern-proc-session] KERN_PROC_PID({self_pid}) (this test process, to learn the \
+             array's own record stride) failed: {:?} -- cannot interpret KERN_PROC_SESSION \
+             without it",
+            io::Error::last_os_error()
+        );
+        return;
+    }
+    let stride = single_len;
+
+    let mut session_mib: [libc::c_int; 4] = [
+        libc::CTL_KERN,
+        libc::KERN_PROC,
+        libc::KERN_PROC_SESSION,
+        session_id,
+    ];
+    // 1024 records is far beyond any real test session's own membership;
+    // sized against the measured stride rather than a fixed byte count,
+    // since the stride itself is only known at runtime.
+    // SAFETY: `session_buffer` is valid and sized as declared; every
+    // read below is a plain, bounds-checked byte (or byte-slice) index,
+    // never a typed/aligned access into the buffer.
+    let mut session_buffer = vec![0_u8; stride.saturating_mul(1024)];
+    let mut session_len: libc::size_t = session_buffer.len();
+    let session_result = unsafe {
+        libc::sysctl(
+            session_mib.as_mut_ptr(),
+            session_mib.len() as libc::c_uint,
+            session_buffer.as_mut_ptr().cast(),
+            &raw mut session_len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if session_result != 0 {
+        eprintln!(
+            "[kern-proc-session] sysctl(KERN_PROC_SESSION, {session_id}) failed: {:?}",
+            io::Error::last_os_error()
+        );
+        return;
+    }
+
+    let record_count = session_len / stride;
+    let mut found_looked_for_pid = false;
+    let mut records = Vec::with_capacity(record_count);
+    for index in 0..record_count {
+        let base = index * stride;
+        if base + P_PID_OFFSET + 4 > base + stride {
+            records.push(format!("record {index}: too short to read p_pid"));
+            continue;
+        }
+        let p_pid = i32::from_le_bytes([
+            session_buffer[base + P_PID_OFFSET],
+            session_buffer[base + P_PID_OFFSET + 1],
+            session_buffer[base + P_PID_OFFSET + 2],
+            session_buffer[base + P_PID_OFFSET + 3],
+        ]);
+        let p_stat = session_buffer[base + P_STAT_OFFSET];
+        let p_flag = u32::from_le_bytes([
+            session_buffer[base + P_FLAG_OFFSET],
+            session_buffer[base + P_FLAG_OFFSET + 1],
+            session_buffer[base + P_FLAG_OFFSET + 2],
+            session_buffer[base + P_FLAG_OFFSET + 3],
+        ]);
+        if p_pid == looked_for_pid {
+            found_looked_for_pid = true;
+        }
+        records.push(format!(
+            "pid={p_pid} p_stat={p_stat} p_flag=0x{p_flag:x}{}",
+            if p_pid == looked_for_pid {
+                " <-- looked_for_pid"
+            } else {
+                ""
+            }
+        ));
+    }
+
+    eprintln!(
+        "[kern-proc-session] session {session_id}: stride={stride} bytes, \
+         written_len={session_len}, {record_count} record(s), looked_for_pid {looked_for_pid} \
+         {}: [{}]",
+        if found_looked_for_pid {
+            "FOUND"
+        } else {
+            "ABSENT"
+        },
+        records.join(", ")
+    );
+}
+
+// Unlike `report_child_status_at_timeout` above, this function's only
+// caller is itself inside a `#[test]` fn, so the stub below is scoped to
+// `cfg(test)` too, not left reachable from a plain (non-test) build on
+// any platform -- that wider reachability is exactly what a plain `cargo
+// clippy --lib` build on Linux flagged as dead code the first time this
+// was written.
+#[cfg(all(test, not(target_os = "macos")))]
+pub(super) fn report_session_members_via_kern_proc_session(
+    _session_id: libc::pid_t,
+    _looked_for_pid: libc::pid_t,
+) {
+}
 
 /// Review 625's own required datum, at the exact moment
 /// `wait_for_child_outcome` is about to give up: **re-send the readiness
