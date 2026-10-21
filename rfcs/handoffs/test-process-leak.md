@@ -3163,3 +3163,22 @@ path; `a_real_backgrounded_job...`'s own subject is a non-leader session member,
 through the unchanged bulk-scan path). Reported as two recurrences of macOS CI's own already-known
 timing class, not as evidence against this round's fix -- the pair the reviewer asked for held, and
 these are additional data, not a regression attributed to this commit.
+
+## New row, 2026-10-21 -- `dropping_a_running_terminal_kills_the_real_process_group`, review 638/639's own blind spot in a third test neither round touched
+
+Run `39557865185` (`8388527`, review 639's own push), `macos-measurement` job. First failure ever
+recorded for this test name in this document. Panic at `tests.rs:1171`: *"Drop for RunningTerminal
+must have killed the real process group during unwind, before `catch_unwind` returned control
+here"* -- a negative assertion, `!process_is_alive(pid)`, failing.
+
+**Same root cause as reviews 638/639, a third site neither round's own grep found or was asked to
+find.** `kill(pid, 0)` succeeds against an unreaped zombie; `RunningTerminal::drop`'s own `SIGKILL`
+(no grace period, by design) can leave the shell a corpse for a moment before this process is
+reaped, and `process_is_alive` alone cannot tell that corpse from a genuine survivor -- the
+identical shape `a_real_backgrounded_job_is_dead_after_a_real_close`'s own post-close assertion had
+before review 638 corrected it. Not caused by anything in review 638/639's own diff (neither touched
+this test), surfaced only because this run happened to hit the timing window.
+
+Not yet fixed. Candidate for the same `!process_is_alive(pid) || is_gone_or_going(pid)` correction,
+reported rather than applied this round, since review 639's own order was to report what still
+fails after its push, not to expand scope unilaterally.
