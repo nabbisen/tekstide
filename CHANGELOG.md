@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed — review 645 (continued): a fifth site, the same race on the well-behaved peer this time
+
+The very next CI run found `serve_concurrently_accepts_a_second_connection_while_the_first_stalls`
+failing under the identical mechanism, on the *well-behaved* peer's own connection this time (it
+had passed under this same race in the prior run — confirmed load-dependent per-connection, not
+fixed by the earlier four). The "block on a read before exiting" pattern used for the other four
+does not fit here: a successful `authenticate_and_read` moves the stream into the returned
+`AcceptedProposal` rather than closing it, so there is no "server is done" signal for the client to
+wait on. Fixed by removing the race outright instead — the well-behaved peer's thread now returns
+its stream rather than dropping it, and the test holds it open until well after the result has
+already been obtained and asserted.
+
 ### Fixed — review 645: four `approval::tests::channel` tests had their own client-closes-too-early race, closed deterministically rather than tolerated
 
 Review 644's `ConnectionClosed` mapping worked exactly as designed — and, in working, turned an

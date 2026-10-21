@@ -3286,3 +3286,23 @@ unblocks the sender, strictly after the server has finished every time.
 into its connect loop (identical semantics; it only ever governed later reads) instead of after a
 300ms sleep that let the endpoint close the surplus connections first. All four confirmed passing
 locally, 5 of 5 repeats each, and the full channel module's own 26 tests clean together.
+
+## A fifth site, found by the very next run -- the same race, on the *well-behaved* peer this time
+
+Run `39619255752` (`dd31fb1`): `serve_concurrently_accepts_a_second_connection_while_the_first_
+stalls` failed, this time with `ApprovalChannelError { reason: ConnectionClosed, source: None,
+operation: None }` where `proposal-1` was expected -- the identical `EINVAL`-on-a-closed-peer
+mechanism (review 644), but on the *well-behaved* peer's own accepted connection, which review
+645's own fix list did not include (it had passed under this same mechanism in the prior run,
+confirming the race is genuinely load-dependent per-connection, not fixed just because one run
+didn't catch it).
+
+**Why the review 645 pattern (block on a read, bounded, before the thread exits) does not fit
+here**: a *successful* `authenticate_and_read` moves the stream into the returned
+`AcceptedProposal` rather than closing it -- the connection stays open for the eventual decision --
+so there is no "server is done, drops its end" moment for the client thread to block on. **Fixed
+by removing the race outright instead**: the well-behaved peer's own thread now returns its stream
+rather than letting it drop when the closure ends; the test holds it until well after the result
+has already been obtained and asserted, so nothing closes the peer's own end while the server might
+still be calling `set_read_timeout` on it. Confirmed passing, 5 of 5 repeats, and the full channel
+module's own 26 tests clean together.

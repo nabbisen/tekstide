@@ -1331,6 +1331,21 @@ fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
         stream
             .write_all(&valid_proposal_frame(&token, "proposal-1"))
             .expect("well-behaved peer send proposal");
+        // Review 645's own pattern, applied here in the only shape that
+        // fits this test: a successful `authenticate_and_read` moves the
+        // stream into the returned `AcceptedProposal` rather than closing
+        // it (the connection stays open for the eventual decision), so
+        // there is no "server is done, drops its end" moment for this
+        // thread to block on the way the other four fixes do. Returning
+        // the stream instead of dropping it here removes the race
+        // outright: nothing closes the peer's own end until this test
+        // drops it explicitly, well after the server has already read
+        // the frame -- the same macOS `EINVAL`-on-a-closed-peer mechanism
+        // (review 644) otherwise risks firing on *this* connection's own
+        // `set_read_timeout`, which is what a later run of this test
+        // showed (`reason: ConnectionClosed` where `proposal-1` was
+        // expected).
+        stream
     });
 
     let started = std::time::Instant::now();
@@ -1340,7 +1355,7 @@ fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
     );
     let elapsed = started.elapsed();
 
-    well_behaved_peer
+    let well_behaved_stream = well_behaved_peer
         .join()
         .expect("well-behaved peer thread must not panic");
     slow_peer.join().expect("slow peer thread must not panic");
@@ -1352,6 +1367,7 @@ fn serve_concurrently_accepts_a_second_connection_while_the_first_stalls() {
         "the well-behaved connection must be served quickly, not wait behind the \
          stalling one -- took {elapsed:?}"
     );
+    drop(well_behaved_stream);
     drop(shutdown);
 }
 
