@@ -262,7 +262,7 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   "it has been asked for your attention" sentence was therefore never true on either platform, a
   pre-existing RFC-058 defect that this RFC's own socket-length work happened to surface, not
   create. The false claim is removed here (a thing the product says that is not true is fixed
-  before a thing the product does not yet do); wiring the knock itself is reserved as **RFC-075**,
+  before a thing the product does not yet do); wiring the knock itself needs **its own RFC** (number assigned when written; see the dated correction in `../done/058-a-project-held-by-one-process.md`),
   with RFC-058's own closeout gaining a dated correction recording what its own verification
   actually checked.
 - **D5. Process/PTY: six Linux-only mechanisms, re-scoped against a full sweep rather than the

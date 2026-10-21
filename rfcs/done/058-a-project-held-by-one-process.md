@@ -224,3 +224,15 @@ Wiring the knock itself — where the call belongs, what the user is told when a
 and fails, whether to attempt one at all on a platform or configuration where the socket cannot
 bind — is reserved as **RFC-075**, since it needs its own decisions and is not a slice of the RFC
 that found the gap.
+
+## Correction (2026-10-22): the knock's own RFC has no number yet
+
+The paragraph above reserves **RFC-075** for wiring the knock. That reservation is withdrawn, and
+nothing else about the paragraph changes: wiring the knock still needs its own RFC, for the reasons
+given there.
+
+**A number is assigned when the document is written, not when the work is planned.** A number held
+in prose and in no document is invisible to anyone reading `rfcs/`, so it cannot be relied on and
+cannot be checked -- two readers can claim the same one, and a reader meeting `RFC-075` has nothing
+to open. Planned work is named instead; the number comes from the tree's own maximum at the moment
+the file is created, where a clash would be two files rather than silence.

@@ -1,7 +1,7 @@
 ---
 title: "AUR publishing from CI: what it must do, what it must never do, and what stays the owner's"
-status: "Scope note. Opened 2026-10-21, after the owner registered both AUR packages. Not an RFC yet; RFC-076 is reserved for it."
-rfc_file: "none yet — RFC-076 reserved"
+status: "Scope note. Opened 2026-10-21, after the owner registered both AUR packages. Not an RFC yet; it takes a number when the document is written."
+rfc_file: "none — the RFC is not written yet, so it has no number (see §Why this is an RFC)"
 target_milestone: "M14"
 created: "2026-10-21"
 ---
@@ -18,8 +18,8 @@ they be integrated with GitHub Actions CI:
   yet.** It needs its own `PKGBUILD` against a published Linux release asset.
 
 This note is the scope, the constraints and the schedule. It is deliberately not a workflow: the
-credential and the publishing surface are new, so the design gets reviewed as **RFC-076** before any
-job can push.
+credential and the publishing surface are new, so the design gets reviewed as its own **RFC** before any
+job can push -- and it takes a number when that document is written, not now.
 
 ## Why this is an RFC and not a chore
 
@@ -71,12 +71,12 @@ It does not exist yet and has two correctness requirements beyond the obvious:
 - Creating the AUR SSH key, adding its public half to the AUR account, and adding the private half as
   the Actions secret. Nobody else can, and nobody else should.
 - Approving each publishing run, if the Environment-reviewer design above is adopted.
-- Accepting RFC-076.
+- Accepting that RFC once it is written.
 
 ## Schedule, and what happens in the meantime
 
-**RFC-076 is drafted after RFC-074**, which is itself after RFC-028. The reason is not priority but
-sequence: RFC-074 moves modules between crates, and a packaging change that pins paths and feature
+**It is drafted after the capability-boundaries RFC**, which is itself after RFC-028. The reason is not priority but
+sequence: that work moves modules between crates, and a packaging change that pins paths and feature
 flags across that move would be written twice.
 
 **Until it lands, publishing stays manual, and the gap is covered by the checklist** — including the
