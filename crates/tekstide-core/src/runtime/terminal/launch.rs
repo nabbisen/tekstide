@@ -898,7 +898,41 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// measured here, unlike `kill` and `sysctl` (review 628's own
 /// `--nocapture` measurement confirmed both, 13 of 13); this function
 /// deliberately never calls it, rather than assume it behaves like the
-/// two mechanisms that were actually checked.
+/// two mechanisms that were actually checked. Review 631's own argument
+/// for why no probe is needed, not merely a shrug: `getsid` is either
+/// never reached for a mid-exit pid at all (`live_member_of_session`
+/// only runs over what `proc_listallpids` already returned, and a
+/// mid-exit pid is exactly what that list omits), or, if a process
+/// enters this window mid-scan, `getsid` failing `ESRCH` yields
+/// `Some(false)` -- treated as departed, which matches response 340's
+/// own deliberate zombie exclusion (a process on its way out is not a
+/// survivor) rather than contradicting it.
+///
+/// **This function is deliberately asymmetric with
+/// [`live_member_of_session`], and that asymmetry is the point, not an
+/// inconsistency to "unify" later**: only the session leader gets an
+/// existence-authoritative check (`kill` + `sysctl`) bypassing libproc
+/// entirely, because the leader is the one pid whose absence from the
+/// bulk list is indistinguishable from departure -- it *is* `session_id`,
+/// by construction, so there is no other pid in the scan that could ever
+/// stand in for it. Every other member is still found (or not) purely
+/// through the bulk scan plus [`live_member_of_session`]; adding the
+/// same direct check there would mean trusting `kill(pid, 0)` alone to
+/// decide survivorship for a pid this module did not already know by
+/// invariant, which is a different and unjustified trust.
+///
+/// **Safe to add a `kill`-confirmed pid to `members` only because
+/// `termination.rs`'s own `signal_candidates` re-verifies session
+/// membership immediately before every signal**
+/// (`if session_id_of(pid) != Some(session_id) { continue; }`) --
+/// without that re-check, a leader that had since fully exited and had
+/// its pid recycled by the kernel for an unrelated process would read
+/// as `kill`-confirmed "alive," enter `members` here, and be fed into a
+/// `SIGKILL` sweep aimed at a stranger. That re-verification already
+/// existed for a different reason (the same race against any pid, not
+/// only this one); this function's own safety now depends on it too,
+/// which is why both are named together, here, rather than left for a
+/// future reader to rediscover the coupling by accident.
 #[cfg(target_os = "macos")]
 fn session_leader_still_alive(pid: libc::pid_t) -> Option<bool> {
     // SAFETY: `kill` with signal `0` delivers nothing; it only asks the
