@@ -933,6 +933,20 @@ fn branch_is_still_read_when_git_itself_is_unavailable() {
 #[test]
 fn a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts() {
     let fixture = Fixture::new("summary-linked-worktree-branch");
+    // This test's own fixture bug, found on macOS CI: every other
+    // branch-name-sensitive test in this file explicitly checks out a
+    // named branch before the first commit (the line below, matching
+    // `a_clean_control_repository_is_complete_with_zero_changes_and_no_
+    // upstream` and its siblings) -- this one omitted it and asserted
+    // the primary branch's own name was literally `"master"`, silently
+    // depending on the ambient `git`'s own `init.defaultBranch` instead.
+    // That default is itself environment-specific, not a git constant:
+    // the macOS GitHub Actions runner's own `git` defaults to `"main"`,
+    // where this test was apparently last validated against a `git`
+    // defaulting to `"master"`. Not a defect in `compute_summary`'s own
+    // branch-reading logic at all -- fixed in the fixture, the same way
+    // every sibling test already avoids depending on that default.
+    fixture.setup_git(&["checkout", "-q", "-b", "main"]);
     fixture.write("tracked.txt", "one\n");
     fixture.setup_git(&["add", "-A"]);
     fixture.setup_git(&["commit", "-q", "-m", "initial"]);
@@ -945,7 +959,7 @@ fn a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts() {
     let worktree_summary =
         compute_summary_with_environment(&worktree_path, GIT_EXECUTABLE, &fixture.forwarded_env);
 
-    assert_eq!(primary_summary.branch_name, Some("master".to_string()));
+    assert_eq!(primary_summary.branch_name, Some("main".to_string()));
     assert_eq!(worktree_summary.branch_name, Some("other".to_string()));
 }
 

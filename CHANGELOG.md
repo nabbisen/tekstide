@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed — `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` depended on the ambient `git`'s own default branch name
+
+Every other branch-name-sensitive test in `runtime/git/tests.rs` explicitly checks out a named
+branch (`checkout -q -b main`) before the first commit; this one omitted it and asserted the
+primary branch's own name was literally `"master"`, silently depending on the ambient `git`'s own
+`init.defaultBranch` instead — an environment property, not a git constant. The macOS GitHub
+Actions runner's own `git` defaults to `"main"`; this machine's defaults to `"master"`. Not a defect
+in `compute_summary`'s own branch-reading logic at all. Fixed by making the fixture explicit, the
+same way every sibling test already does; confirmed passing on both defaults (5 of 5 repeats here,
+where the ambient default is `"master"`).
+
 ### Added — a standing test pins the admitted-set boundary `record_changed_paths` already enforces
 
 `the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses` measured macOS
