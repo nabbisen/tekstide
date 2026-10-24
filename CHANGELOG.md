@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed — the `init.defaultBranch` fixture-config-origin diagnostic was invisible on CI, the same way libproc-visibility and kern-proc-session once were
+
+The measurement review 648 required (`git config --show-origin --get init.defaultBranch`, run
+through the fixture's own fully-overridden environment) runs inside `Fixture::new`, called by
+every git-fixture test in the suite-wide `cargo test` step — which, as this job's own file already
+states, only prints a test's captured stdout/stderr when that test fails. The linked-worktree test
+passed on the first real macOS run after the fix, so its `eprintln!` never reached the log, and the
+measurement review 648 asked for was never actually seen. Added a dedicated `--nocapture` step for
+it, following the `macos-measurement` job's own established pattern and stated general rule for
+exactly this case.
+
 ### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
 
 Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)
