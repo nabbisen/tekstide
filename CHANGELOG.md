@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
+
+Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)
+was correct but stopped one layer short: `setup_git_in` forwards `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_
+SYSTEM` (pointed at the fixture's own empty files) but never carried `GIT_CONFIG_NOSYSTEM=1` — the
+exact override review 621 already added to production's `spawn_git_command` (`git.rs`) after
+finding `GIT_CONFIG_SYSTEM=/dev/null` alone does not suppress a real macOS `git`'s own bundled
+Xcode `gitconfig`. So fixture *setup* was never as isolated from the developer's real
+configuration as its own doc comment claimed — the same gap, found a second time, in test code
+rather than product code.
+
+Fixed by giving `setup_git_in` the same three overrides `spawn_git_command` has, applied last
+(after `forwarded_env`) for the same "nothing forwarded can weaken them" reason the product
+already uses. Corrected the fixture's own doc comment to stop overstating the isolation it didn't
+have. Added one diagnostic (`git config --show-origin --get init.defaultBranch`, run through the
+fixture's own fully-overridden environment) printed once per fixture, so the next macOS run
+measures directly whether the override suppresses the file that previously forced a `"main"`
+default, rather than inferring it from the branch-name symptom alone.
+
+`init.defaultbranch` is on `vet_configuration`'s own allowlist, which is why review 621's original
+probe — which returns on the first disallowed key — never surfaced this: it never reached this key
+at all.
+
 ### Fixed — `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` depended on the ambient `git`'s own default branch name
 
 Every other branch-name-sensitive test in `runtime/git/tests.rs` explicitly checks out a named

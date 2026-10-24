@@ -25,6 +25,8 @@ struct Fixture {
     repo: PathBuf,
     markers: PathBuf,
     forwarded_env: Vec<(String, String)>,
+    global_config: PathBuf,
+    system_config: PathBuf,
 }
 
 impl Fixture {
@@ -67,15 +69,51 @@ impl Fixture {
             repo,
             markers,
             forwarded_env,
+            global_config,
+            system_config,
         };
         fixture.setup_git(&["init", "-q"]);
+        // Review 648's own required measurement, run through the same,
+        // now-fixed environment `setup_git_in` itself uses (forwarded_env
+        // plus the three overrides applied last): confirms directly that
+        // `GIT_CONFIG_NOSYSTEM=1` actually suppresses whatever named a
+        // real file here before this fix existed, rather than inferring
+        // it from the branch-name symptom alone.
+        let origin = Command::new("git")
+            .args(["config", "--show-origin", "--get", "init.defaultBranch"])
+            .current_dir(&fixture.repo)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .envs(fixture.forwarded_env.iter().cloned())
+            .env("GIT_CONFIG_GLOBAL", &fixture.global_config)
+            .env("GIT_CONFIG_SYSTEM", &fixture.system_config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .expect("git must be installed to run this test suite");
+        eprintln!(
+            "[fixture-config-origin] init.defaultBranch, with this fixture's own overrides \
+             applied: {}",
+            if origin.stdout.is_empty() {
+                "(empty -- no origin found)".to_string()
+            } else {
+                String::from_utf8_lossy(&origin.stdout).trim().to_string()
+            }
+        );
         fixture
     }
 
     /// Runs a *setup* git command directly (not through [`evaluate`]):
     /// building the fixture's own history is not the property under test.
-    /// Uses the same isolated `HOME`/`GIT_CONFIG_*` as the fixture proper,
-    /// so setup itself never touches the developer's real configuration.
+    ///
+    /// **Review 648's own required correction: this used to claim an
+    /// isolation it did not have.** `forwarded_env` carries `GIT_CONFIG_
+    /// GLOBAL`/`GIT_CONFIG_SYSTEM` (pointed at this fixture's own empty
+    /// files) but never carried `GIT_CONFIG_NOSYSTEM=1` -- the same gap
+    /// review 621 found and closed in `spawn_git_command` (`git.rs`),
+    /// now found a second time here. Without it, a real macOS `git`'s
+    /// own bundled Xcode `gitconfig` is still a layer `GIT_CONFIG_SYSTEM`
+    /// alone does not reach, so fixture *setup* was never as isolated
+    /// from the developer's real configuration as this comment claimed.
     fn setup_git(&self, args: &[&str]) {
         self.setup_git_in(&self.repo, args);
     }
@@ -94,6 +132,18 @@ impl Fixture {
             .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
             .env("GIT_COMMITTER_NAME", "fixture")
             .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+            // Review 648's own required fix, applied last for the same
+            // reason `spawn_git_command` applies its own copy of these
+            // three last (`git.rs`): so nothing `forwarded_env` carries,
+            // now or in a later change, can weaken them by accident. The
+            // first two repeat `forwarded_env`'s own values (the
+            // fixture's own isolated files, not `/dev/null` -- unlike
+            // the product path, this fixture needs a real, writable
+            // empty config it controls); the third is the one that was
+            // missing.
+            .env("GIT_CONFIG_GLOBAL", &self.global_config)
+            .env("GIT_CONFIG_SYSTEM", &self.system_config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .status()
             .expect("git must be installed to run this test suite");
         assert!(status.success(), "fixture setup `git {args:?}` failed");
