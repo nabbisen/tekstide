@@ -73,32 +73,6 @@ impl Fixture {
             system_config,
         };
         fixture.setup_git(&["init", "-q"]);
-        // Review 648's own required measurement, run through the same,
-        // now-fixed environment `setup_git_in` itself uses (forwarded_env
-        // plus the three overrides applied last): confirms directly that
-        // `GIT_CONFIG_NOSYSTEM=1` actually suppresses whatever named a
-        // real file here before this fix existed, rather than inferring
-        // it from the branch-name symptom alone.
-        let origin = Command::new("git")
-            .args(["config", "--show-origin", "--get", "init.defaultBranch"])
-            .current_dir(&fixture.repo)
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .envs(fixture.forwarded_env.iter().cloned())
-            .env("GIT_CONFIG_GLOBAL", &fixture.global_config)
-            .env("GIT_CONFIG_SYSTEM", &fixture.system_config)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .output()
-            .expect("git must be installed to run this test suite");
-        eprintln!(
-            "[fixture-config-origin] init.defaultBranch, with this fixture's own overrides \
-             applied: {}",
-            if origin.stdout.is_empty() {
-                "(empty -- no origin found)".to_string()
-            } else {
-                String::from_utf8_lossy(&origin.stdout).trim().to_string()
-            }
-        );
         fixture
     }
 
@@ -140,7 +114,9 @@ impl Fixture {
             // fixture's own isolated files, not `/dev/null` -- unlike
             // the product path, this fixture needs a real, writable
             // empty config it controls); the third is the one that was
-            // missing.
+            // missing. Measured empty (`git config --show-origin --get
+            // init.defaultBranch`) on the macOS runner, CI run
+            // 40093247170, with these three overrides applied.
             .env("GIT_CONFIG_GLOBAL", &self.global_config)
             .env("GIT_CONFIG_SYSTEM", &self.system_config)
             .env("GIT_CONFIG_NOSYSTEM", "1")

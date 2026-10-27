@@ -2,17 +2,6 @@
 
 ## Unreleased
 
-### Fixed — the `init.defaultBranch` fixture-config-origin diagnostic was invisible on CI, the same way libproc-visibility and kern-proc-session once were
-
-The measurement review 648 required (`git config --show-origin --get init.defaultBranch`, run
-through the fixture's own fully-overridden environment) runs inside `Fixture::new`, called by
-every git-fixture test in the suite-wide `cargo test` step — which, as this job's own file already
-states, only prints a test's captured stdout/stderr when that test fails. The linked-worktree test
-passed on the first real macOS run after the fix, so its `eprintln!` never reached the log, and the
-measurement review 648 asked for was never actually seen. Added a dedicated `--nocapture` step for
-it, following the `macos-measurement` job's own established pattern and stated general rule for
-exactly this case.
-
 ### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
 
 Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)
@@ -27,10 +16,12 @@ rather than product code.
 Fixed by giving `setup_git_in` the same three overrides `spawn_git_command` has, applied last
 (after `forwarded_env`) for the same "nothing forwarded can weaken them" reason the product
 already uses. Corrected the fixture's own doc comment to stop overstating the isolation it didn't
-have. Added one diagnostic (`git config --show-origin --get init.defaultBranch`, run through the
-fixture's own fully-overridden environment) printed once per fixture, so the next macOS run
-measures directly whether the override suppresses the file that previously forced a `"main"`
-default, rather than inferring it from the branch-name symptom alone.
+have. Measured directly rather than inferred from the branch-name symptom alone
+(`git config --show-origin --get init.defaultBranch`, run through the fixture's own
+fully-overridden environment, on the macOS runner, CI run `40093247170`): empty, confirming the
+override suppresses the file that previously forced a `"main"` default. The measurement itself was
+a throwaway diagnostic and dedicated CI step, retired once it answered; the result is recorded in
+`setup_git_in`'s own comment instead.
 
 `init.defaultbranch` is on `vet_configuration`'s own allowlist, which is why review 621's original
 probe — which returns on the first disallowed key — never surfaced this: it never reached this key

@@ -252,18 +252,3 @@ jobs:
           TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
             runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close \
             -- --exact --nocapture
-
-      - name: fixture-config-origin measurement (--nocapture)
-        # Review 648's own required measurement hit this job's own
-        # stated general rule (above) the first time it was added: the
-        # suite-wide run only prints captured output on failure, and
-        # `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts`
-        # -- like every other `Fixture::new` caller -- passed on the run
-        # that was meant to surface it, so its `eprintln!` never reached
-        # this log. Same fix, same reasoning: a dedicated step.
-        if: always()
-        run: |
-          set -euo pipefail
-          TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
-            runtime::git::tests::a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts \
-            -- --exact --nocapture
