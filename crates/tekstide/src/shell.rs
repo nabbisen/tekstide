@@ -6055,10 +6055,12 @@ fn handle_project_board_path_field_key(state: &mut State, key: &input::KeyPress)
     }
     match &key.key {
         keyboard::Key::Character(typed) => {
-            if key.modifiers.control() && typed.as_ref() == "v" {
+            // RFC-028 D9: `.command()`, not `.control()` -- see
+            // `run_report.rs`'s own `field_key`, the identical pattern.
+            if key.modifiers.command() && typed.as_ref() == "v" {
                 return iced::clipboard::read().map(Message::PathFieldPasteResolved);
             }
-            if !key.modifiers.control() && !key.modifiers.alt() {
+            if !key.modifiers.command() && !key.modifiers.alt() {
                 push_to_path_field(state, typed);
             }
         }
@@ -9453,8 +9455,17 @@ fn status_bar(state: &State) -> Element<'_, Message> {
     for field in active_project_status_fields(state) {
         items = items.push(text(field).size(state.theme.font_size_status()));
     }
-    items = items
-        .push(text(state.catalog.get("status-bar-key-hint")).size(state.theme.font_size_status()));
+    items = items.push(
+        // RFC-028 D9: names the real accelerator for this host.
+        text(state.catalog.get_with_args(
+            "status-bar-key-hint",
+            &CatalogArgs::new().trusted_symbol(
+                "primary",
+                tekstide_core::navigation::Chord::primary_modifier_label(),
+            ),
+        ))
+        .size(state.theme.font_size_status()),
+    );
 
     // RFC-053 D3: a field that does not fit moves to the next line **whole**
     // (`Row::wrap`), never squeezed until a word is cut. Measured at 520px:

@@ -3,10 +3,17 @@ use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
 
 use super::{FocusZone, KeyPress, ModalAbsent, RoutedInput, route_non_modal_input};
 
+/// RFC-028 D9: `ctrl` sets `Modifiers::COMMAND`, not the physical
+/// `Modifiers::CTRL` -- every call site here uses this parameter to mean
+/// "the policy's primary modifier is held" (simulating a global chord
+/// press), which is exactly what `format_binding`'s own `.command()`
+/// check now reads, and `COMMAND` is `CTRL` on every host but macOS. A
+/// literal `CTRL` here would desync from `format_binding` on a real
+/// macOS build without a single test catching it until it ran there.
 fn character_press(c: &str, ctrl: bool, alt: bool, shift: bool) -> KeyPress {
     let mut modifiers = iced::keyboard::Modifiers::empty();
     if ctrl {
-        modifiers |= iced::keyboard::Modifiers::CTRL;
+        modifiers |= iced::keyboard::Modifiers::COMMAND;
     }
     if alt {
         modifiers |= iced::keyboard::Modifiers::ALT;
@@ -197,7 +204,14 @@ fn key_press_for_binding(binding: &str) -> KeyPress {
             break;
         }
         match part {
-            "Ctrl" => modifiers |= iced::keyboard::Modifiers::CTRL,
+            // RFC-028 D9: `Modifiers::COMMAND`, not the physical
+            // `Modifiers::CTRL` -- `iced_core` itself defines `COMMAND`
+            // as `CTRL` on every host but macOS, where it is `LOGO` (⌘),
+            // matching exactly what `format_binding`'s own `.command()`
+            // check now reads. Hardcoding `CTRL` would desync this
+            // synthetic press from `format_binding` the moment this
+            // crate's tests run on a real macOS build.
+            "Ctrl" => modifiers |= iced::keyboard::Modifiers::COMMAND,
             "Alt" => modifiers |= iced::keyboard::Modifiers::ALT,
             "Shift" => modifiers |= iced::keyboard::Modifiers::SHIFT,
             other => {

@@ -345,6 +345,18 @@ pub struct KeybindingPolicy {
 }
 
 impl KeybindingPolicy {
+    /// RFC-028 D3's own note on this constructor: "linux" names the
+    /// *Linux MVP profile* this table shipped as, not a platform -- and
+    /// RFC-028 D9 confirms it by investigation rather than leaving the
+    /// name to imply otherwise: every rule below (every action, every
+    /// letter, every collision argument) is platform-**independent**, the
+    /// single table every host uses. What varies by host is which real
+    /// keypress fills each chord's `Ctrl` slot
+    /// (`crates/tekstide/src/input.rs`'s `format_binding` checks
+    /// `Modifiers::command()`) and which label a human reads for it
+    /// (`Chord::primary_modifier_label`, presentation-only) -- never the
+    /// stored chord text itself. See `chord.rs`'s own module doc for why
+    /// a second, macOS-spelled table was tried and reverted.
     pub fn linux_mvp() -> Self {
         Self {
             rules: vec![

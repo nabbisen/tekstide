@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+### Added — PR-028-E (RFC-028 D9): the keybinding layer handles the Command/⌘ modifier on macOS
+
+Until this slice, nothing in the GUI layer distinguished macOS's `⌘` (Command) from physical
+`Ctrl` — `winit`/`iced` report Command as `Modifiers::LOGO`, a different bit than
+`Modifiers::CTRL`, and the policy's own input-matching function (`format_binding`) checked only
+`.control()`. A macOS build would have required the physical Control key for every global
+shortcut, with `Ctrl+click` colliding with the platform's own secondary-click convention besides.
+
+**One modifier abstraction, applied only at presentation.** `Chord::primary_modifier_label()`
+(`navigation/chord.rs`) is `"Ctrl"` on Linux, `"⌘"` on macOS — the single new platform-dispatched
+primitive this slice adds, following the project's existing `default_for_host()` convention. It
+is used in exactly two places: `format_binding` (`input.rs`), which now reads
+`Modifiers::command()` instead of `Modifiers::control()` so a real `⌘` press on macOS fills the
+policy's `Ctrl` slot the way a real `Ctrl` press does on Linux; and `Chord::display_spelling`,
+which respells an already-canonical `"Ctrl+..."` string for a human to read (the Help modal,
+`--help`, the status bar, and three `locales/en.ftl` strings via a new `$primary` Fluent
+variable). **Never used for parsing, matching, or storage** — `Chord::parse`, `Display`, the
+policy table's own stored strings, and `config.toml`'s rebind grammar all stay `Ctrl`-spelled on
+every host, so a config file is portable text and a chord round-trips through matching
+regardless of platform. An earlier version of this slice baked the macOS spelling into a second,
+duplicate policy table; it was reverted after a local platform-swap exercise showed `Chord::parse`
+cannot read `⌘` back at all, silently breaking rebinding and collision detection — recorded in
+`chord.rs`'s own module doc so a future reader does not retry it.
+
+Of the 7 `.control()`/`.command()` call sites D9 named: 6 became `.command()` (the global-dispatch
+matcher, and the OS-paste/typing guards in the path field and the AgentRun Report field — these
+are GUI accelerator conventions, where the real OS paste shortcut is `⌘+V` on macOS, not
+`Ctrl+V`). The 7th, `input::terminal_surface::key_to_pty_bytes`, stays `.control()` deliberately:
+it computes a real ANSI control code (`letter & 0x1f`) for the PTY, a terminal-protocol
+convention every terminal emulator on every platform (including macOS's own Terminal.app and
+iTerm2) reads from the physical Control key, never Command — routing it through `.command()`
+would have sent `⌘+C` to the shell as `ETX`, silently breaking `SIGINT` on macOS.
+
+**Measured, not assumed, that no binding collides with a macOS system shortcut.** `⌘Q`/`⌘W`/
+`⌘H`/`⌘M` are bare (no `Alt`) OS-reserved chords; this policy's only bare-`Ctrl` bindings are `S`
+(Save) and `Z`/`Shift+Z` (Undo/Redo), and every `Ctrl+Alt+<letter>` binding (including the `H`/`M`
+ones) holds `Alt` too, so none resolves to a bare `⌘<letter>` on macOS — pinned by a new test
+(`no_bare_ctrl_binding_resolves_to_a_chord_the_operating_system_already_reserves_on_macos`)
+rather than left as an inspection claim. `⌘Space` cannot collide at all: the chord grammar admits
+only `A`-`Z`/`0`-`9` as the final key.
+
+**Documentation sweep**, run as the "Book Against The Changelog" sweep already does (grep the
+changed words directly, not read-and-hope): `keyboard-reference.md`, `README.md` and
+`getting-started.md` each gained one clear "press ⌘ wherever this says `Ctrl`" note at their own
+keyboard table; `configuration.md`'s own rebind section was corrected (it previously claimed a
+rebind is "spelled the way the Help window... prints it", no longer true once the Help window
+started printing `⌘` while the file keeps reading `Ctrl`) and gained a note explaining that
+asymmetry. The ~70 other inline mentions of a specific shortcut in unrelated prose (trust,
+audit, terminal sections) were left as correct, unchanged Linux-literal text — deliberately not
+rewritten, since the canonical note now lives on the one page a reader of any of them would reach
+for the full reference.
+
 ### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
 
 Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)

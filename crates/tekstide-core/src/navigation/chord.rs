@@ -9,6 +9,24 @@
 //! `every_advertised_chord_round_trips` (`navigation/tests.rs`) holds the file
 //! and the help to each other over every binding the policy ships.
 //!
+//! **RFC-028 D9: `Ctrl` is this grammar's own canonical name for the primary
+//! modifier slot, held fixed everywhere a chord is matched, stored, parsed
+//! or compared -- `Chord::parse`, `Display`, `config.toml`'s own rebind
+//! text, and the policy table's stored strings all stay `Ctrl`, on every
+//! host.** Only the *keypress that fills that slot* varies by platform
+//! (`crates/tekstide/src/input.rs`'s `format_binding` checks
+//! `Modifiers::command()`, not `Modifiers::control()`, so a real `⌘` press
+//! on macOS is read into the same `Ctrl` slot a real `Ctrl` press fills on
+//! Linux) and the *label a human reads*, via [`Chord::primary_modifier_label`]
+//! -- used only by presentation call sites (the Help modal, `--help`, the
+//! status bar, a handful of `locales/en.ftl` strings), never by anything
+//! that matches, stores or parses a chord. Baking the label into stored
+//! data was tried and reverted: `Chord::parse` cannot read `⌘` back (it is
+//! not in the grammar at all), so a stored chord spelled with the label
+//! could never be rebound, matched, or compared against collision-free,
+//! only displayed -- the exact bug the swap-tested ablation in RFC-028's
+//! own PR-028-E review caught before it shipped.
+//!
 //! What a chord may be is narrower than what a keyboard can send, on purpose:
 //!
 //! * **At least `Ctrl` or `Alt`.** A global binding on a bare letter, or on
@@ -116,7 +134,54 @@ impl Chord {
             key,
         })
     }
+
+    /// RFC-028 D9: this crate's one modifier abstraction, and the *only*
+    /// thing this slice makes platform-aware -- **never** used by
+    /// [`Self::parse`], [`Display`](std::fmt::Display), or anything that
+    /// stores or matches a chord (see the module doc for why: `⌘` is not
+    /// in the grammar, so a value spelled with it could not be read back).
+    /// A label for a human to read, nothing else: `"Ctrl"` on Linux, the
+    /// physical key a Linux user presses for every binding this policy
+    /// ships; `"⌘"` on macOS, because `winit`/`iced` surface Command as
+    /// `Modifiers::LOGO`, a different bit than `Modifiers::CTRL`, so a
+    /// Help modal that kept *printing* `Ctrl` on macOS would show a key no
+    /// Mac user presses for that binding, even though the stored chord
+    /// (and the real key that fills its `ctrl` slot -- see
+    /// `crates/tekstide/src/input.rs`'s `format_binding`) is unaffected.
+    /// Same convention as
+    /// [`crate::config::ConfigPathProvider::default_for_host`]: a
+    /// whole-function `#[cfg(target_os = "...")]` split, never a blanket
+    /// `#[cfg(unix)]`, and a hard compile error for a target this split
+    /// does not name.
+    #[cfg(target_os = "linux")]
+    pub const fn primary_modifier_label() -> &'static str {
+        "Ctrl"
+    }
+
+    /// See [`Self::primary_modifier_label`] above for the convention.
+    #[cfg(target_os = "macos")]
+    pub const fn primary_modifier_label() -> &'static str {
+        "⌘"
+    }
+
+    /// Respells a chord **already canonically formatted** (`Chord`'s own
+    /// [`Display`](std::fmt::Display), or a policy table's stored
+    /// `"Ctrl+..."` string) for a human to read on this host: the leading
+    /// `Ctrl` token, and only it, becomes [`Self::primary_modifier_label`].
+    /// For presentation only -- the Help modal, `--help`, the status bar
+    /// -- never for anything matched, parsed or stored back; see the
+    /// module doc.
+    pub fn display_spelling(canonical: &str) -> String {
+        canonical.replacen("Ctrl", Self::primary_modifier_label(), 1)
+    }
 }
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+compile_error!(
+    "Chord::primary_modifier_label() has no arm for this target_os -- RFC-028 D9's own \
+     convention (RFC-028 D3) requires a dispatch arm added deliberately for a new platform, not \
+     a fall-through to a Unix-shaped default that may not hold."
+);
 
 impl fmt::Display for Chord {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

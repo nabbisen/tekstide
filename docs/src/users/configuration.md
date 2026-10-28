@@ -45,9 +45,14 @@ persist_unsaved_buffers = true      # protect dirty documents from being lost; d
 ## Keybindings
 
 `[keybindings]` takes one entry per action you want to move: the action's name on the left, the
-chord on the right, **spelled the way the Help window (`Ctrl+Alt+K`) and `tekstide --help` print
-it**. Case does not matter (`ctrl+alt+j` works) and the chord is read back in the canonical
-spelling. `Ctrl+Alt+C` applies a change without a restart.
+chord on the right, **spelled `Ctrl`/`Alt`/`Shift`, the same grammar on every platform**. Case
+does not matter (`ctrl+alt+j` works) and the chord is read back in that canonical spelling.
+`Ctrl+Alt+C` applies a change without a restart.
+
+**On macOS, type `Ctrl` here even though the Help window and `tekstide --help` print ⌘ for the
+same binding.** The file's own grammar is one fixed vocabulary on every platform — portable,
+so the same `config.toml` works unedited if you ever move it — and only the *running
+application's* display of a chord resolves to the key you actually press.
 
 What a chord can be: `Ctrl` and/or `Alt`, optionally `Shift`, then one letter `A`–`Z` or digit
 `0`–`9`. **It needs `Ctrl` or `Alt`** — a bare letter would take that key away from typing in the

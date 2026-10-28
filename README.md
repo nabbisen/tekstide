@@ -121,7 +121,8 @@ cargo run -p tekstide -- /path/to/project
 | `Ctrl+Alt+U` | Open Workspace Trust for the active project |
 | `Ctrl+Alt+K` | Open the keyboard reference, from anywhere |
 
-Everything else is in `tekstide --help`, the in-app Help modal, and the
+On macOS, press ⌘ wherever this table says `Ctrl`. Everything else is in `tekstide --help`, the
+in-app Help modal, and the
 [Keyboard reference](https://nabbisen.github.io/tekstide/users/keyboard-reference.html).
 
 ## Local data and privacy

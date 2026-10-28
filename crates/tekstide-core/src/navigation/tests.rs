@@ -10,6 +10,35 @@ fn linux_mvp_keybinding_policy_reserves_command_palette_and_avoids_shift_escape(
     assert!(!policy.uses_binding("Ctrl+Shift+Esc"));
 }
 
+/// RFC-028 D9's own required check: whether any binding collides with a
+/// macOS system shortcut once the policy's one `Ctrl` slot resolves to a
+/// real `⌘` press there. `⌘Q`/`⌘W`/`⌘H`/`⌘M` are bare (no `Alt`, no
+/// `Shift`) OS-reserved chords, so the question is exactly: does this
+/// table hold a bare `"Ctrl+<letter>"` rule (`Alt` absent, `Shift`
+/// absent) whose letter is `Q`, `W`, `H` or `M`? Every `Ctrl+Alt+<letter>`
+/// binding this table ships (including the `H`/`M` ones, for
+/// `OpenApprovalHistory`/`ToggleProjectMode`) holds `Alt` too, so it
+/// resolves to `⌘+Alt+<letter>` on macOS -- a different chord entirely,
+/// not a near miss this loop would need to special-case. `⌘Space` is not
+/// checked the same way: this crate's own chord grammar (`Chord::parse`'s
+/// doc) admits only `A`-`Z`/`0`-`9` as the final key, so no rule in this
+/// table -- or any future one built through
+/// [`KeybindingRule::bound`]/[`KeybindingRule::reserved`] -- can ever
+/// spell a bare-`Space` chord at all; the grammar forecloses that
+/// collision rather than this test having to measure it.
+#[test]
+fn no_bare_ctrl_binding_resolves_to_a_chord_the_operating_system_already_reserves_on_macos() {
+    let policy = KeybindingPolicy::linux_mvp();
+    for reserved in ["Ctrl+Q", "Ctrl+W", "Ctrl+H", "Ctrl+M"] {
+        assert!(
+            !policy.uses_binding(reserved),
+            "{reserved} resolves to a chord macOS itself claims (Quit/Close Window/Hide/\
+             Minimize) once its `Ctrl` slot reads as a real `⌘` press; this policy must not \
+             bind it bare (without `Alt`)"
+        );
+    }
+}
+
 #[test]
 fn project_board_shortcut_is_configurable_candidate() {
     let policy = KeybindingPolicy::linux_mvp();
@@ -754,6 +783,23 @@ fn a_chord_is_case_insensitive_on_input_and_canonical_on_output() {
     }
     assert_eq!(chord("shift+ctrl+v").to_string(), "Ctrl+Shift+V");
     assert_eq!(chord("ctrl+5").to_string(), "Ctrl+5");
+}
+
+/// RFC-028 D9: [`Chord::display_spelling`] touches only the leading
+/// `Ctrl` token, replaces it with this host's own
+/// [`Chord::primary_modifier_label`] (`"Ctrl"` on this machine, since
+/// these tests run on Linux), and leaves `Alt`/`Shift`/the key alone --
+/// including a string that holds no `Ctrl` at all (an `Alt`-only chord),
+/// which must come back unchanged rather than gain a spurious label.
+#[test]
+fn display_spelling_respells_only_the_leading_ctrl_token() {
+    let primary = Chord::primary_modifier_label();
+    assert_eq!(
+        Chord::display_spelling("Ctrl+Alt+P"),
+        format!("{primary}+Alt+P")
+    );
+    assert_eq!(Chord::display_spelling("Ctrl+S"), format!("{primary}+S"));
+    assert_eq!(Chord::display_spelling("Alt+F4"), "Alt+F4");
 }
 
 /// What a chord may not be, each with its own reason and none of them carrying

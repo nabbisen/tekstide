@@ -147,7 +147,7 @@ project-board-empty-command-example = tekstide /path/to/project
 # `path_field_section` now renders this on the populated board too
 # (`Ctrl+Alt+O`, the second-project case), where "empty" no longer
 # describes the board it's showing on.
-project-board-path-field-label = Type a project path and press Enter (Ctrl+V to paste):
+project-board-path-field-label = Type a project path and press Enter ({ $primary }+V to paste):
 
 # RFC-038 PR-038-G: the folder browser's own visible control -- a real,
 # clickable button, not only the `Ctrl+Alt+B` accelerator, per D1's
@@ -1112,7 +1112,7 @@ agent-run-report-field-notes = Notes, up to { $max } characters. Shift+Enter sta
 agent-run-report-field-export = Save this report as a new file. Type its full path:
 agent-run-report-field-save = Save
 agent-run-report-field-cancel = Cancel
-agent-run-report-field-hint = Enter saves. Escape cancels. Ctrl+V pastes.
+agent-run-report-field-hint = Enter saves. Escape cancels. { $primary }+V pastes.
 # Said before the file is written (D5): what it contains, and that it is then
 # outside the product's reach.
 agent-run-report-export-contains = The file will contain this run's recorded details, your classification and notes, { $count ->
@@ -1492,7 +1492,7 @@ help-dialog-close = Close
 # real terminal panes -- is unchanged. Points at the Project Board
 # because that is where the full keyboard list lives when nothing is
 # open; it is deliberately not a claim that Ctrl+Alt+P opens "help".
-status-bar-key-hint = Ctrl+Alt+P Project Board
+status-bar-key-hint = { $primary }+Alt+P Project Board
 
 # RFC-025 PR-025-B, REQ-NOTIFY-002: the active project's own status-bar
 # fields, on the same line as `status-bar-summary` for the height reason

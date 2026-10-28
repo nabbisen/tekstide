@@ -91,7 +91,12 @@ pub(super) fn handle_agent_run_report_key(
     if state.run_report_field.is_some() {
         return field_key(state, key);
     }
-    if key.modifiers.control() || key.modifiers.alt() {
+    // RFC-028 D9: `.command()`, not `.control()` -- this guard exists so
+    // this surface's own bare-letter hotkeys (`1`-`6`, `c`, `n`, `e`)
+    // never double-fire alongside a global `Ctrl+Alt+<letter>` binding;
+    // the real modifier that fills that binding's `Ctrl` slot is `⌘` on
+    // macOS, not physical Control.
+    if key.modifiers.command() || key.modifiers.alt() {
         return Task::none();
     }
     if let keyboard::Key::Character(character) = &key.key {
@@ -115,10 +120,15 @@ pub(super) fn handle_agent_run_report_key(
 fn field_key(state: &mut State, key: &input::KeyPress) -> Task<Message> {
     match &key.key {
         keyboard::Key::Character(typed) => {
-            if key.modifiers.control() && typed.as_ref() == "v" {
+            // RFC-028 D9: `.command()`, not `.control()` -- this is the
+            // OS paste shortcut (`⌘+V` on macOS, `Ctrl+V` elsewhere), not
+            // a terminal control code; `input::terminal_surface`'s own
+            // `key_to_pty_bytes` is the one place that stays `.control()`
+            // deliberately, for the opposite reason.
+            if key.modifiers.command() && typed.as_ref() == "v" {
                 return iced::clipboard::read().map(Message::RunReportFieldPasteResolved);
             }
-            if !key.modifiers.control() && !key.modifiers.alt() {
+            if !key.modifiers.command() && !key.modifiers.alt() {
                 push_to_field(state, typed);
             }
         }
@@ -628,9 +638,16 @@ fn field_view<'a>(state: &'a State, field: &'a RunReportField) -> Element<'a, Me
         .into(),
     );
     lines.push(
-        text(state.catalog.get("agent-run-report-field-hint"))
-            .size(status)
-            .into(),
+        // RFC-028 D9: names the real paste gesture for this host.
+        text(state.catalog.get_with_args(
+            "agent-run-report-field-hint",
+            &CatalogArgs::new().trusted_symbol(
+                "primary",
+                tekstide_core::navigation::Chord::primary_modifier_label(),
+            ),
+        ))
+        .size(status)
+        .into(),
     );
     column(lines).spacing(4).into()
 }

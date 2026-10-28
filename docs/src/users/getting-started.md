@@ -70,8 +70,9 @@ tekstide /path/to/project /path/to/another
 | `Ctrl+Alt+U` | Open Workspace Trust for the active project |
 | `Ctrl+Alt+K` | Open the keyboard reference, from anywhere |
 
-`tekstide --help` prints usage and every binding, and the running application lists them all on
-the Project Board and in the Help modal (`Ctrl+Alt+K`). The complete table is in
+On macOS, press ⌘ wherever this table says `Ctrl`. `tekstide --help` prints usage and every
+binding, and the running application lists them all on the Project Board and in the Help modal
+(`Ctrl+Alt+K`). The complete table, with the same note, is in
 [Keyboard reference](./keyboard-reference.md).
 
 ## Before an AI CLI run will start

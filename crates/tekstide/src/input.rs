@@ -289,7 +289,18 @@ fn matching_global_action(policy: &KeybindingPolicy, press: &KeyPress) -> Option
 /// own `default_binding` strings are written (`"Ctrl+Shift+P"`), so a
 /// real key press can be compared against them directly. Only the
 /// modifiers this policy actually uses today (Ctrl, Alt, Shift) are
-/// handled; Logo/Super is not part of any current binding.
+/// handled; Logo/Super on its own is not part of any current binding.
+///
+/// **RFC-028 D9: the `Ctrl` slot is filled by `Modifiers::command()`, not
+/// `Modifiers::control()`.** The policy's own stored chords always spell
+/// this slot `Ctrl` (see `navigation.rs`'s and `chord.rs`'s own module
+/// docs for why that stays fixed on every host); what varies by platform
+/// is which real key reaches it -- `iced`'s own `command()` is `control()`
+/// on Linux and `logo()` (⌘) on macOS, exactly the primary-modifier
+/// distinction this crate needs and the one `iced_core` already draws.
+/// The *label* a human reads for this token (`Chord::primary_modifier_label`)
+/// is a separate, presentation-only concern, used by the Help modal and
+/// `--help`, never by this matching function.
 fn format_binding(press: &KeyPress) -> Option<String> {
     let iced::keyboard::Key::Character(ref character) = press.key else {
         return None;
@@ -300,7 +311,7 @@ fn format_binding(press: &KeyPress) -> Option<String> {
     // binding *name*, not a literal transcript of which modifiers were
     // physically held for the letter's case.
     let mut parts: Vec<String> = Vec::new();
-    if press.modifiers.control() {
+    if press.modifiers.command() {
         parts.push("Ctrl".to_string());
     }
     if press.modifiers.alt() {

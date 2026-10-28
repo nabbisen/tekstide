@@ -69,6 +69,16 @@ fn key_to_pty_bytes(press: &KeyPress) -> Option<Vec<u8>> {
     use iced::keyboard::key::Named;
 
     if let Key::Character(character) = &press.key {
+        // RFC-028 D9: `.control()` stays, deliberately, unlike the other
+        // six `.control()`/`.command()` call sites this slice swept.
+        // This is not a GUI accelerator -- it is the terminal/ANSI
+        // protocol's own convention (`control_code_for` computes a real
+        // control code, `letter & 0x1f`), which every terminal emulator
+        // on every platform, including macOS's own Terminal.app and
+        // iTerm2, reads from the physical Control key, not Command.
+        // Routing this through `.command()` would send `⌘+C` to the PTY
+        // as `ETX` on macOS, silently breaking every shell's own
+        // `SIGINT`/line-editing convention the moment this shipped there.
         if press.modifiers.control() {
             return control_code_for(character);
         }

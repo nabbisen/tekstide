@@ -6,6 +6,14 @@ ships with**: any of them except `Ctrl+Shift+P` can be moved in your configurati
 [Configuration](./configuration.md#keybindings). The Help modal shows the chords in force;
 `--help` runs before the file is read, so it shows the defaults.
 
+**On macOS, press ⌘ wherever this page says `Ctrl`.** `Alt` and `Shift` are the same physical
+keys (Option and Shift). The running application and `tekstide --help` already print the chord
+this way on that platform — this table, the one in [Getting Started](./getting-started.md) and
+the one in the main [README](https://github.com/nabbisen/tekstide#readme) spell every chord with
+`Ctrl` because that is this book's own convention, not because the keys differ; your
+`config.toml` keeps spelling rebinds `Ctrl` too, on every platform, since the file's own grammar
+is one fixed vocabulary, never translated.
+
 | Binding | Action |
 | --- | --- |
 | `Ctrl+Alt+P` | Open the Project Board |

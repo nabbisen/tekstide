@@ -313,16 +313,28 @@ fn empty_state_keys_resolve_to_real_catalog_text() {
         "project-board-empty-heading",
         "project-board-empty-open-a-project",
         "project-board-empty-command-example",
-        // RFC-038 PR-038-B/C: the field's own label (shared with the
-        // populated-board `Ctrl+Alt+O` case, so no longer "empty-"
-        // prefixed); `project-board-empty-keyboard-heading` removed from
-        // this list -- the keyboard list itself moved off this surface
-        // entirely into `shell::help_modal_view` (PR-038-C).
-        "project-board-path-field-label",
         // RFC-038 PR-038-G: the folder browser's own visible control.
         "project-board-browse-button",
     ] {
         let rendered = catalog.get(key);
+        assert_ne!(
+            rendered, key,
+            "empty-state key {key:?} did not resolve to real text -- check the key name against en.ftl"
+        );
+    }
+
+    // RFC-038 PR-038-B/C: the field's own label (shared with the
+    // populated-board `Ctrl+Alt+O` case, so no longer "empty-" prefixed);
+    // `project-board-empty-keyboard-heading` removed from this list -- the
+    // keyboard list itself moved off this surface entirely into
+    // `shell::help_modal_view` (PR-038-C). RFC-028 D9: takes `$primary`
+    // now, so it needs `get_with_args`, not the bare loop above.
+    {
+        let key = "project-board-path-field-label";
+        let rendered = catalog.get_with_args(
+            key,
+            &crate::i18n::CatalogArgs::new().trusted_symbol("primary", "Ctrl"),
+        );
         assert_ne!(
             rendered, key,
             "empty-state key {key:?} did not resolve to real text -- check the key name against en.ftl"
@@ -503,12 +515,10 @@ fn the_recent_row_open_button_is_real_and_gated_on_row_kind_not_highlight() {
 /// about below, not merely counted or left to a future reader to
 /// notice by inspecting the rendered output.
 ///
-/// Of the six: three are plain descriptive prose with no action-shaped
+/// Of the five: three are plain descriptive prose with no action-shaped
 /// claim at all (`project-board-empty-heading`,
 /// `project-board-empty-open-a-project`,
-/// `project-board-empty-command-example`); one describes a real,
-/// keystroke-routed field rather than naming a separate action
-/// (`project-board-path-field-label`); and two are real button labels,
+/// `project-board-empty-command-example`); and two are real button labels,
 /// each proven to sit on a genuine, wired `iced::widget::button` by its
 /// own dedicated test rather than re-proven here
 /// (`project-board-browse-button` by
@@ -520,6 +530,14 @@ fn the_recent_row_open_button_is_real_and_gated_on_row_kind_not_highlight() {
 /// from the catalogue entirely -- `the_two_action_labels_that_named_
 /// nothing_are_gone_from_the_catalogue`) named actions with nothing
 /// behind them at all.
+///
+/// **`project-board-path-field-label` moved out of this list, RFC-028
+/// D9:** it now renders through `catalog.get_with_args` (its `$primary`
+/// names the real paste gesture for this host), so the bare-`catalog.
+/// get("` needle below no longer matches it -- it describes a real,
+/// keystroke-routed field rather than naming a separate action, same as
+/// before, and `empty_state_keys_resolve_to_real_catalog_text` still
+/// covers it with the args it now needs.
 #[test]
 fn every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_action() {
     let source = std::fs::read_to_string(
@@ -546,7 +564,6 @@ fn every_catalog_key_this_module_renders_is_enumerated_and_none_names_a_dead_act
             "project-board-empty-open-a-project",
             "project-board-empty-command-example",
             "project-board-browse-button",
-            "project-board-path-field-label",
             // Review 424, B1: one badge that says a project is not open, in
             // place of five that each say "unknown".
             "project-board-not-open",

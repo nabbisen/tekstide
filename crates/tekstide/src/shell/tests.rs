@@ -6268,9 +6268,14 @@ fn the_reload_configuration_command_is_advertised_in_help_and_usage_text() {
         &tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
     );
 
+    // RFC-028 D9: `line.binding` and `usage` are both respelled for this
+    // host (`Chord::display_spelling`), a no-op on Linux but not on
+    // macOS -- compare against the respelled label, not the bare
+    // canonical literal.
+    let spelled = tekstide_core::navigation::Chord::display_spelling("Ctrl+Alt+C");
     let line = lines
         .iter()
-        .find(|line| line.binding == "Ctrl+Alt+C")
+        .find(|line| line.binding == spelled)
         .expect("Ctrl+Alt+C must be one of the advertised live bindings");
     assert!(
         !line.description.is_empty() && line.description != "keyboard-help-reload-configuration",
@@ -6280,7 +6285,7 @@ fn the_reload_configuration_command_is_advertised_in_help_and_usage_text() {
 
     let usage = crate::keyboard_help::usage_text(&catalog, "tekstide");
     assert!(
-        usage.contains("Ctrl+Alt+C"),
+        usage.contains(&spelled),
         "--help is generated from the same registry and must list it too"
     );
 }
@@ -10987,7 +10992,7 @@ fn ctrl_s_saves_the_real_edited_document_to_disk() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -11034,7 +11039,7 @@ fn press_ctrl_z(state: &mut State) {
         state,
         crate::input::KeyPress {
             key: iced::keyboard::Key::Character("z".into()),
-            modifiers: iced::keyboard::Modifiers::CTRL,
+            modifiers: iced::keyboard::Modifiers::COMMAND,
         },
     );
 }
@@ -11044,7 +11049,7 @@ fn press_ctrl_shift_z(state: &mut State) {
         state,
         crate::input::KeyPress {
             key: iced::keyboard::Key::Character("z".into()),
-            modifiers: iced::keyboard::Modifiers::CTRL | iced::keyboard::Modifiers::SHIFT,
+            modifiers: iced::keyboard::Modifiers::COMMAND | iced::keyboard::Modifiers::SHIFT,
         },
     );
 }
@@ -11082,7 +11087,7 @@ fn ctrl_z_undoes_a_real_typed_character_and_returns_to_clean() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("z".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -11126,7 +11131,7 @@ fn undo_does_not_cross_a_real_external_change_reload() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let save_press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -11183,7 +11188,7 @@ fn redo_then_save_writes_what_the_screen_showed() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let save_press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -11210,7 +11215,7 @@ fn ctrl_shift_z_is_a_real_global_keybinding_for_redo() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("z".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL | iced::keyboard::Modifiers::SHIFT,
+        modifiers: iced::keyboard::Modifiers::COMMAND | iced::keyboard::Modifiers::SHIFT,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -11247,7 +11252,7 @@ fn saving_over_a_real_external_change_opens_the_conflict_modal_and_reload_takes_
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -11297,7 +11302,7 @@ fn dismissing_the_conflict_modal_never_writes_the_local_edit_to_disk() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -11688,7 +11693,7 @@ fn saving_a_clean_document_over_a_real_external_change_does_not_claim_discarded_
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -12212,9 +12217,17 @@ fn escape_is_a_no_op_on_the_permanently_shown_empty_board_field() {
 #[test]
 fn the_path_field_hint_names_the_paste_gesture_that_actually_works_here() {
     let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
-    let hint = catalog.get("project-board-path-field-label");
+    // RFC-028 D9: the key now takes `$primary`, rendered via
+    // `get_with_args` -- `"Ctrl"` here matches this test's own
+    // assertion, which (like the rest of the product on this host) is
+    // Linux-literal text, not `Chord::primary_modifier_label()`'s
+    // resolved value.
+    let hint = catalog.get_with_args(
+        "project-board-path-field-label",
+        &crate::i18n::CatalogArgs::new().trusted_symbol("primary", "Ctrl"),
+    );
     assert!(
-        hint.contains("Ctrl+V"),
+        hint.contains(&format!("{ISOLATE_START}Ctrl{ISOLATE_END}+V")),
         "the field must name the paste gesture that actually works in it, not the one the \
          rest of the product teaches (Ctrl+Shift+V): {hint:?}"
     );
@@ -15426,7 +15439,7 @@ fn clicking_reload_takes_the_disk_content_and_closes_the_dialog() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");
@@ -20567,13 +20580,18 @@ fn a_rebind_in_the_users_file_is_in_force_advertised_and_a_bad_one_is_named_on_t
         "the default stands"
     );
 
+    // RFC-028 D9: `help_bindings` returns `keyboard_help_lines`'s own
+    // output, which is respelled for this host (`Chord::display_spelling`)
+    // -- a no-op on Linux, but comparing against a bare `"Ctrl+..."`
+    // literal would fail the moment this test runs on macOS.
+    use tekstide_core::navigation::Chord;
     let advertised = help_bindings(&state);
     assert!(
-        advertised.contains(&"Ctrl+Alt+J".to_owned()),
+        advertised.contains(&Chord::display_spelling("Ctrl+Alt+J")),
         "{advertised:?}"
     );
     assert!(
-        !advertised.contains(&"Ctrl+Alt+K".to_owned()),
+        !advertised.contains(&Chord::display_spelling("Ctrl+Alt+K")),
         "the old chord is still advertised"
     );
 
@@ -20608,7 +20626,13 @@ fn a_reload_applies_a_rebind_live_and_reserved_stays_reserved() {
         "Ctrl+Alt+J",
         "applied without a restart"
     );
-    assert!(help_bindings(&state).contains(&"Ctrl+Alt+J".to_owned()));
+    // RFC-028 D9: see the identical note in
+    // `a_rebind_in_the_users_file_is_in_force_advertised_and_a_bad_one_is_named_on_the_board`.
+    assert!(
+        help_bindings(&state).contains(&tekstide_core::navigation::Chord::display_spelling(
+            "Ctrl+Alt+J"
+        ))
+    );
     assert!(project_board_configuration_lines(&state).is_empty());
 
     rewrite_config(
@@ -21886,7 +21910,7 @@ fn a_blocked_save_against_a_deleted_file_still_opens_the_dialog() {
     let policy = tekstide_core::navigation::KeybindingPolicy::linux_mvp();
     let press = crate::input::KeyPress {
         key: iced::keyboard::Key::Character("s".into()),
-        modifiers: iced::keyboard::Modifiers::CTRL,
+        modifiers: iced::keyboard::Modifiers::COMMAND,
     };
     let proof =
         crate::input::ModalAbsent::check(&state.modal).expect("test precondition: no modal open");

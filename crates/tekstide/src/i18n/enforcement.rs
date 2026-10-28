@@ -792,6 +792,11 @@ fn generic_args() -> CatalogArgs<'static> {
         )
         .number("kept", 1u32)
         .number("omitted", 1u32)
+        // RFC-028 D9: `project-board-path-field-label`/`agent-run-report-field-hint`/
+        // `status-bar-key-hint`'s `$primary` -- the real value is
+        // `Chord::primary_modifier_label()` (`"Ctrl"` on Linux, `"⌘"` on
+        // macOS); any trusted symbol exercises the same code path here.
+        .trusted_symbol("primary", "Ctrl")
 }
 
 fn shipped_additional_locales() -> Vec<String> {

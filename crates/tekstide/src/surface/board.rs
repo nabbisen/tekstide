@@ -302,7 +302,19 @@ fn path_field_section<'a, Message: 'a + Clone>(
     .on_press(open_browser_message);
 
     let mut lines = column![
-        text(catalog.get("project-board-path-field-label")).size(theme.font_size_body()),
+        // RFC-028 D9: the hint names the real paste gesture for this
+        // host (`⌘+V` on macOS, `Ctrl+V` elsewhere) -- `trusted_symbol`,
+        // not raw text, since `Chord::primary_modifier_label()` is a
+        // compile-time constant this crate chose, not anything a user or
+        // a file supplied.
+        text(catalog.get_with_args(
+            "project-board-path-field-label",
+            &CatalogArgs::new().trusted_symbol(
+                "primary",
+                tekstide_core::navigation::Chord::primary_modifier_label()
+            ),
+        ))
+        .size(theme.font_size_body()),
         field_box,
         browse_button,
     ]

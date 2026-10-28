@@ -23,17 +23,22 @@
 //! make-it-unrepresentable discipline the theme's contrast destructure
 //! uses.
 
-use tekstide_core::navigation::{KeybindingPolicy, NavigationAction};
+use tekstide_core::navigation::{Chord, KeybindingPolicy, NavigationAction};
 
 use crate::i18n::Catalog;
 
 /// One row of help: the binding as the policy spells it, and the
 /// already-localized description of what it does.
 pub struct KeyboardHelpLine {
-    /// A chord (`"Ctrl+Alt+P"`). Either fixed text from the policy or, when the
-    /// user rebound it, the **canonical rendering of a parsed chord** -- the
-    /// grammar admits only `Ctrl`/`Alt`/`Shift`, `+` and one `A`-`Z`/`0`-`9`,
-    /// so nothing the file wrote can reach here as text, and it is not routed
+    /// A chord (`"Ctrl+Alt+P"` on Linux, `"⌘+Alt+P"` on macOS --
+    /// [`Chord::display_spelling`] respells the policy's own canonical
+    /// text for this host; see `navigation.rs`'s and `chord.rs`'s own
+    /// module docs for why the policy's *stored* chord stays `Ctrl`
+    /// everywhere and only this presentation step varies). Either fixed
+    /// text from the policy or, when the user rebound it, the
+    /// **canonical rendering of a parsed chord** -- the grammar admits
+    /// only `Ctrl`/`Alt`/`Shift`, `+` and one `A`-`Z`/`0`-`9`, so nothing
+    /// the file wrote can reach here as text, and it is not routed
     /// through `text_safety::quote_untrusted`.
     pub binding: String,
     pub description: String,
@@ -617,7 +622,13 @@ pub fn keyboard_help_lines(catalog: &Catalog, policy: &KeybindingPolicy) -> Vec<
         .into_iter()
         .filter_map(|(action, binding)| {
             action_catalog_key(action).map(|key| KeyboardHelpLine {
-                binding: binding.to_owned(),
+                // RFC-028 D9: `Chord::display_spelling`, not a bare
+                // `.to_owned()` -- `binding` is the policy's own
+                // canonical spelling (always `Ctrl`, on every host; see
+                // `navigation.rs`'s and `chord.rs`'s own module docs),
+                // and this is the presentation boundary where it becomes
+                // the label a human on this host actually reads.
+                binding: Chord::display_spelling(binding),
                 description: catalog.get(key),
             })
         })
@@ -638,7 +649,14 @@ pub fn usage_text(catalog: &Catalog, executable: &str) -> String {
     out.push_str("USAGE:\n");
     out.push_str(&format!("    {executable} [PROJECT_PATH]...\n\n"));
     out.push_str("Opens each PROJECT_PATH as a project. With no path, the Project Board\n");
-    out.push_str("opens empty, with a field to type or paste one (Ctrl+Alt+O opens the\n");
+    // RFC-028 D9: this framing sentence is fixed English (see the doc
+    // above), but the one chord it names still has to read correctly on
+    // macOS -- `Chord::display_spelling` is the same presentation step
+    // the catalog-driven lines below go through.
+    out.push_str(&format!(
+        "opens empty, with a field to type or paste one ({} opens the\n",
+        Chord::display_spelling("Ctrl+Alt+O")
+    ));
     out.push_str("same field once a project is already open).\n\n");
     out.push_str("OPTIONS:\n");
     out.push_str("    -h, --help       Print this help\n");
