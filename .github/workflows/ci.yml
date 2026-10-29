@@ -252,3 +252,59 @@ jobs:
           TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
             runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close \
             -- --exact --nocapture
+
+      - name: Cold-start window capture (RFC-028 D2, PR-028-F scope item 2, review 650)
+        # `pr-028-f-scope-additions.md` §2: this runner has a real window server, but nobody
+        # has measured whether screen capture is even reachable on it -- TCC-governed, and
+        # the GUI rules' own repeat-limit applies at the level of this whole question, not
+        # of retries inside it: one attempt; a refusal here is the answer and is not worth a
+        # second try.
+        #
+        # Throwaway `$HOME`, not `XDG_CONFIG_HOME`/`XDG_STATE_HOME` -- corrected 2026-10-29,
+        # review 650: `ConfigPathProvider::macos_from_env`/`AppStatePathProvider::macos_from_env`
+        # (`crates/tekstide-core/src/config/path.rs`,
+        # `crates/tekstide-core/src/project/recent/store.rs`) resolve `$HOME/Library/
+        # Application Support/tekstide` from `$HOME` alone on this platform and read neither
+        # `XDG_*` variable, so only `$HOME` isolates anything here -- never the maintainer's
+        # own account, which this runner does not have anyway, but the principle is the same
+        # one `project-instructions-gui-common.md` states for a developer's own machine.
+        #
+        # Cold start only, no project opened: answers whether the window opens at all and
+        # whether the chrome looks like a macOS window. The Help-modal glyph question (does
+        # `⌘`/`⌥`/`⇧` draw as a real glyph) is answered separately, by a font-coverage test,
+        # not by this picture -- driving the modal open would need keyboard automation this
+        # project has no macOS equivalent of yet.
+        #
+        # No resize after launch: the binary opens at its own default size, stated here
+        # rather than chosen, and nothing below moves or resizes the window afterward.
+        #
+        # A full-screen capture, not a window-targeted one: this runner shows nothing else,
+        # and AppleScript window-targeting is exactly the kind of thing not to improvise
+        # untested, under a rule that allows only one attempt.
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p capture-evidence
+          CAPTURE_HOME="$(mktemp -d)"
+          HOME="$CAPTURE_HOME" ./target/debug/tekstide >capture-evidence/launch.log 2>&1 &
+          TEKSTIDE_PID=$!
+          sleep 3
+          if ! kill -0 "$TEKSTIDE_PID" 2>/dev/null; then
+            echo "the binary exited before a capture could be taken:"
+            cat capture-evidence/launch.log
+            exit 1
+          fi
+          screencapture -x capture-evidence/macos-cold-start.png
+          kill "$TEKSTIDE_PID" 2>/dev/null || true
+          wait "$TEKSTIDE_PID" 2>/dev/null || true
+          file capture-evidence/macos-cold-start.png
+          sips -g pixelWidth -g pixelHeight capture-evidence/macos-cold-start.png
+
+      - name: Upload the macOS cold-start capture
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-cold-start-capture
+          path: capture-evidence/
+          if-no-files-found: ignore
+          retention-days: 14
