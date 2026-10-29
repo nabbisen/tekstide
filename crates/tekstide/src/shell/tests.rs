@@ -2,6 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 mod editor_baseline;
 mod editor_column_width;
 mod editor_rows;
+mod help_modal_glyph_coverage;
 
 use std::path::{Path, PathBuf};
 
