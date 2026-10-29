@@ -408,10 +408,12 @@ project-board-configuration-unknown-key = Configuration: { $key } is not a setti
 # chosen by the parser, so a configured string is never echoed here; `$other`
 # is another action's name, a fixed identifier, for the two reasons that name one.
 #
-# RFC-028 D9 Round 2: the three example chords quoted below
-# (`not-a-string`/`chord-empty`/`chord-unknown-part`) are **deliberately
-# not respelled** for macOS and must stay that way. They name
-# `config.toml`'s own grammar -- the chord a user types into the file --
+# RFC-028 D9 Round 2, corrected review 650 round 3 (this comment said "three", naming only
+# `not-a-string`/`chord-empty`/`chord-unknown-part`, and undercounted its own selector --
+# `chord-no-ctrl-or-alt` and `chord-shift-digit` below belong to the same exception for the
+# same reason and were never named here): the five reason arms quoted below that mention
+# `Ctrl`, `Alt` or `Shift` are **deliberately not respelled** for macOS and must stay that
+# way. They name `config.toml`'s own grammar -- the chord a user types into the file --
 # which `Chord::parse` (crates/tekstide-core/src/navigation/chord.rs)
 # accepts only `Ctrl`-spelled, on every host; it rejects `⌘`. Routing
 # these through `Chord::display_spelling` would tell a macOS user to

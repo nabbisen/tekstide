@@ -24,8 +24,9 @@
 //! `Shift` either) -- used only by presentation call sites (the Help
 //! modal, `--help`, the status bar, a handful of `locales/en.ftl`
 //! strings), never by anything that matches, stores or parses a chord.
-//! **The three `config.toml` parse-error strings
-//! (`not-a-string`/`chord-empty`/`chord-unknown-part` in
+//! **The five `config.toml` parse-error strings naming this grammar's own modifier words
+//! (`not-a-string`/`chord-empty`/`chord-unknown-part`/`chord-no-ctrl-or-alt`/
+//! `chord-shift-digit`, in `project-board-configuration-fallback`,
 //! `locales/en.ftl`) are the one deliberate exception**: they name the
 //! *file's* grammar, which stays `Ctrl`-spelled on every host, so they
 //! must never be routed through `display_spelling` -- doing so would
@@ -37,6 +38,18 @@
 //! displayed -- the exact bug the swap-tested ablation in RFC-028's own
 //! PR-028-E review caught before it shipped, and the same bug the error
 //! strings would reintroduce through a different door if ever respelled.
+//!
+//! **Review 650 round 3: symbols for accelerators, words in prose -- the boundary for
+//! everything else in `locales/en.ftl` that mentions a modifier by name.** A string
+//! naming a *displayed accelerator* (the Help modal, `--help`, the status bar, a chord
+//! quoted back from the policy) goes through `display_spelling`, on this rule's own say-so
+//! above. A string that is *prose about a fixed UI convention* -- `Tab`/`Shift+Tab` cycling
+//! focus through a dialog, `Shift+Enter` for a newline, neither one a rebindable chord this
+//! module's own grammar governs, both named only in the named keys exception two
+//! paragraphs below -- is deliberately left spelled out, the same way Apple's own
+//! documentation writes "press Shift-Tab" in prose while showing `⌘` in a menu. Nine such
+//! strings exist today (grep `locales/en.ftl` for `Shift+Tab` or `Shift+Enter`); none of
+//! them is a bug, and nothing here should "complete" that sweep.
 //!
 //! What a chord may be is narrower than what a keyboard can send, on purpose:
 //!
