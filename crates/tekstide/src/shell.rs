@@ -922,6 +922,11 @@ pub struct State {
     /// needs an id, and there is nowhere else to get one from a message
     /// handler that is not itself a window-lifecycle callback.
     window_id: Option<iced::window::Id>,
+    /// Review 650 round 3: has [`Message::FirstFramePresented`] already fired. Once `true`,
+    /// `subscription` stops offering `iced::window::frames()` -- the same reason this field
+    /// exists at all: a CI step needs one stderr line, not a standing, redraw-forcing
+    /// subscription for the rest of the session.
+    first_frame_reported: bool,
     /// RFC-015 PR-015-F: `None` unless `TEKSTIDE_MEASURE_CRITERION` names
     /// a recognized criterion -- see `measurement`'s module doc.
     measurement: Option<Measurement>,
@@ -1589,6 +1594,7 @@ impl State {
             focus: FocusZone::MainArea,
             modal,
             window_id: None,
+            first_frame_reported: false,
             measurement,
             typing_doc,
             terminal_panes,
@@ -1957,6 +1963,19 @@ pub enum Message {
     /// `request_user_attention` needs an id this crate otherwise has no
     /// way to obtain from inside a message handler.
     WindowOpened(iced::window::Id),
+    /// Review 650 round 3, PR-028-F scope item 2: the first real `iced::window::frames()`
+    /// tick this process has seen -- "a frame was painted," the same signal
+    /// `measurement`'s own `Criterion::Startup` uses (see that module's doc for why
+    /// `frames()`, not `open_events()`, is the only application-level "painted" signal).
+    /// Reported once, to stderr, so a CI step capturing this process's own window can wait
+    /// for it instead of guessing a sleep is long enough or comparing screenshots that can
+    /// differ for a reason that has nothing to do with this window (a Dock animation, a
+    /// clock tick). `subscription` stops offering `frames()` the moment
+    /// `State::first_frame_reported` is set, the same "checked but usually absent, and
+    /// permanently absent after the one event that matters" shape `WindowOpened`'s own
+    /// `window_id` already uses -- unlike `Criterion::Startup`, this process does not exit
+    /// afterward, so the subscription must actually stop rather than merely not matter.
+    FirstFramePresented,
     /// RFC-030 PR-030-B, review 410: a background Git evaluation
     /// (`tekstide_core::runtime::git::compute_summary`) has finished for
     /// one project, triggered by [`git_summary_subscription`]. Applied by
@@ -2326,7 +2345,8 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         | Message::EditorViewportMeasured(_)
         | Message::PathFieldPasteResolved(_)
         | Message::ProjectAttentionRequested
-        | Message::WindowOpened(_) => None,
+        | Message::WindowOpened(_)
+        | Message::FirstFramePresented => None,
     }
 }
 
@@ -3219,6 +3239,16 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::WindowOpened(window_id) => {
             state.window_id = Some(window_id);
+        }
+        Message::FirstFramePresented => {
+            // Review 650 round 3: a one-line, always-on readiness signal a CI step can wait
+            // on instead of a fixed sleep or a before/after screenshot comparison (either of
+            // which can be fooled by something unrelated changing on screen -- a Dock
+            // animation, a clock tick). Set first, so `subscription` stops offering
+            // `frames()` on the very next rebuild even if this line's own write were to
+            // block or fail.
+            state.first_frame_reported = true;
+            eprintln!("TEKSTIDE_FIRST_FRAME_PRESENTED");
         }
         // RFC-058 D9: best-effort, and worded by construction rather than
         // by care at each call site -- `request_user_attention` never
@@ -8646,6 +8676,16 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     // merely usually.
     if state.window_id.is_none() {
         subscriptions.push(iced::window::open_events().map(Message::WindowOpened));
+    }
+
+    // Review 650 round 3: the same "checked but usually absent" shape as `window_id` above,
+    // but permanently absent after the one event that matters rather than merely absent for a
+    // normal session's own duration -- `measurement`'s own `Criterion::Startup` arm
+    // (`measurement_subscription`, above) already proves subscribing to `frames()` only until
+    // the first tick is safe; this is that same reasoning applied outside the measurement
+    // branch, for every ordinary run, not only a measurement one.
+    if !state.first_frame_reported {
+        subscriptions.push(iced::window::frames().map(|_| Message::FirstFramePresented));
     }
 
     // RFC-017 PR-017-C: only added when a demo pane exists (the env var

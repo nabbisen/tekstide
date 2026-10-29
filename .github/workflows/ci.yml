@@ -253,7 +253,7 @@ jobs:
             runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close \
             -- --exact --nocapture
 
-      - name: Cold-start window capture (RFC-028 D2, PR-028-F scope item 2, review 650 round 2)
+      - name: Cold-start window capture (RFC-028 D2, PR-028-F scope item 2, review 650 round 3)
         # `pr-028-f-scope-additions.md` §2: this runner has a real window server, but nobody
         # has measured whether screen capture is even reachable on it -- TCC-governed, and
         # the GUI rules' own repeat-limit applies at the level of this whole question, not
@@ -282,28 +282,41 @@ jobs:
         # and AppleScript window-targeting is exactly the kind of thing not to improvise
         # untested, under a rule that allows only one attempt.
         #
-        # **Before/after, not a longer fixed sleep** -- added review 650 round 2, after this
-        # step's own second run captured a blank desktop (no window in frame, no crash in
-        # launch.log): a 3-second wait is a guessed timeout, not a measured one, and the GUI
-        # rules ask to "compare before and after identically" rather than assume a wait was
-        # long enough. One capture before launch, one after the wait; if the two are
-        # byte-identical, the screen never changed, so the window never appeared -- fail the
-        # step and say so, instead of uploading a blank frame as if it were evidence. The wait
-        # itself stays at 3 seconds: a failure here is now a measured finding (the wait was
-        # too short, or the launch failed some other way) rather than a guess about whether it
-        # was.
+        # **A readiness signal, not a fixed sleep or a before/after comparison -- added
+        # review 650 round 3, retiring both earlier attempts in turn.** The fixed sleep (round
+        # 1) captured a blank desktop on its own second run, no crash logged. The before/after
+        # screenshot comparison (round 2) "passed" on the very next run and still captured no
+        # window: `imagemagick compare` showed the only pixels that differed were inside the
+        # Dock (a launch bounce), with the menu bar still reading "Finder" -- proof that *some*
+        # screen change is not evidence of *this app's own window*. The app itself now reports
+        # when it has actually painted: `Message::FirstFramePresented` (`shell.rs`), driven by
+        # `iced::window::frames()` the same way `measurement`'s own `Criterion::Startup` already
+        # does, prints `TEKSTIDE_FIRST_FRAME_PRESENTED` to stderr exactly once. This step polls
+        # `launch.log` for that line with a bounded budget (10s, generous against the ~3s the
+        # successful runs so far have taken) instead of guessing a sleep or trusting that
+        # *something* on screen changed.
         if: always()
         run: |
           set -euo pipefail
           mkdir -p capture-evidence
-          screencapture -x capture-evidence/before.png
           CAPTURE_HOME="$(mktemp -d)"
           HOME="$CAPTURE_HOME" ./target/debug/tekstide >capture-evidence/launch.log 2>&1 &
           TEKSTIDE_PID=$!
-          sleep 3
-          if ! kill -0 "$TEKSTIDE_PID" 2>/dev/null; then
-            echo "the binary exited before a capture could be taken:"
+          READY=0
+          for _ in $(seq 1 100); do
+            if grep -q "TEKSTIDE_FIRST_FRAME_PRESENTED" capture-evidence/launch.log 2>/dev/null; then
+              READY=1
+              break
+            fi
+            if ! kill -0 "$TEKSTIDE_PID" 2>/dev/null; then
+              break
+            fi
+            sleep 0.1
+          done
+          if [ "$READY" -ne 1 ]; then
+            echo "the app never presented a frame (TEKSTIDE_FIRST_FRAME_PRESENTED not seen within the wait budget):"
             cat capture-evidence/launch.log
+            kill "$TEKSTIDE_PID" 2>/dev/null || true
             exit 1
           fi
           screencapture -x capture-evidence/macos-cold-start.png
@@ -311,11 +324,6 @@ jobs:
           wait "$TEKSTIDE_PID" 2>/dev/null || true
           file capture-evidence/macos-cold-start.png
           sips -g pixelWidth -g pixelHeight capture-evidence/macos-cold-start.png
-          if cmp -s capture-evidence/before.png capture-evidence/macos-cold-start.png; then
-            echo "before and after are byte-identical: the screen never changed, so the window never appeared"
-            exit 1
-          fi
-          echo "the screen changed between before and after: a window appeared"
 
       - name: Upload the macOS cold-start capture
         if: always()
