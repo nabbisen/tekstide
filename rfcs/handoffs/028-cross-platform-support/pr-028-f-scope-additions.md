@@ -32,9 +32,13 @@ screen capture is TCC-governed there and nobody has measured it. One step tells 
 report that and stop -- it is not worth a second attempt.
 
 Every rule in `.git-exclude/rules/project-instructions-gui-common.md` applies, and two of them bind
-here in particular: throwaway `XDG_CONFIG_HOME` **and** `XDG_STATE_HOME`, because a capture made
-against real state puts other projects' names into committed evidence; and a fixed window size
-obtained **at launch**, never by resizing a running window.
+here in particular. **Isolation on macOS means a throwaway `$HOME`, not the `XDG_*` variables** --
+corrected 2026-10-29, review 650: `ConfigPathProvider::macos_from_env` and
+`AppStatePathProvider::macos_from_env` build `$HOME/Library/Application Support/tekstide` from
+`$HOME` alone and read neither variable, so the instruction this note first gave would have
+isolated nothing. The reason isolation is required at all is unchanged: a capture made against
+real state puts other projects' names into committed evidence. And the window size is fixed **at
+launch**, never by resizing a running window.
 
 If the capture works, the release notes' wording changes from "never run on real hardware" to
 "launched and rendered on real macOS, screenshot attached, not interactively exercised by a human" --
