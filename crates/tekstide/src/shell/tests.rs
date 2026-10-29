@@ -2,6 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 mod editor_baseline;
 mod editor_column_width;
 mod editor_rows;
+mod help_modal_glyph_coverage;
 
 use std::path::{Path, PathBuf};
 
@@ -21800,6 +21801,11 @@ fn a_project_open_before_the_state_is_built_is_watched_from_the_start() {
 
 /// RFC-026 D8: an external change to the open document reaches it on the next drain, through the
 /// watcher's notice, and the document keeps its text. Nothing is reloaded silently.
+///
+/// RFC-028 D2, review 650: this is the covering test, named at the production site, for
+/// `record_project_watch_notice`'s own `touched_documents` arm (`shell.rs`) -- confirmed by
+/// ablating that arm by hand and watching this test's own assertion go red on `Opened`
+/// rather than `ExternalChanged`, not merely fail to compile.
 #[test]
 fn an_external_change_to_the_open_document_reaches_it_without_a_silent_reload() {
     let (mut state, dir) = state_with_an_open_document("d8-external-change", "hello\n");
@@ -21842,6 +21848,10 @@ fn an_external_change_to_the_open_document_reaches_it_without_a_silent_reload() 
 /// files, leaves the second active, changes the *first* (background) one on disk, and
 /// asserts the notice reaches it -- while the active document's own displayed status is
 /// untouched, the same cross-document isolation PR-065-A's own repair is about.
+///
+/// RFC-028 D2, review 650: the second covering test for `record_project_watch_notice`'s own
+/// `touched_documents` arm -- see the cross-reference at that arm (`shell.rs`) and at
+/// [`an_external_change_to_the_open_document_reaches_it_without_a_silent_reload`] above.
 #[test]
 fn an_external_change_to_a_background_open_document_reaches_it_too() {
     let (mut state, dir) = state_with_an_open_document("d8-background-external-change", "hello\n");

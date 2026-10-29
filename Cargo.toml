@@ -24,20 +24,43 @@ tekstide-core               = { version = "0.37.0", path = "crates/tekstide-core
 
 libc                        = "0.2"
 
-# RFC-026 D4, adopted at review 452: non-recursive per-directory watches only, so
-# the default `macos_fsevent` feature (macOS-only) is off. Re-check row: the 9.0 line
-# (release candidates since 2026-01-25; see rfcs/handoffs/dependency-advisories.md).
+# RFC-026 D4, adopted at review 452: non-recursive per-directory watches only. Re-check
+# row: the 9.0 line (release candidates since 2026-01-25; see
+# rfcs/handoffs/dependency-advisories.md).
 #
-# RFC-028 D2: `macos_fsevent` off (above) with no replacement left every `cfg(all(
-# target_os = "macos", not(feature = "macos_kqueue")))` path in `notify`'s own
-# `src/lib.rs` compiling in a backend that needs `fsevent-sys`, which was never
-# pulled in -- a macOS build breaks today, regardless of anything this project adds.
-# `macos_kqueue` is the fix, not re-enabling `macos_fsevent`: `kqueue` needs no
-# `FSEvents`-style elevated privilege, and RFC-026 D4's own non-recursive design
-# never needed `FSEvents`' native recursive-tree behaviour anyway. Inert on
-# Linux/Windows -- every gate it un-gates in `notify`'s own source is additionally
-# `cfg(target_os = "macos")`.
-notify                      = { version = "8.2.0", default-features = false, features = ["macos_kqueue"] }
+# RFC-028 D2, corrected 2026-10-29 (dated correction in
+# rfcs/accepted/028-cross-platform-support.md): `macos_fsevent`, not `macos_kqueue`.
+# Measured on the real macOS runner, one variable, pushed and reverted in both
+# directions: `macos_kqueue` failed `reading_a_watched_file_is_not_reported_but_
+# writing_it_is` and `the_hostile_tree_is_watched_only_where_the_policy_admits_and_
+# never_recurses` (1147 passed, 5 failed); `macos_fsevent` passed both (1151 passed, 1
+# failed, an unrelated git test). `kqueue` never reports a content write inside a
+# watched directory -- only entry-list changes (create/delete/rename) -- so on macOS
+# the explorer's git-status column and the editor's view of a file go stale with no
+# notice, even though `project::tests::content`'s save/edit-time comparison still
+# catches the external change before anything is overwritten.
+#
+# D2's original two reasons for `kqueue` are both retired, not merely outweighed.
+# **Non-recursion**: moot, because `ProjectWatcher::record_changed_paths`'s own
+# `self.scope.is_watched(parent)` check already enforces the admitted-set boundary
+# regardless of what the platform reports -- pinned platform-independently as
+# `record_changed_paths_drops_a_grandchild_of_an_admitted_directory` in
+# `project/watch/tests.rs`, so `FSEvents`' native recursive-tree behaviour cannot
+# reintroduce the leak. **Elevated privilege**: narrower than it reads --
+# `FSEvents`' *system-wide* streams need it; a watch on a single directory the user
+# already chose does not, and `kqueue` needs the same file access on a
+# TCC-protected location anyway.
+#
+# **Open risk, recorded rather than measured**: a GitHub runner's temp directory is
+# not TCC-protected, so a green CI run says nothing about a project under Documents,
+# Desktop or Downloads, where macOS may require consent the runner never exercises.
+# The decision is safe either way: if `FSEvents` turns out to be blocked there, the
+# result is exactly `kqueue`'s present behaviour (no content notices), no worse than
+# today. Inert on Linux/Windows -- every gate it un-gates in `notify`'s own source is
+# additionally `cfg(target_os = "macos")`. `macos_fsevent` is also `notify`'s own
+# default, so this entry is now what `default-features = true` would already pick on
+# macOS.
+notify                      = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
 
 serde                       = { version = "1", features = ["derive"] }
 serde_json                  = "1"

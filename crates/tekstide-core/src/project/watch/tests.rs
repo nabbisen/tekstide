@@ -997,6 +997,16 @@ fn a_drained_window_asks_for_a_scan_only_for_a_folder_the_explorer_shows() {
 /// leaves the root, a loop back to the root, and an expanded folder, the live watch covers
 /// exactly what the policy admits and nothing recurses. Every assertion is against the
 /// kernel's reports, not against the policy's own answer.
+///
+/// RFC-028 D2 (corrected 2026-10-29): this test's own `never_recurses` name reads as the
+/// product-level guarantee, but that guarantee is actually enforced one layer up, in
+/// [`super::ProjectWatcher::record_changed_paths`]'s `is_watched(parent)` check -- tested
+/// platform-independently by `record_changed_paths_drops_a_grandchild_of_an_admitted_directory`
+/// above, which does not depend on what any one backend's kernel API reports. So a future
+/// backend that recurses natively (as `FSEvents`, the backend this test now runs against,
+/// does) does not read as a product regression here: this test still measures the *platform's*
+/// own boundary, which this RFC's own A/B found `FSEvents` holds to in practice, not the
+/// guarantee the user actually gets.
 #[test]
 fn the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses() {
     use crate::project::root::{ProjectRootValidator, SymlinkPolicy};
@@ -1151,6 +1161,72 @@ fn reading_a_watched_file_is_not_reported_but_writing_it_is() {
         )
     });
     assert!(reported_by_write, "the write is reported, with its path");
+
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+/// RFC-028 D2 (corrected 2026-10-29): the one thing the backend flip's own acceptance named to
+/// pin rather than infer. Every macOS watch test before this one exercises an entry-list change
+/// (`create_dir_all`, a new file) -- which `kqueue` already reported -- so none of them pinned a
+/// *content* change (an existing file rewritten) travelling all the way from the real backend
+/// through [`super::ProjectWatcher::record_changed_paths`] to an actual
+/// [`ScanRequest`]. `reading_a_watched_file_is_not_reported_but_writing_it_is` above stops at the
+/// [`super::WatchNotice`] channel; this test carries the same real write the rest of the way,
+/// replicating the glue `shell.rs`'s own event loop performs (notice -> `record_changed_paths` ->
+/// `drain_due`) and that this module does not itself own. If this passes on the macOS runner, the
+/// backend decision is verified rather than reasoned.
+#[test]
+fn a_real_content_change_travels_through_record_changed_paths_to_a_scan_request() {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    let directory = &watch_test_root().join("tekcontent-change");
+    let _ = std::fs::remove_dir_all(directory);
+    std::fs::create_dir_all(directory).unwrap();
+    let file = directory.join("note.txt");
+    std::fs::write(&file, "original\n").unwrap();
+
+    let mut watcher = super::ProjectWatcher::open();
+    watcher.reconcile(
+        &BTreeSet::from([WatchedDirectory::for_test(directory)]),
+        Vec::new(),
+    );
+    let mut events = watcher.events().unwrap().take().unwrap();
+    let (sender, notices) = channel();
+    std::thread::spawn(move || {
+        while let Some(notice) = events.wait_for_notice() {
+            if sender.send(notice).is_err() {
+                break;
+            }
+        }
+    });
+
+    std::fs::write(&file, "changed\n").unwrap();
+    let at = Instant::now();
+    let changed = (0..20)
+        .find_map(|_| match notices.recv_timeout(Duration::from_millis(200)) {
+            Ok(super::WatchNotice::Changed(paths)) if paths.contains(&file) => Some(paths),
+            _ => None,
+        })
+        .expect("the real backend reports the content write, with its path");
+
+    watcher.record_changed_paths(&changed, at);
+    let due = watcher.drain_due(at + SCAN_WINDOW);
+    assert_eq!(
+        due.len(),
+        1,
+        "exactly one directory's window closes: the watched directory itself"
+    );
+    assert_eq!(
+        due[0].directory, *directory,
+        "a real content change reaches an actual scan request for the watched directory, not \
+         only a WatchNotice"
+    );
+    assert!(
+        due[0].coalesced_events >= 1,
+        "the real backend's own notice batching is not this test's property to pin"
+    );
 
     drop(watcher);
     let _ = std::fs::remove_dir_all(directory);

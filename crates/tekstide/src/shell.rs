@@ -8110,6 +8110,19 @@ fn record_project_watch_notice(
     }
     let now = std::time::Instant::now();
     match notice {
+        // RFC-028 D2, review 650: a `Changed` notice does two independent things, and
+        // `tekstide-core`'s own
+        // `a_real_content_change_travels_through_record_changed_paths_to_a_scan_request`
+        // (`project/watch/tests.rs`) pins only the second arm below. This arm --
+        // whether an open document's own path lands in `touched_documents` -- is pinned
+        // here, in this crate, end to end through `drain_project_watches`'s own refresh,
+        // by `shell::tests::an_external_change_to_the_open_document_reaches_it_without_a_silent_reload`
+        // and `an_external_change_to_a_background_open_document_reaches_it_too`. Ablated
+        // by hand (this `if` forced to `false`) during review 650: both go red on the
+        // document's resulting state (`Opened`/`Clean`, not `ExternalChanged`), not merely
+        // on an assertion about this field. If this loop's own condition changes, one of
+        // those two tests should go red with it; if neither does, the test has stopped
+        // covering this arm.
         tekstide_core::project::WatchNotice::Changed(paths) => {
             for path in &open_document_paths {
                 if paths.contains(path) && !watch.touched_documents.contains(path) {
