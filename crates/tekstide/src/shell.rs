@@ -3244,9 +3244,20 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
             // Review 650 round 3: a one-line, always-on readiness signal a CI step can wait
             // on instead of a fixed sleep or a before/after screenshot comparison (either of
             // which can be fooled by something unrelated changing on screen -- a Dock
-            // animation, a clock tick). Set first, so `subscription` stops offering
-            // `frames()` on the very next rebuild even if this line's own write were to
-            // block or fail.
+            // animation, a clock tick).
+            //
+            // Review 650 round 4: the check and the set live in the same handler, and the
+            // print is gated on the check, not merely the set -- `iced`'s own `frames()`
+            // subscription does not stop as sharply as `subscription`'s own code reads
+            // (confirmed live: `TEKSTIDE_FIRST_FRAME_PRESENTED` appeared twice in one real
+            // run, the one in-flight tick that was already queued when the first one flipped
+            // this flag). A startup trace line that announces the *first* frame twice would
+            // mislead a reader the same way any other user-visible text that overclaims does;
+            // this guard is what makes "first" true regardless of how many ticks `frames()`
+            // delivers after the flag is set.
+            if state.first_frame_reported {
+                return Task::none();
+            }
             state.first_frame_reported = true;
             eprintln!("TEKSTIDE_FIRST_FRAME_PRESENTED");
         }
