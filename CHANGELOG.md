@@ -66,6 +66,29 @@ the existing `+` separators rather than Apple's unseparated `⌘⌥P` style. Sep
 unparseable `"⌘+Alt+J"` into their own config file — the same class of defect the reverted
 `macos_mvp()` experiment already proved real, re-entering through a different door.
 
+**Round 3 — review 650: the macOS watcher backend, a content-change pinning test, and a status-bar
+hybrid-spelling defect the capture step itself caught.** RFC-028 D2 is corrected: the macOS
+watcher feature becomes `macos_fsevent`, not `macos_kqueue` — `kqueue` never reports a content
+write inside a watched directory (only entry-list changes), so on macOS the explorer's git-status
+column and the editor's own view of a file went stale with no notice; measured on the real macOS
+runner, one variable, pushed and reverted in both directions (`macos_kqueue`: 1147 passed, 5
+failed; `macos_fsevent`: 1155 passed, 0 failed, with the new pinning test counted in). A new test,
+`a_real_content_change_travels_through_record_changed_paths_to_a_scan_request`, pins the property
+the decision rests on: a real content write travelling from the backend through
+`record_changed_paths` to an actual scan request, platform-independently.
+
+A macOS CI job now launches the built binary headfully, under a throwaway `$HOME` (not
+`XDG_CONFIG_HOME`/`XDG_STATE_HOME`, which neither `ConfigPathProvider` nor `AppStatePathProvider`
+reads on macOS), and uploads a real screen capture as a build artifact — the first rendered
+evidence this project has from real macOS hardware. **It caught a real defect on its first run**:
+the status bar's own keybinding hint (`status-bar-key-hint`) still printed the hybrid `⌘+Alt+P`,
+because it was built from a bare `$primary` Fluent substitution with `Alt` hardcoded as literal
+text in `locales/en.ftl`, never routed through `Chord::display_spelling` the way Round 2's fix
+covered the Help modal, `--help` and the status line's own summary. Fixed the same way: a second
+`$alt` substitution, from `Chord::alt_modifier_label()` (now `pub`, alongside
+`shift_modifier_label`, both widened from `pub(crate)` for this cross-crate need), with its own
+regression test (`the_status_bar_key_hint_respells_both_modifiers_not_only_the_primary_one`).
+
 ### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
 
 Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)

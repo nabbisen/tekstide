@@ -1503,7 +1503,7 @@ help-dialog-close = Close
 # real terminal panes -- is unchanged. Points at the Project Board
 # because that is where the full keyboard list lives when nothing is
 # open; it is deliberately not a claim that Ctrl+Alt+P opens "help".
-status-bar-key-hint = { $primary }+Alt+P Project Board
+status-bar-key-hint = { $primary }+{ $alt }+P Project Board
 
 # RFC-025 PR-025-B, REQ-NOTIFY-002: the active project's own status-bar
 # fields, on the same line as `status-bar-summary` for the height reason

@@ -9462,23 +9462,37 @@ fn trust_symbol(trust: tekstide_core::project::WorkspaceTrust) -> &'static str {
 /// [`terminal_workspace_content_size`] reads the size the layout engine
 /// then left the panes -- the invariant is a property of the layout, not a
 /// sentence about it.
+/// RFC-028 D9, corrected review 650: names the real accelerator for this host -- both
+/// modifiers, not only the primary one. Factored out of [`status_bar`], the same reason
+/// [`status_bar_summary`] already is: a real macOS capture caught this string still
+/// printing the hybrid `"⌘+Alt+P"` (one modifier respelled, one not), the exact defect
+/// `Chord::display_spelling` exists to prevent everywhere else -- this call site never
+/// went through it, having been built from `$primary` alone before
+/// `alt_modifier_label`/`shift_modifier_label` existed, and a hardcoded literal inside
+/// the Fluent message itself (`locales/en.ftl`) is exactly the kind of thing no Rust-side
+/// test can see without rendering the real catalog lookup, directly testable here.
+pub(crate) fn status_bar_key_hint(state: &State) -> String {
+    state.catalog.get_with_args(
+        "status-bar-key-hint",
+        &CatalogArgs::new()
+            .trusted_symbol(
+                "primary",
+                tekstide_core::navigation::Chord::primary_modifier_label(),
+            )
+            .trusted_symbol(
+                "alt",
+                tekstide_core::navigation::Chord::alt_modifier_label(),
+            ),
+    )
+}
+
 fn status_bar(state: &State) -> Element<'_, Message> {
     let mut items =
         row![text(status_bar_summary(state)).size(state.theme.font_size_status())].spacing(16);
     for field in active_project_status_fields(state) {
         items = items.push(text(field).size(state.theme.font_size_status()));
     }
-    items = items.push(
-        // RFC-028 D9: names the real accelerator for this host.
-        text(state.catalog.get_with_args(
-            "status-bar-key-hint",
-            &CatalogArgs::new().trusted_symbol(
-                "primary",
-                tekstide_core::navigation::Chord::primary_modifier_label(),
-            ),
-        ))
-        .size(state.theme.font_size_status()),
-    );
+    items = items.push(text(status_bar_key_hint(state)).size(state.theme.font_size_status()));
 
     // RFC-053 D3: a field that does not fit moves to the next line **whole**
     // (`Row::wrap`), never squeezed until a word is cut. Measured at 520px:

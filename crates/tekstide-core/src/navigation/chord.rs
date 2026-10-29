@@ -177,35 +177,42 @@ impl Chord {
 
     /// Companion to [`Self::primary_modifier_label`], for the same reason:
     /// a Mac user never sees `Alt` on a real keyboard, only `⌥`. Identity
-    /// on Linux. `pub(crate)`, not private: `navigation::tests` needs the
-    /// real value to assert `display_spelling`'s respelling honestly
-    /// instead of hardcoding a platform literal that would go stale the
-    /// moment this function's own body changed, exactly the gap that let
-    /// a hardcoded `"Alt"` in that test pass on Linux while being wrong
-    /// on macOS until the real runner caught it (review 649 round 2).
+    /// on Linux. `pub`, not `pub(crate)` (widened review 650, after a real
+    /// macOS capture caught `shell.rs`'s own `status-bar-key-hint` printing
+    /// the hybrid `⌘+Alt+P` -- that call site builds its Fluent args from
+    /// individual `&'static str` labels, the same way
+    /// [`Self::primary_modifier_label`] already does, and `display_spelling`
+    /// returns an owned `String` the catalog's own `trusted_symbol` cannot
+    /// take (it requires `&'static str` by construction, so a caller is
+    /// never tempted to carry file-derived text into trusted catalog
+    /// substitution) -- so a second, cross-crate-visible source of the real
+    /// value was the fix, not a change to that API).
     #[cfg(target_os = "linux")]
-    pub(crate) const fn alt_modifier_label() -> &'static str {
+    pub const fn alt_modifier_label() -> &'static str {
         "Alt"
     }
 
     /// See [`Self::alt_modifier_label`] above for the convention.
     #[cfg(target_os = "macos")]
-    pub(crate) const fn alt_modifier_label() -> &'static str {
+    pub const fn alt_modifier_label() -> &'static str {
         "⌥"
     }
 
     /// Companion to [`Self::primary_modifier_label`], for the same reason:
     /// a Mac user never sees `Shift` on a real keyboard, only `⇧`.
-    /// Identity on Linux. `pub(crate)` for the same reason as
-    /// [`Self::alt_modifier_label`].
+    /// Identity on Linux. `pub` for the same reason as
+    /// [`Self::alt_modifier_label`] -- no production call site needs it
+    /// yet, but the same constraint (`trusted_symbol` wants `&'static str`)
+    /// would apply the moment one does, and a visibility split between two
+    /// otherwise-identical sibling functions would itself be a trap.
     #[cfg(target_os = "linux")]
-    pub(crate) const fn shift_modifier_label() -> &'static str {
+    pub const fn shift_modifier_label() -> &'static str {
         "Shift"
     }
 
     /// See [`Self::shift_modifier_label`] above for the convention.
     #[cfg(target_os = "macos")]
-    pub(crate) const fn shift_modifier_label() -> &'static str {
+    pub const fn shift_modifier_label() -> &'static str {
         "⇧"
     }
 

@@ -797,6 +797,11 @@ fn generic_args() -> CatalogArgs<'static> {
         // `Chord::primary_modifier_label()` (`"Ctrl"` on Linux, `"⌘"` on
         // macOS); any trusted symbol exercises the same code path here.
         .trusted_symbol("primary", "Ctrl")
+        // RFC-028 D9, review 650: `status-bar-key-hint`'s own `$alt`, added when that
+        // string's hardcoded "Alt" was found still unrespelled on a real macOS capture --
+        // the real value is `Chord::alt_modifier_label()` (`"Alt"` on Linux, `"⌥"` on
+        // macOS).
+        .trusted_symbol("alt", "Alt")
 }
 
 fn shipped_additional_locales() -> Vec<String> {

@@ -487,6 +487,36 @@ fn a_project_board_shell_input_dispatches_the_real_app_command() {
     assert!(status_bar_summary(&state).contains("Project Board"));
 }
 
+/// RFC-028 D9, review 650: `status_bar_key_hint`'s own regression test -- a real macOS
+/// capture caught this exact string still printing the hybrid `"⌘+Alt+P"` (`Ctrl`
+/// respelled, `Alt` left a hardcoded literal in `locales/en.ftl`), after
+/// `display_spelling_respells_every_modifier_token_it_has_a_label_for`
+/// (`navigation/tests.rs`) had already pinned that `Chord::display_spelling` itself
+/// respells every token -- this call site simply never went through it. Both expected
+/// labels come from `Chord`'s own real functions, not hardcoded platform literals, for
+/// the same reason review 649 round 2's bug exists: a hardcoded copy here would go stale
+/// the moment either function's body changed, silently, on whichever platform this test
+/// does not run on.
+#[test]
+fn the_status_bar_key_hint_respells_both_modifiers_not_only_the_primary_one() {
+    let state = state_with(ApplicationShell::new());
+    let hint = super::status_bar_key_hint(&state);
+
+    // Fluent wraps each substituted variable in its own bidi isolation marks
+    // (U+2068/U+2069), so the rendered string is not a plain concatenation an
+    // `assert_eq!` against a hand-built literal could match -- `.contains`, the
+    // same shape `usage.contains(&spelled)` already uses for `Chord::display_
+    // spelling`'s own Rust-side (non-catalog) rendering.
+    let primary = tekstide_core::navigation::Chord::primary_modifier_label();
+    let alt = tekstide_core::navigation::Chord::alt_modifier_label();
+    assert!(
+        hint.contains(primary),
+        "{hint:?} must contain the primary label"
+    );
+    assert!(hint.contains(alt), "{hint:?} must contain the alt label");
+    assert!(hint.ends_with("P Project Board"), "{hint:?}");
+}
+
 /// RFC-015 PR-015-E: `ToggleProjectMode`'s real default binding
 /// (`KeybindingPolicy::linux_mvp`, `Ctrl+Alt+M`) makes this the second
 /// `NavigationAction` with a genuine dispatch path -- proven the same
