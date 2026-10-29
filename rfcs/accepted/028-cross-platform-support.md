@@ -98,6 +98,30 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   `cfg`-chain reasoning into the manifest as a comment, the same way the AUR `PKGBUILD`'s `CFLAGS`
   strip documents its own reason — a bare feature name is exactly what a later cleanup deletes.
 
+  **Decision corrected, 2026-10-29 (reviews 641-649), delegated by the owner to the architect: the
+  feature becomes `macos_fsevent`.** Measured A/B on the real runner, one flag, pushed and reverted,
+  reproduced in both directions: under `macos_kqueue` both `reading_a_watched_file_is_not_reported_but_writing_it_is`
+  and `the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses` fail; under
+  `macos_fsevent` both pass and the core binary's only other failure was an unrelated git test.
+  **Both of this decision's original reasons are retired by measurement, not by argument.** The
+  non-recursion reason is moot: `ProjectWatcher::record_changed_paths`'s own `is_watched(parent)`
+  check enforces the admitted-set boundary in this project's own layer regardless of what the
+  platform reports, so `kqueue`'s grandchild leak never reached the product. The privilege reason is
+  narrower than it reads: it concerns `FSEvents`' system-wide streams, not a watch on a directory the
+  user chose, and `kqueue` needs the same file access on a TCC-protected location anyway. **What
+  `kqueue` actually costs, and what decided it:** entry-list changes are reported (creations,
+  deletions, renames) but a file whose *contents* change produces no notice at all, so the
+  git-status column and the editor's view of a file go stale while the product believes them --
+  a confident wrong display, which is the one thing the owner's "users must not be able to
+  misunderstand" forbids outright. Data safety is **not** the argument and was checked:
+  `project::tests::content`'s own external-change suite detects the change at save and edit time,
+  independent of any watcher, and passes on macOS today. **TCC remains unmeasurable on CI and does
+  not block the decision**, because the decision is safe under its own uncertainty: if `FSEvents`
+  were blocked in a protected location the result is exactly `kqueue`'s present behaviour, so one
+  option dominates in every branch. **Pinned rather than inferred:** a test that a *content* change
+  travels from the watcher through `record_changed_paths` to a scan request, since every watch test
+  that runs on macOS today exercises an entry-list change, which `kqueue` already reported.
+
   **First real behavioral evidence toward reconsidering this choice, 2026-10-20, review 617/618 —
   held, not acted on.** 602 proposed, for item 5's `PermissionDenied` failures, that `kqueue`
   watches file descriptors (must `open` every watched directory) where `inotify` watches paths
