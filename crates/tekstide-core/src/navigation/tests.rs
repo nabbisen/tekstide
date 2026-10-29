@@ -788,23 +788,37 @@ fn a_chord_is_case_insensitive_on_input_and_canonical_on_output() {
 /// RFC-028 D9 Round 2: [`Chord::display_spelling`] respells every modifier
 /// token it has a host label for -- `Ctrl`, `Alt`, `Shift` -- not just the
 /// leading one, since a hybrid like `⌘+Alt+P` (one modifier translated,
-/// two not) would read as a bug to a macOS reader. On this machine
-/// (Linux) all three host labels are the identity, so every case below is
-/// a no-op and the macOS respelling itself is verified by the swap
-/// exercise (module doc), not here; a chord with no `Ctrl` at all (an
-/// `Alt`-only chord) must still come back with `Alt` itself respelled.
+/// two not) would read as a bug to a macOS reader.
+///
+/// **Pulls all three real labels, not just `primary`.** An earlier
+/// version of this test hardcoded the literal `"Alt"`/`"Shift"` in the
+/// expected strings below -- true on Linux, where those labels are the
+/// identity, so the test passed there and shipped; **false on macOS**,
+/// where it then failed for real (CI run `40801599647`, review 649
+/// round 2): `left: "⌘+⌥+P", right: "⌘+Alt+P"`. The swap exercise this
+/// slice ran before that push only swapped `chord.rs`'s own
+/// `#[cfg(target_os = "...")]` arms, so `primary_modifier_label()`
+/// correctly returned the macOS value under it -- but the hardcoded
+/// `"Alt"`/`"Shift"` literals here were never behind any `cfg` at all,
+/// so the swap could not catch this and the misread result was taken as
+/// confirmation instead of the test defect it was. Fixed at the root
+/// (`alt_modifier_label`/`shift_modifier_label` made `pub(crate)`) rather
+/// than by hardcoding the macOS symbols here too, which would only move
+/// the same staleness risk to a second place.
 #[test]
 fn display_spelling_respells_every_modifier_token_it_has_a_label_for() {
     let primary = Chord::primary_modifier_label();
+    let alt = Chord::alt_modifier_label();
+    let shift = Chord::shift_modifier_label();
     assert_eq!(
         Chord::display_spelling("Ctrl+Alt+P"),
-        format!("{primary}+Alt+P")
+        format!("{primary}+{alt}+P")
     );
     assert_eq!(Chord::display_spelling("Ctrl+S"), format!("{primary}+S"));
-    assert_eq!(Chord::display_spelling("Alt+F4"), "Alt+F4");
+    assert_eq!(Chord::display_spelling("Alt+F4"), format!("{alt}+F4"));
     assert_eq!(
         Chord::display_spelling("Ctrl+Shift+Z"),
-        format!("{primary}+Shift+Z")
+        format!("{primary}+{shift}+Z")
     );
 }
 

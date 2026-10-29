@@ -177,29 +177,35 @@ impl Chord {
 
     /// Companion to [`Self::primary_modifier_label`], for the same reason:
     /// a Mac user never sees `Alt` on a real keyboard, only `⌥`. Identity
-    /// on Linux.
+    /// on Linux. `pub(crate)`, not private: `navigation::tests` needs the
+    /// real value to assert `display_spelling`'s respelling honestly
+    /// instead of hardcoding a platform literal that would go stale the
+    /// moment this function's own body changed, exactly the gap that let
+    /// a hardcoded `"Alt"` in that test pass on Linux while being wrong
+    /// on macOS until the real runner caught it (review 649 round 2).
     #[cfg(target_os = "linux")]
-    const fn alt_modifier_label() -> &'static str {
+    pub(crate) const fn alt_modifier_label() -> &'static str {
         "Alt"
     }
 
     /// See [`Self::alt_modifier_label`] above for the convention.
     #[cfg(target_os = "macos")]
-    const fn alt_modifier_label() -> &'static str {
+    pub(crate) const fn alt_modifier_label() -> &'static str {
         "⌥"
     }
 
     /// Companion to [`Self::primary_modifier_label`], for the same reason:
-    /// a Mac user never sees `Shift` on a real keyboard, only `⇧`. Identity
-    /// on Linux.
+    /// a Mac user never sees `Shift` on a real keyboard, only `⇧`.
+    /// Identity on Linux. `pub(crate)` for the same reason as
+    /// [`Self::alt_modifier_label`].
     #[cfg(target_os = "linux")]
-    const fn shift_modifier_label() -> &'static str {
+    pub(crate) const fn shift_modifier_label() -> &'static str {
         "Shift"
     }
 
     /// See [`Self::shift_modifier_label`] above for the convention.
     #[cfg(target_os = "macos")]
-    const fn shift_modifier_label() -> &'static str {
+    pub(crate) const fn shift_modifier_label() -> &'static str {
         "⇧"
     }
 
@@ -208,9 +214,9 @@ impl Chord {
     /// `"Ctrl+..."` string) for a human to read on this host: `Ctrl`, `Alt`
     /// and `Shift` each become their own host label
     /// ([`Self::primary_modifier_label`] for `Ctrl`; `alt_modifier_label`
-    /// and `shift_modifier_label`, private companions of the same shape,
-    /// for the other two) -- all three, not just the leading token, so a
-    /// macOS reader never sees a hybrid like `⌘+Alt+P` (one
+    /// and `shift_modifier_label`, `pub(crate)` companions of the same
+    /// shape, for the other two) -- all three, not just the leading
+    /// token, so a macOS reader never sees a hybrid like `⌘+Alt+P` (one
     /// modifier respelled, two not) next to a Help modal that otherwise
     /// labels every key the way the real keyboard does. None of `Ctrl`,
     /// `Alt`, `Shift` is a substring of another, so the replacement order
