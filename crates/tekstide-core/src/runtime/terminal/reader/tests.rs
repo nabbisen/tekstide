@@ -64,6 +64,24 @@ fn real_pty_output_reaches_the_channel_end_to_end() {
 /// report *stopped*. Starting the waiter first would only narrow the
 /// window. Holding `exit` back closes it: the shell is still waiting for
 /// input when the first wake is read, so the reader is alive.
+///
+/// **Split from the shell's own exit, review 649 round 2 (2026-10-29).**
+/// This test used to go on to write `exit` and assert `wait_for_exit`
+/// too -- a second property, bundled into the first's name. On macOS
+/// that second half is a known-intermittent member of the
+/// shell-wedged-in-`proc_exit` cluster (register,
+/// `rfcs/handoffs/test-process-leak.md`, "Reopened on macOS,
+/// 2026-10-19" and its dated corrections): `wait_for_exit` sometimes
+/// returns `None` where `Exited { exit_status: 0 }` is expected, while
+/// *this* test's own property -- the wake fires at all -- is unaffected
+/// and confirmed passing there. Quarantining the whole test would have
+/// discarded a passing, unaffected check; the exit assertion is now its
+/// own test, [`the_shell_still_exits_normally_after_the_first_wake_is_observed`],
+/// ignored on macOS alone. This test no longer sends `exit` or waits for
+/// it: the shell is left running and is reaped by `RunningTerminal`'s own
+/// containment `Drop` (RFC-043) when `runtime` goes out of scope, the
+/// same real production path every other dropped-without-exiting test
+/// in this module already relies on.
 #[test]
 fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
     let _real_process_slot = RealProcessLimiter::acquire();
@@ -80,6 +98,80 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
     // `spawn_output_reader` hands the master fd to its dedicated reader
     // thread -- `wait_for_shell_ready` reads directly through `runtime`,
     // which would otherwise race the reader thread for the same bytes.
+    wait_for_shell_ready(&mut runtime, &handle);
+    let reader = runtime
+        .spawn_output_reader(&handle)
+        .expect("reader thread should spawn against a real PTY master");
+    let notifier = reader
+        .try_clone_wake_notifier()
+        .expect("wake notifier should clone against a live reader");
+
+    let (done_sender, done_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let more_coming = notifier.block_until_woken();
+        let _ = done_sender.send(more_coming);
+    });
+
+    runtime
+        .write_input(&handle, b"printf 'tekstide-wake-ok\\n'\n")
+        .expect("marker command should write to PTY");
+
+    match done_receiver.recv_timeout(Duration::from_secs(5)) {
+        Ok(more_coming) => assert!(
+            more_coming,
+            "the first wake from real PTY output should report more wakes may still come, not \
+             that the reader has already stopped"
+        ),
+        Err(_) => panic!(
+            "block_until_woken did not return within 5s against real PTY output -- the wake \
+             eventfd is not being signalled on a successful send"
+        ),
+    }
+
+    drop(reader);
+    cleanup_root(root);
+}
+
+/// The property this test used to share a name and a body with --
+/// [`the_wake_notifier_wakes_when_real_pty_output_arrives`] -- before
+/// review 649 round 2 (2026-10-29) split them: not only does the first
+/// real PTY output wake the reader, the shell is still live and
+/// responsive afterward, and exits normally when told to.
+///
+/// **`#[cfg_attr(target_os = "macos", ignore)]`, not deleted or
+/// weakened.** On macOS this assertion is a known-intermittent member of
+/// the shell-wedged-in-`proc_exit` cluster (register,
+/// `rfcs/handoffs/test-process-leak.md`, "Reopened on macOS,
+/// 2026-10-19" and its 2026-10-21 correction to "not deterministic"):
+/// `wait_for_exit` -> `termination.rs`'s bare `try_wait` + sleep loop
+/// sometimes returns `None` within the 5s budget because the shell is
+/// still inside `proc_exit` (`P_WEXIT` set, confirmed by direct
+/// `sysctl` sampling in that investigation) rather than because this
+/// property is false -- widening the timeout is explicitly rejected
+/// there as not a fix. A release decision, revisited each release
+/// against that register entry, not a closure: lifting the ignore
+/// needs either the macOS exit-wait fix or a reason to believe this
+/// specific intermittent no longer recurs.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "known-intermittent: the shell can sit in proc_exit (P_WEXIT) past wait_for_exit's \
+              5s budget on macOS, a timing property of that platform's exit path, not of this \
+              test's own assertion -- see rfcs/handoffs/test-process-leak.md, \"Reopened on \
+              macOS, 2026-10-19\" and its 2026-10-21 correction. A release decision, revisited \
+              each release, not a closure."
+)]
+#[test]
+fn the_shell_still_exits_normally_after_the_first_wake_is_observed() {
+    let _real_process_slot = RealProcessLimiter::acquire();
+    let root = test_root("reader-wake-exit");
+    let project = project_session(ProjectId::for_test(1), &root);
+    let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
+    let mut runtime = TerminalRuntime::new();
+
+    let (terminal, _) = runtime
+        .launch_project_shell(&project, spec)
+        .expect("plain shell launch should succeed");
+    let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
     wait_for_shell_ready(&mut runtime, &handle);
     let reader = runtime
         .spawn_output_reader(&handle)

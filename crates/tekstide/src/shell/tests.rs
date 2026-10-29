@@ -14949,6 +14949,31 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
 /// measured directly here, not assumed, the same finding
 /// `tekstide-core`'s own sibling test already made and was renamed to
 /// reflect (`a_real_backgrounded_job_is_dead_after_a_real_close`).
+///
+/// **`#[cfg_attr(target_os = "macos", ignore)]`, review 649 round 2
+/// (2026-10-29) — a release decision, revisited each release, not a
+/// closure.** This test's own property -- a backgrounded descendant
+/// dies on a real close -- is covered *better* on macOS by
+/// `tekstide-core`'s own ablation piece 2
+/// (`a_real_close_kills_a_live_hup_immune_backgrounded_job`, register,
+/// `rfcs/handoffs/test-process-leak.md`, "RFC-028 D5 ablation pieces
+/// 1-3"), whose job traps `SIGHUP` so only this project's own `SIGKILL`
+/// sweep can have killed it -- a stronger proof than this test's plain,
+/// non-trapping job gives. What fails here on macOS is a precondition
+/// this test does not itself exist to check: `poll_demo_pane_until_
+/// parsed` timing out before the pane's own `$!` line appears (register,
+/// row 8's macOS recurrences, 2026-10-20/21) -- a PTY/fixture-timing
+/// matter in this GUI crate, unrelated to termination.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "known-intermittent, row 8 (rfcs/handoffs/test-process-leak.md): \
+              poll_demo_pane_until_parsed times out waiting for the pane's own $! line on \
+              macOS before this test's own close-and-kill assertions ever run -- a PTY-read \
+              timing precondition, not the termination property this test names, which is \
+              covered more rigorously on macOS by tekstide-core's own \
+              a_real_close_kills_a_live_hup_immune_backgrounded_job. A release decision, \
+              revisited each release, not a closure."
+)]
 #[test]
 fn closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close() {
     let _audit_state_dir =
