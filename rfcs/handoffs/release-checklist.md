@@ -93,6 +93,20 @@ Ninety seconds. Run it.
 
 ## Required Gates
 
+**Branch protection: decided 2026-10-29, and deliberately partial.** `done/029`'s own advisory line
+("branch protection remains an unconfigured repository setting") and its qa-evidence's "the gate it
+is meant to be are two different things until branch protection is" now have an answer, so nobody
+re-raises it: **force pushes blocked and deletions restricted, status checks deliberately not
+required.** The reasoning is this project's own workflow. A push cannot be blocked by a check that
+has not run, since CI runs *on* the push; the only coherent reading of "require status checks" is
+"this commit already has passing checks", which forces every change through a branch and a pull
+request. This project pushes to trunk on serialised turns on purpose. So the two settings that cost
+no workflow change are taken -- they insure against the one accident nothing else recovers from --
+and the third is refused. **Enforcement of a red gate therefore lives here, in this checklist, run
+by a human before tagging**, which is already true of Linux and must not be written up as anything
+stronger.
+
+
 **Run the release gate in a fresh clone, not in a reviewer's working tree. Added 2026-10-14, at
 `0.37.0`, after the working-tree gate went red 3 of 3 for a reason that had nothing to do with the
 release.** `real_repository_filesystem_scan_cost_headless_benchmark` asserts that the default change

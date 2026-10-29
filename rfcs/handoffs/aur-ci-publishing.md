@@ -46,6 +46,27 @@ convenience.
 5. **Fail closed.** Any step failing must leave the AUR untouched. No partial pushes, no "push and
    validate after".
 
+## The host key is pinned, in a committed file, not in a secret
+
+`ssh` on a fresh runner has no `known_hosts` entry for `aur.archlinux.org`, so without one the
+workflow must either fail to connect or be told `StrictHostKeyChecking=no` -- "trust whatever
+answers on that name", with no prior trust to fall back on because the runner is new every run.
+
+**The risk is content authenticity, not key theft.** A man-in-the-middle cannot obtain
+`AUR_SSH_PRIVATE_KEY`: public-key auth never transmits it and the signature is bound to the session.
+What an unpinned host buys an attacker is the `git push` negotiation -- it can present a history we
+then build our commit on top of, and we would push the result to the real AUR under the owner's
+name.
+
+**So pin it, and put it in `packaging/aur/known_hosts`, committed.** A server's *public* host key is
+public data; filing it as an Actions secret hides from every reviewer the one value they would want
+to watch for changes. In the repository it is reviewable in a diff, its history is visible, and if
+AUR rotates the key the workflow fails closed and the file is updated deliberately. Use it with
+`GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=packaging/aur/known_hosts"`.
+
+Decided 2026-10-29, after the owner asked why a second secret was needed: it was not. The first
+design asked for `AUR_SSH_KNOWN_HOSTS` as a secret, which was the wrong container for public data.
+
 ## What it must never do
 
 - **Never run on `pull_request`, and never expose the key to a workflow a fork can trigger.**
@@ -69,7 +90,9 @@ It does not exist yet and has two correctness requirements beyond the obvious:
 ## What stays the owner's, and cannot be delegated
 
 - Creating the AUR SSH key, adding its public half to the AUR account, and adding the private half as
-  the Actions secret. Nobody else can, and nobody else should.
+  the Actions secret. Nobody else can, and nobody else should. **Done, 2026-10-29:**
+  `AUR_SSH_PRIVATE_KEY` is configured. Make it an AUR-only key, not a general one, so revoking it
+  costs nothing else.
 - Approving each publishing run, if the Environment-reviewer design above is adopted.
 - Accepting that RFC once it is written.
 
