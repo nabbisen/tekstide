@@ -407,6 +407,17 @@ project-board-configuration-unknown-key = Configuration: { $key } is not a setti
 # is a name this build defines (escaped anyway); `$reason` is a closed set
 # chosen by the parser, so a configured string is never echoed here; `$other`
 # is another action's name, a fixed identifier, for the two reasons that name one.
+#
+# RFC-028 D9 Round 2: the three example chords quoted below
+# (`not-a-string`/`chord-empty`/`chord-unknown-part`) are **deliberately
+# not respelled** for macOS and must stay that way. They name
+# `config.toml`'s own grammar -- the chord a user types into the file --
+# which `Chord::parse` (crates/tekstide-core/src/navigation/chord.rs)
+# accepts only `Ctrl`-spelled, on every host; it rejects `⌘`. Routing
+# these through `Chord::display_spelling` would tell a macOS user to
+# write `"⌘+Alt+J"` into `config.toml`, which the parser then refuses --
+# the same defect the reverted `macos_mvp()` experiment proved real,
+# reappearing here instead of in the policy table.
 project-board-configuration-fallback = Configuration: { $setting } was not used, so its default stands. { $reason ->
     [not-a-string] It must be a chord in quotes, such as "Ctrl+Alt+J".
     [chord-empty] It is empty; write a chord such as "Ctrl+Alt+J".

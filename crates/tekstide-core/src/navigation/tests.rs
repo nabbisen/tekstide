@@ -785,14 +785,16 @@ fn a_chord_is_case_insensitive_on_input_and_canonical_on_output() {
     assert_eq!(chord("ctrl+5").to_string(), "Ctrl+5");
 }
 
-/// RFC-028 D9: [`Chord::display_spelling`] touches only the leading
-/// `Ctrl` token, replaces it with this host's own
-/// [`Chord::primary_modifier_label`] (`"Ctrl"` on this machine, since
-/// these tests run on Linux), and leaves `Alt`/`Shift`/the key alone --
-/// including a string that holds no `Ctrl` at all (an `Alt`-only chord),
-/// which must come back unchanged rather than gain a spurious label.
+/// RFC-028 D9 Round 2: [`Chord::display_spelling`] respells every modifier
+/// token it has a host label for -- `Ctrl`, `Alt`, `Shift` -- not just the
+/// leading one, since a hybrid like `⌘+Alt+P` (one modifier translated,
+/// two not) would read as a bug to a macOS reader. On this machine
+/// (Linux) all three host labels are the identity, so every case below is
+/// a no-op and the macOS respelling itself is verified by the swap
+/// exercise (module doc), not here; a chord with no `Ctrl` at all (an
+/// `Alt`-only chord) must still come back with `Alt` itself respelled.
 #[test]
-fn display_spelling_respells_only_the_leading_ctrl_token() {
+fn display_spelling_respells_every_modifier_token_it_has_a_label_for() {
     let primary = Chord::primary_modifier_label();
     assert_eq!(
         Chord::display_spelling("Ctrl+Alt+P"),
@@ -800,6 +802,10 @@ fn display_spelling_respells_only_the_leading_ctrl_token() {
     );
     assert_eq!(Chord::display_spelling("Ctrl+S"), format!("{primary}+S"));
     assert_eq!(Chord::display_spelling("Alt+F4"), "Alt+F4");
+    assert_eq!(
+        Chord::display_spelling("Ctrl+Shift+Z"),
+        format!("{primary}+Shift+Z")
+    );
 }
 
 /// What a chord may not be, each with its own reason and none of them carrying

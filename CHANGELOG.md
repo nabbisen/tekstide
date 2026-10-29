@@ -54,6 +54,18 @@ audit, terminal sections) were left as correct, unchanged Linux-literal text —
 rewritten, since the canonical note now lives on the one page a reader of any of them would reach
 for the full reference.
 
+**Round 2 — review 649's two required additions.** `display_spelling` respelled only the leading
+`Ctrl` token; on macOS that printed `⌘+Alt+P` — one modifier translated, two not, a hybrid no Mac
+keyboard shows. It now respells `Alt` → `⌥` and `Shift` → `⇧` too (`Chord::alt_modifier_label`/
+`shift_modifier_label`, identity on Linux, same `#[cfg(target_os = "...")]` convention), keeping
+the existing `+` separators rather than Apple's unseparated `⌘⌥P` style. Separately, the three
+`config.toml` parse-error strings in `locales/en.ftl` (`not-a-string`/`chord-empty`/
+`chord-unknown-part`) are commented as a deliberate exception that must never be routed through
+`display_spelling`: they name the *file's* grammar, which `Chord::parse` accepts only
+`Ctrl`-spelled on every host, so respelling them would instruct a macOS user to write an
+unparseable `"⌘+Alt+J"` into their own config file — the same class of defect the reverted
+`macos_mvp()` experiment already proved real, re-entering through a different door.
+
 ### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
 
 Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)

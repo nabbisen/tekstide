@@ -17,15 +17,26 @@
 //! (`crates/tekstide/src/input.rs`'s `format_binding` checks
 //! `Modifiers::command()`, not `Modifiers::control()`, so a real `⌘` press
 //! on macOS is read into the same `Ctrl` slot a real `Ctrl` press fills on
-//! Linux) and the *label a human reads*, via [`Chord::primary_modifier_label`]
-//! -- used only by presentation call sites (the Help modal, `--help`, the
-//! status bar, a handful of `locales/en.ftl` strings), never by anything
-//! that matches, stores or parses a chord. Baking the label into stored
-//! data was tried and reverted: `Chord::parse` cannot read `⌘` back (it is
-//! not in the grammar at all), so a stored chord spelled with the label
-//! could never be rebound, matched, or compared against collision-free,
-//! only displayed -- the exact bug the swap-tested ablation in RFC-028's
-//! own PR-028-E review caught before it shipped.
+//! Linux) and the *labels a human reads*, via [`Chord::display_spelling`]
+//! (Round 2: it respells `Alt` and `Shift` too, not just `Ctrl` -- a
+//! macOS reader must never see a hybrid like `⌘+Alt+P`, one modifier
+//! translated and two not, since no real Mac keyboard shows `Alt` or
+//! `Shift` either) -- used only by presentation call sites (the Help
+//! modal, `--help`, the status bar, a handful of `locales/en.ftl`
+//! strings), never by anything that matches, stores or parses a chord.
+//! **The three `config.toml` parse-error strings
+//! (`not-a-string`/`chord-empty`/`chord-unknown-part` in
+//! `locales/en.ftl`) are the one deliberate exception**: they name the
+//! *file's* grammar, which stays `Ctrl`-spelled on every host, so they
+//! must never be routed through `display_spelling` -- doing so would
+//! instruct a macOS user to write `"⌘+Alt+J"` into `config.toml`, which
+//! `Chord::parse` rejects outright. Baking a label into stored data was
+//! tried and reverted: `Chord::parse` cannot read `⌘` back (it is not in
+//! the grammar at all), so a stored chord spelled with the label could
+//! never be rebound, matched, or compared against collision-free, only
+//! displayed -- the exact bug the swap-tested ablation in RFC-028's own
+//! PR-028-E review caught before it shipped, and the same bug the error
+//! strings would reintroduce through a different door if ever respelled.
 //!
 //! What a chord may be is narrower than what a keyboard can send, on purpose:
 //!
@@ -164,15 +175,54 @@ impl Chord {
         "⌘"
     }
 
+    /// Companion to [`Self::primary_modifier_label`], for the same reason:
+    /// a Mac user never sees `Alt` on a real keyboard, only `⌥`. Identity
+    /// on Linux.
+    #[cfg(target_os = "linux")]
+    const fn alt_modifier_label() -> &'static str {
+        "Alt"
+    }
+
+    /// See [`Self::alt_modifier_label`] above for the convention.
+    #[cfg(target_os = "macos")]
+    const fn alt_modifier_label() -> &'static str {
+        "⌥"
+    }
+
+    /// Companion to [`Self::primary_modifier_label`], for the same reason:
+    /// a Mac user never sees `Shift` on a real keyboard, only `⇧`. Identity
+    /// on Linux.
+    #[cfg(target_os = "linux")]
+    const fn shift_modifier_label() -> &'static str {
+        "Shift"
+    }
+
+    /// See [`Self::shift_modifier_label`] above for the convention.
+    #[cfg(target_os = "macos")]
+    const fn shift_modifier_label() -> &'static str {
+        "⇧"
+    }
+
     /// Respells a chord **already canonically formatted** (`Chord`'s own
     /// [`Display`](std::fmt::Display), or a policy table's stored
-    /// `"Ctrl+..."` string) for a human to read on this host: the leading
-    /// `Ctrl` token, and only it, becomes [`Self::primary_modifier_label`].
-    /// For presentation only -- the Help modal, `--help`, the status bar
-    /// -- never for anything matched, parsed or stored back; see the
-    /// module doc.
+    /// `"Ctrl+..."` string) for a human to read on this host: `Ctrl`, `Alt`
+    /// and `Shift` each become their own host label
+    /// ([`Self::primary_modifier_label`] for `Ctrl`; `alt_modifier_label`
+    /// and `shift_modifier_label`, private companions of the same shape,
+    /// for the other two) -- all three, not just the leading token, so a
+    /// macOS reader never sees a hybrid like `⌘+Alt+P` (one
+    /// modifier respelled, two not) next to a Help modal that otherwise
+    /// labels every key the way the real keyboard does. None of `Ctrl`,
+    /// `Alt`, `Shift` is a substring of another, so the replacement order
+    /// below does not matter. On Linux all three labels are the identity,
+    /// so this is a no-op there. For presentation only -- the Help modal,
+    /// `--help`, the status bar -- never for anything matched, parsed or
+    /// stored back; see the module doc.
     pub fn display_spelling(canonical: &str) -> String {
-        canonical.replacen("Ctrl", Self::primary_modifier_label(), 1)
+        canonical
+            .replacen("Ctrl", Self::primary_modifier_label(), 1)
+            .replacen("Alt", Self::alt_modifier_label(), 1)
+            .replacen("Shift", Self::shift_modifier_label(), 1)
     }
 }
 
