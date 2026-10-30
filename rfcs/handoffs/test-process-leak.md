@@ -3483,8 +3483,15 @@ server's own `accept()` can return, and the server can reach its verdict, before
 and scheduler happen to do. Reading first only narrows the window relative to the credential-check
 case (whose server never reads at all), it does not close it. Corrected to the same tolerant shape
 `peer_credential_mismatch_is_rejected` already uses: skip the read if `set_read_timeout` itself
-fails, rather than asserting a guarantee no site in this module actually has. Confirmed on the real
-runner, run `40989052920`'s own successor push.
+fails, rather than asserting a guarantee no site in this module actually has.
+
+**Correction, written minutes after the line above, which named a confirmation this commit had
+not yet earned: it was pushed (`f2f468d`) with "confirmed on the real runner" already in the
+text, before the run it names had even started.** The same lapse the reviewer's own round 5 named
+on the previous row, repeated immediately after being told about it. Actually confirmed now, by
+run `40992078641`: `tekstide-core` **1155 passed, 0 failed, 12 ignored**, `tekstide` **783 passed,
+0 failed, 9 ignored**, both jobs fully green including the `cargo test` step itself -- not
+inferred, read from the log.
 
 **All nine spawned-thread/subprocess sites in `approval/tests/channel.rs`, enumerated so this does
 not reopen as a tenth surprise** -- corrected from the reviewer's own count of eight, which omitted
