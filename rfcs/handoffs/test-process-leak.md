@@ -3450,3 +3450,69 @@ outcome) and skips the read in that case rather than asserting; a sentence was a
 `malformed_frame_is_rejected_not_partially_parsed` naming the "server reads first" condition its
 own `.expect()` depends on, so the next test built on this shape checks the condition and not
 only the pattern.
+
+## New row, 2026-10-30 -- the "sixth test" review 644 named in 2026-10-19's own history never actually got review 645's fix
+
+Run `40989052920` (`bac3caf`, confirming the round-4 fix above): `approval::tests::channel::
+wrong_token_is_rejected_without_a_dialog` failed. **The runner's own exact string, quoted rather
+than reconstructed from the pattern** -- review 651 round 5's own required correction, after the
+first version of this row hedged between two values, one of which never appeared in the log:
+
+```
+left: ConnectionClosed
+ right: TokenMismatch
+```
+
+`ConnectionClosed` means review 644's own `EINVAL` mapping fired exactly as designed -- the same
+mechanism, same mapping, as the five already-fixed sites, not a different cause. Read against
+this register's own "Mechanism confirmed, review 644" section: that section *names* this test
+joining the failing set on a sample run, but review 645's actual fix commits (`dd31fb1`,
+`25c21a2`) touched `malformed_frame_is_rejected_not_partially_parsed`,
+`oversized_declared_length_is_rejected_before_reading_the_body`,
+`cross_process_impersonation_with_wrong_token_is_rejected`,
+`serve_concurrently_refuses_connections_beyond_the_concurrency_cap` and
+`serve_concurrently_accepts_a_second_connection_while_the_first_stalls` -- five sites, and this one
+was never among them. Named in the history, never actually fixed; the two things look alike in a
+text search, which is presumably how it was missed for this long.
+
+**Fixed with the tolerant shape, not an unconditional `.expect()`.** The first version of this fix
+(and the comment added to `malformed_frame_is_rejected_not_partially_parsed` to justify it) claimed
+"this server reads first, so it cannot close first" as an absolute guarantee. It is not: the
+server's own `accept()` can return, and the server can reach its verdict, before the peer thread's
+`write_all` even completes, since there is no ordering between the two beyond whatever the kernel
+and scheduler happen to do. Reading first only narrows the window relative to the credential-check
+case (whose server never reads at all), it does not close it. Corrected to the same tolerant shape
+`peer_credential_mismatch_is_rejected` already uses: skip the read if `set_read_timeout` itself
+fails, rather than asserting a guarantee no site in this module actually has. Confirmed on the real
+runner, run `40989052920`'s own successor push.
+
+**All nine spawned-thread/subprocess sites in `approval/tests/channel.rs`, enumerated so this does
+not reopen as a tenth surprise** -- corrected from the reviewer's own count of eight, which omitted
+`peer_credential_mismatch_is_rejected` itself:
+
+1. `malformed_frame_is_rejected_not_partially_parsed` -- bounded read, `.expect()`-ed; server reads
+   the frame before rejecting, narrowing but not closing the race (round 5's own corrected comment).
+2. `oversized_declared_length_is_rejected_before_reading_the_body` -- same shape, same reasoning,
+   by reference to (1)'s own comment.
+3. `cross_process_impersonation_with_wrong_token_is_rejected` -- a real subprocess (`python3`), not
+   a thread; fixed inside its own Python payload (review 645, `dd31fb1`).
+4. `serve_concurrently_refuses_connections_beyond_the_concurrency_cap` -- no spawned thread at all
+   (40 synchronous `connect`s held in the main test thread); its own race was `set_read_timeout`
+   running after a sleep that let the endpoint close surplus connections first, fixed by moving it
+   into the connect loop (review 645, `dd31fb1`).
+5. `serve_concurrently_accepts_a_second_connection_while_the_first_stalls` -- two threads: a `slow_
+   peer` that never writes (no race), and a `well_behaved_peer` fixed structurally rather than with
+   a bounded read -- it returns its own stream alive instead of letting it drop, so there is no
+   "server might still be reading when I close" moment at all (the "fifth site," review 645,
+   `25c21a2`).
+6. `real_proposal_and_decision_round_trip_over_the_socket` -- needs no fix: its adapter thread does
+   a real `read_exact` of the decision, a genuine exchange rather than a race barrier (review 646,
+   `8757027`).
+7. `silent_peer_triggers_a_read_timeout_rather_than_blocking_forever` -- never writes at all, by
+   design; no race to have.
+8. `peer_credential_mismatch_is_rejected` -- bounded, tolerant read (skip on `set_read_timeout`
+   failure); this server's rejection path never reads at all, so it finishes first routinely, not
+   only on an unlucky schedule (review 651 rounds 3-4).
+9. `wrong_token_is_rejected_without_a_dialog` -- bounded, tolerant read, same shape as (8); this
+   server's own rejection path does read first, narrowing the window relative to (8)'s, but the
+   same non-assertable gap (review 651 round 5, this row).

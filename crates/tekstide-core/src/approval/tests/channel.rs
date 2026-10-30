@@ -645,6 +645,33 @@ fn wrong_token_is_rejected_without_a_dialog() {
         stream
             .write_all(&valid_proposal_frame(&wrong_token, "proposal-evil"))
             .expect("impersonator send proposal");
+        // Found on the real macOS runner the same session the sibling
+        // fix above landed (review 651 round 4): this test's own
+        // impersonator thread never had review 645's bounded-read fix at
+        // all, so its own close could race ahead of the server's
+        // `set_read_timeout` and report `ConnectionClosed` instead of
+        // `TokenMismatch` -- `test-process-leak.md`'s own "sixth test
+        // joined" note (review 644) named it without the fix ever
+        // actually landing here. **Review 651 round 5's own correction**:
+        // this server's verdict path does read the full frame
+        // (`read_frame`, then the token check) before it can reject, so
+        // the server is slower than this thread by a real amount of work
+        // -- but that only narrows the window, it does not remove it: the
+        // server's own `accept()` can return as soon as `connect()`
+        // lands, before this thread's `write_all` does, so there is no
+        // structural guarantee the server has even started reading by
+        // the time this thread reaches `set_read_timeout`. Tolerated, not
+        // asserted, the same shape `peer_credential_mismatch_is_rejected`
+        // uses: skip the read if the timeout itself fails, rather than
+        // claiming a guarantee only the credential-check path lacks when
+        // every spawned-thread site in this module has the same
+        // underlying race at different odds.
+        if stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .is_ok()
+        {
+            let _ = stream.read(&mut [0_u8; 1]);
+        }
     });
 
     let result = endpoint.accept_proposal();
@@ -686,16 +713,26 @@ fn malformed_frame_is_rejected_not_partially_parsed() {
         // which is what makes this `read` return `0` -- strictly after
         // the server has finished, every time, no `sleep` anywhere.
         //
-        // **This thread's own `.expect()` on `set_read_timeout` is sound
-        // only because this test's server path always reads first**
+        // **Review 651 round 5's own required correction to this
+        // comment's first version, which claimed a guarantee that does
+        // not exist.** This test's server path does read first
         // (`authenticate_and_read` calls `read_frame` before it can reach
-        // any verdict here), so the server is strictly slower than this
-        // peer and can never drop the stream first. `peer_credential_
-        // mismatch_is_rejected` (below) has no such guarantee -- its
-        // server's rejection path never reads at all -- which is exactly
-        // why that test tolerates this same call failing instead of
-        // asserting on it. Copy the bounded-read *shape* freely; copy the
-        // `.expect()` only where the server is proven to read first too.
+        // any verdict here), so the window for this thread's own
+        // `set_read_timeout` to race an already-closed peer is much
+        // narrower than in the credential-check case below, where the
+        // server's rejection path never reads at all -- **narrower, not
+        // absent**: `accept()` can return before this thread's own
+        // `write_all` does, so there is no structural ordering that rules
+        // the server out finishing first on a sufficiently loaded runner.
+        // This `.expect()` has not been observed to fail here across this
+        // cluster's own history; that is evidence of a smaller
+        // probability, not of a closed race. `peer_credential_mismatch_
+        // is_rejected` and `wrong_token_is_rejected_without_a_dialog`
+        // (below) both tolerate this call failing instead, for exactly
+        // this reason. Uniformising this one onto the tolerant shape too
+        // is deliberately deferred to the B1 socket-path fix's own
+        // subject, which touches this module anyway, rather than
+        // churning a passing test to close a window never observed open.
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .expect("set the sender's own bound");
@@ -1031,11 +1068,13 @@ fn peer_credential_mismatch_is_rejected() {
         // `malformed_frame_is_rejected_not_partially_parsed`'s: block on a
         // bounded read so this thread cannot return, and drop the stream,
         // before the server has reached its verdict. But that sibling
-        // test's server always calls `read_frame` before rejecting, so it
-        // is strictly slower than its own peer and cannot finish first --
-        // this server's rejection path (`authenticate_and_read`'s
-        // `peer_uid` check) never reads at all, so it *can* finish and
-        // drop its end before this thread's own `set_read_timeout` runs.
+        // test's server always calls `read_frame` before rejecting, which
+        // only narrows its own race (round 5's own correction to that
+        // comment) -- here the gap is categorically wider: this server's
+        // rejection path (`authenticate_and_read`'s `peer_uid` check)
+        // never reads at all, so it routinely finishes and drops its end
+        // before this thread's own `set_read_timeout` runs, not merely on
+        // an unlucky schedule.
         // When that happens, `set_read_timeout` is itself the call looking
         // at an already-gone peer, and hits the identical macOS `EINVAL`
         // (review 644) this fix exists to avoid on the *server* side --
