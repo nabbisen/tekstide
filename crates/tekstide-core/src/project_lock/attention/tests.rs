@@ -52,6 +52,16 @@ fn max_socket_path_len_matches_the_real_platform_limit() {
 /// adapted for this module's own filename shape
 /// (`<project_id>.attention.sock`, no prefix to strip since `ProjectId`
 /// carries none).
+/// **Review 651 B1: this test's own doc comment above overstated what it
+/// measures.** `test_root` (above) joins under `std::env::temp_dir()`
+/// too, but `ci.yml`'s macOS job runs the whole suite under
+/// `TMPDIR="$CI_TMPDIR"` (`/tmp/tci`), so this test measures that short
+/// anchor's own headroom, never the runner's real per-session `$TMPDIR`
+/// (`/var/folders/…/T`, **not** canonicalized here -- `attention_socket_
+/// dir`'s macOS arm, unlike the approval channel's, never resolves the
+/// `/var` → `/private/var` symlink). Still a real, correct regression
+/// check for this module's own fixed overhead; the diagnostic below
+/// supplies the measurement against the real limit this one cannot.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_macos_attention_socket_path_leaves_comfortable_headroom_under_the_real_limit() {
@@ -68,6 +78,31 @@ fn the_macos_attention_socket_path_leaves_comfortable_headroom_under_the_real_li
          the stated {STATED_HEADROOM}-byte headroom under the real {MACOS_SUN_PATH_LIMIT}-byte \
          sun_path limit -- attention_socket_dir's own $TMPDIR/tekstide-attention choice may \
          have regressed"
+    );
+    cleanup_root(state_root);
+}
+
+/// Review 651 B1: a pure measurement, not a check -- see
+/// `approval::tests::channel`'s own sibling diagnostic for the full
+/// reasoning. Prints the real runner's own ambient `$TMPDIR` and the
+/// resolved attention-socket path length against the limit, asserting
+/// nothing.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "a measurement, not a check -- see ci.yml's own dedicated step, review 651 B1"]
+fn macos_attention_socket_path_headroom_measurement_against_the_real_ambient_tmpdir() {
+    let raw = std::env::temp_dir();
+    eprintln!("MEASURED raw std::env::temp_dir() = {raw:?}");
+
+    let state_root = test_root("macos-real-tmpdir-headroom-measurement");
+    let project_id = uuid::Uuid::new_v4().to_string();
+    let path = super::attention_socket_path(&state_root, &project_id);
+    let path_len = path.as_os_str().len();
+    const MACOS_SUN_PATH_LIMIT: usize = 103;
+    eprintln!(
+        "MEASURED attention socket path = {path:?} ({path_len} bytes, limit \
+         {MACOS_SUN_PATH_LIMIT}, headroom {})",
+        MACOS_SUN_PATH_LIMIT as isize - path_len as isize
     );
     cleanup_root(state_root);
 }

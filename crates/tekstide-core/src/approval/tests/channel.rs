@@ -1161,6 +1161,17 @@ fn a_realistic_linux_socket_path_leaves_comfortable_headroom() {
 /// module's own fixed overhead (the `"tekstide"` dirname,
 /// `socket_filename_stem`'s prefix strip, `.sock`) growing enough to
 /// eat the stated headroom under the real 103-byte limit.
+/// **Review 651 B1: this test's own doc comment above overstated what it
+/// measures.** `ci.yml`'s macOS job runs the whole suite under
+/// `TMPDIR="$CI_TMPDIR"` (`/tmp/tci`, 8 bytes) to keep the rest of the
+/// suite from reddening on an unrelated `sockaddr_un` path -- which means
+/// *this* test, run inside that same job, measures `/tmp/tci`'s own
+/// headroom, never the runner's real per-session `$TMPDIR`
+/// (`/var/folders/…/T`, canonicalized here to `/private/var/folders/…/T`
+/// since `/var` is a symlink on macOS). It is still a real, correct
+/// regression check for this module's own fixed overhead -- the thing it
+/// is not is a measurement of the real limit, which is what the
+/// diagnostic below exists to supply.
 #[cfg(target_os = "macos")]
 #[test]
 fn the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit() {
@@ -1177,6 +1188,39 @@ fn the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit() {
          stated {STATED_HEADROOM}-byte headroom under the real {MACOS_SUN_PATH_LIMIT}-byte \
          sun_path limit -- channel_dir_under's own $TMPDIR/tekstide choice, or \
          socket_filename_stem's prefix strip, may have regressed"
+    );
+}
+
+/// Review 651 B1: a pure measurement, not a check -- asserts nothing,
+/// consumes nothing, and exists only to print, against the real runner's
+/// own ambient `$TMPDIR` (left alone by this one dedicated CI step,
+/// unlike the suite-wide run above), the numbers arithmetic alone
+/// predicted might already be over the limit: a typical macOS
+/// `/var/folders/<2>/<~30>/T` anchor, canonicalized (the `/private`
+/// prefix `channel_dir_under`'s macOS arm pays for), joined with
+/// `tekstide` and a 36-byte UUID plus `.sock`. `--nocapture`, its own CI
+/// step, the same shape `ci.yml`'s libproc-visibility/kern-proc-session
+/// measurements already use, for the same reason: a passing test's
+/// stdout/stderr is otherwise discarded.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "a measurement, not a check -- see ci.yml's own dedicated step, review 651 B1"]
+fn macos_approval_socket_path_headroom_measurement_against_the_real_ambient_tmpdir() {
+    let raw = std::env::temp_dir();
+    let canonical = raw.canonicalize();
+    eprintln!("MEASURED raw std::env::temp_dir() = {raw:?}");
+    eprintln!("MEASURED canonicalized = {canonical:?}");
+
+    let state_root = temp_state_root("macos-real-tmpdir-headroom-measurement");
+    let directory = resolve_directory(&state_root);
+    let agent_run_id = AgentRunId::for_test(rand_seed());
+    let path = directory.socket_path(&agent_run_id);
+    let path_len = path.as_os_str().len();
+    const MACOS_SUN_PATH_LIMIT: usize = 103;
+    eprintln!(
+        "MEASURED approval socket path = {path:?} ({path_len} bytes, limit \
+         {MACOS_SUN_PATH_LIMIT}, headroom {})",
+        MACOS_SUN_PATH_LIMIT as isize - path_len as isize
     );
 }
 
