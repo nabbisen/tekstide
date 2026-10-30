@@ -685,6 +685,17 @@ fn malformed_frame_is_rejected_not_partially_parsed() {
         // reads the frame, reaches its verdict, and drops its own end,
         // which is what makes this `read` return `0` -- strictly after
         // the server has finished, every time, no `sleep` anywhere.
+        //
+        // **This thread's own `.expect()` on `set_read_timeout` is sound
+        // only because this test's server path always reads first**
+        // (`authenticate_and_read` calls `read_frame` before it can reach
+        // any verdict here), so the server is strictly slower than this
+        // peer and can never drop the stream first. `peer_credential_
+        // mismatch_is_rejected` (below) has no such guarantee -- its
+        // server's rejection path never reads at all -- which is exactly
+        // why that test tolerates this same call failing instead of
+        // asserting on it. Copy the bounded-read *shape* freely; copy the
+        // `.expect()` only where the server is proven to read first too.
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .expect("set the sender's own bound");
@@ -1015,6 +1026,34 @@ fn peer_credential_mismatch_is_rejected() {
         // fast, correct rejection, not a test failure, so errors are
         // deliberately ignored rather than `.expect()`-ed.
         let _ = stream.write_all(&valid_proposal_frame(&token, "proposal-1"));
+        // Review 651 round 3's own required fix -- and round 4's own
+        // required correction to it. The *shape* is
+        // `malformed_frame_is_rejected_not_partially_parsed`'s: block on a
+        // bounded read so this thread cannot return, and drop the stream,
+        // before the server has reached its verdict. But that sibling
+        // test's server always calls `read_frame` before rejecting, so it
+        // is strictly slower than its own peer and cannot finish first --
+        // this server's rejection path (`authenticate_and_read`'s
+        // `peer_uid` check) never reads at all, so it *can* finish and
+        // drop its end before this thread's own `set_read_timeout` runs.
+        // When that happens, `set_read_timeout` is itself the call looking
+        // at an already-gone peer, and hits the identical macOS `EINVAL`
+        // (review 644) this fix exists to avoid on the *server* side --
+        // asserting on it here would just move the same intermittent to
+        // the peer thread. Tolerated, not asserted: the only measured
+        // cause of a failure here is the server already being gone, which
+        // is this test's own asserted outcome, so there is nothing left
+        // to wait for. Skipping the read on that failure keeps it bounded
+        // either way -- the one thing an unconditional `.expect()` was
+        // guarding against, a hang against a still-live server, cannot
+        // happen, since a *live* server's `set_read_timeout` always
+        // succeeds here.
+        if stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .is_ok()
+        {
+            let _ = stream.read(&mut [0_u8; 1]);
+        }
     });
 
     let result = endpoint.accept_proposal();

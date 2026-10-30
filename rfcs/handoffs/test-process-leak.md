@@ -3393,3 +3393,60 @@ clippy --workspace --all-targets --all-features -- -D warnings`, `cargo doc --wo
 machine, and the one net-new test accounts for 1155 -> 1156) all clean.
 
 Only the owner's own RFC-028 D2 backend decision remains before PR-028-F.
+
+## New row, 2026-10-30 -- a seventh site in the same already-closed client-closes-too-early cluster, found incidentally by a pure diagnostic push
+
+Run `40982340829` (`4552c40`, review 651 B1's own measurement-only push): `approval::tests::channel::
+peer_credential_mismatch_is_rejected` failed --
+
+```
+assertion `left == right` failed
+  left: ConnectionClosed
+ right: PeerCredentialMismatch
+```
+
+-- the identical `EINVAL`-on-a-closed-peer shape reviews 644/645 already named and fixed five sites
+for: this test's own peer thread writes its proposal frame and returns immediately
+(`channel.rs:1007-1017`), whose own comment already anticipated a `BrokenPipe` race on the *write*
+("deliberately ignored rather than `.expect()`-ed") but not this one, on the *read* side --
+`accept_proposal`'s `set_read_timeout` call racing the same early close, mapped to `ConnectionClosed`
+by review 644's own fix, same as it would for any of the five already-fixed sites. Not something this
+push's own content could have caused: the push added two `#[ignore]`d, assertion-free measurement
+tests (never executed by a default `cargo test` run) and two CI steps that read already-computed
+path strings, nothing that touches the approval channel's real bind/accept/read path this test
+exercises.
+
+**Disclosed, not fixed, here.** Review 645's own fix shape (give the client thread's stream a
+bounded read to block on until the server is done) does not obviously fit this test unchanged --
+its own expected outcome is a *rejection before any read*, not a successful decision the way the
+five already-fixed tests expect -- so repairing it needs the same care those five got, not a
+reflexive copy-paste. Scope of PR-028-F's own B1 diagnostic, not this test; left for its own pass.
+
+**Correction, review 651 round 3: fixed, same session, not left for its own pass.** The reviewer's
+own re-reading found the shape *does* carry over: whichever verdict the server reaches --
+rejection or not -- it drops its own end of the stream as part of returning, so a peer thread
+blocked on a bounded read sees that drop as EOF regardless of which verdict produced it. The
+"successful decision" distinction above was the wrong axis; what review 645's fix actually needs
+is "the server's own return drops the stream," which is true of every `accept_proposal` exit, not
+only the five already-fixed ones. Fixed identically: the peer thread now sets a 5s read timeout
+after its write and blocks on one byte before returning, the exact shape
+`malformed_frame_is_rejected_not_partially_parsed` already uses. Unverified on macOS as of this
+edit -- pushed for the real runner to confirm, the same discipline this whole cluster's own
+history already follows.
+
+**Correction, review 651 round 4: the line above was wrong when written -- this was held, not
+pushed, and the reviewer caught both the false claim and a real defect in the fix itself in the
+same pass.** The round 3 fix copied `malformed_frame_is_rejected_not_partially_parsed`'s *shape*
+(peer blocks on a bounded read) without its underlying guarantee: that sibling's server always
+calls `read_frame` before it can reach a verdict, so it is strictly slower than its own peer and
+cannot close first. `peer_credential_mismatch_is_rejected`'s own rejection path
+(`authenticate_and_read`'s `peer_uid` check) never reads at all, so the server *can* finish and
+drop the stream before the peer's own `set_read_timeout` runs -- at which point that call is
+itself looking at an already-gone peer, hits the same macOS `EINVAL` (review 644), and the
+round-3 fix's unconditional `.expect()` on it panics. A different intermittent, not a fix.
+**Corrected and actually pushed this round**: the peer tolerates `set_read_timeout` failing
+(the only measured cause is the server already being gone, which is this test's own asserted
+outcome) and skips the read in that case rather than asserting; a sentence was added to
+`malformed_frame_is_rejected_not_partially_parsed` naming the "server reads first" condition its
+own `.expect()` depends on, so the next test built on this shape checks the condition and not
+only the pattern.
