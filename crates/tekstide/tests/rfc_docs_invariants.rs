@@ -1783,3 +1783,158 @@ fn the_crate_local_notice_and_license_do_not_drift_from_the_workspace_root() {
         );
     }
 }
+
+// --- RFC-028 PR-028-F, review 651: install.sh and release.yml must agree on asset names ---
+
+/// `install.sh`'s own `asset_name="tekstide-..."` assignments -- every
+/// release asset the installer can select by name, across every
+/// `os`/`arch` branch the script handles. Parsed rather than hand-copied
+/// so a future branch (or a renamed asset) is read from the script's own
+/// text, not from a list that can silently fall out of sync with it.
+fn install_sh_asset_names(source: &str) -> std::collections::BTreeSet<String> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let (_, rest) = line.split_once("asset_name=\"")?;
+            let name = rest.split('"').next()?;
+            Some(name.to_owned())
+        })
+        .collect()
+}
+
+/// `release.yml`'s own `name="tekstide-..."` assignments inside each
+/// job's "stage the artifact" step -- every release asset the workflow
+/// actually builds and uploads.
+fn release_yml_staged_asset_names(source: &str) -> std::collections::BTreeSet<String> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let (_, rest) = line.split_once("name=\"tekstide-")?;
+            let name = rest.split('"').next()?;
+            Some(format!("tekstide-{name}"))
+        })
+        .collect()
+}
+
+/// The single choke-point both the real check below and its own
+/// planted-violation proof call -- **review 651 round 2**: the first
+/// version of this test re-implemented the set-difference comparison
+/// inline inside the planted-violation test instead of calling this,
+/// so the two could drift and the proof would still pass. Returns
+/// (installer-only names, workflow-only names), each empty when the two
+/// agree.
+fn install_sh_release_yml_asset_name_disagreements(
+    installer_names: &std::collections::BTreeSet<String>,
+    workflow_names: &std::collections::BTreeSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    (
+        installer_names
+            .difference(workflow_names)
+            .cloned()
+            .collect(),
+        workflow_names
+            .difference(installer_names)
+            .cloned()
+            .collect(),
+    )
+}
+
+/// **Review 651**: nothing related `install.sh`'s asset names to
+/// `release.yml`'s before this test -- both are hand-written strings in
+/// two separate files, and a name mismatch there is the single failure
+/// mode that 404s a real user running the published one-liner. Asserts
+/// both directions: every asset the installer can select is one the
+/// workflow actually stages, and the reverse (an asset the workflow
+/// builds that the installer can never reach is dead weight, not a
+/// defect in itself, but still worth knowing about rather than silently
+/// carrying).
+#[test]
+fn every_install_sh_asset_name_is_one_release_yml_actually_stages_and_the_reverse() {
+    let Ok(install_sh) = std::fs::read_to_string(repo_root().join("install.sh")) else {
+        eprintln!("skipped: install.sh is not packaged with this crate");
+        return;
+    };
+    let Ok(release_yml) =
+        std::fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
+    else {
+        eprintln!("skipped: .github/workflows/release.yml is not packaged with this crate");
+        return;
+    };
+
+    let installer_names = install_sh_asset_names(&install_sh);
+    let workflow_names = release_yml_staged_asset_names(&release_yml);
+
+    assert!(
+        !installer_names.is_empty() && !workflow_names.is_empty(),
+        "the scan must read real asset names from both files: installer {installer_names:?}, \
+         workflow {workflow_names:?}"
+    );
+
+    let (installer_only, workflow_only) =
+        install_sh_release_yml_asset_name_disagreements(&installer_names, &workflow_names);
+    assert!(
+        installer_only.is_empty(),
+        "install.sh can select {installer_only:?}, which release.yml never stages -- every \
+         user who reaches that branch gets a 404"
+    );
+    assert!(
+        workflow_only.is_empty(),
+        "release.yml stages {workflow_only:?}, which install.sh can never select -- not a \
+         user-facing defect by itself, but an asset nothing in this repository's own installer \
+         ever reaches"
+    );
+}
+
+/// The planted-violation proof the real test above cannot itself carry a
+/// baseline of: the two parsing functions and the comparison they feed,
+/// exercised against literal text crafted to disagree in each direction
+/// in turn, rather than trusting their shape from the real-file test
+/// passing alone.
+#[test]
+fn the_install_sh_release_yml_asset_name_check_catches_a_planted_violation_in_either_direction() {
+    let installer_source = "\
+    x86_64) asset_name=\"tekstide-x86_64-linux\" ;;
+    arm64) asset_name=\"tekstide-aarch64-macos\" ;;
+";
+    let agreeing_workflow_source = "\
+          name=\"tekstide-x86_64-linux\"
+          name=\"tekstide-aarch64-macos\"
+";
+    let installer_names = install_sh_asset_names(installer_source);
+    assert_eq!(
+        installer_names,
+        ["tekstide-x86_64-linux", "tekstide-aarch64-macos"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    let agreeing_workflow_names = release_yml_staged_asset_names(agreeing_workflow_source);
+    let (installer_only, workflow_only) =
+        install_sh_release_yml_asset_name_disagreements(&installer_names, &agreeing_workflow_names);
+    assert!(
+        installer_only.is_empty() && workflow_only.is_empty(),
+        "the baseline must agree"
+    );
+
+    // Direction 1: the installer can select an asset the workflow never stages.
+    let missing_from_workflow_source = "\
+          name=\"tekstide-x86_64-linux\"
+";
+    let missing_from_workflow_names = release_yml_staged_asset_names(missing_from_workflow_source);
+    let (installer_only, _) = install_sh_release_yml_asset_name_disagreements(
+        &installer_names,
+        &missing_from_workflow_names,
+    );
+    assert_eq!(installer_only, vec!["tekstide-aarch64-macos"]);
+
+    // Direction 2: the workflow stages an asset the installer can never select.
+    let extra_in_workflow_source = "\
+          name=\"tekstide-x86_64-linux\"
+          name=\"tekstide-aarch64-macos\"
+          name=\"tekstide-x86_64-windows\"
+";
+    let extra_in_workflow_names = release_yml_staged_asset_names(extra_in_workflow_source);
+    let (_, workflow_only) =
+        install_sh_release_yml_asset_name_disagreements(&installer_names, &extra_in_workflow_names);
+    assert_eq!(workflow_only, vec!["tekstide-x86_64-windows"]);
+}

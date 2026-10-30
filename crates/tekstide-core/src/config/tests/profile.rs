@@ -457,3 +457,34 @@ fn to_ai_cli_profile_treats_a_bare_command_as_a_reviewed_system_path_lookup() {
         other => panic!("expected AiCliExecutable::PathLookup, got {other:?}"),
     }
 }
+
+/// RFC-028 D8: a GUI-launched macOS app does not inherit the user's
+/// interactive shell `PATH`, so a bare configured command must still be
+/// able to find an Apple Silicon Homebrew install -- the same class of fix
+/// as the two pre-existing reviewed system directories, not gated to a
+/// single platform since the lookup itself only checks whether a
+/// candidate path exists. **Review 651: pins the whole ordered list, not
+/// only Homebrew's presence** -- the order is the behaviour, since it
+/// decides which binary wins when a bare command exists in more than one
+/// of these directories, and `agent/profile.rs`'s own sibling tests
+/// already pin their lists the same way.
+#[test]
+fn to_ai_cli_profile_bare_command_lookup_includes_the_homebrew_directory() {
+    let profile = to_ai_cli_profile("id", &configured_profile("claude"));
+    match profile.executable {
+        AiCliExecutable::PathLookup { lookup_paths, .. } => {
+            assert_eq!(
+                lookup_paths
+                    .iter()
+                    .map(|entry| entry.path.clone())
+                    .collect::<Vec<_>>(),
+                vec![
+                    PathBuf::from("/opt/homebrew/bin"),
+                    PathBuf::from("/usr/local/bin"),
+                    PathBuf::from("/usr/bin"),
+                ]
+            );
+        }
+        other => panic!("expected AiCliExecutable::PathLookup, got {other:?}"),
+    }
+}

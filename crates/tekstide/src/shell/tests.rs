@@ -3682,7 +3682,7 @@ fn apply_terminal_geometry_resizes_every_tracked_pane_when_called_from_a_launch_
 
 /// RFC-022 PR-022-D: the real `Ctrl+Alt+A` path against a freshly opened
 /// project -- `WorkspaceTrust::Restricted` by default, and this test
-/// never grants it. `claude_code_linux_default`'s honest
+/// never grants it. `default_for_host`'s honest
 /// `MayDiscoverWorkspaceFiles` policy is therefore refused here every
 /// time, regardless of whether an AI CLI happens to be installed on the
 /// machine running this suite. Still switches to Terminal Immersion, the
@@ -3969,7 +3969,7 @@ fn a_restricted_mode_blocked_record_appears_only_for_workspace_discovery_refusal
             .unwrap()
             .set_resource_limits(limits);
 
-        let profile = tekstide_core::agent::AiCliProfile::claude_code_linux_default();
+        let profile = tekstide_core::agent::AiCliProfile::default_for_host();
         let refusal = attempt_agent_run_launch_with_profile(&mut state, profile)
             .expect_err("a zero agent_run_limit must refuse before anything else is checked");
         assert!(matches!(
@@ -5555,7 +5555,7 @@ fn attempt_agent_run_launch_with_profile_launches_a_plain_profile_unaudited_inst
 
 /// **Response 371 R1, the second reachable cause.** `AuditReference::new`
 /// rejects any byte outside `[A-Za-z0-9-_.:]` -- a space is enough. Not
-/// reachable through `claude_code_linux_default()` today, but profile ids
+/// reachable through `default_for_host()` today, but profile ids
 /// are `AiCliProfile` data, and RFC-045 is reserved to make a
 /// configuration-supplied profile reach exactly this path. Uses
 /// `Supervised`, not `Plain`, so this proves the profile-id check
@@ -6387,14 +6387,14 @@ fn no_configuration_value_or_field_name_reaches_the_change_record() {
 /// same as every other test in this section since response 248 found
 /// the route itself was unreachable. Then launch a
 /// profile whose `workspace_discovery_policy` is `MayDiscoverWorkspaceFiles`
-/// (the same shape `claude_code_linux_default`'s own honest policy uses,
+/// (the same shape `default_for_host`'s own honest policy uses,
 /// which is what `agent_run_launch_shell_input_switches_to_terminal_immersion_and_shows_the_real_trust_refusal`
 /// above proves refuses in a fresh, untrusted project) and confirm a
 /// real process actually spawns.
 ///
 /// **Before** granting: refused with `WorkspaceDiscoveryBlocked`, the
 /// exact same refusal the sibling test above proves for the real
-/// `claude_code_linux_default` profile -- this test's own custom profile
+/// `default_for_host` profile -- this test's own custom profile
 /// reaches the identical gate, not a different one, before diverging
 /// only in what happens *after* a real grant.
 ///
@@ -6498,7 +6498,7 @@ fn granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch() {
 /// and compiled, spawned through the actual `Managed` launch path this
 /// GUI crate now supports end to end -- `structured_action_approval:
 /// true` on a `DisabledByLaunch` profile (bypasses the trust gate
-/// PR-022-D's own `claude_code_linux_default` cannot get past, the same
+/// PR-022-D's own `default_for_host` cannot get past, the same
 /// way `tekstide-core`'s own `built_in_profile` test helper does).
 /// Deliberately never the real, live product this pathway is modelled
 /// on -- see every other real-process test in this RFC for why.
@@ -6594,7 +6594,7 @@ fn launch_real_managed_agent_run_with_executable(
 /// transcript state root configured would have had nothing for its
 /// approval channel to bind to either, and failed closed with
 /// `AgentAdapterApprovalError::StateRootMissing` -- not reachable in
-/// production yet (`claude_code_linux_default` is `Supervised`), which
+/// production yet (`default_for_host` is `Supervised`), which
 /// is exactly why this had to land before the opt-out that makes it
 /// reachable.
 #[test]
@@ -7599,7 +7599,7 @@ fn truncated_and_clean_detections_are_distinguishable_though_both_produce_no_cha
 /// pointed at a temporary directory rather than the developer's real
 /// `$XDG_STATE_HOME` via the injectable seam this slice's own gate
 /// asked for. Uses a `Supervised` profile -- the real
-/// `claude_code_linux_default`'s own compatibility level, unlike
+/// `default_for_host`'s own compatibility level, unlike
 /// `launch_real_managed_agent_run`'s `Managed` reference adapter --
 /// pointed at a tiny marker-printing script instead, so this test
 /// exercises the exact shape of the real production launch rather than

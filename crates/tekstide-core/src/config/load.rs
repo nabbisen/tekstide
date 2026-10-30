@@ -340,7 +340,7 @@ pub fn parse_and_validate(source: &str) -> Result<ConfigLoadOutcome, ConfigDiagn
 /// RFC-045 D8: `default_profile` naming an id the file does not define
 /// is a diagnostic, not a silent fallback to the built-in profile. A
 /// user who misspells their own profile's id would otherwise get
-/// `claude_code_linux_default()` and no indication that the profile they
+/// `default_for_host()` and no indication that the profile they
 /// configured is not the one that launched.
 fn validate_default_profile(document: &ConfigurationDocument) -> Result<(), ConfigDiagnostic> {
     let Some(default_profile) = &document.agent.default_profile else {

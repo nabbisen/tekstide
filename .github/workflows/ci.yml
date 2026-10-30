@@ -53,24 +53,34 @@
 # it can safely ignore -- the same reasoning `docs.yml`'s own header already gives for
 # itself, reached independently here for a different set of files.
 #
-# **The second job, `macos-measurement` (RFC-028 D7, PR-028-A): a live, continuous
-# measurement of distance from a macOS build, not a release gate.** `continue-
-# on-error: true` at the job level, same advisory-then-blocking shape this file's
-# own `gate` job and RFC-072's quarantine job both use for a different artefact --
-# red here is the expected result today and is not a failure of this job or the
-# slice that added it. It runs on every push to `main`, the same as `gate`, so the
-# next compile error anyone introduces is caught the moment it is written rather
-# than at the next point-in-time audit (this RFC's own evidence table was exactly
-# such an audit, already stale by the time it was reviewed). Flipped to blocking
-# once PR-028-F lands it green, build *and* test both, not before.
+# **The second job, `macos-measurement` (RFC-028 D7, PR-028-A through F): started
+# as a live, continuous measurement of distance from a macOS build, now fully
+# blocking.** `continue-on-error: true` at the job level was the same
+# advisory-then-blocking shape this file's own `gate` job and RFC-072's quarantine
+# job both use for a different artefact -- a red result there was the expected
+# outcome, not a failure of the job or the slice that added it. It runs on every
+# push to `main`, the same as `gate`, so the next compile error anyone introduces
+# is caught the moment it is written rather than at the next point-in-time audit
+# (this RFC's own evidence table was exactly such an audit, already stale by the
+# time it was reviewed).
 #
 # RFC-028 D5, review 595: build reached zero errors on 2026-10-17 (`39bf840`), so
-# this job now also runs the real test suite -- the first time any test in this
-# workspace has executed on a second platform. Still `continue-on-error: true`
-# and still measurement, not a gate: PR-028-C's own `/dev/fd` TOCTOU test runs for
-# the first time here, as do `WakeSignal`'s own runner-only checks (review 593's
+# this job started also running the real test suite -- the first time any test in
+# this workspace executed on a second platform. PR-028-C's own `/dev/fd` TOCTOU
+# test runs here, as do `WakeSignal`'s own runner-only checks (review 593's
 # CLOEXEC postcondition and wake-contract tests, and the `poll(2)`-on-a-kqueue-fd
 # assumption `poll_for_readiness` documents as unverifiable anywhere but here).
+#
+# **Flipped to fully blocking, PR-028-F, once PR-028-A through E had all landed
+# and run `40885095023`/`40887584231` confirmed green, build and test both** (the
+# job keeps its own name rather than being renamed, since it still runs the real
+# measurements the two steps below name). "Fully blocking" means exactly what the
+# job-level setting below says: a macOS failure now fails this workflow run. It
+# does **not** mean a red run blocks a push by itself -- branch protection on this
+# repository deliberately does not require status checks (`release-checklist.md`'s
+# own "Required Gates" note has the full reasoning), so enforcement of a red gate
+# still lives there, run by a human before tagging, exactly as it already does for
+# Linux.
 
 name: ci
 
@@ -171,17 +181,17 @@ jobs:
           echo "0 fixture entries left."
 
   macos-measurement:
-    # RFC-028 PR-028-A: a measurement, not a gate -- see this file's own header.
+    # RFC-028 PR-028-F: fully blocking now -- see this file's own header.
     runs-on: macos-latest
-    continue-on-error: true
     # Review 598: this job sat blocked for 5h05m (GitHub's own 6-hour
-    # job default) after a real hang in newly-ported macOS code --
-    # `continue-on-error` only means it never fails `gate`, not that it
-    # cannot run for hours on every single push until someone notices
-    # and cancels it by hand. 30 minutes is generous against this job's
-    # own ordinary ~3-4 minutes (build + test, no macOS runner queueing
-    # counted against it -- GitHub does not charge queue time against a
-    # job's own timeout), not a measured ceiling.
+    # job default) after a real hang in newly-ported macOS code, back
+    # when `continue-on-error: true` (removed, PR-028-F) made it easy to
+    # forget this job could still run for hours on every single push
+    # until someone noticed and cancelled it by hand. 30 minutes is
+    # generous against this job's own ordinary ~3-4 minutes (build +
+    # test, no macOS runner queueing counted against it -- GitHub does
+    # not charge queue time against a job's own timeout), not a measured
+    # ceiling.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -221,13 +231,14 @@ jobs:
         # measurement; any future probe either asserts (and is a test,
         # covered above) or gets its own step like this one.
         #
-        # `if: always()`: the suite-wide run above is expected to carry
-        # real, unrelated failures on this job -- that is this job's own
-        # stated purpose (`continue-on-error: true` at the job level) --
-        # and a step whose own predecessor failed is *skipped* by default
-        # regardless of that job-level setting, which is exactly why this
-        # measurement went missing the first time this step existed: it
-        # never ran at all, on a run where the prior step did fail.
+        # `if: always()`: a step whose own predecessor failed is
+        # *skipped* by default regardless of the job's own pass/fail
+        # outcome, which is exactly why this measurement went missing the
+        # first time this step existed: it never ran at all, on a run
+        # where the prior step did fail. Still needed now that the job is
+        # fully blocking (PR-028-F) -- this measurement step asserts a
+        # real property of its own and should run whether or not the
+        # suite-wide step above found something else wrong.
         if: always()
         run: |
           set -euo pipefail
@@ -257,7 +268,7 @@ jobs:
         # **Deliberately does NOT set TMPDIR.** Every step above pins it to
         # `$CI_TMPDIR` (`/tmp/tci`, 8 bytes) so the rest of the suite does not
         # redden on an unrelated sockaddr_un overflow -- which means the
-        # suite's own headroom test
+        # suite's own own headroom test
         # (`the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit`)
         # has never measured this runner's real per-session anchor
         # (`/var/folders/.../T`, which `channel_dir_under`'s macOS arm

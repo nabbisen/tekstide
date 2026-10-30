@@ -2287,7 +2287,7 @@ fn attach_agent_launch_plan_selects_the_just_launched_run() {
 /// profile is never satisfied by anything inside the project root).
 #[test]
 fn claude_code_profile_lookup_paths_prefer_home_local_bin_when_home_is_set() {
-    let profile = AiCliProfile::claude_code_from_env(Some("/home/example"));
+    let profile = AiCliProfile::claude_code_linux_from_env(Some("/home/example"));
     match &profile.executable {
         AiCliExecutable::PathLookup {
             command,
@@ -2343,7 +2343,7 @@ fn claude_code_profile_lookup_paths_prefer_home_local_bin_when_home_is_set() {
 /// directories only, never silently substituting something else.
 #[test]
 fn claude_code_profile_falls_back_to_system_paths_only_without_home() {
-    let profile = AiCliProfile::claude_code_from_env(None::<&str>);
+    let profile = AiCliProfile::claude_code_linux_from_env(None::<&str>);
     match &profile.executable {
         AiCliExecutable::PathLookup { lookup_paths, .. } => {
             assert_eq!(
@@ -2358,8 +2358,64 @@ fn claude_code_profile_falls_back_to_system_paths_only_without_home() {
     }
 }
 
+/// RFC-028 D8: the macOS arm gains exactly one extra entry over its Linux
+/// sibling, in Apple Silicon Homebrew's own install location, ahead of the
+/// two directories shared with Linux -- a GUI-launched macOS app does not
+/// inherit the user's interactive shell `PATH`, so without this a bare
+/// `claude` command fails to resolve for the common Homebrew-installed
+/// case, not an edge one.
+#[test]
+fn claude_code_macos_profile_lookup_paths_add_homebrew_ahead_of_the_shared_directories() {
+    let profile = AiCliProfile::claude_code_macos_from_env(Some("/Users/example"));
+    match &profile.executable {
+        AiCliExecutable::PathLookup { lookup_paths, .. } => {
+            assert_eq!(
+                lookup_paths
+                    .iter()
+                    .map(|entry| entry.path.clone())
+                    .collect::<Vec<_>>(),
+                vec![
+                    PathBuf::from("/Users/example/.local/bin"),
+                    PathBuf::from("/opt/homebrew/bin"),
+                    PathBuf::from("/usr/local/bin"),
+                    PathBuf::from("/usr/bin"),
+                ]
+            );
+            assert!(
+                lookup_paths.iter().all(|entry| !entry.project_local),
+                "none of these paths are inside any project"
+            );
+        }
+        other => panic!("expected a PathLookup executable, got {other:?}"),
+    }
+}
+
+/// The `HOME`-unavailable branch on macOS: still falls back to Homebrew
+/// plus the two directories shared with Linux, never silently dropping
+/// Homebrew because `$HOME` was unset.
+#[test]
+fn claude_code_macos_profile_falls_back_to_homebrew_and_system_paths_without_home() {
+    let profile = AiCliProfile::claude_code_macos_from_env(None::<&str>);
+    match &profile.executable {
+        AiCliExecutable::PathLookup { lookup_paths, .. } => {
+            assert_eq!(
+                lookup_paths
+                    .iter()
+                    .map(|entry| entry.path.clone())
+                    .collect::<Vec<_>>(),
+                vec![
+                    PathBuf::from("/opt/homebrew/bin"),
+                    PathBuf::from("/usr/local/bin"),
+                    PathBuf::from("/usr/bin"),
+                ]
+            );
+        }
+        other => panic!("expected a PathLookup executable, got {other:?}"),
+    }
+}
+
 /// RFC-022 PR-022-D: `launch_agent_run_with_runtime`'s real-profile
-/// proof -- validates and launches a `claude_code_from_env` profile for
+/// proof -- validates and launches a `claude_code_linux_from_env` profile for
 /// real, through the exact same de-gated, now-`pub` entry point the GUI
 /// crate's production `Ctrl+Alt+A` path calls. Deliberately does **not**
 /// invoke the real, live Claude Code CLI: it points the profile at a
@@ -2370,7 +2426,7 @@ fn claude_code_profile_falls_back_to_system_paths_only_without_home() {
 /// makes real network calls, and spawning it from an automated test
 /// would be unbounded and unsafe, not merely slow.
 ///
-/// Requires a **trusted** project: `claude_code_from_env`'s honest
+/// Requires a **trusted** project: `claude_code_linux_from_env`'s honest
 /// `MayDiscoverWorkspaceFiles` policy is correctly refused in the
 /// default `Restricted` project (proven separately in
 /// `restricted_mode_blocks_workspace_local_automation_paths`-adjacent
@@ -2388,7 +2444,7 @@ fn a_trusted_project_launches_a_real_claude_code_profile_through_the_production_
     let mut project = restricted_project(ProjectId::for_test(1), &root);
     project.grant_trust("test: workspace discovery requires a trusted project");
 
-    let profile = AiCliProfile::claude_code_from_env(Some(&home));
+    let profile = AiCliProfile::claude_code_linux_from_env(Some(&home));
     let request = AgentRunLaunchRequest::new(project.id().clone(), &profile.id, "test session")
         .with_local_bounded_transcript(state_root.clone());
     let validation = AgentRunLaunchValidator

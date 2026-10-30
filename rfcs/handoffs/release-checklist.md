@@ -483,23 +483,76 @@ Checked every release, because a watch that depends on someone remembering is no
 
 ## Release Artifacts
 
-RFC-029 PR-029-C, D5: every published artifact has a published checksum. `.github/workflows/
-release.yml` runs automatically on the version tag pushed above — nothing here is a manual step
-unless the workflow itself failed.
+RFC-029 PR-029-C, D5 (Linux); RFC-028 D7, PR-028-F (macOS, `aarch64-apple-darwin` only): every
+published artifact has a published checksum. `.github/workflows/release.yml` runs automatically
+on the version tag pushed above — nothing here is a manual step unless the workflow itself
+failed.
 
-- [ ] `.github/workflows/release.yml` ran for this tag and succeeded — checked in the Actions tab,
-      not assumed from the tag existing.
-- [ ] The GitHub Release for this tag carries exactly two new assets:
-      `tekstide-x86_64-linux` and `tekstide-x86_64-linux.sha256`.
+- [ ] `.github/workflows/release.yml` ran for this tag and succeeded — **both jobs**, `artifacts`
+      (Linux) and `artifacts-macos`, checked in the Actions tab, not assumed from the tag
+      existing or from one job's own green check.
+- [ ] **`artifacts-macos` depends on `artifacts` (`needs:`) so it never races to create the
+      release, but that dependency has a failure mode of its own**: if `artifacts` succeeds and
+      `artifacts-macos` then fails, the GitHub Release for this tag already exists and already
+      carries the Linux asset — a real, downloadable release, missing only the macOS one. Check
+      both jobs individually, not only the workflow run's overall conclusion.
+- [ ] The GitHub Release for this tag carries, from the Linux job: `tekstide-x86_64-linux`,
+      `tekstide-x86_64-linux.sha256`, `NOTICE`, `LICENSE`. From the macOS job:
+      `tekstide-aarch64-macos` and `tekstide-aarch64-macos.sha256` (the macOS job does not
+      re-upload `NOTICE`/`LICENSE` — the Linux job already owns them on this release).
 - [ ] **Downloaded, not just listed**: `gh release download <version> && sha256sum -c
-      tekstide-x86_64-linux.sha256` reports `OK` against the actual downloaded file.
+      tekstide-x86_64-linux.sha256` reports `OK` against the actual downloaded Linux file, and
+      `shasum -a 256 -c tekstide-aarch64-macos.sha256` reports `OK` against the actual downloaded
+      macOS file (macOS ships no `sha256sum`; this is the asset's own verification command, not a
+      Linux substitute for it).
 - [ ] `./tekstide-x86_64-linux --version` reports this release's own version.
+- [ ] **`./tekstide-aarch64-macos --version` reports this release's own version — on a Mac.**
+      This step can only be run on real Apple hardware, which is the same dependency the Run It
+      gate's own answer settles. If no Apple hardware is available for this release, this box is
+      left unchecked and the release notes say so, the same shape the Run It gate already uses —
+      it does not get silently skipped as though it were optional.
 - [ ] **The checksum is described only as what it is** (`what-the-installer-must-not-do.md` §3):
       *verified against its published checksum*, in the release notes and anywhere else it is
       mentioned. Never *secure*, *safe*, *signed*, or unqualified *verified* — this binary is not
       byte-reproducible from a fresh clone (measured at the `0.36.0` tag: two independent
       `--locked` builds of the identical source produced different SHA-256 sums), so the checksum
-      proves the download arrived intact, not that the release can be independently rebuilt.
+      proves the download arrived intact, not that the release can be independently rebuilt. True
+      of the macOS binary for the same reason; not separately measured there, since the cause
+      (build-path-derived debug info) is toolchain-level, not platform-specific.
+
+## First Release With A macOS Artifact
+
+**One-time, not a per-release item — tick it once, in the release that first ships
+`tekstide-aarch64-macos`, then delete this section.** RFC-028 PR-028-F, review 651.
+
+- [ ] Three places carry this claim, not two — **found at review 651 round 2: the first pass at
+      this item missed the third.** `README.md:52` and `docs/src/introduction.md:5` (**not**
+      `docs/src/users/introduction.md` — that path does not exist) say *"**Linux only.** There is
+      no evidence for any other platform."* `docs/src/users/getting-started.md:4` says the same
+      thing in different words: *"It runs on Linux; there is no cross-platform evidence beyond
+      it."* All three are true when written, false in substance by the time a macOS artifact
+      ships: a full test suite green on the real macOS runner, plus a rendered window capture
+      from it, **is** evidence. What is actually still missing is a *human* exercising the real
+      binary on real hardware — a narrower, more honest claim than "no evidence." Replace all
+      three with wording to that effect, naming what was and was not done (the Run It gate's own
+      answer, above, decides which of the two this is):
+      *"launched and rendered on real macOS, screenshot attached, not interactively exercised by
+      a human"* if Run It was not performed before this tag, or a claim of real use if it was
+      (`pr-028-f-scope-additions.md` §2 has the first form verbatim). Do not leave the old
+      sentence standing past this release.
+- [ ] **Required, found at review 651 round 2, measured round 3 — both the approval and attention
+      socket paths are over `sun_path`'s real limit on an ordinary Mac, not merely on an unusually
+      long one.** Measured on the real runner (run `40982340829`, `$TMPDIR` left at its real
+      per-session value): the approval socket resolves to 107 bytes against a 103-byte limit
+      (`SocketPathTooLong`, refused by name); the attention socket resolves to 119 bytes against
+      the same limit (`bind_attention_listener` returns `None`, silently). `ci.yml`'s own suite-wide
+      run cannot see this because it pins `TMPDIR` to a short, fixed value for unrelated reasons —
+      two dedicated diagnostic steps that deliberately leave it alone are what measured the real
+      number. **This box may not be ticked until the fix lands and both of those diagnostics are
+      themselves turned into assertions against the real ambient `$TMPDIR`** — a measurement a
+      human reads is what found this; it is not what keeps it fixed. Shipping a macOS binary whose
+      `Managed` approval cannot start and whose attention knock never arrives is exactly the
+      failure this gate exists to catch before a tag, not after one.
 
 ## AUR Package
 

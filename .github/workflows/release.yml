@@ -1,11 +1,15 @@
-# Release artifacts and checksums (RFC-029 D5, PR-029-C).
+# Release artifacts and checksums (RFC-029 D5, PR-029-C; macOS artifact RFC-028
+# D7, PR-028-F).
 #
 # On a version tag, builds the Linux `x86_64` release binary `--locked` and
 # publishes it, its SHA-256, `NOTICE` and `LICENSE` as assets on the GitHub
 # Release for that tag -- creating a minimal release if the tag does not have
 # one yet, uploading to it (with `--clobber`, so a re-run from
 # `workflow_dispatch` replaces stale assets rather than failing) if it
-# already does.
+# already does. A second job then does the same for the first macOS artifact,
+# `aarch64-apple-darwin` only (D7, PR-028-F) -- `tekstide-aarch64-macos` and its
+# own SHA-256, uploaded to the same release once the first job has guaranteed
+# it exists (see that job's own `needs:` comment, below).
 #
 # **`NOTICE`/`LICENSE` ship beside the binary, found missing at the first
 # real release attempt.** A bare binary uploaded on its own -- which is what
@@ -72,6 +76,8 @@ permissions:
 
 jobs:
   artifacts:
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     runs-on: ubuntu-latest
     # Review 598: every job in this project's workflows gets an explicit
     # bound now, after one with none sat blocked for 5+ hours elsewhere
@@ -154,4 +160,66 @@ jobs:
           fi
           gh release upload "$TAG" "staging/${ARTIFACT}" "staging/${ARTIFACT}.sha256" \
             "staging/NOTICE" "staging/LICENSE" \
+            --repo "${{ github.repository }}" --clobber
+
+  artifacts-macos:
+    # RFC-028 D7/PR-028-F: the first macOS release artifact, `aarch64-apple-darwin`
+    # only -- GitHub's `macos-latest` runners are Apple Silicon, the same target
+    # `ci.yml`'s own `macos-measurement` job already builds and tests on, so this
+    # is not a cross-compile. A second (Intel) artifact is deliberately deferred
+    # (D7): it doubles the release surface for a shrinking minority of machines,
+    # and adding it later is additive, not a reason to hold this one.
+    #
+    # **Depends on `artifacts`, not parallel with it**, so the GitHub Release for
+    # this tag is guaranteed to exist (created by that job if missing) before this
+    # job only ever uploads to it -- two jobs racing to `gh release create` the
+    # same tag is exactly the kind of accident a `needs:` avoids rather than a race
+    # worth tolerating. The tag is read from that job's own resolved output, not
+    # re-derived here, so the two jobs cannot disagree about which tag they build.
+    #
+    # Review 651: the same `needs:` that prevents two jobs racing to create the
+    # release also means `artifacts` (Linux) has always already put `NOTICE`/
+    # `LICENSE` on it by the time this job runs -- so this job uploads only its
+    # own binary and checksum, not a second, `--clobber`-overwritten copy of
+    # files the Linux job already owns. One job owning a file, not two agreeing
+    # on its bytes, is the simpler invariant to keep true.
+    needs: artifacts
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.artifacts.outputs.tag }}
+
+      - name: Install Rust (rustup's own update path, see ci.yml for why no pin)
+        run: |
+          set -euo pipefail
+          rustup update stable
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: cargo build --release --locked
+        run: cargo build --release --locked
+
+      - name: Name, checksum, and stage the artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          name="tekstide-aarch64-macos"
+          mkdir -p staging
+          cp target/release/tekstide "staging/${name}"
+          ( cd staging && shasum -a 256 "${name}" > "${name}.sha256" )
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      # Already created by `artifacts`, which also already carries NOTICE/LICENSE -- not
+      # re-uploaded here (see this job's own `needs:` comment above).
+      - name: Upload to the GitHub Release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.artifacts.outputs.tag }}
+          ARTIFACT: ${{ steps.artifact.outputs.name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "staging/${ARTIFACT}" "staging/${ARTIFACT}.sha256" \
             --repo "${{ github.repository }}" --clobber

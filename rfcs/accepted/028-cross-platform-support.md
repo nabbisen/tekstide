@@ -816,6 +816,74 @@ then, not now.
   macOS path alongside the Linux one before the first macOS artifact ships, not discovered at the
   release gate.
 
+  **Done, 2026-10-30.** `ci.yml`'s `macos-measurement` job drops `continue-on-error: true`,
+  confirmed green on the real runner first rather than assumed from an earlier pass: run
+  `40885095023` (`tekstide-core` `1155/0/10`, `tekstide` `783/0/9` on macOS) and `40887584231` (the
+  same, re-confirmed after review 650's own fixes landed). Its header comment states what "fully
+  blocking" does and does not mean: a macOS failure now fails this workflow run, but branch
+  protection still does not require status checks (decided 2026-10-29), so enforcement of a red
+  gate stays a human step in `release-checklist.md`'s own "Required Gates" section, exactly as it
+  already is for Linux. Seven macOS-conditional ignores named with their reasons, six in
+  `tekstide-core` and one in `tekstide` (CHANGELOG's own PR-028-F entry has the full list); nothing
+  else ignored on macOS is new here. `release.yml` gains a second job, depended on through
+  `needs:` so it never races the Linux job to create the release (and so it never re-uploads
+  `NOTICE`/`LICENSE`, which that same `needs:` guarantees the Linux job already put there),
+  building `tekstide-aarch64-macos` (`aarch64-apple-darwin` only, as this decision requires) and
+  its own SHA-256; `install.sh` gains a Darwin/`arm64` branch, refusing every other macOS
+  architecture by name, and falls back to `shasum -a 256` where `sha256sum` is absent -- and, found
+  at review 651, now fails with a named reason (the URL, and that this release may not publish an
+  asset for this platform/version yet) rather than a bare `curl` error or `wget`'s own silent
+  nothing, since the Darwin branch is live on `main` before `0.38.0`'s own assets exist.
+  `config/profile.rs` gains `/opt/homebrew/bin` unconditionally; `agent/profile.rs`'s
+  `claude_code_from_env` is replaced by the macOS dispatch arm this decision's own "third kind"
+  note above reserved -- `AiCliProfile::default_for_host()`, with `claude_code_linux_from_env`/
+  `claude_code_macos_from_env` siblings, the macOS one adding Homebrew ahead of the two shared
+  directories. Every *durable* path in `local-data-and-privacy.md` and `configuration.md` now
+  states the macOS path (`~/Library/Application Support/tekstide/...`) alongside its Linux one --
+  **corrected twice at review 651**: round one found the approval and attention sockets are the
+  exception, not covered by that blanket claim, since both already move to the per-user `$TMPDIR`
+  on macOS (`approval/channel.rs`'s `channel_dir_under`, `project_lock/attention.rs`'s
+  `attention_socket_dir`, RFC-028 D4) specifically because Application Support does not fit the
+  `sockaddr_un` limit there -- the first pass at this page said the opposite. Round two found that
+  round one's own replacement wording overclaimed in turn, moving `$TMPDIR` from "wrong path" to
+  "immune to the limit"; both pages now say only what holds either way (the limit applies there
+  too). `release-checklist.md` updated to cover both release jobs and to carry a one-time step for
+  the release that first ships this artifact, rather than left to describe only the Linux half of
+  `release.yml`.
+
+  **B1, review 651 round 2, confirmed round 3 -- measured, not predicted.** Arithmetic over the
+  real production code and the real `/var/folders/…/T` shape macOS actually uses (not the short
+  `$TMPDIR` `ci.yml` pins for the rest of the suite) predicted both sockets were over `sun_path`'s
+  real limit on an ordinary Mac; a pure measurement (two new `#[ignore]`d tests, two new `ci.yml`
+  steps that deliberately leave `TMPDIR` alone, per this project's own rule that a diagnostic
+  consuming and asserting nothing may skip a review turn) confirmed it exactly on run
+  `40982340829`: the approval socket resolves to 107 bytes against the 103-byte limit
+  (`SocketPathTooLong`, refused by name); the attention socket resolves to 119 bytes
+  (`bind_attention_listener` returns `None`, silently) -- both on an ordinary session, not an edge
+  case. The same run showed two further blind spots: the approval channel's own functional test
+  family passes only under the `TMPDIR` override, and the attention socket's functional tests use
+  a 6-byte literal id where production uses a 36-byte UUID. **The fix is reserved as its own
+  subject**, gated by a new required row in `release-checklist.md`'s "First Release With A macOS
+  Artifact" section rather than decided here -- not merely before the RFC closes, but before the
+  first macOS artifact tags. Also found by the same diagnostic run and fixed (not deferred, since
+  the now fully-blocking job cannot ship with a known-intermittent inside it): two more sites in
+  the already-documented client-closes-too-early cluster neither review 644 nor 645 had actually
+  closed -- `approval::tests::channel::peer_credential_mismatch_is_rejected` (confirmed on run
+  `40982340829`) and `wrong_token_is_rejected_without_a_dialog` (named joining the cluster in
+  review 644's own history but never actually fixed; confirmed on run `40989052920`). Both fixed
+  with a *tolerant* bounded read rather than the five already-fixed sites' own unconditional
+  `.expect()` -- correctly so after a first attempt got the stronger claim wrong and a second pass
+  corrected it, including an overstated guarantee the first pass had written into a sibling test's
+  own comment. Run `40992078641` confirmed both together, fully green on both platforms
+  (`tekstide-core` 1155/0/12, `tekstide` 783/0/9) -- the actual bar the flip needed before landing,
+  not merely the structural argument. All nine spawned-thread/subprocess sites in that test module
+  are now enumerated by name in `test-process-leak.md`.
+
+  **Not done here**: the Run It gate's own answer stays the owner's, per Acceptance's own
+  wording, and this slice does not assume it. The B1 socket-path fix is also not done here,
+  deliberately -- its own subject, gated by the release-checklist row above rather than rushed
+  into this one.
+
 PR-028-C and PR-028-D may land in either order **at the code/decision level — found, PR-028-C,
 2026-10-15: not at the test-execution level**. `cargo build --workspace` fails on macOS until every
 one of D5's six mechanisms is ported (PR-028-A's own 11 errors are all D5's), so no macOS test —

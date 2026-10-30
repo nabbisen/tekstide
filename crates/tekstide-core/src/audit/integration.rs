@@ -1407,7 +1407,7 @@ fn sensitive_config_changed_record(
 /// RFC-046 deliberately places out of audit scope, not a malformed
 /// state; a profile id outside `AuditReference`'s bounded charset is
 /// unreachable today only because production hardcodes
-/// `claude_code_linux_default()`, and RFC-045 is reserved to make it
+/// `default_for_host()`, and RFC-045 is reserved to make it
 /// reachable. Neither is a bug to crash on -- both mean "launch this
 /// unaudited," the same as the audit store itself failing to open.
 ///

@@ -161,7 +161,7 @@ pub enum ConfiguredAiCliAdapter {
 /// **`default_profile` is RFC-045 D8**: `profiles` is a map, and RFC-023
 /// never said which entry the launch button uses -- without this key,
 /// a profile is definable and unlaunchable. `None` means
-/// `AiCliProfile::claude_code_linux_default()`, unchanged from today; a
+/// `AiCliProfile::default_for_host()`, unchanged from today; a
 /// value naming an id the file does not define is a diagnostic. It is
 /// **not** a [`super::SecuritySensitiveField`]: pointing the default at
 /// a different profile does not bypass RFC-045 D4's first-use gate,

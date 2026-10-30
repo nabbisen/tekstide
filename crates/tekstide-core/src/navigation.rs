@@ -47,7 +47,7 @@ pub enum NavigationAction {
     RedoActiveDocument,
     CycleVisibleTerminalSession,
     /// RFC-022 PR-022-D: launches a real AgentRun in the active project,
-    /// through a code-defined profile (`AiCliProfile::claude_code_linux_default`)
+    /// through a code-defined profile (`AiCliProfile::default_for_host`)
     /// resolved at launch time -- see response 218. Distinct from
     /// `LaunchTerminal`: the spawned process is an AI CLI under transcript
     /// capture/audit, not a plain shell, and the launch can be refused

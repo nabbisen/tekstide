@@ -42,6 +42,31 @@ impl AiCliProfile {
         }
     }
 
+    /// RFC-028 D3: the single host-dispatch point every production caller
+    /// should use instead of naming `claude_code_linux_default`/
+    /// `claude_code_macos_default` directly -- the same convention stated
+    /// once on [`crate::project::recent::AppStatePathProvider::default_for_host`]:
+    /// a whole-function `#[cfg(target_os = "...")]` split per platform, never
+    /// a blanket `#[cfg(unix)]`, and a hard compile error for anything this
+    /// split does not name. Found as this convention's own "third kind" at
+    /// review 585: unlike the five `linux_mvp()` labels elsewhere in this
+    /// crate, this constructor is genuinely platform-coupled -- the lookup
+    /// paths below differ by platform -- and was not dispatched at all until
+    /// PR-028-F closed that gap. See [`Self::claude_code_linux_from_env`]/
+    /// [`Self::claude_code_macos_from_env`] below for the rest of what this
+    /// profile is.
+    #[cfg(target_os = "linux")]
+    pub fn default_for_host() -> Self {
+        Self::claude_code_linux_default()
+    }
+
+    /// See [`Self::default_for_host`] above for the convention this
+    /// implements.
+    #[cfg(target_os = "macos")]
+    pub fn default_for_host() -> Self {
+        Self::claude_code_macos_default()
+    }
+
     /// RFC-022 PR-022-D: the first real, code-defined profile -- see
     /// response 218 (review request 218's answer). Not the reference
     /// adapter: that stays test-only (`what-the-dialog-must-not-lie-about.md`
@@ -77,10 +102,12 @@ impl AiCliProfile {
     /// grouping), and both already treat `BuiltIn` and `UserGlobal`
     /// identically, so this changes no observable launch behaviour.
     pub fn claude_code_linux_default() -> Self {
-        Self::claude_code_from_env(std::env::var_os("HOME"))
+        Self::claude_code_linux_from_env(std::env::var_os("HOME"))
     }
 
-    pub fn claude_code_from_env(home: Option<impl AsRef<OsStr>>) -> Self {
+    /// `$HOME/.local/bin` (the real install location confirmed on the
+    /// reference dev machine), then the reviewed system directories.
+    pub fn claude_code_linux_from_env(home: Option<impl AsRef<OsStr>>) -> Self {
         let mut lookup_paths = Vec::new();
         if let Some(home) = home.filter(|value| !value.as_ref().is_empty()) {
             lookup_paths.push(ExecutableLookupPath::reviewed_system(
@@ -89,7 +116,33 @@ impl AiCliProfile {
         }
         lookup_paths.push(ExecutableLookupPath::reviewed_system("/usr/local/bin"));
         lookup_paths.push(ExecutableLookupPath::reviewed_system("/usr/bin"));
+        Self::claude_code_profile(lookup_paths)
+    }
 
+    pub fn claude_code_macos_default() -> Self {
+        Self::claude_code_macos_from_env(std::env::var_os("HOME"))
+    }
+
+    /// RFC-028 D8: `$HOME/.local/bin`, then `/opt/homebrew/bin` (Apple
+    /// Silicon Homebrew) ahead of the two reviewed system directories
+    /// already shared with Linux. A GUI-launched macOS app does not
+    /// inherit the user's interactive shell `PATH` at all -- the normal
+    /// way a user reaches this product on that platform -- so without this
+    /// entry the lookup fails for the common case, not an edge one.
+    pub fn claude_code_macos_from_env(home: Option<impl AsRef<OsStr>>) -> Self {
+        let mut lookup_paths = Vec::new();
+        if let Some(home) = home.filter(|value| !value.as_ref().is_empty()) {
+            lookup_paths.push(ExecutableLookupPath::reviewed_system(
+                PathBuf::from(home.as_ref()).join(".local/bin"),
+            ));
+        }
+        lookup_paths.push(ExecutableLookupPath::reviewed_system("/opt/homebrew/bin"));
+        lookup_paths.push(ExecutableLookupPath::reviewed_system("/usr/local/bin"));
+        lookup_paths.push(ExecutableLookupPath::reviewed_system("/usr/bin"));
+        Self::claude_code_profile(lookup_paths)
+    }
+
+    fn claude_code_profile(lookup_paths: Vec<ExecutableLookupPath>) -> Self {
         let mut profile = Self::new(
             "claude-code",
             "Claude Code",
@@ -110,6 +163,13 @@ impl AiCliProfile {
         profile
     }
 }
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+compile_error!(
+    "AiCliProfile::default_for_host() has no arm for this target_os -- RFC-028 D3's own \
+     convention requires a dispatch arm added deliberately for a new platform, not a \
+     fall-through to a Unix-shaped default that may not hold."
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AiCliProfileSource {

@@ -4147,7 +4147,7 @@ thread_local! {
 
 /// RFC-022 PR-022-D: the real `Ctrl+Alt+A` path, and `launch_agent_run_with_runtime`'s
 /// first production caller (response 218's own required outcome for
-/// this slice). Points at [`tekstide_core::agent::AiCliProfile::claude_code_linux_default`],
+/// this slice). Points at [`tekstide_core::agent::AiCliProfile::default_for_host`],
 /// a real, code-defined profile for a genuinely installed AI CLI at
 /// `Supervised` compatibility -- not the reference adapter (stays
 /// test-only, see `what-the-dialog-must-not-lie-about.md` §4) and not
@@ -4191,7 +4191,7 @@ fn attempt_agent_run_launch(state: &mut State) -> Result<(), AgentRunLaunchRefus
     let Some(profile) = state.configuration.default_profile().cloned() else {
         return attempt_prepared_agent_run_launch(
             state,
-            tekstide_core::agent::AiCliProfile::claude_code_linux_default(),
+            tekstide_core::agent::AiCliProfile::default_for_host(),
             open_real_agent_run_state_root(),
             capture_enabled,
             budget_exhausted,
@@ -4421,7 +4421,7 @@ fn attempt_agent_run_launch_with_profile_and_state_root(
 /// explicitly, from the same `state_root`, whenever one is available --
 /// unconditionally, not only when `with_local_bounded_transcript` is
 /// also called. Before this, a `Managed` launch with capture disabled
-/// (not reachable yet -- `claude_code_linux_default` is `Supervised` --
+/// (not reachable yet -- `default_for_host` is `Supervised` --
 /// but about to become reachable the moment PR-033-B lands) would have
 /// had no state root to bind its approval channel to at all, and failed
 /// closed with `AgentAdapterApprovalError::StateRootMissing`.
@@ -4691,7 +4691,7 @@ fn attempt_prepared_agent_run_launch(
             .agent_run_change_baselines
             .insert(agent_run_id.clone(), baseline);
     }
-    // `claude_code_linux_default` is `Supervised`, which never binds an
+    // `default_for_host` is `Supervised`, which never binds an
     // approval endpoint -- `None` here today. Registered for real once a
     // `Managed` profile can reach this path (response 227's found
     // defect: this endpoint used to be silently dropped one layer down;
@@ -7317,7 +7317,7 @@ pub(crate) fn open_real_audit_store(
 ///
 /// D8's `default_profile` is resolved here into a real `AiCliProfile`
 /// through `to_ai_cli_profile` — and goes no further in this slice. The
-/// launch path still uses `claude_code_linux_default()`; nothing
+/// launch path still uses `default_for_host()`; nothing
 /// configuration-defined executes before PR-045-C's confirmation exists.
 /// `parse_and_validate` has already refused a `default_profile` naming
 /// a profile the file does not define (D8, PR-045-A), so the lookup

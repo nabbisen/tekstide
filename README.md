@@ -66,7 +66,7 @@ work is tracked in [Deferred work](https://nabbisen.github.io/tekstide/contribut
 ## Quick Start
 
 The installer below installs one binary to `$HOME/.local/bin/tekstide` and touches nothing else —
-no shell rc edit, no `sudo`, no repository added. Linux x86_64 only; see
+no shell rc edit, no `sudo`, no repository added. Linux x86_64, or macOS on Apple Silicon; see
 [What works today](https://nabbisen.github.io/tekstide/users/what-works-today.html) for every
 other platform's status.
 
@@ -84,6 +84,10 @@ here fetches code from the same server:
 ```sh
 cargo install tekstide
 ```
+
+The step-by-step form, verified by hand instead of by the script: on Linux, the asset is
+`tekstide-x86_64-linux`; on macOS (Apple Silicon), `tekstide-aarch64-macos`, verified with
+`shasum -a 256 -c` instead of `sha256sum -c`.
 
 ```sh
 curl -LO https://github.com/nabbisen/tekstide/releases/latest/download/tekstide-x86_64-linux

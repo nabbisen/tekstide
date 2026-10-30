@@ -89,6 +89,160 @@ covered the Help modal, `--help` and the status line's own summary. Fixed the sa
 `shift_modifier_label`, both widened from `pub(crate)` for this cross-crate need), with its own
 regression test (`the_status_bar_key_hint_respells_both_modifiers_not_only_the_primary_one`).
 
+### Added — PR-028-F (RFC-028 D7/D8): the macOS CI job is fully blocking, and the first macOS release artifact ships
+
+RFC-028's last slice. PR-028-A through E landed macOS support behind a non-blocking CI job; this
+one closes the loop.
+
+**`ci.yml`'s `macos-measurement` job drops `continue-on-error: true`.** Confirmed green on the real
+runner before the flip, not assumed from an earlier pass: run `40885095023` (`tekstide-core`
+`1155/0/10`, `tekstide` `783/0/9` on macOS) and `40887584231` (the same, re-confirmed after review
+650's own fixes), `grep -c "... FAILED"` zero across each whole log. "Fully blocking" means exactly
+what the job-level setting says — a macOS failure now fails this workflow run — and nothing more:
+branch protection on this repository deliberately does not require status checks (decided
+2026-10-29), so enforcement of a red gate still lives in `release-checklist.md`'s own "Required
+Gates" section, run by a human before tagging, exactly as it already does for Linux.
+
+**Nine macOS-conditional test ignores, named with their reasons — corrected at review 651 round
+3 from an earlier count of seven that stopped reconciling the moment this slice added its own
+two.** Seven pre-existing: four APFS non-UTF-8-filename tests
+(`scanner_preserves_non_utf8_filename_identity_in_relative_path`,
+`a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row`,
+`a_non_utf8_path_is_skipped_from_the_map_but_still_counted`,
+`a_non_utf8_filename_survives_the_round_trip` — APFS refuses a non-UTF-8 filename outright, and the
+platform fact itself is pinned instead by
+`hostile_tests::the_non_utf8_escaping_row_is_recorded_as_refused_on_a_filesystem_that_cannot_hold_it`);
+`dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname` (macOS-only, a closed design question
+kept as a standing regression check, run by hand); and
+`the_shell_still_exits_normally_after_the_first_wake_is_observed` (a known-intermittent
+`proc_exit`/wake-cluster member, covered on macOS by
+`a_real_close_kills_a_live_hup_immune_backgrounded_job` instead) — six in `tekstide-core`, plus one
+in `tekstide`: `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
+(row 8's own PTY-read timing precondition, same covering test). **Two new, both in
+`tekstide-core`, both macOS-only, both added by this slice itself (see the second asterisk
+below):** `macos_approval_socket_path_headroom_measurement_against_the_real_ambient_tmpdir` and
+`macos_attention_socket_path_headroom_measurement_against_the_real_ambient_tmpdir`, ignored
+because they are pure diagnostics (assert nothing, read by a human), not because of any defect in
+what they measure. Eight in `tekstide-core`, one in `tekstide`, nine total. Everything else
+ignored predates this RFC and is ignored on both platforms (measurements, benchmarks,
+diagnostics) — true of none of these nine.
+
+**The first macOS release artifact.** `release.yml` gains a second job building
+`tekstide-aarch64-macos` (`aarch64-apple-darwin` only, D7 — a second, Intel artifact is
+deliberately deferred) and uploading it and its own SHA-256 to the same GitHub Release the Linux
+job creates, depended on through `needs:` so the two jobs cannot race to create that release
+twice (and so the macOS job never re-uploads `NOTICE`/`LICENSE` — the Linux job already owns both
+on that release by the time it runs). `install.sh` gains a Darwin/`arm64` branch alongside
+Linux/`x86_64`, refusing any other macOS architecture by name rather than guessing; checksum
+verification now prefers `sha256sum` and falls back to macOS's own `shasum -a 256` when it is
+absent. A download failure (a platform or version this release does not publish an asset for) now
+names the URL and points at the releases page, in both the `curl` and the previously-silent
+`wget` path — review 651 found the Darwin branch's own one-liner, served from `main`, 404s for
+every macOS user until this release's assets exist, and the `wget` branch gave no output at all
+on that failure. `install.sh`'s header comment, `README.md` and `getting-started.md` no longer
+describe the installer as Linux-only, and their manual-download recipes now name the macOS asset
+and its `shasum -a 256` verification alongside the Linux one. A new invariant test
+(`every_install_sh_asset_name_is_one_release_yml_actually_stages_and_the_reverse`) reads both
+files and asserts every asset name either can select is one the other actually handles, in both
+directions — nothing related the two before review 651, and a name mismatch there is the single
+failure mode that 404s a real user.
+
+**D8: the AI-CLI `PATH` lookup gains `/opt/homebrew/bin`.** A GUI-launched macOS app does not
+inherit the user's interactive shell `PATH` at all — the normal way a user reaches this product on
+that platform — so without this entry a bare `claude` command, or any bare command a config file
+names, fails to resolve for the common Homebrew-installed case, not an edge one. `config/profile.rs`'s
+configured-profile lookup gains the directory unconditionally (harmless elsewhere: the lookup only
+checks whether a candidate path exists); `agent/profile.rs`'s built-in Claude Code profile gets a
+real platform dispatch instead of a platform-generic helper — `AiCliProfile::default_for_host()`
+(D3's own convention), splitting the old `claude_code_from_env` into
+`claude_code_linux_from_env`/`claude_code_macos_from_env` siblings, the macOS one adding Homebrew
+ahead of the two directories already shared with Linux. The one production call site (`shell.rs`'s
+`Ctrl+Alt+A` path) now goes through the dispatcher rather than naming `claude_code_linux_default()`
+directly.
+
+**Required, review 585: the user docs now state the macOS path.** `local-data-and-privacy.md` and
+`configuration.md` named only `$XDG_STATE_HOME`/`$XDG_CONFIG_HOME` and their Linux fallbacks.
+Every *durable* path now states `~/Library/Application Support/tekstide/...` alongside its Linux
+one, since macOS draws no config/state distinction the way XDG does and both resolve there. **Two
+rounds of correction, both found at review 651, to the first pass at this**: round one fixed the
+*path* — the approval and attention sockets are not under Application Support on macOS at all —
+`approval/channel.rs`'s own `channel_dir_under` and `project_lock/attention.rs`'s own
+`attention_socket_dir` already move both to the per-user `$TMPDIR` there (RFC-028 D4, reviews
+600/601/603), specifically because a real socket path under Application Support does not
+reliably fit the ~100-byte `sockaddr_un` limit — the first pass at this page said the opposite,
+that macOS has no override for that limit and a long username eats the headroom, which inverted
+the design. Round two (below) found that round one's own replacement claim — that moving to
+`$TMPDIR` *avoids* the limit outright — does not hold either, so the pages now say only what
+holds regardless: the same limit applies to the per-user directory too.
+
+**`release-checklist.md` now covers both release jobs, found out of date at review 651.** Its
+"Release Artifacts" section still named only the two Linux assets, as though `release.yml` had
+not grown a second job: it now lists the macOS asset and its checksum as their own rows, states
+that both jobs' own success must be checked (not only the workflow run's overall conclusion,
+since `artifacts-macos` can fail after `artifacts` has already published a release `install.sh`
+offers a macOS download for), and states plainly that the macOS binary's own `--version` check
+can only be run on a Mac — the same dependency the Run It answer settles, written as a dependency
+rather than quietly assumed away. A new one-time "First Release With A macOS Artifact" section
+records that the "Linux only" claim needs updating, at the release that first ships
+`tekstide-aarch64-macos`, to `pr-028-f-scope-additions.md` §2's own wording — correcting that the
+current claim is already false in substance by then (a green suite plus a rendered capture from
+the real runner *is* evidence; what is actually missing is a human exercising it), without
+pre-empting *this* slice's own decision to leave the claim alone until that release. **Corrected
+at review 651 round 2**: that section originally named two carriers of the claim and a path that
+does not exist (`docs/src/users/introduction.md`); it names all three real ones now
+(`README.md:52`, `docs/src/introduction.md:5`, `docs/src/users/getting-started.md:4`).
+
+**Second asterisk, found at review 651 round 2, confirmed on the real runner at round 3: both
+macOS sockets are over `sun_path`'s real limit on an ordinary Mac, not merely predicted to be.**
+`ci.yml` pins `TMPDIR=/tmp/tci` for the whole suite (so an unrelated path doesn't redden it),
+which meant `the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit` and
+`the_macos_attention_socket_path_leaves_comfortable_headroom_under_the_real_limit` had only ever
+measured that 8-byte anchor, never a real macOS session's own `/var/folders/…/T`. Two new
+diagnostic tests and matching `ci.yml` steps that deliberately leave `TMPDIR` alone (named in the
+ignore count above) measured the real thing instead. **Run `40982340829`, the runner's own
+numbers:** `std::env::temp_dir()` resolved to `/var/folders/n6/hn37q6pj7sj_9dmqqc2113800000gn/T/`;
+the approval socket's real path is **107 bytes against the 103-byte limit** (`SocketPathTooLong`,
+refused by name); the attention socket's is **119 bytes** (`bind_attention_listener` returns
+`None`, silently). On this session, right now, a `Managed` launch cannot start on macOS and a
+second window's attention knock never arrives — not an edge case, the ordinary one. The same run
+also showed the approval channel's own functional test family only passes under the `TMPDIR`
+override (a long `TMPDIR` on a Linux dev machine reddened 56 of them the same way), and that the
+attention socket's functional tests use a 6-byte literal project id where production uses a
+36-byte UUID, so they stay green regardless of the real anchor's length — two blind spots beyond
+the headroom tests themselves. The user docs no longer claim macOS is immune to this limit — both
+pages now say the same ~100-byte limit applies to the per-user temporary directory too, that a
+`Managed` launch refuses by name if the approval socket doesn't fit, and that the attention
+socket is best-effort and fails silently on every platform if it doesn't. **The fix is its own
+subject, not a patch inside this one, and `release-checklist.md`'s new one-time section now
+carries a required row gating it before the first macOS artifact tags** — shipping a binary whose
+`Managed` approval cannot start is not something a label in the release notes can excuse.
+
+**Two more test-process-leak.md flakes, found incidentally by the diagnostic run above and fixed,
+not deferred, since either would make the now fully-blocking macOS job fail at random.** The same
+`EINVAL`-on-a-closed-peer race reviews 644/645 already fixed five sites for
+(`test-process-leak.md`'s own "New row, 2026-10-30" entries) had two more sites neither review had
+actually closed: `approval::tests::channel::peer_credential_mismatch_is_rejected` (`left:
+ConnectionClosed, right: PeerCredentialMismatch`, confirmed on run `40982340829`) and
+`wrong_token_is_rejected_without_a_dialog` (`left: ConnectionClosed, right: TokenMismatch`,
+confirmed on run `40989052920`) — the second one named in review 644's own 2026-10-19 history as
+"joining the failing set," but never actually touched by review 645's fix commits. Both fixed with
+a *tolerant* bounded read (skip it if `set_read_timeout` itself fails, rather than asserting on
+it) — narrower than the five already-fixed sites' own unconditional `.expect()`, and correctly so:
+neither of these two servers is guaranteed to finish reading after its own peer, only usually
+likely to, which the first attempt at fixing the credential-check site got wrong before a second
+pass corrected it, and corrected a sibling test's own comment that repeated the same overstated
+guarantee. Run `40992078641` confirmed both fixes together, fully green: `tekstide-core`
+**1155 passed, 0 failed, 12 ignored**, `tekstide` **783 passed, 0 failed, 9 ignored**, the real bar
+the flip itself needed before landing. All nine spawned-thread/subprocess sites in
+`approval/tests/channel.rs` are now enumerated by name in `test-process-leak.md`, not left as a
+prose history to re-derive.
+
+**Not done here, and not this slice's alone to close:** the Run It gate's own answer (real Apple
+hardware, or the label) is the owner's, per RFC-028's own Acceptance decision — resolved
+separately, not assumed, before this slice is treated as closed. The B1 socket-path fix is also
+not done here, deliberately — its own subject, gated by the new release-checklist row above
+rather than rushed into this one.
+
 ### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
 
 Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)

@@ -3,11 +3,19 @@
 Tekstide is local-first: **it does not send project data anywhere.** This chapter lists every
 file it writes, what each one can contain, and how to remove it.
 
+**On macOS, every *durable* path below is under `~/Library/Application Support/tekstide/`
+instead** — there is no `XDG_STATE_HOME` there, and macOS draws no distinction between
+configuration and state the way XDG does, so both share that one directory. **The two Unix-domain
+sockets below are the one exception**: a socket path is capped at around 100 bytes, which
+`~/Library/Application Support/tekstide/...` does not reliably fit, so on macOS those two live
+in the per-user temporary directory instead — their own sections below say exactly where. Each
+other path below names its macOS equivalent beside the Linux one.
+
 ## The recent-projects list
 
 `$XDG_STATE_HOME/tekstide/recent-projects.json`
-(`~/.local/state/tekstide/recent-projects.json` if `XDG_STATE_HOME` is unset), created on every
-launch.
+(`~/.local/state/tekstide/recent-projects.json` if `XDG_STATE_HOME` is unset; `~/Library/Application
+Support/tekstide/recent-projects.json` on macOS), created on every launch.
 
 It holds the paths of projects you have opened, used to restore the Project Board across
 sessions, plus each project's last-known trust state so the board can label rows without opening
@@ -30,7 +38,8 @@ store, and one with no recorded grant is Restricted again.
 ## The audit store
 
 `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`
-(`~/.local/state/tekstide/audit/audit.sqlite3` if `XDG_STATE_HOME` is unset).
+(`~/.local/state/tekstide/audit/audit.sqlite3` if `XDG_STATE_HOME` is unset; `~/Library/Application
+Support/tekstide/audit/audit.sqlite3` on macOS).
 
 **Pressing `Ctrl+Alt+T` to open a terminal creates this database**, the first time you do it.
 
@@ -104,7 +113,9 @@ the opposite; the error is described under *Corrections* in the
 [changelog](../record/changelog.md). What follows is what actually happens.
 
 Pressing `Ctrl+Alt+A` in a trusted project starts a bounded transcript for that run at
-`$XDG_STATE_HOME/tekstide/transcripts/<project>/<agent-run>/transcript.log`. It contains **the
+`$XDG_STATE_HOME/tekstide/transcripts/<project>/<agent-run>/transcript.log`
+(`~/Library/Application Support/tekstide/transcripts/<project>/<agent-run>/transcript.log` on
+macOS). It contains **the
 terminal output of that AI session as it was produced** — which means whatever the AI CLI
 printed, **including anything it quoted from your files.**
 
@@ -210,7 +221,8 @@ previous session ended, never whether anything is offered.
 
 **It never writes the file you are editing.** This is not autosave. The record lives entirely
 outside your project, at `$XDG_STATE_HOME/tekstide/recovery/` (`~/.local/state/tekstide/recovery/`
-if `XDG_STATE_HOME` is unset); the file on disk is never touched by it.
+if `XDG_STATE_HOME` is unset; `~/Library/Application Support/tekstide/recovery/` on macOS); the
+file on disk is never touched by it.
 
 **A clean document has no record.** Only a document with unsaved edits gets one — the same
 reasoning transcripts and every other retained content in this product already follow: if it is
@@ -241,7 +253,8 @@ launch after that.
 
 **Opening a project root takes a real, process-visible lock — not an in-memory flag.** Each open
 project gets a file at `$XDG_STATE_HOME/tekstide/project-locks/<project-id>.lock`
-(`~/.local/state/tekstide/project-locks/` if `XDG_STATE_HOME` is unset), held by an OS-level
+(`~/.local/state/tekstide/project-locks/` if `XDG_STATE_HOME` is unset;
+`~/Library/Application Support/tekstide/project-locks/` on macOS), held by an OS-level
 `flock` for as long as the window has that project open. This is what *A project can be held by
 only one Tekstide window at a time* (see
 [What works today](./what-works-today.md#projects-files-and-editing)) is actually made of: a
@@ -259,9 +272,19 @@ pid means nothing to a person reading the screen, and the lock file's content pl
 exclusivity decision itself, which belongs to the lock primitive alone.
 
 **A second window's refusal asks the first window for your attention, over a small local socket**
-at `<project-locks>/<project-id>.attention.sock`, also removed when its project closes. This only
+at `<project-locks>/<project-id>.attention.sock`
+(`$TMPDIR/tekstide-attention/<project-id>.attention.sock` on macOS — **not** under
+`~/Library/Application Support/`, for the same socket-length reason [The approval
+socket](#the-approval-socket) explains below), also removed when its project closes. This only
 ever *asks*; a Wayland window cannot bring itself to the front on its own, so nothing here claims
 the first window was raised, switched to, or focused — only that it was asked.
+
+**This socket is best-effort, by design, on every platform.** Binding it is attempted alongside
+taking the lock above, but nothing about opening a project depends on it succeeding: a path too
+long for the same length limit the approval socket names below, a bind error, or a permission
+error all fail the same way — silently, with no message on screen. Losing it never loses the
+lock itself; it only means a second instance's own "please look" has nowhere to land. Treated the
+same as a compositor that declines to surface the request at all.
 
 **If the mechanism cannot tell who, if anyone, holds a project** — an unreadable state directory,
 for instance — **opening proceeds unprotected rather than refusing.** A text editor that will not
@@ -276,18 +299,29 @@ recreated the next time a project is opened.
 
 **A `Managed` AI CLI session (see [Configuration](./configuration.md#declaring-an-adapter)) talks
 to Tekstide over a local socket** at
-`$XDG_STATE_HOME/tekstide/approval/<agent-run-id>.sock`
+`$XDG_STATE_HOME/tekstide/approval/<run-id>.sock`
 (`~/.local/state/tekstide/approval/` if `XDG_STATE_HOME` is unset), created when the session
-starts and removed when it ends. Nothing is written to disk through it; it only carries the
-proposal-and-decision exchange a command approval dialog is built from.
+starts and removed when it ends. `<run-id>` is the run's id with its `agent-run-` prefix
+stripped (a bare identifier, not the full `agent-run-...` form), on both platforms. Nothing is
+written to disk through it; it only carries the proposal-and-decision exchange a command approval
+dialog is built from.
 
-**Its path has a real length limit, inherited from the operating system.** A Unix domain socket's
-path is capped at a small, fixed size (on the order of 100 bytes on Linux), and that budget is
-shared with the rest of the path — the state directory, the fixed `approval/` segment, and the
-run's own id. **If `XDG_STATE_HOME` points somewhere with an unusually long or deeply nested
-path, a `Managed` launch can fail to start, naming this directly rather than failing silently.**
-Pointing `XDG_STATE_HOME` at a shorter path resolves it; nothing else about the installation needs
-to change.
+**On macOS this socket is *not* under `~/Library/Application Support/`** — it lives at
+`$TMPDIR/tekstide/<run-id>.sock` instead, in the per-user temporary directory macOS gives every
+process. This is deliberate, not an oversight: `~/Library/Application Support/tekstide/approval/`
+is long enough on its own that a real socket path under it would not reliably fit the length
+limit below, which is why this socket moves off the durable state directory in the first place.
+
+**Its path has a real length limit, inherited from the operating system, and it applies on
+macOS too — to the per-user temporary directory above, not only to the durable paths this page
+otherwise describes.** A Unix domain socket's path is capped at a small, fixed size (around 100
+bytes on both Linux and macOS), shared with the rest of the path. **On Linux, if
+`XDG_STATE_HOME` points somewhere with an unusually long or deeply nested path, a `Managed`
+launch can fail to start, naming this directly rather than failing silently.** Pointing
+`XDG_STATE_HOME` at a shorter path resolves it. **On macOS, where there is no equivalent setting
+to point elsewhere, the same failure is possible if the per-user temporary directory macOS
+itself chose is long enough** — and a `Managed` launch refuses to start by name
+(`SocketPathTooLong`) rather than silently, exactly as on Linux, if it is.
 
 ## Where the full policies live
 

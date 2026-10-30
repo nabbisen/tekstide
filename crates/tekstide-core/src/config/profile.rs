@@ -123,6 +123,12 @@ fn resolve_executable(command: &str) -> AiCliExecutable {
         AiCliExecutable::PathLookup {
             command: command.to_owned(),
             lookup_paths: vec![
+                // RFC-028 D8: a GUI-launched macOS app does not inherit the
+                // user's interactive shell `PATH` at all, so a bare command
+                // name must still find an Apple Silicon Homebrew install.
+                // Harmless on every other platform: lookup only checks
+                // whether the path actually exists.
+                ExecutableLookupPath::reviewed_system("/opt/homebrew/bin"),
                 ExecutableLookupPath::reviewed_system("/usr/local/bin"),
                 ExecutableLookupPath::reviewed_system("/usr/bin"),
             ],

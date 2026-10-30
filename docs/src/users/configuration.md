@@ -1,7 +1,10 @@
 # Configuration
 
 Tekstide reads `$XDG_CONFIG_HOME/tekstide/config.toml` (or `~/.config/tekstide/config.toml`) at
-startup.
+startup. **On macOS**, where there is no `XDG_CONFIG_HOME` equivalent, this is instead
+`~/Library/Application Support/tekstide/config.toml` — the same directory macOS uses for the
+state paths [Local data and privacy](./local-data-and-privacy.md) describes, since macOS draws no
+config/state distinction the way XDG does.
 
 **A missing file is normal.** An invalid one still starts the application with built-in defaults
 — the Project Board then says the file was ignored and names the key that broke it.
@@ -278,7 +281,11 @@ approval machinery (a real socket, a real dialog) without this exact declaration
 `adapter = false` (the default either way), and the profile behaves exactly as it always has. See
 [Local data and privacy](./local-data-and-privacy.md#the-approval-socket) for that socket's path
 and the length constraint it inherits from the OS — an unusually long `XDG_STATE_HOME` can stop a
-`Managed` launch from starting, and it is worth knowing before turning this on, not after.
+`Managed` launch from starting on Linux. **On macOS the socket lives in the per-user temporary
+directory instead**, not under the durable configuration/state path — moved there specifically
+because the durable path is too long for this limit — but the same ~100-byte limit still applies
+to that shorter path, and there is no setting to point it elsewhere if it is somehow still too
+long. Worth knowing before turning this on, not after.
 
 **This is a claim the file makes, not a fact Tekstide checks.** Nothing verifies that the program
 named in `command` actually speaks the protocol — the model is cooperative, so a program that

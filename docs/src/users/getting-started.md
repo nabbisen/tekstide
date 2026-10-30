@@ -5,10 +5,11 @@ development workflows. It runs on Linux; there is no cross-platform evidence bey
 
 ## Install
 
-Downloads the Linux x86_64 release binary, verifies it against its own published checksum, and
-installs **one binary** to `$HOME/.local/bin/tekstide` — plus the directory it goes in, if that
-does not already exist. Touches nothing else: no shell rc edit, no `sudo`, no repository added. If
-a future version needs to do more than that, it will say so before doing it, not after.
+Downloads the release binary for this platform (Linux x86_64, or macOS on Apple Silicon), verifies
+it against its own published checksum, and installs **one binary** to `$HOME/.local/bin/tekstide`
+— plus the directory it goes in, if that does not already exist. Touches nothing else: no shell rc
+edit, no `sudo`, no repository added. If a future version needs to do more than that, it will say
+so before doing it, not after.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nabbisen/tekstide/main/install.sh | sh
@@ -29,7 +30,9 @@ one of them fetches code from the same server as the one-liner above:
   ```
 
 - **The checksum, verified by hand** instead of by the script — for anyone who wants to see
-  exactly what the installer did, one step at a time:
+  exactly what the installer did, one step at a time. On Linux, the asset is
+  `tekstide-x86_64-linux`; on macOS (Apple Silicon), `tekstide-aarch64-macos`, verified with
+  `shasum -a 256 -c` instead of `sha256sum -c`:
 
   ```sh
   curl -LO https://github.com/nabbisen/tekstide/releases/latest/download/tekstide-x86_64-linux
