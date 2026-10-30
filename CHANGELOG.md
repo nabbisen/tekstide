@@ -101,7 +101,11 @@ runner before the flip, not assumed from an earlier pass: run `40885095023` (`te
 what the job-level setting says — a macOS failure now fails this workflow run — and nothing more:
 branch protection on this repository deliberately does not require status checks (decided
 2026-10-29), so enforcement of a red gate still lives in `release-checklist.md`'s own "Required
-Gates" section, run by a human before tagging, exactly as it already does for Linux.
+Gates" section, run by a human before tagging, exactly as it already does for Linux. Run
+`40993033378` is the one that actually evidences the flip doing its job, not merely a pre-flip
+green with `continue-on-error` still in place: `continue-on-error` is gone from the committed
+`ci.yml`, both jobs are green, and the workflow's own conclusion is green (`gate`
+`1160/0/4`/`785/0/8`/`25/0`, `macos-measurement` `1158/0/12`/`783/0/9`/`25/0`).
 
 **Nine macOS-conditional test ignores, named with their reasons — corrected at review 651 round
 3 from an earlier count of seven that stopped reconciling the moment this slice added its own

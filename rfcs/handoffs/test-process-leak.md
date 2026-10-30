@@ -3494,8 +3494,12 @@ run `40992078641`: `tekstide-core` **1155 passed, 0 failed, 12 ignored**, `tekst
 inferred, read from the log.
 
 **All nine spawned-thread/subprocess sites in `approval/tests/channel.rs`, enumerated so this does
-not reopen as a tenth surprise** -- corrected from the reviewer's own count of eight, which omitted
-`peer_credential_mismatch_is_rejected` itself:
+not reopen as a tenth surprise.** The reviewer's own count of eight was not missing a member --
+it counted a different unit, `std::thread::spawn` call sites (two of which sit in the single test
+`serve_concurrently_accepts_a_second_connection_while_the_first_stalls`), against the nine below,
+counted by test. A thread-based count also could not have found item 4, which has no spawned
+thread at all -- the nine-by-test enumeration is the one that stays complete as sites are added
+or removed:
 
 1. `malformed_frame_is_rejected_not_partially_parsed` -- bounded read, `.expect()`-ed; server reads
    the frame before rejecting, narrowing but not closing the race (round 5's own corrected comment).
