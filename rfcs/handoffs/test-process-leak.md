@@ -33,6 +33,7 @@ resulting pressure, each disclosed separately and each moved past:
 | `runtime::terminal::reader::tests::the_wake_notifier_wakes_when_real_pty_output_arrives` | review of request 391 (2026-09-15) — **a race inside the test; mechanism confirmed by measurement and fixed in RFC-050 PR-050-B's first commit (2026-09-16).** The test now holds `exit` back until the first wake is observed. See the dated entries. **Confirmed by the test-flake-disposition pass (2026-10-09): still passes on Linux. Retired from active tracking there.** **Reopened for macOS (2026-10-19): the same test fails deterministically on `macos-measurement` at a different assertion -- `wait_for_exit` returns `None` where `Exited { exit_status: 0 }` is expected (`reader/tests.rs:115`). Not the 2026-09-15 race, not an intermittent. See the dated entry at the end.** **Corrected, 2026-10-21 (review 633's own run): not deterministic after all -- passed on `macos-measurement` in two of the three runs directly checked; the shell-wedged-in-`proc_exit` cause named above is unchanged, only "every run" was wrong.** **Split, review 649 round 2 (2026-10-29): the wake-fires property (this name) is unaffected by the cluster and confirmed passing on macOS; it keeps its name, stays active on every platform, and sends no `exit`. The exit-and-wait property this test used to also assert is now its own test, next row, quarantined there instead. See the dated entry at the end.** |
 | `runtime::terminal::reader::tests::the_shell_still_exits_normally_after_the_first_wake_is_observed` | split out of the row above, review 649 round 2 (2026-10-29) — **`#[cfg_attr(target_os = "macos", ignore)]`, kept active on Linux. The property (the shell is still responsive and exits normally after the first wake) is a known-intermittent member of the shell-wedged-in-`proc_exit` cluster the row above already tracks for macOS (`P_WEXIT` set, confirmed by direct `sysctl` sampling, 2026-10-21) -- `wait_for_exit` sometimes returns `None` within its 5s budget for a reason unrelated to this property being false. Widening the timeout is explicitly rejected as a fix (see "Reopened on macOS, 2026-10-19" below). A release decision, revisited each release, not a closure -- see the dated entry at the end.** |
 | `runtime::terminal::reader::tests::the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming` | `macos-measurement`, run 40880445334 (2026-10-29, review 650 round 2) — **a third, previously unnamed member of the two rows above's own shell-wedged-in-`proc_exit` cluster, not caused by anything in that push (the diff touched a new test file, a CI step and a `mod` line -- nothing in `runtime::terminal::reader`).** Verbatim: *"the wake notifier never reported the reader had stopped within 5s after the child exited -- EOF is not reaching the wake signal."* Same shape as the other two rows' own failures: a 5-second budget waiting on the child's exit/EOF to reach something, on macOS specifically, where `P_WEXIT` is already confirmed (2026-10-21 `sysctl` sample) to let a shell sit in `proc_exit` past exactly this kind of deadline. Not confirmed as the same root cause by direct measurement here — recorded as the datum (a third test, same symptom shape, same platform, same budget) rather than merged into either existing row, since neither names this test and a grep for the field/test name is not evidence of absence (the lesson of this very review's `touched_documents` round). **Review 650 round 3: reading this test found the actual cause of the run above's failure was narrower than "the cluster".** It asserted two things -- the notifier's own "no more coming" report (its name), and, redundantly, the same `wait_for_exit` outcome `the_shell_still_exits_normally_after_the_first_wake_is_observed` (row above) already owns and already ignores on macOS. The duplicate assertion is removed (`reader/tests.rs`); this test now asserts only its own named property. Whether that property alone is also a macOS intermittent, making this a genuine fourth row, or whether it was only ever failing on the now-removed duplicate, is answered by the next macOS run -- not yet disposed. |
+| `runtime::terminal::reader::tests::real_pty_output_reaches_the_channel_end_to_end` | `macos-measurement`, run 41190734667 (2026-10-31, review 653's own push) — **a fourth member of the shell-wedged-in-`proc_exit` cluster the three rows above already track, found incidentally; not caused by that push (the diff touched only docs, `release.yml`, and `release-checklist.md` — nothing in `runtime::terminal`).** `wait_for_exit` returned `None` where `Exited { exit_status: 0 }` is expected (`reader/tests.rs:48`), with the same `sysctl(KERN_PROC_PID)` signature already confirmed for this cluster: `p_stat=2 (SRUN: runnable), p_flag=0x6006 (P_WEXIT set)` sampled three times over 200ms. Same shape, same platform, same 5s budget. **Disclosed, not fixed, here** — the established disposition for this cluster (`#[cfg_attr(target_os = "macos", ignore)]`, kept active on Linux, a release decision revisited each release) is a candidate but not applied unilaterally to a fourth test outside the subject that found it; left for the next review to decide alongside it. |
 | `audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active` | RFC-030 PR-030-B's wiring-layer gate, run 3 of 3 (2026-09-22) — failed once under the third of three consecutive full-workspace runs; passed immediately in isolation (`cargo test -p tekstide-core audit::tests::purge::purge_reports_deferred_cleanup_while_wal_reader_is_active`, 1 passed, 0 failed). The name names its own contention (a WAL reader held open while purge runs); not investigated further this session — flagged as a candidate for the same class of SQLite-under-parallel-load timing sensitivity this document's other rows already describe, not confirmed as the same root cause. **Verdict, test-flake-disposition pass (2026-10-09): Accept. See the dated disposition entry.** |
 | `runtime::git::tests::every_failure_to_answer_is_unknown_and_never_none_ignored` | RFC-055 PR-055-C, one ablation run (2026-09-25) — **suspected `ETXTBSY` on a stand-in `git` script; not reproduced; mitigated in the test, see the dated section at the end.** `wait_until_executable` already retries on `errno 26` before handing out the stand-in script. **Confirmed by the test-flake-disposition pass (2026-10-09): mitigation still in place, no recurrence since. Retired from active tracking.** |
 
@@ -3527,3 +3528,58 @@ or removed:
 9. `wrong_token_is_rejected_without_a_dialog` -- bounded, tolerant read, same shape as (8); this
    server's own rejection path does read first, narrowing the window relative to (8)'s, but the
    same non-assertable gap (review 651 round 5, this row).
+
+## New row, 2026-10-31 -- a fourth member of the shell-wedged-in-`proc_exit` cluster, found incidentally by review 653's own docs-only push
+
+Run `41190734667` (`e3f432d`, review 653's own push, docs/workflow/checklist only --
+`README.md`, `CHANGELOG.md`, `docs/src/introduction.md`, `docs/src/users/getting-started.md`,
+`rfcs/accepted/028-cross-platform-support.md`, `rfcs/handoffs/release-checklist.md`,
+`.github/workflows/release.yml`; nothing under `crates/`):
+
+```
+assertion `left == right` failed
+  left: None
+ right: Some(Exited { exit_status: 0 })
+```
+
+`runtime::terminal::reader::tests::real_pty_output_reaches_the_channel_end_to_end`
+(`reader/tests.rs:48`) -- `wait_for_exit` returned `None` where `Exited { exit_status: 0 }` is
+expected, inside its own 5-second budget. The diagnostic `wait_for_exit` already prints on this
+exact outcome names the same signature the three existing cluster rows above already confirmed
+by direct `sysctl` sampling (2026-10-21): `kill(pid, 0) = 0` (the process is still visible to
+signals) while `proc_pidinfo`/`proc_bsdshortinfo` both report "No such process", and
+`sysctl(KERN_PROC_PID)` samples the shell three times over 200ms, every time reading
+`p_stat=2 (SRUN: runnable), p_flag=0x6006 (P_WEXIT set)` -- a shell that has entered `proc_exit`
+but not yet finished leaving it, the exact mechanism this cluster's own rows already name, not a
+new one.
+
+**Not caused by this push.** The diff this run tested touches no file under `crates/` at all --
+every change is a doc, a GitHub Actions workflow, or a handoff checklist; nothing in
+`runtime::terminal` or anywhere near it. The `gate` (Linux) job on the same run, same commit,
+passed clean, including the full workspace suite. This is the same cluster surfacing on a push
+that happens to have run on macOS, not a regression this push introduced.
+
+**A genuinely new member, not a recurrence of an existing row.** None of the three existing rows
+name this test, and the test itself is otherwise unrelated to any of theirs: it is the plainest
+possible real-PTY round trip (write a marker, read it back, wait for the shell's own exit), with
+no wake-notifier or backgrounded-descendant machinery any of the other three touch. The only
+thing it shares with them is the symptom (`wait_for_exit` timing out on a wedged `proc_exit`) and
+the platform.
+
+**Disclosed, not fixed, here.** The established disposition for this cluster --
+`#[cfg_attr(target_os = "macos", ignore = "…")]`, kept active on Linux, named as "a release
+decision, revisited each release, not a closure" at review 649 round 2 -- is the obvious
+candidate for this test too, but applying it was not this subject's own call to make
+unilaterally: review 653 was already accepted and closed on an unrelated disclosure before this
+run's own result came back, and extending a quarantine pattern to a fourth site is exactly the
+kind of judgment call this project holds for a review turn rather than deciding alone. Left for
+the next review that touches this area, or a dedicated one if none is imminent.
+
+**Worth noting, not acted on**: every macOS run this session watched directly between review 650
+round 3's fix and this one (`41150759162`, `41185684169`, and this run's own `gate` sibling) shows
+`tekstide-core`'s full suite passing with zero failures except this one -- consistent with, but
+not proof of, row 35's own open question (whether `the_wake_notifier_delivers_a_final_wake_and_
+reports_no_more_are_coming` is a genuine fourth row of its own) having resolved quietly in the
+negative. Not updated here: a few clean runs is not the kind of evidence this document's own
+"grep for absence is not evidence of absence" lesson accepts, and that row is not this entry's
+own subject.
