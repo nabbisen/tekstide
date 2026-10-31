@@ -224,13 +224,13 @@ impl ApprovalChannelDirectory {
 /// `channel_dir_under`'s macOS arm needs to fit a real session's
 /// `$TMPDIR` under `sun_path`'s 103-byte limit (measured over by 4 bytes
 /// at the full 32). A `Uuid::new_v4` is already uniformly random, so any
-/// 12-character window of it carries the same entropy per bit as a digest
-/// would, with no new mechanism to justify -- and the *last* group
-/// (`xxxx-xxxx-xxxxxxxxxxxx`'s own final 12) is specifically the one
-/// window with no version/variant bits constrained by the UUID format at
-/// all, unlike a window starting from the front. A collision between two
-/// runs' truncated ids fails closed, not open: `bind()`'s own
-/// already-existing checks
+/// 12-character window of it -- front or back -- carries the same 48 bits
+/// of entropy, with no new mechanism to justify. The *last* window is the
+/// one actually chosen here not for entropy (a front window is no less
+/// random in a v4) but for this crate's own test fixtures: see the dated
+/// correction below for why a front window is wrong for a reason that has
+/// nothing to do with entropy. A collision between two runs' truncated
+/// ids fails closed, not open: `bind()`'s own already-existing checks
 /// (`a_live_listener_at_the_bind_path_is_refused_as_already_listening`,
 /// `bind_recovers_from_a_stale_socket_file`) mean a colliding second bind
 /// is refused or recovers, never silently shares a channel with the

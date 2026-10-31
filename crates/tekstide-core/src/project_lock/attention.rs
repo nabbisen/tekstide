@@ -36,9 +36,10 @@ use super::project_locks_dir;
 /// prefix to strip -- unlike `AgentRunId`) is truncated the same way
 /// `approval::channel`'s own `socket_filename_stem` truncates its id:
 /// hyphens removed, *last* 12 of the remaining hex characters kept (48
-/// bits, uniformly random from `Uuid::new_v4`, with no version/variant
-/// bits in that window the way a prefix window would carry). The
-/// `.attention` segment is also dropped from the suffix -- redundant
+/// bits either way against a real `Uuid::new_v4` -- the last window is
+/// chosen for this crate's own test fixtures, not for entropy; see the
+/// dated correction below). The `.attention` segment is also dropped
+/// from the suffix -- redundant
 /// inside a directory already named `tekstide-attention`, and the one
 /// remaining source of avoidable length. Together these shed the 26
 /// bytes the macOS anchor needed (measured over by 16 at the untruncated

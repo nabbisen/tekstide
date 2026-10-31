@@ -18,10 +18,10 @@ same to the project id, and also drops the filename's own `.attention` segment (
 a directory already named `tekstide-attention`/`project-locks`) — `<id>.sock`, not
 `<id>.attention.sock`. Neither function carries a platform `cfg`, so both platforms get the same
 shortened name; only macOS needed the bytes back. A `Uuid::new_v4` is already uniformly random, so
-any 12-character window of it carries the same entropy per bit as a digest would, with no new
-mechanism to justify — the last group specifically, since it carries none of the format's own
-version/variant bits a window starting from the front would. Measured against the budget review
-651 B1 set: approval now resolves to **83 bytes** (headroom 20, was over by 4 at 107), attention
+any 12-character window of it — front or back — carries the same 48 bits of entropy; the *last*
+window is chosen for the reason below, this crate's own test fixtures, not for entropy. Measured
+against the budget review 651 B1 set: approval now resolves to **83 bytes** (headroom 20, was
+over by 4 at 107), attention
 to **85 bytes** (headroom 18, was over by 16 at 119) — both comfortably past the 10-byte headroom
 the existing tests already stated as the bar.
 
