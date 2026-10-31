@@ -206,3 +206,34 @@ tidy-up. It is recorded here so nobody takes it as a quick win in a dependency s
 
 **Accepted by ID for `0.38.0`.** The gate's pass condition is now **zero vulnerabilities and exactly
 six warnings** -- `paste`, `ttf-parser`, `lru`, and these three. A seventh is a finding.
+
+## 2026-10-31 -- the `0.38.0` candidate cut's own run found two more; one fixed, one recorded
+
+**A seventh warning did arrive, and this register's own rule caught it rather than letting it
+ride into the release unexamined.** `cargo audit` against the candidate cut's lockfile reported
+**eight** warnings, not six: the six above, plus `tokio 1.53.1` (`RUSTSEC-2026-0386`, **unsound**
+-- `AsyncFd::new` and related constructors violate I/O safety, dated 2026-10-13) and
+`clipboard-win 5.4.1` (**yanked**, no advisory id).
+
+**`tokio` fixed, not accepted -- a published fix existed and was reachable, unlike `lru`.**
+`cargo tree -e normal -i tokio@1.53.1` shows it reached through `iced_futures` -> `iced` with no
+platform `cfg` at all, so it is a normal dependency on every target this project builds, not a
+lock-only entry. `cargo update -p tokio --dry-run` resolved to `1.54.1`, inside the advisory's own
+patched range (`>=1.53.3`) -- the opposite of `lru`'s own situation, where the same dry-run check
+locks zero packages. Applied for real: `tokio 1.53.1 -> 1.54.1`, `Cargo.lock` only, no source
+change. `cargo audit` afterward: seven warnings, `tokio` gone. Full workspace suite re-run after
+the bump (`tekstide-core` 1164/0/4, `tekstide` 785/0/8, `rfc_docs_invariants` 25/0) clean, same as
+before it.
+
+**`clipboard-win` recorded, not fixed -- same shape as the `windows_*`/`metal`/`kqueue` family
+already dismissed above, verified the same way rather than assumed from the name.**
+`cargo tree -e normal -i clipboard-win@5.4.1` (current platform) finds nothing; `--target all`
+shows the real chain: `clipboard-win` <- `window_clipboard` <- `iced_winit` <- `iced` <-
+`tekstide`, and `window_clipboard`'s own manifest gates `clipboard-win` to Windows only. **None on
+Linux or macOS** -- the crate exists in `Cargo.lock` (which records every platform) and in
+neither build this project ships. A yanked version with zero reach here costs nothing to carry;
+retires if `window_clipboard` ever bumps past it, which nothing here depends on.
+
+**The gate's pass condition for `0.38.0`'s own tag is now zero vulnerabilities and exactly seven
+warnings** -- the six already accepted, plus `clipboard-win`. An eighth, or a `tokio` warning
+reappearing, is a finding.

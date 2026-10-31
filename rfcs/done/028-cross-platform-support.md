@@ -1,12 +1,14 @@
 # RFC-028: Cross-Platform Support — macOS
 
-Status: **Accepted by the human owner 2026-10-15.** D1–D9 as written; **the Run It question
-answered by the acceptance itself** — see *Decided on acceptance*. `0.38.0` in the authorised
-schedule. Proposed 2026-10-14. Scoped against what the current code actually assumes, not a
-hypothetical platform matrix — found by a four-part investigation (process/PTY, IPC/sockets,
-filesystem/paths/watcher, GUI/clipboard/packaging) whose load-bearing claims were independently
-re-derived against vendored dependency sources, not taken on report alone. Returned twice before
-this draft: review 566 found D5's inventory incomplete (re-scoped against a full
+Status: **Implemented and closed 2026-10-31; `0.38.0` candidate, not yet published.** Moved to
+`done/`. Accepted by the human owner 2026-10-15; D1–D9 as written. **The Run It question is
+answered by RFC-028 *Acceptance*'s own option (2), taken 2026-10-31** — no Apple hardware
+available to this project, CI's own macOS evidence accepted as sufficient — see *Decided on
+acceptance*'s own dated note. Proposed 2026-10-14. Scoped against what the current code actually
+assumes, not a hypothetical platform matrix — found by a four-part investigation (process/PTY,
+IPC/sockets, filesystem/paths/watcher, GUI/clipboard/packaging) whose load-bearing claims were
+independently re-derived against vendored dependency sources, not taken on report alone. Returned
+twice before this draft: review 566 found D5's inventory incomplete (re-scoped against a full
 `libc::`/`/proc`/`SYS_` sweep); review 567 found the keybinding layer missing entirely (D9) and no
 acceptance story for a platform nobody here can run Run It on. `0.37.0` was first of M14; this is
 the second. Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23.

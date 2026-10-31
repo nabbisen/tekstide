@@ -1,7 +1,7 @@
 ---
 title: "PR-028-F: what it includes beyond the RFC's own text"
 status: "Handoff. Opened 2026-10-29, after PR-028-E was accepted and D2's backend decision was made."
-rfc_file: "../../accepted/028-cross-platform-support.md"
+rfc_file: "../../done/028-cross-platform-support.md"
 target_milestone: "M14"
 created: "2026-10-29"
 ---

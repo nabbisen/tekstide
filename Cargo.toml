@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version         = "0.37.0"
+version         = "0.38.0"
 edition         = "2024"
 license             = "Apache-2.0"
 authors             = ["nabbisen"]
@@ -20,7 +20,7 @@ keywords            = ["workspace", "developer-tools", "ai", "cli"]
 # *newest* core: `cargo install tekstide --version 0.25.0` stopped compiling the day `0.26.0` added three public
 # enum variants. Bumped **with every release** -- `the_workspace_pins_tekstide_core_to_its_own_version` fails if
 # this and `[workspace.package] version` disagree.
-tekstide-core               = { version = "0.37.0", path = "crates/tekstide-core" }
+tekstide-core               = { version = "0.38.0", path = "crates/tekstide-core" }
 
 libc                        = "0.2"
 
@@ -29,7 +29,7 @@ libc                        = "0.2"
 # rfcs/handoffs/dependency-advisories.md).
 #
 # RFC-028 D2, corrected 2026-10-29 (dated correction in
-# rfcs/accepted/028-cross-platform-support.md): `macos_fsevent`, not `macos_kqueue`.
+# rfcs/done/028-cross-platform-support.md): `macos_fsevent`, not `macos_kqueue`.
 # Measured on the real macOS runner, one variable, pushed and reverted in both
 # directions: `macos_kqueue` failed `reading_a_watched_file_is_not_reported_but_
 # writing_it_is` and `the_hostile_tree_is_watched_only_where_the_policy_admits_and_

@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.38.0 - macOS Support, And What It Does Not Claim
+
+Status: **candidate, not yet published.** RFC-028's nine decisions are all implemented, gated
+and closed, the macOS CI job is fully blocking, and the Run It question is answered — RFC-028
+*Acceptance*'s own option (2): no Apple hardware available, CI's own evidence accepted as
+sufficient, disclosed rather than implied as parity with Linux. This entry was written
+incrementally across reviews 566-654 as each piece landed, then re-read against the finished set
+at the candidate; see `rfcs/handoffs/028-cross-platform-support/pr-028-f-scope-additions.md` for
+PR-028-F's own scope additions and `rfcs/done/028-cross-platform-support.md` for the full,
+dated decision record.
 
 ### Fixed — review 651 B1: both macOS socket paths shortened to fit under `sun_path`'s real limit
 
@@ -336,7 +345,7 @@ exactly this moment. The owner has now answered: **no Apple hardware is availabl
 project, and CI's own macOS evidence is accepted as sufficient — option (2).** This is not a
 departure from the accepted RFC; it is the shape *Acceptance* already named as "the only other
 shape this release may take." Recorded as a dated note under *Decided on acceptance (2026-10-15)*
-in `rfcs/accepted/028-cross-platform-support.md`, not an edit to it — option (1) and the original
+in `rfcs/done/028-cross-platform-support.md`, not an edit to it — option (1) and the original
 preference stay exactly as written, so a future reader can see what was ranked and what was
 chosen, not only the outcome.
 
