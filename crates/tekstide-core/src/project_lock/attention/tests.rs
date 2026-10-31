@@ -47,7 +47,7 @@ fn max_socket_path_len_matches_the_real_platform_limit() {
 
 /// Review 651 B1: pins the exact transformation, not just its effect on
 /// a path length -- every hyphen is removed from the project id, only
-/// the first 12 of the remaining 32 hex characters are kept, and the
+/// the *last* 12 of the remaining 32 hex characters are kept, and the
 /// suffix is the bare `.sock` (the `.attention` segment this socket's
 /// filename used to carry is gone, redundant inside a directory already
 /// named `tekstide-attention`/`project-locks`). Run on every platform:
@@ -55,14 +55,37 @@ fn max_socket_path_len_matches_the_real_platform_limit() {
 /// the same shortened, truncated name as macOS even though only macOS
 /// needed the bytes back.
 #[test]
-fn attention_socket_path_truncates_the_id_and_drops_the_attention_suffix_segment() {
+fn attention_socket_path_keeps_the_last_twelve_hex_characters_and_drops_the_attention_suffix_segment()
+ {
     let state_root = test_root("filename-shape");
     let path = super::attention_socket_path(&state_root, "01234567-89ab-cdef-0123-456789abcdef");
     assert_eq!(
         path.file_name().and_then(|name| name.to_str()),
-        Some("0123456789ab.sock"),
-        "expected hyphens removed, only the first 12 of the remaining 32 hex characters kept, \
+        Some("456789abcdef.sock"),
+        "expected hyphens removed, only the last 12 of the remaining 32 hex characters kept, \
          and a bare .sock suffix with no .attention segment"
+    );
+    cleanup_root(state_root);
+}
+
+/// Review 651 B1, dated correction 2026-10-31: see
+/// `approval::tests::channel`'s own sibling for the full story -- a
+/// first version of this function took the *first* 12 characters, which
+/// collapses every `ProjectId::for_test`-shaped sequential id (format
+/// `00000000-0000-4000-8000-{sequence:012x}`, review `identity.rs`) to
+/// the identical stem, since the distinguishing digits live entirely in
+/// the last 12-hex-character group.
+#[test]
+fn attention_socket_path_distinguishes_sequential_test_fixture_ids() {
+    let state_root = test_root("sequential-ids");
+    let first = super::attention_socket_path(&state_root, "00000000-0000-4000-8000-000000000000");
+    let second = super::attention_socket_path(&state_root, "00000000-0000-4000-8000-000000000001");
+    assert_ne!(
+        first, second,
+        "two different for_test()-shaped sequential ids must not truncate to the same path -- \
+         a collision here means every concurrently-running test that binds through it collides \
+         on the real macOS runner, where the socket directory is shared rather than \
+         state_root-derived"
     );
     cleanup_root(state_root);
 }

@@ -12,16 +12,35 @@ the first macOS artifact tags; this is that fix, its own subject, not a round of
 
 **The id each socket's filename is built from is now truncated to 12 hex characters (48 bits),
 not the full 32-hex-character UUID.** `approval::channel::socket_filename_stem` strips the
-`agent-run-` prefix as before, then removes the remaining UUID's hyphens and keeps only the first
-12 of its 32 hex characters. `project_lock::attention::attention_socket_path` does the same to
-the project id, and also drops the filename's own `.attention` segment (redundant inside a
-directory already named `tekstide-attention`/`project-locks`) — `<id>.sock`, not
+`agent-run-` prefix as before, then removes the remaining UUID's hyphens and keeps only the
+*last* 12 of its 32 hex characters. `project_lock::attention::attention_socket_path` does the
+same to the project id, and also drops the filename's own `.attention` segment (redundant inside
+a directory already named `tekstide-attention`/`project-locks`) — `<id>.sock`, not
 `<id>.attention.sock`. Neither function carries a platform `cfg`, so both platforms get the same
 shortened name; only macOS needed the bytes back. A `Uuid::new_v4` is already uniformly random, so
-a prefix of it carries the same entropy per bit as a digest would, with no new mechanism to
-justify. Measured against the budget review 651 B1 set: approval now resolves to **83 bytes**
-(headroom 20, was over by 4 at 107), attention to **85 bytes** (headroom 18, was over by 16 at
-119) — both comfortably past the 10-byte headroom the existing tests already stated as the bar.
+any 12-character window of it carries the same entropy per bit as a digest would, with no new
+mechanism to justify — the last group specifically, since it carries none of the format's own
+version/variant bits a window starting from the front would. Measured against the budget review
+651 B1 set: approval now resolves to **83 bytes** (headroom 20, was over by 4 at 107), attention
+to **85 bytes** (headroom 18, was over by 16 at 119) — both comfortably past the 10-byte headroom
+the existing tests already stated as the bar.
+
+**Corrected within the hour of first landing: a *prefix* truncation reddened the real macOS
+runner, run `41149340411`, eight failing tests.** `AgentRunId::for_test`/`ProjectId::for_test`
+(the deterministic ids this crate's own test suite uses) build on `Uuid::from_u128(sequence)` and
+`{sequence:012x}` respectively, both of which place a small sequence's distinguishing digits in
+the UUID's *trailing* characters — `for_test(0)` and `for_test(1)` differ only in their very last
+character. Taking the first 12 characters collapsed every test-fixture id in the crate to the
+identical stem, invisible on Linux (where `channel_dir` is still `state_root`-derived, so each
+test's own unique `state_root` kept the full path unique regardless) but fatal on macOS (where
+`channel_dir` is the one shared `$TMPDIR/tekstide` anchor for every test, so the collapsed stem
+made every concurrently-running test bind the same path and collide,
+`BindTargetAlreadyListening`). Fixed by taking the *last* 12 characters instead — full entropy
+against a real `Uuid::new_v4`, and the window that happens to carry every `for_test` sequence's
+own distinguishing digits too. Two new regression tests
+(`socket_filename_stem_distinguishes_sequential_test_fixture_ids` and its attention sibling)
+assert two different `for_test`-shaped sequences never collide, so this class of defect fails a
+test locally before it can reach a real runner again.
 
 **Collision consequence stated per socket, since the two are not symmetrical.** A truncated id can
 collide, at 48 bits, across a handful of concurrently open runs/projects — negligible, but the two
@@ -42,27 +61,26 @@ reader, across nine reviews, that nothing was actually being checked) now assert
 that deliberately leave `TMPDIR` alone no longer pass `--ignored` either, and their own step
 names already said "assertion"), rather than only printing a number for a human to read. Two new,
 narrower unit tests pin the exact transformation rather than only its effect on a path length —
-`socket_filename_stem_strips_the_prefix_then_keeps_the_first_twelve_hex_characters` and
-`attention_socket_path_truncates_the_id_and_drops_the_attention_suffix_segment` — both run on
-every platform, since the transformation itself carries no `cfg`. The truncation length itself is
-now a named constant in each module (`TRUNCATED_ID_HEX_LEN`, duplicated rather than shared — the
-same deliberate-duplication precedent `max_socket_path_len` already set, for the same reason:
-these two modules stay independent of each other on every platform), not a bare `12` inside a
-chained iterator. `bind_rejects_a_state_root_deep_enough_to_exceed_sun_path`'s own
+`socket_filename_stem_strips_the_prefix_then_keeps_the_last_twelve_hex_characters` and
+`attention_socket_path_keeps_the_last_twelve_hex_characters_and_drops_the_attention_suffix_segment`
+— both run on every platform, since the transformation itself carries no `cfg`. The truncation
+length itself is now a named constant in each module (`TRUNCATED_ID_HEX_LEN`, duplicated rather
+than shared — the same deliberate-duplication precedent `max_socket_path_len` already set, for
+the same reason: these two modules stay independent of each other on every platform), not a bare
+`12` inside a chained iterator. `bind_rejects_a_state_root_deep_enough_to_exceed_sun_path`'s own
 deliberately-deep state root grew one more 40-byte segment, since the stem shrinking by 24 bytes
 would otherwise have falsified that test's own precondition rather than its assertion.
 
 `local-data-and-privacy.md`'s approval- and attention-socket paragraphs now name the shortened
-filenames (`<run-id>` and `<short-id>` are explicitly "the first 12 characters," not the full id)
+filenames (`<run-id>` and `<short-id>` are explicitly "the last 12 characters," not the full id)
 instead of the pre-truncation names review 651 round 1 had just corrected to be accurate in every
 other respect.
 
-**Not yet confirmed on a real macOS runner.** Everything above is verified on Linux
-(`cargo fmt --check`, `clippy -D warnings`, the full workspace suite under a short fixed
-`TMPDIR`, `actionlint`/YAML parse on `ci.yml`) and by direct arithmetic against the same formula
-review 651 B1 used to find the original overflow, but the two promoted headroom assertions and
-the `ci.yml` step changes have not yet run on macOS. `release-checklist.md`'s gating checkbox
-stays unticked until they have.
+**Confirmed on the real runner, the hard way.** The first version of this fix (prefix
+truncation) ran on run `41149340411` and reddened `macos-measurement` — the gate this very slice
+flipped to fully blocking — eight tests failing with `BindTargetAlreadyListening`, diagnosed and
+corrected (suffix truncation, above) the same day, same subject. `release-checklist.md`'s gating
+checkbox stays unticked until a run with the corrected code is green.
 
 ### Added — PR-028-E (RFC-028 D9): the keybinding layer handles the Command/⌘ modifier on macOS
 

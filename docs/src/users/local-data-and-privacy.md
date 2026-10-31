@@ -276,10 +276,11 @@ at `<project-locks>/<short-id>.sock`
 (`$TMPDIR/tekstide-attention/<short-id>.sock` on macOS — **not** under
 `~/Library/Application Support/`, for the same socket-length reason [The approval
 socket](#the-approval-socket) explains below), also removed when its project closes. `<short-id>`
-is the first 12 characters of the project's id with the hyphens removed, not the full identifier —
-the filename is built the same way on both platforms, chosen for the macOS case below where the
-full id does not reliably leave room under the length limit, and carried over to Linux rather than
-giving the two platforms two different names for the same thing. This only ever *asks*; a Wayland
+is the last 12 characters of the project's id once its hyphens are removed, not the full
+identifier — the filename is built the same way on both platforms, chosen for the macOS case
+below where the full id does not reliably leave room under the length limit, and carried over to
+Linux rather than giving the two platforms two different names for the same thing. This only ever
+*asks*; a Wayland
 window cannot bring itself to the front on its own, so nothing here claims the first window was
 raised, switched to, or focused — only that it was asked.
 
@@ -305,8 +306,8 @@ recreated the next time a project is opened.
 to Tekstide over a local socket** at
 `$XDG_STATE_HOME/tekstide/approval/<run-id>.sock`
 (`~/.local/state/tekstide/approval/` if `XDG_STATE_HOME` is unset), created when the session
-starts and removed when it ends. `<run-id>` is the first 12 characters of the run's id, with its
-`agent-run-` prefix and the id's own hyphens stripped first — a short fragment, not the full
+starts and removed when it ends. `<run-id>` is the last 12 characters of the run's id, with its
+`agent-run-` prefix stripped and its own hyphens removed first — a short fragment, not the full
 `agent-run-...` form and not the full identifier either, on both platforms. Nothing is written to
 disk through it; it only carries the proposal-and-decision exchange a command approval dialog is
 built from.

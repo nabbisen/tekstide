@@ -1200,24 +1200,48 @@ fn bind_rejects_a_state_root_deep_enough_to_exceed_sun_path() {
 /// Review 651 B1: pins the exact transformation, not just its effect on a
 /// path length -- the `"agent-run-"` prefix is stripped first (review
 /// 600/601), then every hyphen is removed from the remaining UUID, then
-/// only the first 12 of those 32 hex characters are kept. Run on every
+/// only the *last* 12 of those 32 hex characters are kept. Run on every
 /// platform (the function carries no `cfg`), not only macOS, since this
 /// is a plain string transformation with nothing platform-specific in
 /// it -- the budget it exists to meet is macOS's, the code is shared.
 #[test]
-fn socket_filename_stem_strips_the_prefix_then_keeps_the_first_twelve_hex_characters() {
+fn socket_filename_stem_strips_the_prefix_then_keeps_the_last_twelve_hex_characters() {
     let agent_run_id = AgentRunId::from_persisted("agent-run-01234567-89ab-cdef-0123-456789abcdef")
         .expect("a well-formed agent-run id");
     let stem = super::super::channel::socket_filename_stem(&agent_run_id);
     assert_eq!(
-        stem, "0123456789ab",
-        "expected the agent-run- prefix stripped, hyphens removed, and only the first 12 of \
+        stem, "456789abcdef",
+        "expected the agent-run- prefix stripped, hyphens removed, and only the last 12 of \
          the remaining 32 hex characters kept"
     );
     assert_eq!(
         stem.len(),
         12,
         "the stem must be exactly 12 characters, every time"
+    );
+}
+
+/// Review 651 B1, dated correction 2026-10-31: the exact regression that
+/// reddened the real macOS runner (run `41149340411`) within the hour of
+/// landing a *first* 12-character truncation -- `AgentRunId::for_test`'s
+/// own `Uuid::from_u128(sequence)` puts a small sequence's distinguishing
+/// bits in the UUID's low-order, trailing bytes, so every small sequence
+/// stringifies with the same leading `"00000000-0000-0000-0000-00000000"`
+/// and only its final few characters differ. A prefix truncation
+/// collapsed every test-fixture id in this crate to one identical stem;
+/// this is the test that would have caught it before a push, not after
+/// one.
+#[test]
+fn socket_filename_stem_distinguishes_sequential_test_fixture_ids() {
+    let first = AgentRunId::for_test(0);
+    let second = AgentRunId::for_test(1);
+    assert_ne!(
+        super::super::channel::socket_filename_stem(&first),
+        super::super::channel::socket_filename_stem(&second),
+        "two different for_test() sequences must not truncate to the same stem -- a collision \
+         here means every concurrently-running test that binds through this stem collides on \
+         the real macOS runner, where the socket directory is shared rather than state_root-\
+         derived"
     );
 }
 

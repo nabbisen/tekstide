@@ -220,22 +220,38 @@ impl ApprovalChannelDirectory {
 /// about a type this module does not own.
 ///
 /// **Review 651 B1**: the stripped id's own 32 hex characters (hyphens
-/// removed) are then truncated to the first 12 -- 48 bits, the budget
+/// removed) are then truncated to the *last* 12 -- 48 bits, the budget
 /// `channel_dir_under`'s macOS arm needs to fit a real session's
 /// `$TMPDIR` under `sun_path`'s 103-byte limit (measured over by 4 bytes
-/// at the full 32). A `Uuid::new_v4` is already uniformly random, so a
-/// prefix of it carries the same entropy per bit as a digest would, with
-/// no new mechanism to justify. A collision between two runs' truncated
-/// ids fails closed, not open: `bind()`'s own already-existing checks
+/// at the full 32). A `Uuid::new_v4` is already uniformly random, so any
+/// 12-character window of it carries the same entropy per bit as a digest
+/// would, with no new mechanism to justify -- and the *last* group
+/// (`xxxx-xxxx-xxxxxxxxxxxx`'s own final 12) is specifically the one
+/// window with no version/variant bits constrained by the UUID format at
+/// all, unlike a window starting from the front. A collision between two
+/// runs' truncated ids fails closed, not open: `bind()`'s own
+/// already-existing checks
 /// (`a_live_listener_at_the_bind_path_is_refused_as_already_listening`,
 /// `bind_recovers_from_a_stale_socket_file`) mean a colliding second bind
 /// is refused or recovers, never silently shares a channel with the
 /// first run's own peer.
-/// Review 651 B1's own budget: 48 bits (12 hex characters), the number of
-/// the stripped id's 32 that `channel_dir_under`'s macOS arm needs kept to
-/// fit a real session's `$TMPDIR` under `sun_path`'s 103-byte limit with
-/// the stated 10-byte headroom to spare -- see `socket_filename_stem`'s
-/// own doc for the full arithmetic.
+///
+/// **Dated correction, 2026-10-31: the first version of this function
+/// took the *first* 12 characters, and that broke the real macOS runner
+/// (run `41149340411`) within the hour.** `AgentRunId::for_test`'s own
+/// `Uuid::from_u128(sequence)` places a small `sequence`'s distinguishing
+/// bits in the UUID's low-order, *trailing* bytes -- `for_test(0)` and
+/// `for_test(1)` stringify to `00000000-0000-0000-0000-000000000000` and
+/// `00000000-0000-0000-0000-000000000001`, differing only in their very
+/// last character, so a prefix truncation collapsed every test-fixture
+/// id in this crate to the identical stem `000000000000`. Invisible on Linux,
+/// where `channel_dir` is still `state_root`-derived and every test's
+/// `state_root` is already unique; fatal on macOS, where `channel_dir`
+/// is the one shared `$TMPDIR/tekstide` regardless of `state_root`, so
+/// every concurrently-running test bound the same path and collided
+/// (`BindTargetAlreadyListening`, eight failing tests). A suffix
+/// truncation has no such blind spot against this project's own test
+/// fixtures, and is still full entropy against a real `Uuid::new_v4`.
 const TRUNCATED_ID_HEX_LEN: usize = 12;
 
 pub(super) fn socket_filename_stem(agent_run_id: &AgentRunId) -> String {
@@ -243,11 +259,9 @@ pub(super) fn socket_filename_stem(agent_run_id: &AgentRunId) -> String {
         .as_str()
         .strip_prefix("agent-run-")
         .unwrap_or(agent_run_id.as_str());
-    stripped
-        .chars()
-        .filter(|c| *c != '-')
-        .take(TRUNCATED_ID_HEX_LEN)
-        .collect()
+    let hex: String = stripped.chars().filter(|c| *c != '-').collect();
+    let start = hex.len().saturating_sub(TRUNCATED_ID_HEX_LEN);
+    hex[start..].to_owned()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

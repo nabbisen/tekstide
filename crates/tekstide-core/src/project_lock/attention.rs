@@ -35,19 +35,30 @@ use super::project_locks_dir;
 /// **Review 651 B1**: `project_id` (a full 36-character `ProjectId`, no
 /// prefix to strip -- unlike `AgentRunId`) is truncated the same way
 /// `approval::channel`'s own `socket_filename_stem` truncates its id:
-/// hyphens removed, first 12 of the remaining hex characters kept (48
-/// bits, uniformly random from `Uuid::new_v4`). The `.attention` segment
-/// is also dropped from the suffix -- redundant inside a directory
-/// already named `tekstide-attention`, and the one remaining source of
-/// avoidable length. Together these shed the 26 bytes the macOS anchor
-/// needed (measured over by 16 at the untruncated name). A collision
-/// between two projects' truncated ids is not symmetrical the way an
-/// approval-socket collision is: the second project's own bind simply
-/// fails (no attention for it), but a knock meant for it can reach the
-/// first project's listener instead -- cosmetic (D9's "best-effort,
-/// reversible" framing already covers a knock that never arrives at
-/// all) and, at 48 bits across a handful of concurrently open projects,
-/// negligible.
+/// hyphens removed, *last* 12 of the remaining hex characters kept (48
+/// bits, uniformly random from `Uuid::new_v4`, with no version/variant
+/// bits in that window the way a prefix window would carry). The
+/// `.attention` segment is also dropped from the suffix -- redundant
+/// inside a directory already named `tekstide-attention`, and the one
+/// remaining source of avoidable length. Together these shed the 26
+/// bytes the macOS anchor needed (measured over by 16 at the untruncated
+/// name). A collision between two projects' truncated ids is not
+/// symmetrical the way an approval-socket collision is: the second
+/// project's own bind simply fails (no attention for it), but a knock
+/// meant for it can reach the first project's listener instead --
+/// cosmetic (D9's "best-effort, reversible" framing already covers a
+/// knock that never arrives at all) and, at 48 bits across a handful of
+/// concurrently open projects, negligible.
+///
+/// **Dated correction, 2026-10-31**: see `socket_filename_stem`'s own
+/// correction for the full story -- a first version of this function
+/// took the *first* 12 characters, which collapses every
+/// `ProjectId::for_test`-shaped sequential id (its own distinguishing
+/// digits live in its last 12-hex-character group) to the identical
+/// stem. This module's own tests happened not to hit it this round, but
+/// the mechanism is identical to `approval::channel`'s, so the fix is
+/// the same: take the last 12, not the first.
+///
 /// Review 651 B1's own budget, the same reasoning as `approval::channel`'s
 /// own `TRUNCATED_ID_HEX_LEN` -- a second, independent copy for the same
 /// reason this module's own `max_socket_path_len` is: 48 bits (12 hex
@@ -57,11 +68,9 @@ use super::project_locks_dir;
 const TRUNCATED_ID_HEX_LEN: usize = 12;
 
 pub fn attention_socket_path(state_root: &Path, project_id: &str) -> PathBuf {
-    let truncated_id: String = project_id
-        .chars()
-        .filter(|c| *c != '-')
-        .take(TRUNCATED_ID_HEX_LEN)
-        .collect();
+    let hex: String = project_id.chars().filter(|c| *c != '-').collect();
+    let start = hex.len().saturating_sub(TRUNCATED_ID_HEX_LEN);
+    let truncated_id = &hex[start..];
     attention_socket_dir(state_root).join(format!("{truncated_id}.sock"))
 }
 

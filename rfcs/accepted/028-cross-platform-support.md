@@ -295,11 +295,22 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   that the full 32-hex-character id this section describes above still overflows `sun_path` by 4
   bytes (approval) and 16 bytes (attention), measured on the real runner (run `40982340829`), not
   merely predicted.** Found and gated at PR-028-F/review 651 round 2-3, fixed as its own subject
-  rather than inside F: both sockets' filenames now keep only the first 12 of the stripped id's
-  32 hex characters (48 bits, held for review, not yet confirmed on a real macOS runner — see
-  `CHANGELOG.md`'s own Unreleased entry for the exact numbers and the two tests promoted from
-  measurement to assertion). D3's own `Application Support` decision for *durable* state remains
+  rather than inside F: both sockets' filenames now keep only 12 of the stripped id's 32 hex
+  characters (48 bits). D3's own `Application Support` decision for *durable* state remains
   untouched; this correction is to this section's own socket-filename claim only.
+
+  **Dated correction, continued, 2026-10-31: the first version of that fix kept the *first* 12
+  characters, and it reddened the real macOS runner within the hour (run `41149340411`, eight
+  failing tests).** `AgentRunId::for_test`/`ProjectId::for_test` build their deterministic test
+  ids from a small sequence number placed in the UUID's low-order, trailing bytes, so a prefix
+  truncation collapsed every test-fixture id in the crate to one identical stem — invisible on
+  Linux (`channel_dir` is still `state_root`-derived there, and every test's own `state_root` is
+  already unique) but fatal on macOS, where `channel_dir` is the one shared `$TMPDIR/tekstide`
+  anchor regardless of `state_root`. Corrected the same day, same subject, to keep the *last* 12
+  characters instead — full entropy against a real `Uuid::new_v4`, and the window that happens to
+  carry every `for_test` sequence's own distinguishing digits too — with two new regression tests
+  asserting two different sequential ids never collide. See `CHANGELOG.md`'s own Unreleased entry
+  for the exact numbers.
 - **D5. Process/PTY: six Linux-only mechanisms, re-scoped against a full sweep rather than the
   three files expected to hold them (review 566's own correction).** Four replaced in-kind
   (`/proc` enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe
