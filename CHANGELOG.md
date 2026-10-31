@@ -2,6 +2,68 @@
 
 ## Unreleased
 
+### Fixed — review 651 B1: both macOS socket paths shortened to fit under `sun_path`'s real limit
+
+PR-028-F's own "second asterisk" — review 651 round 2/3 measured both the approval and attention
+socket paths over `sun_path`'s 103-byte macOS limit on an ordinary session, not merely on an
+unusually long one (run `40982340829`: approval 107 bytes, over by 4; attention 119 bytes, over by
+16). `release-checklist.md`'s "First Release With A macOS Artifact" section gated this fix before
+the first macOS artifact tags; this is that fix, its own subject, not a round of F.
+
+**The id each socket's filename is built from is now truncated to 12 hex characters (48 bits),
+not the full 32-hex-character UUID.** `approval::channel::socket_filename_stem` strips the
+`agent-run-` prefix as before, then removes the remaining UUID's hyphens and keeps only the first
+12 of its 32 hex characters. `project_lock::attention::attention_socket_path` does the same to
+the project id, and also drops the filename's own `.attention` segment (redundant inside a
+directory already named `tekstide-attention`/`project-locks`) — `<id>.sock`, not
+`<id>.attention.sock`. Neither function carries a platform `cfg`, so both platforms get the same
+shortened name; only macOS needed the bytes back. A `Uuid::new_v4` is already uniformly random, so
+a prefix of it carries the same entropy per bit as a digest would, with no new mechanism to
+justify. Measured against the budget review 651 B1 set: approval now resolves to **83 bytes**
+(headroom 20, was over by 4 at 107), attention to **85 bytes** (headroom 18, was over by 16 at
+119) — both comfortably past the 10-byte headroom the existing tests already stated as the bar.
+
+**Collision consequence stated per socket, since the two are not symmetrical.** A truncated id can
+collide, at 48 bits, across a handful of concurrently open runs/projects — negligible, but the two
+sockets fail differently when it happens. Approval fails closed: a live listener at the same path
+refuses the second bind (`a_live_listener_at_the_bind_path_is_refused_as_already_listening`), and
+a stale leftover is cleared and recovered from
+(`bind_recovers_from_a_stale_socket_file`) — a refused or recovered bind either way, never a
+hijacked channel. Attention is asymmetric: the second project's own bind simply fails (no flash
+for it), but a knock meant for it can reach the first project's listener instead — cosmetic, and
+no worse than the knock already being best-effort and silent on every platform (D9).
+
+**Two tests promoted from pure, assertion-free, `#[ignore]`d measurements to real assertions —
+the whole point of adding this subject's own acceptance criterion.** Renamed to match:
+`macos_approval_socket_path_headroom_assertion_against_the_real_ambient_tmpdir` and its attention
+sibling (`_measurement_` → `_assertion_`, since a name claiming "measurement" is what told every
+reader, across nine reviews, that nothing was actually being checked) now assert the stated
+10-byte headroom against the real ambient `$TMPDIR` (unignored; `ci.yml`'s two dedicated steps
+that deliberately leave `TMPDIR` alone no longer pass `--ignored` either, and their own step
+names already said "assertion"), rather than only printing a number for a human to read. Two new,
+narrower unit tests pin the exact transformation rather than only its effect on a path length —
+`socket_filename_stem_strips_the_prefix_then_keeps_the_first_twelve_hex_characters` and
+`attention_socket_path_truncates_the_id_and_drops_the_attention_suffix_segment` — both run on
+every platform, since the transformation itself carries no `cfg`. The truncation length itself is
+now a named constant in each module (`TRUNCATED_ID_HEX_LEN`, duplicated rather than shared — the
+same deliberate-duplication precedent `max_socket_path_len` already set, for the same reason:
+these two modules stay independent of each other on every platform), not a bare `12` inside a
+chained iterator. `bind_rejects_a_state_root_deep_enough_to_exceed_sun_path`'s own
+deliberately-deep state root grew one more 40-byte segment, since the stem shrinking by 24 bytes
+would otherwise have falsified that test's own precondition rather than its assertion.
+
+`local-data-and-privacy.md`'s approval- and attention-socket paragraphs now name the shortened
+filenames (`<run-id>` and `<short-id>` are explicitly "the first 12 characters," not the full id)
+instead of the pre-truncation names review 651 round 1 had just corrected to be accurate in every
+other respect.
+
+**Not yet confirmed on a real macOS runner.** Everything above is verified on Linux
+(`cargo fmt --check`, `clippy -D warnings`, the full workspace suite under a short fixed
+`TMPDIR`, `actionlint`/YAML parse on `ci.yml`) and by direct arithmetic against the same formula
+review 651 B1 used to find the original overflow, but the two promoted headroom assertions and
+the `ci.yml` step changes have not yet run on macOS. `release-checklist.md`'s gating checkbox
+stays unticked until they have.
+
 ### Added — PR-028-E (RFC-028 D9): the keybinding layer handles the Command/⌘ modifier on macOS
 
 Until this slice, nothing in the GUI layer distinguished macOS's `⌘` (Command) from physical
@@ -107,10 +169,8 @@ green with `continue-on-error` still in place: `continue-on-error` is gone from 
 `ci.yml`, both jobs are green, and the workflow's own conclusion is green (`gate`
 `1160/0/4`/`785/0/8`/`25/0`, `macos-measurement` `1158/0/12`/`783/0/9`/`25/0`).
 
-**Nine macOS-conditional test ignores, named with their reasons — corrected at review 651 round
-3 from an earlier count of seven that stopped reconciling the moment this slice added its own
-two.** Seven pre-existing: four APFS non-UTF-8-filename tests
-(`scanner_preserves_non_utf8_filename_identity_in_relative_path`,
+**Seven macOS-conditional test ignores, named with their reasons.** Four APFS non-UTF-8-filename
+tests (`scanner_preserves_non_utf8_filename_identity_in_relative_path`,
 `a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row`,
 `a_non_utf8_path_is_skipped_from_the_map_but_still_counted`,
 `a_non_utf8_filename_survives_the_round_trip` — APFS refuses a non-UTF-8 filename outright, and the
@@ -122,14 +182,14 @@ kept as a standing regression check, run by hand); and
 `proc_exit`/wake-cluster member, covered on macOS by
 `a_real_close_kills_a_live_hup_immune_backgrounded_job` instead) — six in `tekstide-core`, plus one
 in `tekstide`: `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`
-(row 8's own PTY-read timing precondition, same covering test). **Two new, both in
-`tekstide-core`, both macOS-only, both added by this slice itself (see the second asterisk
-below):** `macos_approval_socket_path_headroom_measurement_against_the_real_ambient_tmpdir` and
-`macos_attention_socket_path_headroom_measurement_against_the_real_ambient_tmpdir`, ignored
-because they are pure diagnostics (assert nothing, read by a human), not because of any defect in
-what they measure. Eight in `tekstide-core`, one in `tekstide`, nine total. Everything else
-ignored predates this RFC and is ignored on both platforms (measurements, benchmarks,
-diagnostics) — true of none of these nine.
+(row 8's own PTY-read timing precondition, same covering test). **Corrected twice since review
+651 round 3 first published this count, which is why it is stated plainly rather than narrated
+again: round 3 found two more, both new, both macOS-only diagnostics this slice added (see the
+second asterisk below), making nine; review 651 B1 (its own separate subject, immediately after
+this one closed) promoted both from `#[ignore]`d measurements to real assertions, so they are
+ignores no longer and the count returns to seven.** Everything else ignored predates this RFC and
+is ignored on both platforms (measurements, benchmarks, diagnostics) — true of none of these
+seven.
 
 **The first macOS release artifact.** `release.yml` gains a second job building
 `tekstide-aarch64-macos` (`aarch64-apple-darwin` only, D7 — a second, Intel artifact is

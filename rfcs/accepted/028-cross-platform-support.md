@@ -289,6 +289,17 @@ in any of the three. (The missing Wayland `app_id` is real but tracked separatel
   before a thing the product does not yet do); wiring the knock itself needs **its own RFC** (number assigned when written; see the dated correction in `../done/058-a-project-held-by-one-process.md`),
   with RFC-058's own closeout gaining a dated correction recording what its own verification
   actually checked.
+
+  **Dated correction, 2026-10-31, review 651 B1: moving off `state_root` was not enough on its
+  own — the real per-user `$TMPDIR` anchor is itself long enough, on an ordinary macOS session,
+  that the full 32-hex-character id this section describes above still overflows `sun_path` by 4
+  bytes (approval) and 16 bytes (attention), measured on the real runner (run `40982340829`), not
+  merely predicted.** Found and gated at PR-028-F/review 651 round 2-3, fixed as its own subject
+  rather than inside F: both sockets' filenames now keep only the first 12 of the stripped id's
+  32 hex characters (48 bits, held for review, not yet confirmed on a real macOS runner — see
+  `CHANGELOG.md`'s own Unreleased entry for the exact numbers and the two tests promoted from
+  measurement to assertion). D3's own `Application Support` decision for *durable* state remains
+  untouched; this correction is to this section's own socket-filename claim only.
 - **D5. Process/PTY: six Linux-only mechanisms, re-scoped against a full sweep rather than the
   three files expected to hold them (review 566's own correction).** Four replaced in-kind
   (`/proc` enumeration → `sysctl`/`libproc`; `SYS_close_range` → `closefrom`; `eventfd` → self-pipe

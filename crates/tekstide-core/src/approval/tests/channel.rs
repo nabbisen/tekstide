@@ -1161,11 +1161,13 @@ fn stale_socket_clearing_refuses_a_non_socket_file() {
 fn bind_rejects_a_state_root_deep_enough_to_exceed_sun_path() {
     let mut state_root = std::env::temp_dir();
     // A single path component this long, repeated, reliably pushes the
-    // *real* socket path (`<state_root>/approval/<agent_run_id>.sock`)
-    // past a `sockaddr_un`'s capacity (~108 bytes on Linux) while staying
-    // well under any single filesystem's per-component name limit
-    // (typically 255 bytes).
-    for index in 0..6 {
+    // *real* socket path (`<state_root>/approval/<stem>.sock`) past a
+    // `sockaddr_un`'s capacity (~108 bytes on Linux) while staying well
+    // under any single filesystem's per-component name limit (typically
+    // 255 bytes). Review 651 B1 shortened `socket_filename_stem`'s own
+    // output from 36 to 12 characters, so one more 40-byte segment than
+    // before is needed to keep this test's own precondition (below) true.
+    for index in 0..7 {
         state_root.push("a".repeat(40));
         if index == 0 {
             // The first component is the one that sits in the temp
@@ -1192,6 +1194,30 @@ fn bind_rejects_a_state_root_deep_enough_to_exceed_sun_path() {
         "bind() must refuse a real socket path too long for sockaddr_un, \
          rather than binding through the short /proc/self/fd path and \
          leaving connect() to fail later"
+    );
+}
+
+/// Review 651 B1: pins the exact transformation, not just its effect on a
+/// path length -- the `"agent-run-"` prefix is stripped first (review
+/// 600/601), then every hyphen is removed from the remaining UUID, then
+/// only the first 12 of those 32 hex characters are kept. Run on every
+/// platform (the function carries no `cfg`), not only macOS, since this
+/// is a plain string transformation with nothing platform-specific in
+/// it -- the budget it exists to meet is macOS's, the code is shared.
+#[test]
+fn socket_filename_stem_strips_the_prefix_then_keeps_the_first_twelve_hex_characters() {
+    let agent_run_id = AgentRunId::from_persisted("agent-run-01234567-89ab-cdef-0123-456789abcdef")
+        .expect("a well-formed agent-run id");
+    let stem = super::super::channel::socket_filename_stem(&agent_run_id);
+    assert_eq!(
+        stem, "0123456789ab",
+        "expected the agent-run- prefix stripped, hyphens removed, and only the first 12 of \
+         the remaining 32 hex characters kept"
+    );
+    assert_eq!(
+        stem.len(),
+        12,
+        "the stem must be exactly 12 characters, every time"
     );
 }
 
@@ -1237,8 +1263,9 @@ fn a_realistic_linux_socket_path_leaves_comfortable_headroom() {
 /// `$TMPDIR` rather than needing a synthetic stand-in the way Linux's
 /// counterpart above does. Catches the same regression class: this
 /// module's own fixed overhead (the `"tekstide"` dirname,
-/// `socket_filename_stem`'s prefix strip, `.sock`) growing enough to
-/// eat the stated headroom under the real 103-byte limit.
+/// `socket_filename_stem`'s prefix strip and 12-character truncation,
+/// `.sock`) growing enough to eat the stated headroom under the real
+/// 103-byte limit.
 /// **Review 651 B1: this test's own doc comment above overstated what it
 /// measures.** `ci.yml`'s macOS job runs the whole suite under
 /// `TMPDIR="$CI_TMPDIR"` (`/tmp/tci`, 8 bytes) to keep the rest of the
@@ -1269,21 +1296,29 @@ fn the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit() {
     );
 }
 
-/// Review 651 B1: a pure measurement, not a check -- asserts nothing,
-/// consumes nothing, and exists only to print, against the real runner's
-/// own ambient `$TMPDIR` (left alone by this one dedicated CI step,
-/// unlike the suite-wide run above), the numbers arithmetic alone
-/// predicted might already be over the limit: a typical macOS
-/// `/var/folders/<2>/<~30>/T` anchor, canonicalized (the `/private`
-/// prefix `channel_dir_under`'s macOS arm pays for), joined with
-/// `tekstide` and a 36-byte UUID plus `.sock`. `--nocapture`, its own CI
-/// step, the same shape `ci.yml`'s libproc-visibility/kern-proc-session
-/// measurements already use, for the same reason: a passing test's
-/// stdout/stderr is otherwise discarded.
+/// Review 651 B1: the permanent guard this whole subject exists to add --
+/// asserts the stated 10-byte headroom against the real runner's own
+/// ambient `$TMPDIR` (left alone by this one dedicated CI step, unlike
+/// the suite-wide run above, which pins `TMPDIR` to a short fixed value
+/// for unrelated reasons and so cannot measure this), not merely a
+/// prediction: a typical macOS `/var/folders/<2>/<~30>/T` anchor,
+/// canonicalized (the `/private` prefix `channel_dir_under`'s macOS arm
+/// pays for), joined with `tekstide` and `socket_filename_stem`'s own
+/// 12-character truncation plus `.sock`. Measured over the limit by 4
+/// bytes before the truncation this subject adds (run `40982340829`);
+/// this is the test that must never again find that true without a human
+/// having to read a measurement step to notice. Was a pure, assertion-
+/// free measurement (`#[ignore]`d, review 651 B1's own first round) while
+/// the fix was still being decided; promoted to a real assertion once
+/// the fix landed, per that round's own required acceptance criterion.
+/// `--nocapture`, its own CI step (no longer needs `--ignored`), the same
+/// shape `ci.yml`'s libproc-visibility/kern-proc-session measurements
+/// already use, for the same reason: a passing test's stdout/stderr is
+/// otherwise discarded, and the printed numbers are worth keeping in the
+/// log even though this test no longer depends on a human reading them.
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "a measurement, not a check -- see ci.yml's own dedicated step, review 651 B1"]
-fn macos_approval_socket_path_headroom_measurement_against_the_real_ambient_tmpdir() {
+fn macos_approval_socket_path_headroom_assertion_against_the_real_ambient_tmpdir() {
     let raw = std::env::temp_dir();
     let canonical = raw.canonicalize();
     eprintln!("MEASURED raw std::env::temp_dir() = {raw:?}");
@@ -1295,10 +1330,19 @@ fn macos_approval_socket_path_headroom_measurement_against_the_real_ambient_tmpd
     let path = directory.socket_path(&agent_run_id);
     let path_len = path.as_os_str().len();
     const MACOS_SUN_PATH_LIMIT: usize = 103;
+    const STATED_HEADROOM: usize = 10;
     eprintln!(
         "MEASURED approval socket path = {path:?} ({path_len} bytes, limit \
          {MACOS_SUN_PATH_LIMIT}, headroom {})",
         MACOS_SUN_PATH_LIMIT as isize - path_len as isize
+    );
+    assert!(
+        path_len + STATED_HEADROOM <= MACOS_SUN_PATH_LIMIT,
+        "the real, ambient-$TMPDIR-anchored macOS socket path is {path_len} bytes, leaving \
+         less than the stated {STATED_HEADROOM}-byte headroom under the real \
+         {MACOS_SUN_PATH_LIMIT}-byte sun_path limit -- the id truncation this subject added, \
+         channel_dir_under's own $TMPDIR/tekstide choice, or the real $TMPDIR anchor itself, \
+         may have grown"
     );
 }
 

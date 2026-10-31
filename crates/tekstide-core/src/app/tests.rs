@@ -951,14 +951,14 @@ impl TestSandbox {
         Self { root }
     }
 
-    /// RFC-058: a `project-locks/<uuid>.attention.sock` path lives under
+    /// RFC-058: a `project-locks/<short-id>.sock` path lives under
     /// whatever this sandbox's own root is, and a `sockaddr_un` is bounded
     /// (~107 usable bytes) -- `new`'s own nanosecond-timestamp label
-    /// already spends most of that budget before the socket's own
-    /// filename is considered (the same `SocketPathTooLong` lesson
-    /// `approval::tests::reference_adapter::unique_temp_dir`'s own doc
-    /// comment states). This constructor exists only for tests that bind
-    /// such a socket; every other caller keeps using `new`.
+    /// already spends most of that budget even though review 651 B1
+    /// shortened the socket's own filename (`attention_socket_path`'s own
+    /// doc comment has the arithmetic). This constructor exists only for
+    /// tests that bind such a socket; every other caller keeps using
+    /// `new`.
     fn new_short(label: &str) -> Self {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);

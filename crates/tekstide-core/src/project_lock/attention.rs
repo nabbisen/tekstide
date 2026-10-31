@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use super::project_locks_dir;
 
-/// `<state_root>/project-locks/<project_id>.attention.sock` on Linux -- a
+/// `<state_root>/project-locks/<truncated-project-id>.sock` on Linux -- a
 /// sibling of the lock file itself, under the same directory D3 already
 /// names. RFC-028 D4, review 603's general rule: **every `AF_UNIX` path
 /// this product binds derives from a short per-user anchor, never from
@@ -31,8 +31,38 @@ use super::project_locks_dir;
 /// channel already learned this the hard way (review 600/601) and this
 /// socket now inherits the rule instead of rediscovering the ceiling a
 /// third time. See `attention_socket_dir`'s own macOS doc for why.
+///
+/// **Review 651 B1**: `project_id` (a full 36-character `ProjectId`, no
+/// prefix to strip -- unlike `AgentRunId`) is truncated the same way
+/// `approval::channel`'s own `socket_filename_stem` truncates its id:
+/// hyphens removed, first 12 of the remaining hex characters kept (48
+/// bits, uniformly random from `Uuid::new_v4`). The `.attention` segment
+/// is also dropped from the suffix -- redundant inside a directory
+/// already named `tekstide-attention`, and the one remaining source of
+/// avoidable length. Together these shed the 26 bytes the macOS anchor
+/// needed (measured over by 16 at the untruncated name). A collision
+/// between two projects' truncated ids is not symmetrical the way an
+/// approval-socket collision is: the second project's own bind simply
+/// fails (no attention for it), but a knock meant for it can reach the
+/// first project's listener instead -- cosmetic (D9's "best-effort,
+/// reversible" framing already covers a knock that never arrives at
+/// all) and, at 48 bits across a handful of concurrently open projects,
+/// negligible.
+/// Review 651 B1's own budget, the same reasoning as `approval::channel`'s
+/// own `TRUNCATED_ID_HEX_LEN` -- a second, independent copy for the same
+/// reason this module's own `max_socket_path_len` is: 48 bits (12 hex
+/// characters) is what `attention_socket_dir`'s macOS arm needs kept to
+/// fit a real session's `$TMPDIR` under the limit with the stated 10-byte
+/// headroom to spare.
+const TRUNCATED_ID_HEX_LEN: usize = 12;
+
 pub fn attention_socket_path(state_root: &Path, project_id: &str) -> PathBuf {
-    attention_socket_dir(state_root).join(format!("{project_id}.attention.sock"))
+    let truncated_id: String = project_id
+        .chars()
+        .filter(|c| *c != '-')
+        .take(TRUNCATED_ID_HEX_LEN)
+        .collect();
+    attention_socket_dir(state_root).join(format!("{truncated_id}.sock"))
 }
 
 /// Linux: unchanged, `state_root`-relative. macOS: `std::env::temp_dir()`

@@ -184,10 +184,12 @@ impl ApprovalChannelDirectory {
         &self.channel_dir
     }
 
-    /// One socket per `AgentRun`, named by its bare UUID suffix (review
-    /// 600 drops the `agent-run-` prefix `AgentRunId`'s own `Display`
-    /// carries -- meaningful in a log line, pure overhead in a path
-    /// this crate already knows holds nothing else) -- `.sock` appended.
+    /// One socket per `AgentRun`, named by a 12-hex-character truncation of
+    /// its bare UUID suffix (review 600 drops the `agent-run-` prefix
+    /// `AgentRunId`'s own `Display` carries -- meaningful in a log line,
+    /// pure overhead in a path this crate already knows holds nothing
+    /// else; review 651 B1 shortens the UUID itself on top of that, see
+    /// `socket_filename_stem`'s own doc) -- `.sock` appended.
     ///
     /// Unix `sun_path` is bounded (103 usable bytes on macOS, 107 on
     /// Linux -- see `max_socket_path_len`'s own doc for why the two
@@ -216,11 +218,36 @@ impl ApprovalChannelDirectory {
 /// prefix is somehow absent (it never is, in practice -- `AgentRunId` is
 /// only ever constructed with it) rather than panicking on an assumption
 /// about a type this module does not own.
-pub(super) fn socket_filename_stem(agent_run_id: &AgentRunId) -> &str {
-    agent_run_id
+///
+/// **Review 651 B1**: the stripped id's own 32 hex characters (hyphens
+/// removed) are then truncated to the first 12 -- 48 bits, the budget
+/// `channel_dir_under`'s macOS arm needs to fit a real session's
+/// `$TMPDIR` under `sun_path`'s 103-byte limit (measured over by 4 bytes
+/// at the full 32). A `Uuid::new_v4` is already uniformly random, so a
+/// prefix of it carries the same entropy per bit as a digest would, with
+/// no new mechanism to justify. A collision between two runs' truncated
+/// ids fails closed, not open: `bind()`'s own already-existing checks
+/// (`a_live_listener_at_the_bind_path_is_refused_as_already_listening`,
+/// `bind_recovers_from_a_stale_socket_file`) mean a colliding second bind
+/// is refused or recovers, never silently shares a channel with the
+/// first run's own peer.
+/// Review 651 B1's own budget: 48 bits (12 hex characters), the number of
+/// the stripped id's 32 that `channel_dir_under`'s macOS arm needs kept to
+/// fit a real session's `$TMPDIR` under `sun_path`'s 103-byte limit with
+/// the stated 10-byte headroom to spare -- see `socket_filename_stem`'s
+/// own doc for the full arithmetic.
+const TRUNCATED_ID_HEX_LEN: usize = 12;
+
+pub(super) fn socket_filename_stem(agent_run_id: &AgentRunId) -> String {
+    let stripped = agent_run_id
         .as_str()
         .strip_prefix("agent-run-")
-        .unwrap_or(agent_run_id.as_str())
+        .unwrap_or(agent_run_id.as_str());
+    stripped
+        .chars()
+        .filter(|c| *c != '-')
+        .take(TRUNCATED_ID_HEX_LEN)
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

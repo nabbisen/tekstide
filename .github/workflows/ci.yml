@@ -264,41 +264,45 @@ jobs:
             runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close \
             -- --exact --nocapture
 
-      - name: macOS approval-socket headroom measurement against the real ambient $TMPDIR (review 651 B1, --nocapture)
+      - name: macOS approval-socket headroom assertion against the real ambient $TMPDIR (review 651 B1, --nocapture)
         # **Deliberately does NOT set TMPDIR.** Every step above pins it to
         # `$CI_TMPDIR` (`/tmp/tci`, 8 bytes) so the rest of the suite does not
         # redden on an unrelated sockaddr_un overflow -- which means the
         # suite's own own headroom test
         # (`the_macos_socket_path_leaves_comfortable_headroom_under_the_real_limit`)
-        # has never measured this runner's real per-session anchor
+        # never measures this runner's real per-session anchor
         # (`/var/folders/.../T`, which `channel_dir_under`'s macOS arm
-        # canonicalizes to `/private/var/folders/.../T`). Review 651's own
-        # arithmetic over the real production code predicts the approval
-        # socket is already over `sun_path`'s 103-byte limit for all but an
-        # unusually short anchor. This step is the one place that measures
-        # rather than predicts: it asserts nothing and changes nothing it
-        # observes, so (per this project's own "pure diagnostics may skip
-        # the review turn" rule) it runs here before, not after, a decision
-        # about whether or how to fix it.
+        # canonicalizes to `/private/var/folders/.../T`). Review 651 B1's own
+        # arithmetic over the real production code found the approval socket
+        # already over `sun_path`'s 103-byte limit by 4 bytes under a typical
+        # anchor (run `40982340829`) before `socket_filename_stem`'s own
+        # 12-character truncation landed. No longer `--ignored` or a pure
+        # diagnostic: this test now asserts the 10-byte headroom for real, so
+        # a future regression reddens this step rather than waiting for
+        # someone to read a measurement.
         if: always()
         run: |
           set -euo pipefail
           cargo test -p tekstide-core --lib \
-            approval::tests::channel::macos_approval_socket_path_headroom_measurement_against_the_real_ambient_tmpdir \
-            -- --exact --nocapture --ignored
+            approval::tests::channel::macos_approval_socket_path_headroom_assertion_against_the_real_ambient_tmpdir \
+            -- --exact --nocapture
 
-      - name: macOS attention-socket headroom measurement against the real ambient $TMPDIR (review 651 B1, --nocapture)
+      - name: macOS attention-socket headroom assertion against the real ambient $TMPDIR (review 651 B1, --nocapture)
         # Same reasoning as the approval-socket step immediately above, for
         # `attention_socket_dir`'s own macOS arm -- which does not
         # canonicalize its anchor, unlike the approval channel's. Review
-        # 651's own arithmetic predicts this one is over the limit
-        # unconditionally, for any realistic per-session $TMPDIR shape.
+        # 651 B1's own arithmetic found this one over the limit by 16 bytes,
+        # unconditionally, for any realistic per-session $TMPDIR shape (run
+        # `40982340829`), before `attention_socket_path`'s own id truncation
+        # and dropped `.attention` suffix segment landed. No longer
+        # `--ignored` or a pure diagnostic: this test now asserts the
+        # 10-byte headroom for real.
         if: always()
         run: |
           set -euo pipefail
           cargo test -p tekstide-core --lib \
-            project_lock::attention::tests::macos_attention_socket_path_headroom_measurement_against_the_real_ambient_tmpdir \
-            -- --exact --nocapture --ignored
+            project_lock::attention::tests::macos_attention_socket_path_headroom_assertion_against_the_real_ambient_tmpdir \
+            -- --exact --nocapture
 
       - name: Cold-start window capture (RFC-028 D2, PR-028-F scope item 2, review 650 round 3)
         # `pr-028-f-scope-additions.md` §2: this runner has a real window server, but nobody
