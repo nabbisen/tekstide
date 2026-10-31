@@ -76,11 +76,15 @@ filenames (`<run-id>` and `<short-id>` are explicitly "the last 12 characters," 
 instead of the pre-truncation names review 651 round 1 had just corrected to be accurate in every
 other respect.
 
-**Confirmed on the real runner, the hard way.** The first version of this fix (prefix
-truncation) ran on run `41149340411` and reddened `macos-measurement` — the gate this very slice
-flipped to fully blocking — eight tests failing with `BindTargetAlreadyListening`, diagnosed and
-corrected (suffix truncation, above) the same day, same subject. `release-checklist.md`'s gating
-checkbox stays unticked until a run with the corrected code is green.
+**Confirmed on the real runner, the hard way, then confirmed for real.** The first version of
+this fix (prefix truncation) ran on run `41149340411` and reddened `macos-measurement` — the gate
+this very slice flipped to fully blocking — eight tests failing with `BindTargetAlreadyListening`,
+diagnosed and corrected (suffix truncation, above) the same day, same subject. The corrected code
+ran next on run `41150759162`: both jobs green, both headroom assertions passing against the real
+ambient `$TMPDIR` with the exact predicted numbers (approval 83 bytes/headroom 20, attention 85
+bytes/headroom 18), `tekstide-core` **1164/0/10**, `tekstide` **783/0/9** on macOS. That run is
+what ticks `release-checklist.md`'s gating checkbox — not the fix landing, the real runner saying
+so.
 
 ### Added — PR-028-E (RFC-028 D9): the keybinding layer handles the Command/⌘ modifier on macOS
 
