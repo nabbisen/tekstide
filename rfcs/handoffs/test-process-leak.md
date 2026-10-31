@@ -3595,3 +3595,62 @@ it, this cluster retires as one fix instead of one ignore per member. This is pr
 the terminal runtime, so it is not a change for the eve of a release: filed here as its own
 future subject, after the `0.38.0` tag, with the measurement already in hand, so it is not
 re-derived a fifth time.
+
+## New row, 2026-10-31 -- a fifth member, on a containment property rather than a timing budget, and this one has an exact target
+
+Run `41210748448` (`9171c17`, the register-disclosure push for the explorer flake above --
+pushed without checking its own CI result first, the gap named and corrected below):
+
+```
+[p-stat-at-assertion] pid 6915: p_stat=2 (SRUN: runnable), p_flag=0x6006 (P_WEXIT set)
+[kern-proc-session] failure branch, post-close: sysctl(KERN_PROC_SESSION, 6914) failed: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+
+thread 'runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close' (28950) panicked at crates/tekstide-core/src/runtime/terminal/tests.rs:737:5:
+the real backgrounded job's own pid (6915) must be gone or departing after a real close, not merely 'kill(pid, 0) failed' -- kill(pid, 0) alone cannot tell a real survivor from a SIGKILLed corpse sitting unreaped for a moment under load
+
+test result: FAILED. 1163 passed; 1 failed; 10 ignored; 0 measured; 0 filtered out; finished in 65.00s
+```
+
+**A fifth member of the same cluster the four rows above and the reserved note just above record
+-- the identical `p_flag=0x6006 (P_WEXIT set)` signature -- but the first to land on a
+containment property (is the backgrounded job really gone) rather than a timing budget (`wait_
+for_exit`'s own 5s window).**
+
+**Traced to an exact line, not only matched by signature.** `is_gone_or_going`'s macOS arm
+(`launch.rs:1351-1366`):
+
+```rust
+if result == size {
+    return info.pbi_status == libc::SZOMB;      // early return
+}
+match p_stat_and_flag_via_sysctl(pid) {
+    Some((p_stat, p_flag)) => u32::from(p_stat) == libc::SZOMB || p_flag & P_WEXIT != 0,
+    None => false,
+}
+```
+
+The `P_WEXIT` arm is reached only when `proc_pidinfo` **fails**. In this run it succeeded and
+reported a status that is not `SZOMB` -- the pid is `SRUN`, still inside `proc_exit` -- so the
+function returns early, `false`, without ever consulting `sysctl`'s own stronger, one-way
+`P_WEXIT` signal, which the very next log line shows was already set. Stated as the hypothesis
+this log supports, not a confirmed root cause -- it was not reproduced in isolation or proven by
+a swap/ablation the way this document's own standard elsewhere requires before calling a cause
+confirmed; it explains every observed field of this one assertion exactly, which is what earns it
+the write-up rather than a closed diagnosis.
+
+**This sharpens the reserved subject above rather than replacing it**: not "consult `P_WEXIT`
+somewhere," but specifically, `is_gone_or_going`'s own early return on a successful `proc_pidinfo`
+call is the one place in this cluster's own code that can see `SRUN` and a set `P_WEXIT` in the
+same call and still answer "alive" -- OR the two signals rather than letting libproc's success
+short-circuit the stronger one. Production code (`launch.rs:1146` calls it outside any
+`#[cfg(test)]`), so not a change for the eve of a release -- the same reservation stands,
+now with a line number instead of a hypothesis about where to look.
+
+**Not caused by the push that found it.** `9171c17` is a one-line documentation addendum to this
+very file; nothing in it touches `runtime::terminal` or any process-liveness code.
+
+**The gap, named rather than only fixed**: this disclosure should have been part of the same
+round as the push, not a response to review. Checking a push's own CI result is part of pushing,
+including a documentation-only one -- the gate does not know the diff was harmless, and whatever
+lands on `main` is what a tag would be cut from. A rerun of `9171c17` on the same commit, not a
+new push, is what settles whether this run was itself transient; see the round that reports it.
