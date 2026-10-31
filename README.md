@@ -49,7 +49,8 @@ not go away when you do.
 
 It is early. Read these before relying on it:
 
-- **Linux only.** There is no evidence for any other platform.
+- **Linux, and macOS on Apple Silicon.** macOS is verified by its full test suite and a rendered
+  window capture on real hardware in CI; no human has interactively used it yet.
 - **No screen-reader support**, for the life of the `iced` substrate decision.
 - **The real Claude Code CLI has never been exercised by this project's tests.** Every automated
   proof uses a controlled test executable.

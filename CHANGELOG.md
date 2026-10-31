@@ -329,6 +329,81 @@ separately, not assumed, before this slice is treated as closed. The B1 socket-p
 not done here, deliberately — its own subject, gated by the new release-checklist row above
 rather than rushed into this one.
 
+### Added — the Run It gate's answer: option (2), and the macOS release-notes disclosure
+
+RFC-028 *Acceptance* named two shapes before either was needed and kept both written down for
+exactly this moment. The owner has now answered: **no Apple hardware is available to this
+project, and CI's own macOS evidence is accepted as sufficient — option (2).** This is not a
+departure from the accepted RFC; it is the shape *Acceptance* already named as "the only other
+shape this release may take." Recorded as a dated note under *Decided on acceptance (2026-10-15)*
+in `rfcs/accepted/028-cross-platform-support.md`, not an edit to it — option (1) and the original
+preference stay exactly as written, so a future reader can see what was ranked and what was
+chosen, not only the outcome.
+
+**The `0.38.0` release notes carry the label option (2) itself requires, not a departure from
+it:**
+
+> **macOS, first artifact — what was and was not verified.** `tekstide-aarch64-macos` is built
+> and tested on real Apple Silicon in CI on every change: the full suite (1164 `tekstide-core` /
+> 783 `tekstide` tests, with the seven macOS-conditional ignores named above), its window
+> launched and captured on a real window server, and the shipped artifact's own `--version` run
+> on the runner before upload. **No human has interactively used it.** Tekstide's own Run It gate
+> — a person launching the release binary and looking at the screen — is performed for every
+> Linux release and has not been performed on macOS (RFC-028 *Acceptance*, option (2), taken
+> 2026-10-31: no Apple hardware is available to this project). Reports from macOS users are
+> welcome, and are how that gap closes.
+
+The last sentence is load-bearing, not politeness: waiting for a user report is the actual plan,
+and it reads better when a reader knows what was skipped than when they have to discover it. Kept
+in the same register the checksum wording already uses — state what was done, never imply parity
+with Linux.
+
+**The three platform-claim sentences this label makes false in substance are corrected to one
+shape, so they cannot drift apart later.** `README.md:52` and `docs/src/introduction.md:5`
+("**Linux only.** There is no evidence for any other platform.") and
+`docs/src/users/getting-started.md:4` ("It runs on Linux; there is no cross-platform evidence
+beyond it.") now all say: **"Linux, and macOS on Apple Silicon,"** plus that macOS is verified by
+its full test suite and a rendered window capture on real hardware in CI, and that no human has
+interactively used it yet. None of the three say "supported" — "verified by X, not by Y" is the
+whole point, and it is the same distinction the checksum wording already drew for a different
+claim.
+
+**Both release jobs now run the staged artifact's own `--version` before upload, not after a
+human happens to try it.** Neither `artifacts` nor `artifacts-macos` had ever executed the binary
+it builds — both build `--release`, checksum, and upload, never run. A new step in each, after
+staging and before upload, runs the *staged* file (not `target/release/tekstide`) and asserts its
+output names the release's own tag; `main.rs`'s `-V`/`--version` handling exits cleanly before any
+window opens, so this is a real smoke test, not a GUI launch on a headless runner. **Exact about
+what this does and does not prove**, in each step's own comment: it proves the bytes about to be
+uploaded execute on the target platform and report the right version — for macOS, the only
+execution possible without hardware — and it does *not* prove the *downloaded* file runs; the
+published checksum is what ties the downloaded bytes back to the bytes that ran, and the two
+together are as close as this release gets on macOS. `release.yml` is the one workflow this
+project's CI never exercises (it triggers only on a version tag or `workflow_dispatch`), so
+`actionlint` plus a careful read is the only verification available before the one run that
+matters — stated as exactly that, not reported as tested.
+
+**One line on the Gatekeeper case, named rather than left for the first macOS user to discover.**
+`install.sh` fetches with `curl`, which does not set `com.apple.quarantine`, so the documented
+one-liner and the manual `curl -LO` form are both unaffected. What *is* affected: a user who
+clicks the asset link in a browser gets a quarantined, unsigned binary, and macOS refuses it
+("cannot be verified") until they allow it in System Settings → Privacy & Security —
+`getting-started.md` names this case specifically, under the download forms, without implying a
+developer certificate is coming (it is not, for v0).
+
+**`release-checklist.md` updated to match.** The macOS `--version` row splits in two: the CI
+smoke test above (discharged by pointing at the release run's own `artifacts-macos` log, no
+hardware needed) and running the *downloaded* file on a Mac (still impossible, now explicitly
+covered by the release-notes label rather than left looking like a skipped step — a named gap is
+not the same as a missing one). The platform-claim row in *First Release With A macOS Artifact* is
+discharged by the three corrected sentences above, at this release. The Run It section gains one
+line: this release takes RFC-028 option (2) for macOS, with the label in the release notes; the
+Linux gate is unchanged and still required every release — nothing about Linux gets weaker
+because macOS shipped behind a label.
+
+**Not in scope:** code signing, notarization, a developer certificate, or an Intel artifact. D7
+reserved the second architecture and nothing here reopens it.
+
 ### Fixed — the git-fixture's own `setup_git_in` had review 621's hole in a second place
 
 Review 648's own fix for `a_linked_worktrees_branch_is_its_own_not_the_primary_checkouts` (below)

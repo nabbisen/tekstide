@@ -145,6 +145,50 @@ jobs:
           cp LICENSE staging/LICENSE
           echo "name=${name}" >> "$GITHUB_OUTPUT"
 
+      # Review 653: neither this job nor `artifacts-macos` had ever executed the binary it
+      # builds -- both build `--release`, checksum, and upload, never run. Runs the *staged*
+      # file, not `target/release/tekstide`, so this proves the exact bytes about to be
+      # published actually execute and report the right version -- `main.rs`'s `-V`/`--version`
+      # handling exits cleanly before any window opens, so this is a real smoke test, not a GUI
+      # launch on a headless runner. **It guards more than that, though**: `--version` prints
+      # `env!("CARGO_PKG_VERSION")`, so this is also a version-consistency gate this release
+      # process has never had before -- a tag that disagreed with `Cargo.toml`'s own version
+      # would otherwise publish a binary reporting the wrong version, caught (on Linux) only by
+      # a human's post-publish `--version`, and not at all on macOS. **What this does not
+      # prove**: that the *downloaded* file runs: the published checksum (uploaded alongside it
+      # below) is what ties the downloaded bytes back to the bytes that ran here, and the two
+      # together are as close as this release gets to a user's own machine without one.
+      # `release.yml` is the one workflow this project's `ci.yml` never exercises (it triggers
+      # only on a version tag or `workflow_dispatch`), so this step and a careful read of it are
+      # the only verification available before the one run that matters.
+      - name: Smoke-test the staged artifact before it is published (--version)
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          ARTIFACT: ${{ steps.artifact.outputs.name }}
+        run: |
+          set -euo pipefail
+          chmod +x "staging/${ARTIFACT}"
+          # Captures stderr too and checks the exit status explicitly, rather than letting a
+          # failed execution (wrong arch, a missing library) die on the assignment with the
+          # binary's own stderr arriving unattributed -- this is the one workflow with no
+          # rehearsal, so its first real failure should explain itself.
+          if ! output="$("./staging/${ARTIFACT}" --version 2>&1)"; then
+            echo "::error::staged artifact failed to execute (--version):"
+            echo "$output"
+            exit 1
+          fi
+          echo "$output"
+          # Anchored at the front, not a bare substring: "*$TAG*" would let a tag like "0.3.0"
+          # pass against an output of "tekstide 10.3.0", which is exactly the disagreement this
+          # step exists to catch.
+          case "$output" in
+            "tekstide ${TAG}"*) ;;
+            *)
+              echo "::error::staged artifact's --version output ('$output') does not match 'tekstide ${TAG}' (this release's own tag)"
+              exit 1
+              ;;
+          esac
+
       - name: Publish to the GitHub Release for this tag (create if missing)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -211,6 +255,38 @@ jobs:
           cp target/release/tekstide "staging/${name}"
           ( cd staging && shasum -a 256 "${name}" > "${name}.sha256" )
           echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      # Review 653: see the Linux job's own identical step for the full reasoning -- this
+      # platform is where it matters most, since no Apple hardware exists to run the
+      # *downloaded* binary on at all. This step is the only execution of this exact binary
+      # possible without that hardware; the published checksum is the rest of the story (see
+      # `release-checklist.md`'s own Run It section and `CHANGELOG.md`'s `0.38.0` label). It is
+      # also a version-consistency gate (`--version` prints `Cargo.toml`'s own version), the one
+      # this binary has never had any check at all, on either platform, before this.
+      - name: Smoke-test the staged artifact before it is published (--version)
+        env:
+          TAG: ${{ needs.artifacts.outputs.tag }}
+          ARTIFACT: ${{ steps.artifact.outputs.name }}
+        run: |
+          set -euo pipefail
+          chmod +x "staging/${ARTIFACT}"
+          # Captures stderr too and checks the exit status explicitly, rather than letting a
+          # failed execution die on the assignment with the binary's own stderr unattributed.
+          if ! output="$("./staging/${ARTIFACT}" --version 2>&1)"; then
+            echo "::error::staged artifact failed to execute (--version):"
+            echo "$output"
+            exit 1
+          fi
+          echo "$output"
+          # Anchored at the front: a bare substring match would let a tag like "0.3.0" pass
+          # against an output of "tekstide 10.3.0".
+          case "$output" in
+            "tekstide ${TAG}"*) ;;
+            *)
+              echo "::error::staged artifact's --version output ('$output') does not match 'tekstide ${TAG}' (this release's own tag)"
+              exit 1
+              ;;
+          esac
 
       # Already created by `artifacts`, which also already carries NOTICE/LICENSE -- not
       # re-uploaded here (see this job's own `needs:` comment above).

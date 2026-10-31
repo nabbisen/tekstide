@@ -740,6 +740,16 @@ leaving it in place means nobody has to re-decide this under schedule pressure.
 `aarch64-apple-darwin` only for the first macOS artifact (D7), Windows reserved as its own future
 RFC (D1), and the keybinding slice landing before any artifact ships (D9).
 
+**Dated note, 2026-10-31: option (2) taken, the owner's decision.** No Apple hardware is
+available to this project, and the owner judged CI's own macOS evidence — the full test suite on
+a real Apple Silicon runner, a rendered window capture on a real window server, the staged
+artifact's own `--version` executed before upload — sufficient to ship behind the label option
+(2) itself specifies, rather than waiting on hardware with no date. Option (1) and the original
+preference above stay exactly as written: this is not a reassessment of which shape was better,
+only a record of which one the facts on the ground made available. See `CHANGELOG.md`'s own
+`0.38.0` entry for the label's exact wording and `release-checklist.md`'s Run It section for how
+this interacts with the gate Linux still requires unchanged.
+
 ## PR-028-A measured, 2026-10-15 — this replaces the evidence table's point-in-time sweep
 
 `ci.yml`'s `macos-measurement` job ran on a real push (commit `c6b8a87`) and failed, as its own

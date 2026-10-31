@@ -91,6 +91,12 @@ the claim, never its truth.
 
 Ninety seconds. Run it.
 
+**macOS, review 653: this release takes RFC-028 *Acceptance* option (2) for the first macOS
+artifact — no Apple hardware is available, and the label in the release notes (`CHANGELOG.md`'s
+`0.38.0` entry) discloses that this gate was not performed on macOS, rather than leaving the gap
+silent. This section's own requirement for Linux is unchanged and still every-release-required**:
+nothing about Linux gets weaker because macOS shipped behind a label.
+
 ## Required Gates
 
 **Branch protection: decided 2026-10-29, and deliberately partial.** `done/029`'s own advisory line
@@ -506,11 +512,19 @@ failed.
       macOS file (macOS ships no `sha256sum`; this is the asset's own verification command, not a
       Linux substitute for it).
 - [ ] `./tekstide-x86_64-linux --version` reports this release's own version.
-- [ ] **`./tekstide-aarch64-macos --version` reports this release's own version — on a Mac.**
-      This step can only be run on real Apple hardware, which is the same dependency the Run It
-      gate's own answer settles. If no Apple hardware is available for this release, this box is
-      left unchecked and the release notes say so, the same shape the Run It gate already uses —
-      it does not get silently skipped as though it were optional.
+- [ ] **The macOS staged-artifact smoke test ran in CI, before upload, review 653.** `release.yml`'s
+      `artifacts-macos` job now runs `tekstide-aarch64-macos --version` on the *staged* binary and
+      asserts it names this release's own tag, before uploading it. Discharged by pointing at that
+      run's own log (the `Smoke-test the staged artifact before it is published` step) — no Apple
+      hardware needed for this box specifically, since it runs on the GitHub-hosted macOS runner.
+      This proves the uploaded bytes execute and report the right version; it does not prove the
+      *downloaded* file runs, which is the next box.
+- [ ] **`./tekstide-aarch64-macos --version` reports this release's own version — on a Mac, after
+      downloading it.** Still impossible without real Apple hardware, which is the same dependency
+      the Run It gate's own answer settles. **Not merely left unchecked and silent**: RFC-028
+      *Acceptance* option (2), taken 2026-10-31, means this release's notes explicitly disclose
+      that no human has run the downloaded binary, so this gap is named rather than looking like a
+      skipped step nobody noticed. A gap that is named is not the same as a gap that is missing.
 - [ ] **The checksum is described only as what it is** (`what-the-installer-must-not-do.md` §3):
       *verified against its published checksum*, in the release notes and anywhere else it is
       mentioned. Never *secure*, *safe*, *signed*, or unqualified *verified* — this binary is not
@@ -525,21 +539,19 @@ failed.
 **One-time, not a per-release item — tick it once, in the release that first ships
 `tekstide-aarch64-macos`, then delete this section.** RFC-028 PR-028-F, review 651.
 
-- [ ] Three places carry this claim, not two — **found at review 651 round 2: the first pass at
+- [x] Three places carry this claim, not two — **found at review 651 round 2: the first pass at
       this item missed the third.** `README.md:52` and `docs/src/introduction.md:5` (**not**
-      `docs/src/users/introduction.md` — that path does not exist) say *"**Linux only.** There is
-      no evidence for any other platform."* `docs/src/users/getting-started.md:4` says the same
+      `docs/src/users/introduction.md` — that path does not exist) said *"**Linux only.** There is
+      no evidence for any other platform."* `docs/src/users/getting-started.md:4` said the same
       thing in different words: *"It runs on Linux; there is no cross-platform evidence beyond
-      it."* All three are true when written, false in substance by the time a macOS artifact
-      ships: a full test suite green on the real macOS runner, plus a rendered window capture
-      from it, **is** evidence. What is actually still missing is a *human* exercising the real
-      binary on real hardware — a narrower, more honest claim than "no evidence." Replace all
-      three with wording to that effect, naming what was and was not done (the Run It gate's own
-      answer, above, decides which of the two this is):
-      *"launched and rendered on real macOS, screenshot attached, not interactively exercised by
-      a human"* if Run It was not performed before this tag, or a claim of real use if it was
-      (`pr-028-f-scope-additions.md` §2 has the first form verbatim). Do not leave the old
-      sentence standing past this release.
+      it."*
+
+      **Discharged, review 653, RFC-028 Acceptance option (2) taken 2026-10-31.** All three now
+      say **"Linux, and macOS on Apple Silicon,"** plus that macOS is verified by its full test
+      suite and a rendered window capture on real hardware in CI and that no human has
+      interactively used it yet — "verified by X, not by Y," never "supported." One shape in all
+      three, so they cannot drift apart later; the same wording is in `CHANGELOG.md`'s `0.38.0`
+      entry.
 - [x] **Required, found at review 651 round 2, measured round 3 — both the approval and attention
       socket paths are over `sun_path`'s real limit on an ordinary Mac, not merely on an unusually
       long one.** Measured on the real runner (run `40982340829`, `$TMPDIR` left at its real

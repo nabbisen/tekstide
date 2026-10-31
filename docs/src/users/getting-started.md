@@ -1,7 +1,9 @@
 # Getting started
 
 Tekstide is a local-first, multi-project workbench for supervising terminal-based AI
-development workflows. It runs on Linux; there is no cross-platform evidence beyond it.
+development workflows. It runs on Linux, and macOS on Apple Silicon — macOS is verified by its
+full test suite and a rendered window capture on real hardware in CI; no human has interactively
+used it yet.
 
 ## Install
 
@@ -45,6 +47,13 @@ one of them fetches code from the same server as the one-liner above:
   The checksum is published from the same release as the binary: it proves the download arrived
   intact, not that the release itself could not have been tampered with, so none of the forms
   above say more than *verified against its published checksum*.
+
+**On macOS, clicking the asset link in a browser instead of using one of the forms above will
+not work without one extra step.** `curl` (what every form above uses) does not set the
+`com.apple.quarantine` attribute a browser download does, so only a browser-downloaded binary is
+affected: macOS refuses to run it ("cannot be verified") until you allow it once in **System
+Settings → Privacy & Security**. There is no developer certificate behind this release, so that
+step is expected, not a sign something went wrong.
 
 ## Give it a path, or run it bare
 
