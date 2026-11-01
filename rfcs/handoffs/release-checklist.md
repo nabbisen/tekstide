@@ -534,46 +534,16 @@ failed.
       of the macOS binary for the same reason; not separately measured there, since the cause
       (build-path-derived debug info) is toolchain-level, not platform-specific.
 
-## First Release With A macOS Artifact
+## First Release With A macOS Artifact — discharged and removed
 
-**One-time, not a per-release item — tick it once, in the release that first ships
-`tekstide-aarch64-macos`, then delete this section.** RFC-028 PR-028-F, review 651.
-
-- [x] Three places carry this claim, not two — **found at review 651 round 2: the first pass at
-      this item missed the third.** `README.md:52` and `docs/src/introduction.md:5` (**not**
-      `docs/src/users/introduction.md` — that path does not exist) said *"**Linux only.** There is
-      no evidence for any other platform."* `docs/src/users/getting-started.md:4` said the same
-      thing in different words: *"It runs on Linux; there is no cross-platform evidence beyond
-      it."*
-
-      **Discharged, review 653, RFC-028 Acceptance option (2) taken 2026-10-31.** All three now
-      say **"Linux, and macOS on Apple Silicon,"** plus that macOS is verified by its full test
-      suite and a rendered window capture on real hardware in CI and that no human has
-      interactively used it yet — "verified by X, not by Y," never "supported." One shape in all
-      three, so they cannot drift apart later; the same wording is in `CHANGELOG.md`'s `0.38.0`
-      entry.
-- [x] **Required, found at review 651 round 2, measured round 3 — both the approval and attention
-      socket paths are over `sun_path`'s real limit on an ordinary Mac, not merely on an unusually
-      long one.** Measured on the real runner (run `40982340829`, `$TMPDIR` left at its real
-      per-session value): the approval socket resolves to 107 bytes against a 103-byte limit
-      (`SocketPathTooLong`, refused by name); the attention socket resolves to 119 bytes against
-      the same limit (`bind_attention_listener` returns `None`, silently). `ci.yml`'s own suite-wide
-      run cannot see this because it pins `TMPDIR` to a short, fixed value for unrelated reasons —
-      two dedicated diagnostic steps that deliberately leave it alone are what measured the real
-      number.
-
-      **Fixed, review 652 B1: both filenames now keep only 12 hex characters of the stripped id
-      (48 bits), shedding 14/26 bytes.** Both headroom diagnostics are real assertions now, not
-      pure measurements, and both are green against the real ambient `$TMPDIR` on the real
-      runner — run `41150759162`: approval resolves to 83 bytes (headroom 20), attention to 85
-      bytes (headroom 18), both past the stated 10-byte floor. That is the acceptance criterion
-      this box names, discharged, not restated: **ticked on that run, not before it.**
-
-      One thing worth recording here rather than only in `CHANGELOG.md`: the first version of
-      this fix (run `41149340411`) truncated from the *front* of the id instead of the back,
-      which collapsed every `for_test()`-shaped sequential test fixture to one identical stem and
-      reddened this very job — caught and corrected the same day, same subject, before this box
-      was ticked. The real runner is what caught it; a Linux-only local gate would not have.
+**Both boxes ticked and the section deleted at the `0.38.0` release, 2026-11-01, as its own
+text instructed.** What it required is done and recorded elsewhere, so nothing here depends on
+memory: the three platform-claim sentences now say *"Linux, and macOS on Apple Silicon"* with
+what is and is not verified beside them (`README.md`, `docs/src/introduction.md`,
+`docs/src/users/getting-started.md`), and the B1 socket-path fix landed with both headroom
+diagnostics promoted to real assertions against the real ambient `$TMPDIR`. See
+`release-0.38.0.md` for that release's own record. **This heading stays for one release and is
+then deleted too** — a reader of the next cut should not wonder what used to be here.
 
 ## AUR Package
 

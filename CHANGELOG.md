@@ -2,7 +2,7 @@
 
 ## 0.38.0 - macOS Support, And What It Does Not Claim
 
-Status: **candidate, not yet published.** RFC-028's nine decisions are all implemented, gated
+Status: **released 2026-11-01.** RFC-028's nine decisions are all implemented, gated
 and closed, the macOS CI job is fully blocking, and the Run It question is answered — RFC-028
 *Acceptance*'s own option (2): no Apple hardware available, CI's own evidence accepted as
 sufficient, disclosed rather than implied as parity with Linux. This entry was written

@@ -1,6 +1,6 @@
 # RFC-028: Cross-Platform Support — macOS
 
-Status: **Implemented and closed 2026-10-31; `0.38.0` candidate, not yet published.** Moved to
+Status: **Implemented and closed 2026-10-31; released as `0.38.0` 2026-11-01.** Moved to
 `done/`. Accepted by the human owner 2026-10-15; D1–D9 as written. **The Run It question is
 answered by RFC-028 *Acceptance*'s own option (2), taken 2026-10-31** — no Apple hardware
 available to this project, CI's own macOS evidence accepted as sufficient — see *Decided on
