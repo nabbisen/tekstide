@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+### Fixed — review 656: `is_gone_or_going`'s own early return on macOS never consulted `P_WEXIT` once libproc answered at all
+
+`is_gone_or_going` (`runtime/terminal/launch.rs`, macOS only) returned the moment `proc_pidinfo`
+answered, so `sysctl`'s own `P_WEXIT` check — added at review 630 specifically for when libproc
+cannot see a process mid-`proc_exit` — was reachable only when libproc was already blind, never
+when it answered but got the wrong thing wrong. Found on `test-process-leak.md`'s own fifth
+`proc_exit`/`P_WEXIT` cluster row: `proc_pidinfo` succeeded, reported a live, non-`SZOMB` status,
+and the function returned `false` one line later, while `sysctl` — never reached — would have read
+`P_WEXIT` set on the identical pid in the identical instant (run `41210748448`, pid 6915).
+
+**Fixed by removing the early return**, so `sysctl` is consulted unless libproc has already
+confirmed a zombie. The decision itself is now a pure function
+(`decide_gone_or_going(libproc_zombie, sysctl_reading)`), tested deterministically against the
+exact real-world reading the fifth row captured — the live, load-dependent window this bug lives
+in is not something a test can construct on demand, so the fixture is built from a real captured
+reading rather than a synthetic or live-reproduced one.
+
+**Sourced rather than asserted, and the direction matters**: `P_WEXIT` is trusted as a one-way
+signal on two independent grounds (general POSIX exit semantics, plus this project's own 13-of-13
+direct measurement of this specific bit through the ABI-frozen `sysctl(KERN_PROC)` structure Apple
+maintains for `ps`/`top` — not the renamed kernel-internal flag later XNU versions use). Stated at
+length because the predicate's two ways of being wrong are not equally bad: widening what counts
+as "gone or going" makes the containment sweep more willing to call a session empty, and if the
+sourcing above were wrong the failure would be a real containment leak — the direction this
+project least wants to be wrong in.
+
+**A test-noise fix, not a shipped-security fix — worked out, not assumed.** The bug's own
+production consequence is a pid wrongly counted as alive, costing one redundant, harmless
+`SIGKILL` and, in test/test-support builds only, a false `assert_session_is_empty` panic reporting
+a survivor that was never actually loose — that assertion is compiled into neither this crate's
+release build nor `tekstide`'s shipped binary. No release ever shipped with a real containment gap
+from this.
+
+**The five cluster rows traced individually, not disposed as one class — zero un-ignored, not
+three.** Only one of the five carries an actual `#[cfg_attr(target_os = "macos", ignore)]`
+(`the_shell_still_exits_normally_after_the_first_wake_is_observed`), and tracing its own assertion
+found it calls `wait_for_exit` → `std::process::Child::try_wait()`, the kernel's own `waitpid`,
+with no `is_gone_or_going` anywhere in it — a different mechanism inside the same macOS
+`proc_exit` window, not the one this fix touches. The one row this fix actually targets
+(`a_real_backgrounded_job_is_dead_after_a_real_close`) was never ignored; its own assertion goes
+through `test_support::process_is_alive` → `is_gone_or_going` directly. See
+`test-process-leak.md`'s own review 656 entry for all five, traced.
+
 ## 0.38.0 - macOS Support, And What It Does Not Claim
 
 Status: **released 2026-11-01.** RFC-028's nine decisions are all implemented, gated

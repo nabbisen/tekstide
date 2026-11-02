@@ -1177,8 +1177,41 @@ const P_PID_OFFSET: usize = 40;
 /// called `exit` and begun `proc_exit`, before `p_stat` ever reaches
 /// `SZOMB`. Reviews 628/629 measured it set and stable (three samples,
 /// 100ms apart) on all 13 real firings of the stuck-shell cluster.
-#[cfg(target_os = "macos")]
+///
+/// **Review 656 round 2: `cfg(any(target_os = "macos", test))`, not
+/// `cfg(target_os = "macos")` alone.** The fact this constant records is
+/// still Darwin-only -- nothing on Linux ever sets this bit, and
+/// production code still reads it only from macOS's own
+/// `is_gone_or_going` -- but [`decide_gone_or_going`] is a pure function
+/// this project now needs to run and test on every platform. Dropping
+/// the `cfg` to nothing (tried first) compiled, but left this constant,
+/// `SZOMB` below, and `decide_gone_or_going` genuinely unused by a plain
+/// non-macOS build -- `dead_code`, caught by `cargo build` itself before
+/// it ever reached clippy. `any(.., test)` is the honest middle: present
+/// in every build that can actually use it (macOS production, or any
+/// platform's own test build), absent from the one build where it would
+/// just be dead weight.
+#[cfg(any(target_os = "macos", test))]
 const P_WEXIT: u32 = 0x2000;
+/// Darwin's own zombie `p_stat`, project-owned rather than read as
+/// `libc::SZOMB`, for the reason `P_WEXIT` above already was one:
+/// `libc::SZOMB` does not exist in a Linux build at all (confirmed
+/// directly -- a throwaway crate against this host's `libc` fails with
+/// `cannot find value SZOMB in crate libc`), so [`decide_gone_or_going`]
+/// could not read it from the crate on every platform it now runs on in
+/// a test build. The value itself is not a Darwin peculiarity -- `5` is
+/// the standard BSD-family zombie state code, the same constant every
+/// BSD-derived `libc` that exposes it at all (FreeBSD, NetBSD, Darwin)
+/// gives it -- only the fact that this project needs it on a platform
+/// where `libc` does not expose it is new. Same `cfg` as `P_WEXIT` above,
+/// for the same `dead_code` reason. Pinned against the real platform
+/// constant, on macOS, by
+/// [`tests::project_szomb_matches_the_real_platform_constant`] -- the
+/// same shape `max_socket_path_len_matches_the_real_platform_limit`
+/// already uses elsewhere in this project for a project-owned value that
+/// must track a platform's own.
+#[cfg(any(target_os = "macos", test))]
+pub(super) const SZOMB: u32 = 5;
 
 /// `p_stat` and `p_flag`, read through `sysctl(CTL_KERN, KERN_PROC,
 /// KERN_PROC_PID)` rather than through libproc. `None` only when the
@@ -1347,6 +1380,85 @@ pub(super) fn report_pid_p_stat_via_sysctl(_pid: libc::pid_t) {}
 /// treated as one -- padding this predicate to match would say something
 /// untrue about what was actually measured, worse than the two bodies
 /// looking asymmetric).
+///
+/// **Dated correction, review 656: the `P_WEXIT` check above was real
+/// but unreachable whenever `proc_pidinfo` succeeded, which is most of
+/// the time.** The original shape returned from the `proc_pidinfo` arm
+/// the moment it answered at all, so `sysctl`'s own stronger signal was
+/// consulted only when libproc was already blind -- the one case review
+/// 630 added it for, but not the only case it is needed. Caught on
+/// `test-process-leak.md`'s own fifth cluster row (run `41210748448`):
+/// `proc_pidinfo` succeeded, reported a live, non-`SZOMB` status, and the
+/// function returned `false` one line later while `sysctl`, never
+/// reached, would have read `p_flag=0x6006` -- `P_WEXIT` set -- on the
+/// very same pid in the very same instant. See [`decide_gone_or_going`]
+/// for the fix and the fixture built from that exact reading.
+///
+/// **Why `P_WEXIT` is trusted as irreversible for a pid still mid-exit,
+/// stated and sourced rather than inferred from the flag's name.** Two
+/// independent grounds, not one:
+///
+/// 1. **General POSIX/Unix process lifecycle, not macOS-specific.** Once
+///    a process has entered its kernel exit path (the `exit`/`_exit`
+///    syscall, or a fatal signal the kernel delivers itself), there is no
+///    facility in any Unix-family kernel for that path to be abandoned
+///    and the process returned to ordinary runnable execution -- the
+///    only two states reachable from it are "still tearing down" and
+///    "zombie, awaiting reap." This is textbook kernel design, not a
+///    property this project is the first to rely on.
+/// 2. **This specific bit, on this specific platform, measured rather
+///    than assumed to still mean that.** Apple's own released XNU source
+///    (`xnu-344/bsd/kern/kern_exit.c`,
+///    <https://opensource.apple.com/source/xnu/xnu-344/bsd/kern/kern_exit.c.auto.html>)
+///    shows `proc_exit()` setting `P_WEXIT` once, guarded against being
+///    set a second time, as the kernel's own first committed step into
+///    the exit path -- a one-way marker by construction, not a status
+///    flag that toggles. **Caveat, stated rather than hidden**: later
+///    XNU (`xnu-1228` onward) renamed the *kernel-internal* flag to
+///    `P_LEXIT`/`p_lflag` -- this project reads the field through
+///    `sysctl(KERN_PROC, KERN_PROC_PID)`, a separate, ABI-frozen
+///    compatibility structure Apple maintains for `ps`/`top`/third-party
+///    tools, not the internal field directly, so the rename does not by
+///    itself say whether the public, frozen bit still behaves the same
+///    way. What settles it is review 625-630's own direct measurement on
+///    the real runner this code actually ships on: the bit at this exact
+///    offset and mask was observed set, stable across three samples
+///    100ms apart, on 13 of 13 real firings, every time correlated with
+///    `proc_find`-based APIs refusing to see the pid, and every firing
+///    eventually resolved to `SZOMB` -- never once observed to clear and
+///    return the pid to ordinary visibility. Evidence from the actual
+///    ABI this code reads, not inference from a name that may no longer
+///    describe the kernel's own internal state.
+///
+/// **The fail-closed direction, named explicitly because the two ways
+/// this predicate can be wrong are not equally bad.** `is_gone_or_going`
+/// feeds `live_member_of_session` (`!is_gone_or_going`, production,
+/// `processes_in_session`'s own SIGKILL-candidate enumeration) and
+/// `test_support::process_is_alive`. Widening what counts as "going"
+/// makes the containment sweep *more* willing to call a session empty --
+/// if `P_WEXIT` ever meant less than this analysis concludes, the
+/// failure mode is a genuinely-surviving process excluded from the sweep
+/// and never signalled: a real containment leak, the direction this
+/// project least wants to be wrong in. The two grounds above are stated
+/// at the length they are because that is the direction being risked.
+///
+/// **The production consequence of the bug this corrects, worked out
+/// rather than assumed.** `is_gone_or_going` returning `false` for a
+/// `P_WEXIT`-set pid makes `live_member_of_session` report it as alive,
+/// which puts it in `processes_in_session`'s own `members` and (via
+/// `RunningTerminal::drop`) sends it a second `SIGKILL` -- harmless by
+/// construction (`termination::signal_candidates` tolerates a vanished
+/// pid, and a signal to an already-exiting process is a documented
+/// no-op at the POSIX layer). The only *visible* consequence is
+/// `assert_session_is_empty` -- `#[cfg(any(test, feature =
+/// "test-support"))]`, compiled into neither this crate's own release
+/// build nor `tekstide`'s shipped binary -- panicking with a false
+/// survivor that is not actually a leak. **This is a correctness fix for
+/// a false assertion in this project's own test harness, not a fix for
+/// a shipped security defect**: the direction the bug errs in production
+/// (an already-departing process redundantly signalled and briefly
+/// over-counted) was never the dangerous direction: see the fail-closed
+/// paragraph above for which direction is.
 #[cfg(target_os = "macos")]
 pub(crate) fn is_gone_or_going(pid: libc::pid_t) -> bool {
     // SAFETY: `info` is a plain, fully-zeroed `proc_bsdinfo` the call
@@ -1356,11 +1468,58 @@ pub(crate) fn is_gone_or_going(pid: libc::pid_t) -> bool {
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     let result =
         unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    if result == size {
-        return info.pbi_status == libc::SZOMB;
+    let libproc_zombie = (result == size).then_some(info.pbi_status == SZOMB);
+    decide_gone_or_going(libproc_zombie, p_stat_and_flag_via_sysctl(pid))
+}
+
+/// The pure decision `is_gone_or_going` makes, pulled out so it can be
+/// tested against a fixed reading rather than a live process in exactly
+/// this state -- the real window is load-dependent (reviews 625-629 found
+/// it by running the suite under CI load, not by constructing it on
+/// demand), so there is no reliable "make a process do this right now"
+/// available to a test, and asserting only "it has not flaked since" is
+/// the one conclusion `test-process-leak.md`'s own history already shows
+/// to be worthless. `libproc_zombie` is `None` when `proc_pidinfo` itself
+/// could not answer (`result != size`, folded by the caller before this
+/// point -- this function only ever sees "did libproc say zombie," never
+/// the raw syscall result); `Some(true)`/`Some(false)` otherwise.
+///
+/// **This is the fix, in one place**: the old shape returned
+/// `libproc_zombie`'s own answer the moment libproc answered at all,
+/// before ever consulting `sysctl_reading`. This always consults
+/// `sysctl_reading` unless libproc has already confirmed a zombie --
+/// `P_WEXIT` is checked whenever it is available, not only when libproc
+/// is blind.
+///
+/// `pub(super)`, not private: `runtime::terminal::tests` reaches it as
+/// `super::launch::decide_gone_or_going`, the same visibility shape this
+/// module's own `report_pid_p_stat_via_sysctl` already uses for a test
+/// that needs to call into `launch` directly.
+///
+/// **Review 656 round 2: `cfg(any(target_os = "macos", test))`, not
+/// `cfg(target_os = "macos")` alone.** Nothing in this function's own
+/// body is platform-specific any more -- `P_WEXIT` and `SZOMB`, the only
+/// two platform facts it ever compared against, are both project-owned
+/// constants now rather than read from `libc`. A fully unconditional
+/// `cfg` compiled clean but left this function genuinely unused by a
+/// plain non-macOS build (`dead_code`, from `cargo build` itself, before
+/// clippy even ran) -- production code only ever calls this through
+/// macOS's own `is_gone_or_going`, by design, the same way the Linux
+/// `is_gone_or_going` below has its own separate body rather than
+/// sharing this one. `any(.., test)` keeps that honest while still
+/// compiling this function, and the three tests below, on every
+/// platform's own test build -- which is why they execute on this
+/// machine now, instead of only being reasoned through by hand.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn decide_gone_or_going(
+    libproc_zombie: Option<bool>,
+    sysctl_reading: Option<(u8, u32)>,
+) -> bool {
+    if libproc_zombie == Some(true) {
+        return true;
     }
-    match p_stat_and_flag_via_sysctl(pid) {
-        Some((p_stat, p_flag)) => u32::from(p_stat) == libc::SZOMB || p_flag & P_WEXIT != 0,
+    match sysctl_reading {
+        Some((p_stat, p_flag)) => u32::from(p_stat) == SZOMB || p_flag & P_WEXIT != 0,
         None => false,
     }
 }

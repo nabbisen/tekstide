@@ -3654,3 +3654,119 @@ round as the push, not a response to review. Checking a push's own CI result is 
 including a documentation-only one -- the gate does not know the diff was harmless, and whatever
 lands on `main` is what a tag would be cut from. A rerun of `9171c17` on the same commit, not a
 new push, is what settles whether this run was itself transient; see the round that reports it.
+
+## Review 656 -- `is_gone_or_going`'s early-return fix, and the five cluster rows revisited individually, not disposed as one class
+
+**The fix.** `is_gone_or_going`'s macOS arm (`launch.rs`) returned the moment `proc_pidinfo`
+answered at all, so `sysctl`'s own `P_WEXIT` check -- review 630's own addition -- was reachable
+only when libproc was already blind. A pid where `proc_pidinfo` succeeded and reported a live,
+non-`SZOMB` status never reached the `sysctl` check at all, even if `sysctl` would have read
+`P_WEXIT` set on the identical pid in the identical instant -- exactly what happened on the fifth
+cluster row above (pid 6915, run `41210748448`). Fixed by removing the early return: `sysctl` is
+now consulted unless libproc has already confirmed a zombie, pulled into a pure
+`decide_gone_or_going(libproc_zombie, sysctl_reading)` so the decision itself can be tested
+against a fixed reading rather than a live process in exactly this state. Three new tests assert
+it: the exact reading from the fifth row's own run (now correctly `true`, where the old shape
+would have answered `false`), the pre-existing libproc-blind case (unchanged, still `true`), and
+the negative case (`P_WEXIT` clear reads as alive, on both sources). **Deterministic, not a live
+reproduction** -- the real window is load-dependent (reviews 625-629 found it under CI load, not
+on demand), so this fixture is the tool available, built from a real captured reading rather than
+a synthetic one.
+
+**Why `P_WEXIT` is trusted as one-way, sourced rather than asserted** (the full argument is on
+`is_gone_or_going`'s own doc comment now, this is the summary): general POSIX exit semantics (no
+kernel facility returns a process from its exit path to ordinary execution) plus this project's
+own direct, repeated measurement (13 of 13 real firings, reviews 625-630) of the specific bit this
+code reads, through the ABI-frozen `sysctl(KERN_PROC)` structure Apple maintains for `ps`/`top`
+compatibility -- not the renamed kernel-internal `P_LEXIT`/`p_lflag` later XNU versions use
+internally, which this project does not read and whose rename is noted rather than hidden.
+
+**The fail-closed direction, because the two ways this predicate can be wrong are not equally
+bad.** Widening "gone or going" makes the containment sweep more willing to call a session empty;
+if the analysis above is wrong, the failure is a genuinely-surviving process excluded from the
+sweep and never signalled -- a real containment leak. That is why the sourcing above is stated at
+length rather than summarized to one line.
+
+**The production consequence, worked out rather than assumed: this was a test-noise fix, not a
+shipped-security fix.** The bug's own error direction in production is a pid wrongly counted as
+alive, which costs one redundant, harmless `SIGKILL` (`termination::signal_candidates` tolerates
+a vanished pid; a signal to an already-exiting process is a documented no-op) and, in test/
+test-support builds only, a false `assert_session_is_empty` panic reporting a survivor that was
+never really loose. `assert_session_is_empty` itself is `#[cfg(any(test, feature =
+"test-support"))]` -- compiled into neither this crate's release build nor `tekstide`'s shipped
+binary. No real user-facing release ever shipped with an actual containment gap from this; the
+assertion this fix repairs is this project's own, stricter-than-shipped test harness.
+
+### The five cluster rows, traced individually -- not three un-ignored, zero
+
+**Correcting the instruction's own framing, verified rather than assumed to match**: of the five
+rows, only *one* carries an actual `#[cfg_attr(target_os = "macos", ignore)]` (grepped for the
+real attribute, not a doc-comment mention of the pattern, the same distinction review 651 round 1
+had to re-learn). And tracing each row's own assertion against its actual call chain found that
+this fix touches none of the three `wait_for_exit`-based rows at all -- `wait_for_exit` ->
+`wait_for_child_outcome` is `std::process::Child::try_wait()`, the kernel's own `waitpid`, with no
+`is_gone_or_going` anywhere in it. `is_gone_or_going` is reached only through
+`live_member_of_session` (production, session-wide enumeration of pids this process did not
+itself fork) and `test_support::process_is_alive`. A real, different mechanism from the one this
+subject's own target line explains, even though both sit inside the same macOS `proc_exit`
+window.
+
+1. `the_wake_notifier_wakes_when_real_pty_output_arrives` -- **unaffected.** Asserts only that the
+   wake fires; never calls `wait_for_exit` or `is_gone_or_going`. Nothing to revisit.
+2. `the_shell_still_exits_normally_after_the_first_wake_is_observed` -- **unaffected, stays
+   ignored on macOS.** Its own body calls `runtime.wait_for_exit(...)`, asserting
+   `Exited { exit_status: 0 }` -- the `try_wait`-timeout class, not this fix's own target. Lifting
+   this ignore needs the separate "macOS exit-wait fix" its own doc comment already names (giving
+   `wait_for_child_outcome` a way to tell "still mid-`proc_exit`, genuinely slow" from "actually
+   stuck" rather than only timing out), which is not this subject.
+3. `the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming` -- **unaffected.**
+   Never ignored (review 650 round 3 already removed its own duplicate `wait_for_exit` assertion);
+   asserts only the wake-notifier's own final-wake property.
+4. `real_pty_output_reaches_the_channel_end_to_end` -- **already resolved, review 654**, the same
+   way: its own duplicate `wait_for_exit` assertion removed, not ignored. Unaffected by this fix
+   for the same reason as row 2 -- it was never this mechanism to begin with.
+5. `a_real_backgrounded_job_is_dead_after_a_real_close` -- **the one row this fix actually
+   targets.** Never ignored (the flake is intermittent, not constant), and its own assertion goes
+   through `test_support::process_is_alive` -> `is_gone_or_going` directly -- this is the call
+   chain the fifth row's own log, and the fix, are both about. No code change to the test itself;
+   expected to stop producing this specific false failure, verifiable only by its continued
+   absence on the real runner, which this document's own history already says is not proof by
+   itself -- recorded as the expectation, not claimed as confirmed.
+
+**Ignore count unchanged, so the count-guard owed since review 652 is not triggered this round**
+(it stays owed, independently of this fix finding nothing to flip).
+
+**Green on the real runner**: reported in the review-request round for this subject, not
+restated here -- this entry is the register's own record of the reasoning and the verdicts, not
+the CI evidence, which belongs with the push that produced it.
+
+### Round 2, 2026-11-03 -- the proof itself was behind a platform gate, and that's fixed too
+
+The review response caught a mistake one level up from the bug this subject fixes: the three
+new tests, `decide_gone_or_going`, and the `P_WEXIT`/`SZOMB` constants it reads were all
+`#[cfg(target_os = "macos")]`, so none of them had ever compiled or run on this machine --
+exactly the "a real check sitting behind a platform gate" shape the subject itself exists to
+correct, one level up.
+
+Fixed by making `SZOMB` a project-owned constant beside `P_WEXIT` (`libc::SZOMB` does not exist
+in a Linux build, confirmed directly -- `cannot find value SZOMB in crate libc`), then trying to
+drop the `cfg` from both constants and from `decide_gone_or_going` entirely, as asked. That
+compiled but produced `dead_code` warnings from `cargo build` itself: nothing in a plain
+non-macOS build ever calls `decide_gone_or_going`, because production code only ever reaches it
+through macOS's own `is_gone_or_going` (the Linux `is_gone_or_going` has its own separate body,
+deliberately, since review 639). Landed on `#[cfg(any(target_os = "macos", test))]` instead --
+present in macOS production and in any platform's own test build, absent only from the one build
+where it would be genuinely dead weight. A new macOS-only guard test,
+`project_szomb_matches_the_real_platform_constant`, pins the project's own `SZOMB` against
+`libc::SZOMB`, the same shape `max_socket_path_len_matches_the_real_platform_limit` already uses
+elsewhere for a project-owned value that must track a platform's own; `P_WEXIT` gets no
+equivalent guard since `libc` does not expose a Darwin `P_WEXIT` constant to check against at
+all.
+
+**Watched pass here, not reasoned through by hand**: `tekstide-core` **1167/0/4** (1164 baseline
+plus the three new tests, moved by exactly three as the response asked), `tekstide` **785/0/8**,
+`rfc_docs_invariants` **25/0**, 0 leftover fixture entries. `cargo fmt --check`, `clippy
+--workspace --all-targets --all-features -D warnings`, `cargo doc --workspace --no-deps -D
+warnings` (intra-doc links to `decide_gone_or_going` and the new test resolve clean), `cargo test
+--doc --workspace` all clean. The "never executed, only reasoned through by hand" line from round
+1's own write-up no longer applies to these three tests.

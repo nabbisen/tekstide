@@ -742,6 +742,95 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     );
 }
 
+/// Review 656: `decide_gone_or_going`'s own predicate, against the exact
+/// real-world reading `test-process-leak.md`'s fifth cluster row
+/// captured (run `41210748448`, pid 6915) -- `p_stat=2` (`SRUN`),
+/// `p_flag=0x6006` (`P_WEXIT` set, confirmed: `0x6006 & 0x2000 ==
+/// 0x2000`). **Deterministic, not a live reproduction**: the real
+/// `P_WEXIT`-set-but-not-yet-`SZOMB` window is load-dependent (reviews
+/// 625-629 found it under real CI load, not by constructing it to
+/// order), so this fixture is the one tool available that proves the
+/// predicate's own answer without waiting to catch the window again --
+/// "it has not flaked since" is exactly the conclusion this project's
+/// own register already found worthless.
+///
+/// **Proves the fix, not only the property.** Under the pre-review-656
+/// shape, `proc_pidinfo` succeeding with a non-`SZOMB` status returned
+/// immediately, so `sysctl_reading` here would never have been
+/// consulted at all and the old function would have answered `false` --
+/// exactly the misread the real run hit. This asserts the corrected
+/// answer, `true`.
+///
+/// **Review 656 round 2: no longer `cfg(target_os = "macos")`.**
+/// `decide_gone_or_going` takes a `bool` and a `(u8, u32)` -- nothing in
+/// it, or in this test, is platform-specific now that `P_WEXIT` and
+/// `SZOMB` are both project-owned constants rather than read from
+/// `libc`. Runs, and is watched pass, on this machine.
+#[test]
+fn decide_gone_or_going_consults_p_wexit_even_when_libproc_already_answered() {
+    let libproc_says_not_zombie = Some(false);
+    let real_sysctl_reading_from_run_41210748448 = Some((2u8, 0x6006u32));
+    assert!(
+        super::launch::decide_gone_or_going(
+            libproc_says_not_zombie,
+            real_sysctl_reading_from_run_41210748448,
+        ),
+        "a pid libproc reports alive (non-SZOMB) but sysctl reports P_WEXIT-set must still read \
+         as gone-or-going -- this is the exact reading that produced run 41210748448's own \
+         false failure"
+    );
+}
+
+/// The companion case: libproc blind (`proc_pidinfo` failed), the shape
+/// review 630 originally wrote this predicate for -- still correct after
+/// review 656's own change, since removing the early return only widens
+/// when `sysctl_reading` is consulted, never narrows what it decides
+/// once reached.
+///
+/// `2u8` is `SRUN` -- a plain literal, not `libc::SRUN`, matching the
+/// test above: `libc::SRUN` does not exist in a Linux build either, and
+/// the predicate does not care which non-`SZOMB` state this is, only
+/// that it is not `SZOMB` and that `P_WEXIT` is set in `p_flag`.
+#[test]
+fn decide_gone_or_going_still_excludes_on_p_wexit_when_libproc_is_blind() {
+    assert!(super::launch::decide_gone_or_going(
+        None,
+        Some((2u8, 0x2000))
+    ));
+}
+
+/// The negative case, so the predicate is pinned on both sides rather
+/// than only proven to say `true` when it should: a genuinely running,
+/// non-exiting process (`P_WEXIT` clear) must not read as gone or going,
+/// regardless of which source answered.
+#[test]
+fn decide_gone_or_going_reports_alive_when_neither_source_shows_departure() {
+    assert!(!super::launch::decide_gone_or_going(
+        Some(false),
+        Some((2u8, 0x0004)),
+    ));
+    assert!(!super::launch::decide_gone_or_going(Some(false), None));
+}
+
+/// Review 656 round 2's own required guard: `SZOMB` became a
+/// project-owned constant (`launch.rs`) so `decide_gone_or_going` and
+/// the three tests above could run on every platform, not only macOS --
+/// this is the platform-only half that move still needs, pinning the
+/// project's own value against the real one, the same shape
+/// `max_socket_path_len_matches_the_real_platform_limit`
+/// (`project_lock::attention::tests`) already uses elsewhere in this
+/// project for a project-owned value that must track a platform's own.
+///
+/// `P_WEXIT` gets no equivalent guard here: `libc` does not expose a
+/// Darwin `P_WEXIT` constant to check against at all (only FreeBSD's own
+/// copy is exposed, a different platform's ABI), so there is nothing on
+/// this target to source one against.
+#[cfg(target_os = "macos")]
+#[test]
+fn project_szomb_matches_the_real_platform_constant() {
+    assert_eq!(super::launch::SZOMB, libc::SZOMB);
+}
+
 /// RFC-043 D2's own opt-out, asserted on purpose rather than merely
 /// tolerated: `setsid` is the standard, documented way a user (or a
 /// script) says "this should outlive my terminal," by leaving the
