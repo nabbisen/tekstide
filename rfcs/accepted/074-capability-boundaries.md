@@ -1,7 +1,14 @@
 # RFC-074: Capability Boundaries
 
-Status: **Proposed 2026-11-03.** Approved to follow RFC-028 by the human owner (review 595), and
-drafted only after RFC-028 closed and `0.38.0` shipped, as directed. The goal, the tier model and
+Status: **Accepted by the human owner 2026-11-03** — D1 through D8 as written, with Stages 1
+and 2 as the first slice and the later staging scoped in a handoff after the gate has proven
+itself on two real stages, exactly as *Acceptance* asked. **Two owner-level questions stay
+open and neither blocks that slice**: which release slot this takes, and whether
+`tekstide-core`'s published API may change shape in that release — Stage 1 is API-compatible
+by construction (D3), so it does not wait on the second.
+
+Proposed 2026-11-03. Approved to follow RFC-028 by the human owner (review 595), and drafted
+only after RFC-028 closed and `0.38.0` shipped, as directed. The goal, the tier model and
 three of the decisions below were settled first, in
 `tekstide-structure-goal-definition.md` (2026-10-17, written at the owner's direction to **define
 the goal before measuring the graph**, and derived from `specs/tekstide-requirements-v0.md`,

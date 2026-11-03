@@ -25,7 +25,9 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 074 | [Capability Boundaries](./proposed/074-capability-boundaries.md) | **Proposed 2026-11-03**, drafted after RFC-028 closed and `0.38.0` shipped, as the owner directed at review 595. The goal, the tier model and three decisions were settled first in the architect's own goal definition (2026-10-17); every number in the RFC is re-measured against the code as it stands, not reused from October. Asks for D1–D8 and Stages 1–2 only; the later staging is scoped in a handoff after the gate has proven itself on two real stages |
+
+*(Empty — nothing is proposed and not yet accepted. RFC-074 was accepted on 2026-11-03, the day
+after it was proposed, and moved to `accepted/`.)*
 
 ## Accepted
 
@@ -35,8 +37,7 @@ belongs here, not there.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is accepted and not yet closed. See [RFC-037](./done/037-five-folder-rfc-lifecycle.md).)*
+| 074 | [Capability Boundaries](./accepted/074-capability-boundaries.md) | **Accepted 2026-11-03.** D1–D8 as written; Stages 1–2 are the first slice, later staging scoped in a handoff once the gate has proven itself on two real stages. `tekstide-core` is one strongly connected component of ten modules; the gate that measures it is built before any move, and its bound ratchets with the stage that earns it. Two owner-level questions stay open and neither blocks the slice: the release slot, and whether the published API may change shape in it (Stage 1 is API-compatible by construction) |
 
 ### Reserved numbers — check this before authoring
 
@@ -77,6 +78,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | RFC | Handoff Pack |
 | --- | --- |
 | 028 | [Cross-Platform Support — macOS](./handoffs/028-cross-platform-support/pr-028-f-scope-additions.md) — **M14, second of that milestone**; **implemented and closed 2026-10-31; released as `0.38.0` 2026-11-01** |
+| 074 | [Capability Boundaries](./handoffs/074-capability-boundaries/task-breakdown-pr-plan.md) — **M14**; **accepted 2026-11-03**, first slice in flight: the gate before any move, then `ProjectId` to T0 and `test_support` out of the production graph, each with the gate's own bound lowered in the same commit |
 | 029 | [Documentation, CI, and Release Automation](./handoffs/029-ci-and-distribution/README.md) — **M14, first of that milestone**; **implemented and closed 2026-10-14; released as `0.37.0` 2026-10-14** |
 | 060 | [Command Approval A User Can Reach](./handoffs/060-command-approval-reachable/README.md) — **pre-1.0, a 1.0 blocker**; **implemented and closed 2026-10-12; released as `0.36.0` 2026-10-12** |
 | 059 | [Seeing The Audit](./handoffs/059-seeing-the-audit/README.md) — **pre-1.0**; **implemented and closed 2026-10-12; released as `0.35.0` 2026-10-12** |
