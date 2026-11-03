@@ -25,9 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is proposed and not yet accepted. RFC-074 was accepted on 2026-11-03, the day
-after it was proposed, and moved to `accepted/`.)*
+| 076 | [Readable By Default](./proposed/076-readable-by-default.md) | **Proposed 2026-11-03**, at the owner's direction after they asked whether layout, typography and colour could be kinder to older readers. Colour is already right and enforced in code (WCAG AA, pairs below the floor refused); the gaps are that the defaults sit at the bottom of a range allowing 32 px, and that **no in-app way to change text size exists at all**. **Accepting it also amends external design §4.2's authored 14 px default.** D1–D5, with D1 (one scale factor through `iced`'s own) and D2 (raised defaults) as the first slice |
 
 ## Accepted
 
@@ -57,6 +55,7 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 071 | Windows Packaging And The Microsoft Store | M14 |
 | 072 | A Non-Blocking Job For Quarantined Tests | M14 |
 | 073 | The `locales_dir()`/`CARGO_MANIFEST_DIR` Locale-Loading Defect | M14 |
+| 075 | Sending The Attention Knock | pre-1.0 |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
 audit's findings, not guesses; each row's scope is in the release schedule in
