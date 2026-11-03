@@ -3878,3 +3878,68 @@ mine?". So macOS suite stability is now a precondition for RFC-074's staging, no
 concern -- and the reserved `P_WEXIT` successor subject is the nearest existing home for it, with
 its target already pinned to `launch.rs:1351-1366`. The decision of what runs next is the owner's;
 this row exists so it is made on the measurement rather than on the impression.
+
+## 2026-11-03, fifth datum -- the containment guard fired on the **runner**, and the surviving pid is not the session leader
+
+Run on `6cbc57a` -- the commit that disclosed the fourth datum. Documentation only, again.
+`shell::tests::terminal_session_limit_headless_n_pane_wake_throughput_benchmark`, verbatim from
+`launch.rs:748`:
+
+```
+RunningTerminal::drop's own containment sequence for session 3995 finished, but a real
+re-enumeration afterward still found: Some([4136]).
+```
+
+**This is the reading the "containment guard, firing locally" row above set up to look for, and it
+is the other case.** That row recorded a local Linux occurrence where the surviving pid
+(`1988184`) **equalled** the session id, and reasoned it was "consistent with a load-sensitive
+re-enumeration race (the leader observed mid-exit, not yet reaped) rather than a backgrounded job
+escaping." Here the session is `3995` and the survivor is `4136` -- **not the leader**, and higher
+than it, the shape a child or backgrounded job has. Per that row's own distinction, this
+occurrence is consistent with the other cause. **Consistent with, not established as**: the
+guard's own message says the determination belongs to whoever reads it with the pids in hand, and
+nobody has those pids now that the runner is gone.
+
+### The hypothesis this has to be tested against first, because it was pre-registered
+
+**Review 656 widened `is_gone_or_going`** so that `P_WEXIT` is consulted whenever it is available
+rather than only when libproc is blind. That predicate feeds `live_member_of_session`, which is how
+the sweep decides who to signal. The review that authorised it named this exact failure mode in
+advance, in the instruction and in the function's own doc comment:
+
+> "Widening what counts as 'going' makes the containment sweep *more* willing to call a session
+> empty -- if `P_WEXIT` ever meant less than this analysis concludes, the failure mode is a
+> genuinely-surviving process excluded from the sweep and never signalled: a real containment
+> leak, the direction this project least wants to be wrong in."
+
+A survivor that is **not** the leader, appearing on the runner for the first time after that change
+landed (`259b7cf`, 2026-11-02), is the first observation consistent with that pre-registered mode.
+It is **not** proof: the guard has fired before 656 existed (the local row above), the shape is
+load-sensitive, and the pid's own state was never sampled. But it is the hypothesis with the most
+at stake, it was written down before the fact, and it is checkable: the sweep skips precisely the
+pids `is_gone_or_going` answers true for, so **the test is whether `4136`-shaped survivors are
+`P_WEXIT`-set-but-genuinely-alive.** Sample the survivor's own `p_stat`/`p_flag` at the moment the
+guard fires -- the guard already has the pid and the diagnostic already exists
+(`report_pid_p_stat_via_sysctl`); it is simply not called on this path.
+
+That instrumentation is the first thing the macOS exit-wait subject should land, ahead of its own
+core, because it is the only way to tell a containment leak from a re-enumeration race, and one of
+those two is a security defect.
+
+### Five for five, and the loop is the reviewer's own
+
+Five distinct macOS tests, five consecutive **documentation-only** commits, every one green on a
+rerun of the same commit:
+
+| Commit | Test | Shape |
+| --- | --- | --- |
+| `58bb7e1` | `drawing_the_largest_tree_...fits_inside_a_frame` | wall-clock frame budget |
+| `9171c17` | `a_real_backgrounded_job_is_dead_after_a_real_close` | `P_WEXIT` cluster |
+| `57fc983` | `linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup` | a timeout asserted and not reached |
+| `46b7d29` | `a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request` | a notice reported and not matched |
+| `6cbc57a` | `terminal_session_limit_headless_n_pane_wake_throughput_benchmark` | containment guard, non-leader survivor |
+
+**Stated plainly because it is the reviewer's own doing**: each of those commits was a disclosure of
+the previous one. Writing the row generated the next red. Five pushes, five reds, no code in any of
+them. The register now has the data it needs; **further documentation pushes are stopped until the
+stability subject lands**, because another one buys another red and teaches nothing new.
