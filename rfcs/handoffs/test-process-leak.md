@@ -40,6 +40,8 @@ resulting pressure, each disclosed separately and each moved past:
 
 | `surface::explorer::tests::drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame` | `macos-measurement`, run 39554122960 (2026-10-21, review 638) — **a load-sensitive timing budget, the same class as `change_review_content_view_build_cost_by_line_count_measurement` above, not this document's own process-leak cause.** Measured `100.922167ms` (best of 5) for a 26-row window of a 10 000-row tree, against its own frame bound. Not chased: the dev team disclosed it, and nothing in reviews 636-638 touches layout. **Its own diagnostic is broken on macOS, which is the part worth fixing:** the panic message says *"while the machine's load average (\"\") is well above its core count"* — the load average prints **empty**, because the mechanism behind it is Linux-only. A message that tells a reader to check a number it could not read is worse than one that says nothing; `getloadavg(3)` is POSIX and in `libc` for both platforms. **Recurred, 2026-10-31, review 655's own `0.38.0` candidate-cut push (run `41209720366`, commit `58bb7e1`).** `85.044ms` (best of 5) against the same frame bound, same test, same empty `("")` load-average string — identical shape, a different number. Not caused by that push: nothing in it touches `surface::explorer`, layout, or timing (version bump, CHANGELOG, RFC move, a `tokio` dependency bump unrelated to any GUI code). A `gh run rerun --failed` on the same commit passed clean (`tekstide` 783/0/9, no `surface::explorer` failure) — the same "re-run when idle" the test's own message already advises, now actually exercised rather than only quoted. The diagnostic is still broken; still not chased this round either. |
 
+| `runtime::terminal::tests::linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup` | `macos-measurement`, run 41577181943 (2026-11-03, the architect's own RFC-074 acceptance push, commit `57fc983`) — **not this document's `proc_exit`/`P_WEXIT` cluster: the opposite shape.** That cluster is "a process will not finish departing inside the budget"; this test asserts a timeout **must** occur and none did. Verbatim, `tests.rs:574`: *"assertion failed: events.contains(&TerminalRuntimeEvent::TerminationTimedOut { handle: handle.clone(), after_signal: TerminationSignal::Sighup, })"*. **Not caused by that push**: `57fc983` contains no code at all — an RFC moved `proposed/` → `accepted/` plus three documentation tables. **Intermittent, established rather than assumed**: `gh run rerun --failed` on the same commit passed (`tekstide-core` 1168/0/10), and `gate` had the test green in the failing run itself. **The test's own doc comment already describes this exact outcome** as the failure mode it was rewritten once to avoid — an earlier bare-foreground-`sleep` version "found the whole session already confirmed empty after step 1 alone, `TerminatedBySignal { signal: Sighup }`, no timeout, no escalation" — so the defence (`(trap '' HUP; printf …; sleep 30) &`) did not hold on this run. The `hup-ignoring-job-started` marker **was** read before termination, so the subshell ran and the `trap` statement executed; what is unestablished is whether the trap still governed the process that actually received `SIGHUP`. Candidate mechanism, a hypothesis with a cheap probe and **not a verdict**: the trap belongs to the subshell, and macOS's `/bin/sh` is `bash` (RFC-028's own established platform fact), so a shell that lets the subshell be replaced by its last command would leave a bare `sleep` with the default `SIGHUP` disposition. Measurable on the runner by printing the job's own pid and `$$` alongside the marker. **Also worth a decision by whoever next touches this area**: the test is named `linux_runtime_*` and carries no `cfg`, so a test written for one platform's termination semantics runs unchanged on the other — either the name is stale or the `cfg` is missing, and which one it is decides whether this row needs chasing at all. |
+
 | *the containment guard, firing locally* (`assert_session_is_empty`, `runtime/terminal/launch.rs`) | Review 649 round 2 (2026-10-29), on the dev team's own Linux machine, **twice across three full-workspace runs**, cleared on rerun with no code change. **Recorded because it was disclosed as "consistent with a pre-existing disposition in this document" and no such row existed** -- checked, and this is now that row. **The exact assertion text was not captured**, which is the gap: every earlier row here quotes its own message, and this guard's own message names the surviving pids, which is the whole datum. Any further local occurrence must be captured verbatim before it is called known. Why it matters more than an ordinary intermittent: reviews 625-647 established that this guard was *unable to fail* on macOS and then proved it can (piece 3's ablation went red on both platforms), so a firing is either a real leak caught or a load-sensitive re-enumeration race, and the two are told apart by the pids in the message. **Review 650 (2026-10-29), the first verbatim capture**: `shell::tests::activating_accept_writes_the_real_pasted_content_and_closes_the_dialog`, on the dev team's own Linux machine, in a full-workspace `--no-fail-fast` run, cleared on an isolated rerun with no code change. Verbatim, from `runtime/terminal/launch.rs:748`: *"RunningTerminal::drop's own containment sequence for session 1988184 finished, but a real re-enumeration afterward still found: Some([1988184])."* The surviving pid (`1988184`) equals the session id the message itself names, i.e. the session leader's own pid was re-enumerated as a survivor of its own already-finished containment sequence -- consistent with a load-sensitive re-enumeration race (the leader observed mid-exit, not yet reaped) rather than a backgrounded job escaping, but not conclusively narrowed; recorded as the datum, not the verdict, per this row's own standing instruction. |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
@@ -3770,3 +3772,50 @@ plus the three new tests, moved by exactly three as the response asked), `teksti
 warnings` (intra-doc links to `decide_gone_or_going` and the new test resolve clean), `cargo test
 --doc --workspace` all clean. The "never executed, only reasoned through by hand" line from round
 1's own write-up no longer applies to these three tests.
+
+## New row, 2026-11-03 -- a SIGHUP-escalation test went red on a commit containing no code, and it is not the `proc_exit` cluster
+
+Run `41577181943`, commit `57fc983` -- the architect's own push moving RFC-074 from `proposed/` to
+`accepted/` and updating three documentation tables. **Nothing under `crates/`.** The
+`macos-measurement` job failed one test:
+
+```
+assertion failed: events.contains(&TerminalRuntimeEvent::TerminationTimedOut {
+            handle: handle.clone(),
+            after_signal: TerminationSignal::Sighup,
+        })
+runtime::terminal::tests::linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup
+crates/tekstide-core/src/runtime/terminal/tests.rs:574
+test result: FAILED. 1167 passed; 1 failed; 10 ignored
+```
+
+**Disclosed by the reviewer who caused the push, under this document's own standing rule, and with
+the shape named rather than assimilated.** It is tempting to file anything red on `macos-measurement`
+as another member of the `proc_exit`/`P_WEXIT` cluster. It is not one, and the distinction is the
+useful part: every cluster row is *a process that will not finish departing inside its budget*;
+this test asserts that a `SIGHUP`-ignoring job **survives** a 100ms grace window so the escalation
+to `SIGKILL` is forced, and the failure is that nothing survived to time out.
+
+**Intermittent, established**: `gh run rerun --failed` on the same commit passed, `tekstide-core`
+1168/0/10, and the Linux `gate` job had the same test green inside the failing run. `main` is green.
+
+**What the test's own history already says.** Its doc comment records that an earlier version using
+a bare foreground `sleep` produced precisely this outcome -- *"the whole session already confirmed
+empty after step 1 alone, `TerminatedBySignal { signal: Sighup }`, no timeout, no escalation"* --
+which is why the job is now `(trap '' HUP; printf 'hup-ignoring-job-started\n'; sleep 30) &`. So
+this run is the documented failure mode recurring, not a new unknown.
+
+**What is established and what is not.** The `hup-ignoring-job-started` marker was read before
+`request_terminate` was called, so the subshell ran and the `trap` statement executed. Whether the
+trap still governed the process that received `SIGHUP` is **not** established. The candidate
+mechanism -- the trap belongs to the subshell, and a shell that replaces the subshell with its last
+command would leave a bare `sleep` carrying the default disposition, with macOS's `/bin/sh` being
+`bash` per RFC-028's own platform finding -- is a hypothesis, recorded as one. The probe that would
+settle it is cheap: print the job's own pid and `$$` beside the marker and compare them.
+
+**A question this row cannot answer by itself**: the test is named `linux_runtime_uses_sigkill_
+fallback_...` and carries no `cfg`, so it runs on both platforms. Either the name is stale, or the
+`cfg` is missing and the property is Linux-specific. Which it is decides whether this row needs
+chasing or the test needs a platform. Left for whoever next works in the termination/containment
+area -- the same area the reserved `P_WEXIT` successor subject already owns -- rather than decided
+here by the person who only pushed documentation.
