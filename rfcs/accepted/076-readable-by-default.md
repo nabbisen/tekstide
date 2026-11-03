@@ -1,6 +1,13 @@
 # RFC-076: Readable By Default — text scale, and defaults an older reader can use
 
-Status: **Proposed 2026-11-03**, at the human owner's direction. The owner asked whether the view
+Status: **Accepted by the human owner 2026-11-03** — D1 through D5 as written, with D1 and D2
+as the first slice. **The acceptance carries external design §4.2's amendment with it**: that
+document's authored *"Default base font size: 14 px"* is superseded by D2, and this RFC is the
+record of it. `.git-exclude/specs/tekstide-external-design-v0.md` is the owner's own source
+document and is left untouched; if they want the source line to match, that edit is theirs to
+make or to ask for.
+
+Proposed 2026-11-03, at the human owner's direction. The owner asked whether the view
 layout, typography and colour could be kinder to older users; this RFC is the answer to the two
 parts of that question where the code says yes, and an explicit statement of the part where it
 says the product is already correct.

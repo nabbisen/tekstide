@@ -25,7 +25,9 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-| 076 | [Readable By Default](./proposed/076-readable-by-default.md) | **Proposed 2026-11-03**, at the owner's direction after they asked whether layout, typography and colour could be kinder to older readers. Colour is already right and enforced in code (WCAG AA, pairs below the floor refused); the gaps are that the defaults sit at the bottom of a range allowing 32 px, and that **no in-app way to change text size exists at all**. **Accepting it also amends external design §4.2's authored 14 px default.** D1–D5, with D1 (one scale factor through `iced`'s own) and D2 (raised defaults) as the first slice |
+
+*(Empty — nothing is proposed and not yet accepted. RFC-076 was accepted on 2026-11-03, the
+same day it was proposed.)*
 
 ## Accepted
 
@@ -36,6 +38,7 @@ belongs here, not there.
 | RFC | Title | Status |
 | --- | --- | --- |
 | 074 | [Capability Boundaries](./accepted/074-capability-boundaries.md) | **Accepted 2026-11-03.** D1–D8 as written; Stages 1–2 are the first slice, later staging scoped in a handoff once the gate has proven itself on two real stages. `tekstide-core` is one strongly connected component of ten modules; the gate that measures it is built before any move, and its bound ratchets with the stage that earns it. Two owner-level questions stay open and neither blocks the slice: the release slot, and whether the published API may change shape in it (Stage 1 is API-compatible by construction) |
+| 076 | [Readable By Default](./accepted/076-readable-by-default.md) | **Accepted 2026-11-03**, the same day it was proposed. D1–D5; D1 (one scale factor through `iced`'s own, so hit targets grow with the type) and D2 (defaults body 16 / status 15 / heading 20) are the first slice. **The acceptance carries external design §4.2's amendment**: its authored 14 px default is superseded. Colour is unchanged — already enforced at WCAG AA in code, with sub-floor pairs refused. Independent of the macOS gate |
 
 ### Reserved numbers — check this before authoring
 
@@ -78,6 +81,7 @@ closed RFCs (013, 016), and closed documents are not edited to match a later sta
 | --- | --- |
 | 028 | [Cross-Platform Support — macOS](./handoffs/028-cross-platform-support/pr-028-f-scope-additions.md) — **M14, second of that milestone**; **implemented and closed 2026-10-31; released as `0.38.0` 2026-11-01** |
 | 074 | [Capability Boundaries](./handoffs/074-capability-boundaries/task-breakdown-pr-plan.md) — **M14**; **accepted 2026-11-03**, first slice in flight: the gate before any move, then `ProjectId` to T0 and `test_support` out of the production graph, each with the gate's own bound lowered in the same commit |
+| 076 | [Readable By Default](./handoffs/076-readable-by-default/task-breakdown-pr-plan.md) — **pre-1.0**; **accepted 2026-11-03**, first slice in flight: the raised defaults land *before* the scale factor, so a layout problem with larger type is found with three characters changed rather than inside a new feature |
 | 029 | [Documentation, CI, and Release Automation](./handoffs/029-ci-and-distribution/README.md) — **M14, first of that milestone**; **implemented and closed 2026-10-14; released as `0.37.0` 2026-10-14** |
 | 060 | [Command Approval A User Can Reach](./handoffs/060-command-approval-reachable/README.md) — **pre-1.0, a 1.0 blocker**; **implemented and closed 2026-10-12; released as `0.36.0` 2026-10-12** |
 | 059 | [Seeing The Audit](./handoffs/059-seeing-the-audit/README.md) — **pre-1.0**; **implemented and closed 2026-10-12; released as `0.35.0` 2026-10-12** |
