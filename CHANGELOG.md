@@ -11,21 +11,23 @@ already committed to exiting and the kernel just hasn't finished reaping it yet"
 cause `the_shell_still_exits_normally_after_the_first_wake_is_observed`'s macOS intermittent was
 already registered against (`test-process-leak.md`, "Reopened on macOS, 2026-10-19").
 
-**Fixed by extending in short steps while `P_WEXIT` stays set, up to a generous ceiling —
-gated, not unconditional.** A new `pid_has_committed_to_exit` (`launch.rs`) reuses the same
-`sysctl(KERN_PROC_PID)` reading review 656 already trusts; `decide_on_timeout` (`termination.rs`)
-is the pure choice this makes, tested deterministically against fixed inputs rather than a live
-reproduction — the same shape review 656 earned for `decide_gone_or_going`. Gated on purpose:
-widening the timeout unconditionally is already rejected (`test-process-leak.md`, "Standing
-constraint on the fix"), and this is not that — it extends only for as long as the kernel has
-already begun reaping this exact pid. **Round 2, on review**: a single fixed three-second
-extension was the wrong shape, not just the wrong number — the evidence (reviews 625-630) shows a
-real child still `P_WEXIT`-set at the moment a *five-second* budget expired, with no measured
-duration for how much longer was needed, so a fixed extension smaller than the one budget already
-seen to be insufficient was never going to be defensible. Replaced with a 30-second ceiling,
-deliberately loose (a ceiling only has to be "not too small," unlike a fixed wait) and disclosed
-as unmeasured; `report_committed_exit_extension` logs every grant and resolution so real firings
-can tighten it on evidence.
+**Tried an extension, measured it, and withdrew it — the diagnostic that caught the problem is
+what stays.** `P_WEXIT` is *irreversible* (review 656's own sourced claim, unchallenged), which is
+exactly what containment needs; this fix assumed it was also *prompt* (a status would shortly
+follow), a second, never-sourced claim. A new `pid_has_committed_to_exit` (`launch.rs`) reuses the
+same `sysctl(KERN_PROC_PID)` reading review 656 already trusts, and `decide_on_timeout`
+(`termination.rs`) is the pure choice built on it, tested deterministically against fixed inputs —
+the same shape review 656 earned for `decide_gone_or_going`. A real 30-second ceiling (round 2,
+replacing an even-more-wrong fixed three-second wait) was granted twice on one real macOS run
+(`41598987645`) and both times the process's own `p_stat`/`p_flag` reading was **identical** at
+the start and the end of the full 30 seconds — not "needs more time," evidence that nothing was
+moving. **Round 3: the wait is withdrawn.** `COMMITTED_EXIT_EXTENSION_CEILING` drops to 10ms (one
+poll step, not a literal zero, so both of `report_committed_exit_extension`'s own log points still
+fire); `pid_has_committed_to_exit` and that logging stay, since they are what produced the only
+real finding in this subject. `decide_on_timeout` and its three tests keep their shape, documented
+as tried-measured-withdrawn, for whatever the eventual answer turns out to be — likely a
+thread-level question this project's own process-level sampling cannot answer, reserved as its own
+future subject rather than guessed at here.
 
 **Seven macOS-conditional test ignores, named with their reasons — briefly six, now seven
 again, on real evidence rather than a guess.** Re-derived by grep at write time: four APFS
