@@ -879,6 +879,64 @@ fn the_configuration_page_names_every_theme_role_font_key_and_bound() {
     );
 }
 
+/// **Review 658: the page's own `[font]` example values drifted from the
+/// real defaults silently once already** -- `body_size = 16` was shown
+/// on this page while the real default was still `14.0`, caught only
+/// because a review happened to check it by hand, not by any test. The
+/// test above only checks that each key is *present*, which is why that
+/// drift was invisible to the gate. This page is the defaults
+/// documentation, not an arbitrary example (unlike `[theme]`'s own
+/// colours, which the RFC-054 test above deliberately does not pin to a
+/// real default scheme), so its font-size numbers are pinned against
+/// `FontSizes::default` directly -- every `key = value` line found,
+/// not merely the first, so a page with two example blocks (the
+/// quick-start one and the full one) cannot drift in one while the
+/// other happens to still be right.
+#[test]
+fn the_configuration_page_font_size_examples_match_the_real_defaults() {
+    let page = repo_root().join("docs/src/users/configuration.md");
+    let Ok(source) = std::fs::read_to_string(&page) else {
+        eprintln!("skipped: docs/ is not packaged with this crate");
+        return;
+    };
+    let defaults = tekstide_core::config::FontSizes::default();
+    for (key, expected) in [
+        ("body_size", defaults.body),
+        ("heading_size", defaults.heading),
+        ("status_size", defaults.status),
+    ] {
+        let mut found = 0;
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            let Some(after_key) = trimmed.strip_prefix(key) else {
+                continue;
+            };
+            let Some(after_equals) = after_key.trim_start().strip_prefix('=') else {
+                continue;
+            };
+            let value_text: String = after_equals
+                .trim_start()
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            let value: f32 = value_text.parse().unwrap_or_else(|_| {
+                panic!("{key}'s own example line has no readable number: {line}")
+            });
+            assert_eq!(
+                value, expected,
+                "the page's `{key}` example shows {value}, but FontSizes::default() is \
+                 {expected} -- this page is the defaults documentation, not a free-standing \
+                 example: {line}"
+            );
+            found += 1;
+        }
+        assert!(
+            found > 0,
+            "no `{key}` example line found on the page at all"
+        );
+    }
+}
+
 /// **RFC-054 PR-054-C.** The numbers the configuration page states about the
 /// scrollback cap, the focus border and the scrim are the code's own constants,
 /// formatted -- so changing a cap without the page fails here.

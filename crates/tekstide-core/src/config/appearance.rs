@@ -264,12 +264,46 @@ pub struct FontSizes {
     pub status: f32,
 }
 
+/// RFC-076 D2, reasoned twice, not once -- both rounds recorded here
+/// rather than only in the review that forced the second. Raised from
+/// 14.0/16.0/13.0.
+///
+/// **Round 1 (PR-076-A's own first pass) set status to 15.0, and that was
+/// a real mistake, found by checking the acceptance criterion against the
+/// numbers rather than against a screenshot's first impression.** The
+/// RFC's own criterion was "the status bar is no longer the smallest
+/// text in the product" -- but 13 -> 15 while body goes 14 -> 16
+/// preserves the exact ordering (status still 1px under body), so that
+/// criterion was never achievable at those numbers. The deeper error it
+/// exposed: the RFC's own §Summary named "status ranks below body" as
+/// the defect, when the actual defect was that **13px is too small to
+/// read comfortably** -- an absolute problem, not a relative one. A
+/// status bar one step under body is ordinary typographic hierarchy, not
+/// a fault, and chasing the relative claim would have meant inventing a
+/// hierarchy signal nobody asked for.
+///
+/// **Round 2: status is 16.0, equal to body -- not to rescue the
+/// sentence, but because a 1px step does no work.** At these sizes a
+/// single pixel of difference conveys essentially no hierarchy (round
+/// 1's own capture showed exactly that: the gap "read as small"), so a
+/// 1px step was pure cost -- one pixel of legibility spent on the line
+/// that carries state, the text an older reader most needs, for a
+/// distinction nobody can perceive. Status and body now read as one
+/// voice, deliberately, which also happens to make the original
+/// criterion true -- but the reasoning holds independent of that.
+///
+/// The heading keeps its own real step over body (20.0 vs 16.0, a 4px
+/// gap, was 2px over 14.0 originally) -- that is where the
+/// structure-not-emphasis effect actually comes from, and it was never
+/// in question. The bounds ([`MIN_FONT_SIZE_PX`], [`MAX_FONT_SIZE_PX`])
+/// are unchanged -- a user who prefers the old sizes can still configure
+/// them.
 impl Default for FontSizes {
     fn default() -> Self {
         Self {
-            body: 14.0,
-            heading: 16.0,
-            status: 13.0,
+            body: 16.0,
+            heading: 20.0,
+            status: 16.0,
         }
     }
 }

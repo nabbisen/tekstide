@@ -128,7 +128,7 @@ scrim            = "#00000099" # the dimming behind a dialog; the only colour th
 family       = "DejaVu Serif"  # an installed family, by name
 body_size    = 16              # ordinary text
 heading_size = 20
-status_size  = 13              # badges and the status bar
+status_size  = 16              # badges and the status bar
 ```
 
 A colour is `#` and six hex digits (`#RRGGBB`; eight for the scrim, `#RRGGBBAA`). Nothing else —

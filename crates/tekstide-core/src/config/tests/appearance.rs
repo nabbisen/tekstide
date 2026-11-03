@@ -321,7 +321,7 @@ fn each_size_bound_is_inclusive_and_refuses_just_outside() {
 fn one_bad_size_does_not_take_the_others_with_it() {
     let document = outcome("[font]\nbody_size = 3\nheading_size = 20\nstatus_size = 11\n").document;
     assert_eq!(document.font.body_size, None);
-    assert_eq!(document.font.sizes().body, 14.0, "the default stands");
+    assert_eq!(document.font.sizes().body, 16.0, "the default stands");
     assert_eq!(document.font.sizes().heading, 20.0);
     assert_eq!(document.font.sizes().status, 11.0);
 }

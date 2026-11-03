@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### Changed — PR-076-A (RFC-076 D2): the three default font sizes are raised — body 16, heading 20, status 16
+
+From 14.0/16.0/13.0. The amendment RFC-076's own acceptance carries to external design §4.2 (that
+document's own "Default base font size: 14 px" is superseded, and this RFC is the record of it —
+the source document itself is left untouched, the owner's own to edit if they want the line to
+match). Bounds unchanged (`MIN_FONT_SIZE_PX = 8.0`, `MAX_FONT_SIZE_PX = 32.0`); a user who prefers
+the old sizes can still configure them.
+
+**Reasoned twice, not once — status went to 15 first, then to 16, and both rounds are on
+record** (D2's own dated amendment in the accepted RFC). Round 1 set status to 15, matching the
+RFC's own "no longer the smallest text in the product" wording — but 13→15 against body's 14→16
+preserves the exact ordering, so that criterion was never achievable at those numbers, caught by
+checking the acceptance criterion against the numbers rather than against a screenshot's first
+impression. The deeper error it exposed: the RFC's own §Summary named "status ranks below body"
+as the defect, when the real defect was "13px is too small to read comfortably" — an absolute
+problem, not a relative one. **Round 2: status is 16, equal to body.** Not to rescue the
+sentence — a 1px step conveys no perceptible hierarchy at these sizes (round 1's own capture
+showed exactly that), so it was pure cost: one pixel of legibility spent on the text that carries
+state, the line an older reader most needs, for a distinction nobody can see. Status and body now
+read as one voice, deliberately.
+
+**The heading reads as structure, confirmed by a real capture and unaffected by the status
+ruling**: 20 against 16 is a 4px gap, against the old pair's 2px — a visible step rather than a
+near-match.
+
+Re-derived, not nudged: `surface::explorer::tests::drawing_the_largest_tree_builds_only_the_
+window_and_fits_inside_a_frame`'s own windowed row count moved from 26 to 22 (a larger font fits
+fewer rows in the same height), and the test still passes well inside its frame budget
+(20.8ms against an 80ms debug bound). One hardcoded default assertion
+(`config/tests/appearance.rs`) is updated to match. `docs/src/users/configuration.md`'s own
+`[font]` example had been showing `body_size = 16` against a real default of `14.0` — drifted
+silently, since the existing doc-invariant test only checks that each key is *present*, not that
+example values match the real defaults — caught by hand while reading that test rather than
+trusting it, and now guarded: a new
+`rfc_docs_invariants::the_configuration_page_font_size_examples_match_the_real_defaults` pins
+every `body_size`/`heading_size`/`status_size` example line on the page against
+`FontSizes::default` directly, confirmed to actually fail against a planted stale value before
+being trusted.
+
 ### Fixed — review 657: `wait_for_child_outcome` never consulted `P_WEXIT` either, the same early-exit shape review 656 just fixed one level up
 
 `termination.rs` mentioned `P_WEXIT` twice, in comments, and consulted it nowhere: `wait_for_exit`

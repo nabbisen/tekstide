@@ -63,17 +63,30 @@ them. `NFR-UX-004`'s configurability is unaffected.
   of scale. Any test that asserts a row count or a frame cost must state the scale it assumes, or
   it will drift the first time the default changes.
 
-### D2. Raise the defaults: body 16, status 15, heading 20
+### D2. Raise the defaults: body 16, status 16, heading 20
 
 From body 14 / status 13 / heading 16. This is the amendment to external design §4.2.
 
-Rationale, in order of weight: the status bar stops being the smallest text in the product; the
-heading gains a real step over body so structure is visible without reading the words; and 16 px
-body is the floor most platform guidance now treats as the minimum for sustained reading rather
-than a comfortable maximum.
+Rationale, in order of weight: 16 px body is the floor most platform guidance now treats as the
+minimum for sustained reading rather than a comfortable maximum; the heading gains a real step
+over body so structure is visible without reading the words; and the status bar — the text that
+carries state, which a reader most needs — stops being read in a size too small for comfortable
+reading.
 
 **The bounds do not change** (`MIN_FONT_SIZE_PX = 8.0`, `MAX_FONT_SIZE_PX = 32.0`). A user who
 prefers 14 can still have it; it simply stops being what a first-time reader is given.
+
+**Amended 2026-11-03, dated, not a silent edit: status is 16, not the 15 this D2 first named.**
+PR-076-A's own review found the original criterion ("the status bar is no longer the smallest
+text in the product") unachievable at 13→15 against body's 14→16 — the ordering is preserved
+exactly, status still 1px under body. That exposed a deeper error in this RFC's own §Summary:
+the defect it named was "status ranks below body" (a relative claim), when the real defect was
+"13px is too small to read comfortably" (an absolute one). A status bar one step under body is
+ordinary hierarchy, not a fault — chasing the relative claim would have meant inventing a
+hierarchy signal nobody asked for. Status is set equal to body instead: at these sizes a 1px step
+conveys no perceptible hierarchy (confirmed in PR-076-A's own capture), so it was pure cost —
+one pixel of legibility spent on the text that most needs it, for a distinction no reader can
+see. This also makes the original criterion true, but that is not why the ruling was made.
 
 ### D3. The default theme moves toward AAA; the enforced floor stays AA
 
