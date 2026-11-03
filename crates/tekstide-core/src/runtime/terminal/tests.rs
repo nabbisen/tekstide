@@ -543,7 +543,7 @@ fn linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup() {
         .write_input(
             &handle,
             b"(trap '' HUP; printf 'hup-ignoring-job-started subshell-pid=%s\\n' \"$$\"; \
-              sleep 30) & printf 'backgrounded-job-table-pid=%s\\n' \"$!\"\n",
+              sleep 30) &\n",
         )
         .expect("hup-ignoring background command should write to PTY");
     let output = read_until_contains(&mut runtime, &handle, b"hup-ignoring-job-started");
@@ -554,20 +554,24 @@ fn linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup() {
     );
     // Review 657's own trap-survival probe, not an assertion: the marker
     // above proves the subshell ran and `trap '' HUP` executed, but not
-    // that the trap still governed the *process that actually received*
-    // `SIGHUP` later. `request_terminate` signals the session leader
-    // alone; the leader's own shell is what forwards `SIGHUP` to this
-    // job's process group, tracked by `$!` in the parent's own job
-    // table -- which may or may not be the same pid the subshell reports
-    // about itself as `$$`. Printed so a failing run has both pids to
-    // compare by hand, instead of only the fact that it failed -- this
-    // register's own history already says "it has not flaked since" is
-    // worthless, and asserting a relationship between these two pids
-    // before measuring one on a real failure would be guessing, not
-    // fixing.
+    // that the trap still governed the process that actually received
+    // `SIGHUP` later. Printed so a future failure has the subshell's own
+    // pid to correlate against whatever else is captured at the time,
+    // instead of only the fact that it failed.
+    //
+    // **Correction, same push: a `$!` companion read was here and is
+    // removed, not merely left out.** It broke this exact test on the
+    // real macOS runner (`41591213561`) with `sh: !": event not found` --
+    // macOS's `/bin/sh` is an interactive bash (RFC-028's own established
+    // platform fact), and bash's history expansion fires on a literal `!`
+    // even inside double quotes, before parameter expansion ever sees
+    // `$!`. Found on this push's own CI run, not predicted -- two local
+    // Linux (`dash`) runs never hit it, because `dash` has no history
+    // expansion to trigger, which is exactly why this did not show up
+    // here before it reached the one platform that actually has the
+    // behavior this test is about.
     eprintln!(
-        "[trap-survival-probe] subshell-pid ($$) vs job-table-pid ($!), compare on a failing \
-         run: {}",
+        "[trap-survival-probe] subshell-pid ($$), compare on a failing run: {}",
         String::from_utf8_lossy(&output)
     );
 
