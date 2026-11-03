@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed — a forward reference by number, removed from `0.38.0`'s own released section
+
+`0.38.0`'s symlink-canonicalization entry said nine near-identical sandbox builders were "an input
+to RFC-074's own boundary work." That was a forward reference written while RFC-074 had no document,
+so `an_rfc_a_release_names_lives_in_done` had nothing to resolve it against and passed. Creating
+`rfcs/proposed/074-capability-boundaries.md` made it checkable, and it failed — correctly: an RFC
+named by a released section is asserted to have shipped in that release, and RFC-074 did not ship
+in `0.38.0`. Reworded to name the work rather than the number, per the check's own second remedy
+("the section only MENTIONS it … reword the section and leave the RFC where it is"), rather than
+moving an unshipped RFC to `done/` to silence it. The check is not loosened: forbidding a released
+section from naming an RFC that did not ship in it is the property, not a false positive.
+
 ### Fixed — review 656: `is_gone_or_going`'s own early return on macOS never consulted `P_WEXIT` once libproc answered at all
 
 `is_gone_or_going` (`runtime/terminal/launch.rs`, macOS only) returned the moment `proc_pidinfo`
@@ -1172,7 +1184,8 @@ the ordinary case being `~/dev -> /mnt/data/dev`). Each helper now canonicalizes
 right after creating it, the same fix already applied to `watch_test_root()`.
 `ProjectRootValidator`/`SymlinkPolicy` themselves are unchanged. Nine near-identical sandbox
 builders across two crates is its own, separately recorded observation (not acted on this round):
-an input to RFC-074's own boundary work, not a task for this one.
+an input to the capability-boundaries work the architect's own structure goal definition
+scopes, not a task for this one.
 
 ### Fixed — review 617/618: the hostile fixture's `depth` row cannot be built on macOS at `DEPTH_LEVELS` 1500; `ENAMETOOLONG`, not the `unreadable` row
 

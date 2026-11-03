@@ -25,10 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is proposed and not yet accepted. RFC-028 moved straight to `done/` with this
-cut; its row here, stale since its own acceptance on 2026-10-15, is removed rather than carried
-forward.)*
+| 074 | [Capability Boundaries](./proposed/074-capability-boundaries.md) | **Proposed 2026-11-03**, drafted after RFC-028 closed and `0.38.0` shipped, as the owner directed at review 595. The goal, the tier model and three decisions were settled first in the architect's own goal definition (2026-10-17); every number in the RFC is re-measured against the code as it stands, not reused from October. Asks for D1–D8 and Stages 1–2 only; the later staging is scoped in a handoff after the gate has proven itself on two real stages |
 
 ## Accepted
 
@@ -58,6 +55,7 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 070 | Check For Updates | M14 |
 | 071 | Windows Packaging And The Microsoft Store | M14 |
 | 072 | A Non-Blocking Job For Quarantined Tests | M14 |
+| 073 | The `locales_dir()`/`CARGO_MANIFEST_DIR` Locale-Loading Defect | M14 |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
 audit's findings, not guesses; each row's scope is in the release schedule in
