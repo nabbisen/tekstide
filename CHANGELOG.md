@@ -27,24 +27,27 @@ deliberately loose (a ceiling only has to be "not too small," unlike a fixed wai
 as unmeasured; `report_committed_exit_extension` logs every grant and resolution so real firings
 can tighten it on evidence.
 
-**Six macOS-conditional test ignores, named with their reasons — down from seven.** Re-derived by
-grep at write time, not carried forward from the last count: four APFS non-UTF-8-filename tests
-(`scanner_preserves_non_utf8_filename_identity_in_relative_path`,
+**Seven macOS-conditional test ignores, named with their reasons — briefly six, now seven
+again, on real evidence rather than a guess.** Re-derived by grep at write time: four APFS
+non-UTF-8-filename tests (`scanner_preserves_non_utf8_filename_identity_in_relative_path`,
 `a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row`,
 `a_non_utf8_path_is_skipped_from_the_map_but_still_counted`,
 `a_non_utf8_filename_survives_the_round_trip`) and `dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname`
-(macOS-only) — five in `tekstide-core`, plus one in `tekstide`:
+(macOS-only), plus `the_shell_still_exits_normally_after_the_first_wake_is_observed` — six in
+`tekstide-core`, plus one in `tekstide`:
 `closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`.
-`the_shell_still_exits_normally_after_the_first_wake_is_observed`'s own ignore is **lifted, not
-just revisited**: this fix directly targets its documented failure mode. Disclosed as unconfirmed,
-not settled — this has not run against a real macOS process in this session, only proven
-deterministically against `decide_on_timeout`'s own logic in isolation. If it still times out on a
-real `macos-measurement` run, that is evidence the extension's own bound is too short, not that
-the hypothesis was wrong; re-add the ignore and widen the bound rather than reverting the
-mechanism. **The count's own reconciliation against this paragraph is now a standing check**
+**`the_shell_still_exits_normally_after_the_first_wake_is_observed`'s own ignore was lifted on
+this fix's own first push, then re-added the same subject** once a real `macos-measurement` run
+(`41598987645`) showed it still failing: the extension was granted and ran its full 30-second
+ceiling, and the process's own `p_stat`/`p_flag` reading was **identical at the end of that span
+to the reading at the start** — not merely slower than hoped, but unchanged. Disclosed as a real
+answer, not a shrug: a wedge that has not budged in 30 seconds is not yet distinguishable from
+one that will not budge in any finite extension, so widening the ceiling again without that
+distinction would repeat the same guess. **The count's own reconciliation against this
+paragraph is now a standing check**
 (`rfc_docs_invariants::the_macos_conditional_ignore_count_matches_the_changelogs_own_published_number`),
-owed since review 652's own repeated drift (seven → nine → seven) and built now because this is
-the subject that moved the count again.
+owed since review 652's own repeated drift (seven → nine → seven → **six, then seven again**)
+and built now because this is the subject that moved the count, twice in one day.
 
 ### Changed — a forward reference by number, removed from `0.38.0`'s own released section
 

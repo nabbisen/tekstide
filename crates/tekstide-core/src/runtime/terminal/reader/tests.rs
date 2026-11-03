@@ -164,20 +164,35 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
 /// assert the same `wait_for_exit` outcome a second time; removed there as a duplicate, not a
 /// second finding, so a macOS intermittent in this property does not also fail that one.
 ///
-/// **Review 657: `cfg_attr(macos, ignore)` lifted, not just revisited.** This is the exact
-/// failure mode named above -- `wait_for_exit` returning `None` because the shell is still
-/// inside `proc_exit` (`P_WEXIT` set), not because this property is false -- and `wait_for_exit`
-/// -> `wait_for_child_outcome` (`termination.rs`) now takes one bounded extra wait exactly when
-/// `pid_has_committed_to_exit` says that bit is set, before giving up. **Honest caveat, not
-/// hidden**: this has not run on a real macOS process yet -- `decide_on_timeout`'s own logic is
-/// proven deterministically, but nothing in this session can reproduce the live window to
-/// confirm the fix resolves it there. This project's own register history already says "it has
-/// not flaked since" is worthless; the inverse ("it has not been confirmed to pass yet") is
-/// disclosed for the same reason, not asserted as settled. If this still times out on a real
-/// `macos-measurement` run, that is evidence the fix's own extension window
-/// (`termination::COMMITTED_EXIT_EXTENSION`) is too short, not that the hypothesis was wrong --
-/// re-add the ignore and widen the constant rather than reverting the mechanism, and say so in
-/// the register.
+/// **Review 657: the ignore was lifted, then re-added the same day, on real evidence.**
+/// `wait_for_exit` -> `wait_for_child_outcome` (`termination.rs`) now takes a bounded extra wait
+/// while `pid_has_committed_to_exit` says `P_WEXIT` is set, instead of giving up the moment its
+/// caller's timeout elapses -- lifted first on the strength of that mechanism, before it had run
+/// on a real macOS process. **It then failed on the real runner** (run `41598987645`,
+/// `reader/tests.rs:230`, `left: None / right: Some(Exited { exit_status: 0 })`), exactly as
+/// disclosed it might when the ignore was lifted: the extension was granted
+/// (`[committed-exit-extension] ... extension begins ... elapsed: 5.07s`) and ran the full
+/// `COMMITTED_EXIT_EXTENSION_CEILING` (then 30s) without ever seeing a status
+/// (`... extension ends without a status ... elapsed: 35.05s`) before giving up. **A new datum
+/// this specific run adds, not just "still times out"**: `report_child_status_at_timeout`'s own
+/// three samples, taken at the very end of that 35-second span, read `p_stat=2 (SRUN), p_flag=
+/// 0x6006 (P_WEXIT set)` -- identical to the reading at the 5-second mark. Nothing about the
+/// process's own observable state moved in the 30 seconds the extension spent waiting. That is
+/// evidence against "a longer ceiling would have caught it" as confidently as the instruction
+/// that first authorized this fix assumed it would be -- a wedge that has not budged in 30s on
+/// one occasion is not yet distinguishable from one that would not budge in 300s either, and
+/// widening the ceiling again without that distinction would be the same guess this project has
+/// already made once. Re-added here rather than left red; whether to widen the ceiling further,
+/// or treat this as a different mechanism than "merely slow," is the next question, not yet
+/// answered.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "known-intermittent: the shell can sit in proc_exit (P_WEXIT) past wait_for_exit's \
+              budget on macOS, including review 657's own bounded extension -- a real run \
+              (41598987645) showed the P_WEXIT reading itself unchanged across the full 30s \
+              extension, not merely slow. See rfcs/handoffs/test-process-leak.md, review 657's \
+              own section. A release decision, revisited each release, not a closure."
+)]
 #[test]
 fn the_shell_still_exits_normally_after_the_first_wake_is_observed() {
     let _real_process_slot = RealProcessLimiter::acquire();
