@@ -42,7 +42,7 @@ resulting pressure, each disclosed separately and each moved past:
 
 | `runtime::terminal::tests::linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup` | `macos-measurement`, run 41577181943 (2026-11-03, the architect's own RFC-074 acceptance push, commit `57fc983`) — **not this document's `proc_exit`/`P_WEXIT` cluster: the opposite shape.** That cluster is "a process will not finish departing inside the budget"; this test asserts a timeout **must** occur and none did. Verbatim, `tests.rs:574`: *"assertion failed: events.contains(&TerminalRuntimeEvent::TerminationTimedOut { handle: handle.clone(), after_signal: TerminationSignal::Sighup, })"*. **Not caused by that push**: `57fc983` contains no code at all — an RFC moved `proposed/` → `accepted/` plus three documentation tables. **Intermittent, established rather than assumed**: `gh run rerun --failed` on the same commit passed (`tekstide-core` 1168/0/10), and `gate` had the test green in the failing run itself. **The test's own doc comment already describes this exact outcome** as the failure mode it was rewritten once to avoid — an earlier bare-foreground-`sleep` version "found the whole session already confirmed empty after step 1 alone, `TerminatedBySignal { signal: Sighup }`, no timeout, no escalation" — so the defence (`(trap '' HUP; printf …; sleep 30) &`) did not hold on this run. The `hup-ignoring-job-started` marker **was** read before termination, so the subshell ran and the `trap` statement executed; what is unestablished is whether the trap still governed the process that actually received `SIGHUP`. Candidate mechanism, a hypothesis with a cheap probe and **not a verdict**: the trap belongs to the subshell, and macOS's `/bin/sh` is `bash` (RFC-028's own established platform fact), so a shell that lets the subshell be replaced by its last command would leave a bare `sleep` with the default `SIGHUP` disposition. Measurable on the runner by printing the job's own pid and `$$` alongside the marker. **Also worth a decision by whoever next touches this area**: the test is named `linux_runtime_*` and carries no `cfg`, so a test written for one platform's termination semantics runs unchanged on the other — either the name is stale or the `cfg` is missing, and which one it is decides whether this row needs chasing at all. |
 
-| *the containment guard, firing locally* (`assert_session_is_empty`, `runtime/terminal/launch.rs`) | Review 649 round 2 (2026-10-29), on the dev team's own Linux machine, **twice across three full-workspace runs**, cleared on rerun with no code change. **Recorded because it was disclosed as "consistent with a pre-existing disposition in this document" and no such row existed** -- checked, and this is now that row. **The exact assertion text was not captured**, which is the gap: every earlier row here quotes its own message, and this guard's own message names the surviving pids, which is the whole datum. Any further local occurrence must be captured verbatim before it is called known. Why it matters more than an ordinary intermittent: reviews 625-647 established that this guard was *unable to fail* on macOS and then proved it can (piece 3's ablation went red on both platforms), so a firing is either a real leak caught or a load-sensitive re-enumeration race, and the two are told apart by the pids in the message. **Review 650 (2026-10-29), the first verbatim capture**: `shell::tests::activating_accept_writes_the_real_pasted_content_and_closes_the_dialog`, on the dev team's own Linux machine, in a full-workspace `--no-fail-fast` run, cleared on an isolated rerun with no code change. Verbatim, from `runtime/terminal/launch.rs:748`: *"RunningTerminal::drop's own containment sequence for session 1988184 finished, but a real re-enumeration afterward still found: Some([1988184])."* The surviving pid (`1988184`) equals the session id the message itself names, i.e. the session leader's own pid was re-enumerated as a survivor of its own already-finished containment sequence -- consistent with a load-sensitive re-enumeration race (the leader observed mid-exit, not yet reaped) rather than a backgrounded job escaping, but not conclusively narrowed; recorded as the datum, not the verdict, per this row's own standing instruction. |
+| *the containment guard, firing locally* (`assert_session_is_empty`, `runtime/terminal/launch.rs`) | Review 649 round 2 (2026-10-29), on the dev team's own Linux machine, **twice across three full-workspace runs**, cleared on rerun with no code change. **Recorded because it was disclosed as "consistent with a pre-existing disposition in this document" and no such row existed** -- checked, and this is now that row. **The exact assertion text was not captured**, which is the gap: every earlier row here quotes its own message, and this guard's own message names the surviving pids, which is the whole datum. Any further local occurrence must be captured verbatim before it is called known. Why it matters more than an ordinary intermittent: reviews 625-647 established that this guard was *unable to fail* on macOS and then proved it can (piece 3's ablation went red on both platforms), so a firing is either a real leak caught or a load-sensitive re-enumeration race, and the two are told apart by the pids in the message. **Review 650 (2026-10-29), the first verbatim capture**: `shell::tests::activating_accept_writes_the_real_pasted_content_and_closes_the_dialog`, on the dev team's own Linux machine, in a full-workspace `--no-fail-fast` run, cleared on an isolated rerun with no code change. Verbatim, from `runtime/terminal/launch.rs:748`: *"RunningTerminal::drop's own containment sequence for session 1988184 finished, but a real re-enumeration afterward still found: Some([1988184])."* The surviving pid (`1988184`) equals the session id the message itself names, i.e. the session leader's own pid was re-enumerated as a survivor of its own already-finished containment sequence -- consistent with a load-sensitive re-enumeration race (the leader observed mid-exit, not yet reaped) rather than a backgrounded job escaping, but not conclusively narrowed; recorded as the datum, not the verdict, per this row's own standing instruction. **Review 657's own verification run, 2026-11-03, same shape again**: `shell::tests::ablation_polling_only_visible_panes_would_miss_the_hidden_ones_output`, on this same Linux machine, in a full-workspace `--no-fail-fast` run (`TMPDIR=/tmp/t657j`), cleared on an isolated rerun with no code change. Verbatim, from `runtime/terminal/launch.rs:766` (the line moved; review 657 restructured this function to sample survivors before the `assert!`, not the condition itself, which is unchanged): *"RunningTerminal::drop's own containment sequence for session 303057 finished, but a real re-enumeration afterward still found: Some([303057])."* Survivor pid again equals the session id -- the same leader-not-yet-reaped shape as the first capture, not a regression from this review's own edit (the sampling loop review 657 added is a no-op on Linux; the boolean it checks is computed identically to before). |
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
@@ -3943,3 +3943,141 @@ rerun of the same commit:
 the previous one. Writing the row generated the next red. Five pushes, five reds, no code in any of
 them. The register now has the data it needs; **further documentation pushes are stopped until the
 stability subject lands**, because another one buys another red and teaches nothing new.
+
+## Review 657 -- the stability subject itself: the containment-guard instrument, two measurements, one decision, and the core fix
+
+**The instrument, landed first and alone, per the instruction's own sequencing (`1263591`,
+pushed, no review turn -- the pure-diagnostic exception, same shape review 636/637 used).**
+`assert_session_is_empty` now calls `report_pid_p_stat_via_sysctl` on every survivor before it
+panics, broadened to `cfg(any(test, feature = "test-support"))` so it compiles wherever the
+guard itself does. Nothing has fired it yet with a real survivor since this landed -- the fifth
+cluster row above is still the most recent firing, and it predates the instrument.
+
+**The SIGHUP-escalation row's own named probe, measured, not assumed.** Printed the sighup-
+fallback job's own `$$` (set inside the subshell) beside the parent shell's job-table `$!`, on
+this Linux machine (not macOS, where the row actually fired -- no access to that platform here).
+Two local runs, two different answers: one run read `subshell-pid=3164198` against
+`backgrounded-job-table-pid=3164200` (a two-pid gap); a second run read them identical
+(`3855483` both). **Not a verdict -- the opposite of one.** The relationship between these two
+pids is not fixed even on one shell on one platform across two consecutive runs, which is itself
+worth knowing: a hypothesis built on "the subshell got replaced by its last command" (bash's own
+tail-command optimization, named as the macOS candidate mechanism) would predict a *consistent*
+gap or a *consistent* match, not one of each. Left open, with both readings recorded rather than
+either one generalized from.
+
+**The naming/`cfg` question, decided.** `linux_runtime_uses_sigkill_fallback_for_a_job_that_
+ignores_sighup` is one of eleven `linux_runtime_*`-named tests in `runtime/terminal/tests.rs`,
+none `cfg`'d to Linux -- a longstanding, file-wide naming convention (traced via `git log -S` to
+`a6b4e97`, "Implement terminal process-group termination," where the runtime type itself appears
+to have been named for the one platform that existed at the time) that predates this test and
+is shared by ten siblings, not a defect introduced by or specific to this one. `request_
+terminate`'s own SIGHUP/SIGKILL sequence is explicitly documented as cross-platform
+(`session_confirmed_empty`/`processes_in_session`'s own per-platform bodies do the platform
+work underneath it), and this exact test already runs, and is expected to run, on the real
+`macos-measurement` job -- it is in this row's own table because it fired there. **Decision: no
+`cfg`, no rename.** Adding a `cfg` would hide a real, wanted cross-platform property; renaming
+only this one test out of eleven sharing the stale prefix would misstate the scope of the
+staleness as unique to this test rather than file-wide, and a file-wide rename is a separate,
+bigger cleanup nobody asked for here.
+
+**The core fix.** `wait_for_child_outcome` (`termination.rs`) now takes one bounded extension,
+gated on a new `pid_has_committed_to_exit` (`launch.rs`, the same `sysctl(KERN_PROC_PID)`/`P_WEXIT`
+reading review 656 already trusts), decided by a new pure `decide_on_timeout`, tested
+deterministically the same shape review 656 earned for `decide_gone_or_going`. Bounded to once
+per call and gated strictly on `P_WEXIT`, specifically so this is not the already-rejected
+"widen the timeout unconditionally" fix wearing a disguise -- see `decide_on_timeout`'s own doc
+comment. The extension's own length (three seconds) is disclosed as this implementation's own
+unmeasured choice, not a sourced constant; a new diagnostic, `report_committed_exit_extension`,
+exists so the next real firing supplies the "how late" measurement the standing constraint on
+this fix (above, "Standing constraint on the fix") asks for, instead of this number being
+guessed twice.
+
+**The ignored row, revisited with a verdict, not deferred again.**
+`the_shell_still_exits_normally_after_the_first_wake_is_observed`'s own `#[cfg_attr(macos,
+ignore)]` is lifted: this fix's own target is exactly its documented failure mode. **Disclosed
+as unconfirmed**: nothing in this session can reproduce a real macOS `proc_exit` window, so this
+has been proven deterministically against `decide_on_timeout`'s own logic and cross-compile-
+checked against the real macOS target, never watched pass against a real process. If it still
+times out on a real `macos-measurement` run, that is evidence the three-second bound is too
+short, not that the hypothesis was wrong -- re-add the ignore and widen the bound, rather than
+reverting the mechanism, and say so here.
+
+**The macOS-conditional ignore count guard, owed since review 652, built now because this is the
+subject that moved the count a fourth time.** `rfc_docs_invariants::the_macos_conditional_
+ignore_count_matches_the_changelogs_own_published_number` walks both crates' own `src/` for the
+two real attribute shapes the count is built from and compares the total against `CHANGELOG.md`'s
+own published number. **Caught a real, live drift on its own first run**: the count moved to six
+when the ignore above was lifted, and `CHANGELOG.md` still said seven until the paragraph was
+rewritten to match -- the guard worked exactly as intended, on the first case it was asked to
+catch, before this round was ever filed for review. A second defect was found and fixed the same
+way, by running the check against real content rather than trusting the synthetic self-test
+alone: an early version's own number-word parser checked `line.trim_start().starts_with(word)`
+against lines that actually read `**Seven macOS-conditional...` (markdown bold asterisks first),
+which never matched, so the whole guard silently reported "no disagreement" without ever reading
+a real number -- exactly the "guard that cannot fail" failure mode this project's own standing
+practice warns against. Fixed by stripping leading markdown emphasis before the word check, and
+by asserting the parse itself succeeds, separately, so an unparseable paragraph fails loudly
+rather than reading as agreement.
+
+**Held, not pushed.** `launch.rs`, `termination.rs`, `tests.rs`, `reader/tests.rs`,
+`rfc_docs_invariants.rs`, and `CHANGELOG.md` are staged, not committed -- production code in the
+terminal runtime and a count-guard the instruction itself said to build, both held for review per
+the standing mandate for judgment-call production work.
+
+### A new macOS platform fact, found by breaking the gate: a literal `!` in PTY input hits bash's own history expansion before parameter expansion ever sees `$!`
+
+**Recorded here because the response caught that it existed nowhere durable** -- not in `rfcs/`,
+not in a rules file, only in a commit message and a review request's own prose, both of which a
+future test author has no reason to read before writing the next PTY-driven test.
+
+**What happened.** Review 657 round 1's own SIGHUP-escalation probe added a `printf
+'backgrounded-job-table-pid=%s\n' "$!"` read to `linux_runtime_uses_sigkill_fallback_for_a_job_
+that_ignores_sighup`, pushed under the pure-diagnostic exception (`1263591`). It broke that exact
+test on the real macOS runner (`41591213561`): `sh: !": event not found`. Two local Linux
+(`dash`) runs had already passed with it, and had even produced what looked like a real
+measurement (`$$`/`$!` as a two-pid gap once, identical once) before the real platform run
+retracted it.
+
+**Why.** macOS's `/bin/sh` is an interactive `bash` (RFC-028's own established platform fact,
+used elsewhere in this document). Bash's history expansion fires on a literal `!` **even inside
+double quotes**, and it runs *before* parameter expansion ever gets a chance to read `$!` as the
+job-table pid -- the command line as bash's interactive reader saw it was never the command line
+as written, so the backgrounded job never actually started, and the escalation assertion that
+depended on it had nothing real to escalate against. `dash` (Linux's `/bin/sh`) has no
+interactive history expansion at all, which is exactly why two passing local runs produced no
+warning before this reached the one platform that has the behavior.
+
+**The rule for any future test that writes to a PTY running an interactive shell**: never write a
+literal `!` into PTY input, including inside double quotes, including as part of `$!`. If a
+job-table pid is genuinely needed, read it some other way (the subshell's own `$$`, printed from
+inside the subshell itself, carries no `!` and is safe).
+
+**Fixed the same day** (`4eb20b3`, the already-broken-gate authorization, not a new review turn):
+the `$!` read is removed; the `$$` print, which has no literal `!`, stays. Confirmed on a second
+real macOS run (`41592263943`): the test passes, `tekstide-core` `1168/0/10`, gate green.
+
+**Not added to `project-instructions-rust.md`**: that file's own scope is module organization and
+release tagging, not platform-specific test-authoring traps; this fact belongs here, where every
+other macOS-specific finding in this project already lives, not folded into a file about
+something else just because both could loosely be called "a testing rule."
+
+### Round 2, 2026-11-03 -- the bound reshaped from a fixed extension to a ceiling, per the response
+
+**The response's own correction, not a tuning request**: review 657 round 1's `COMMITTED_EXIT_
+EXTENSION` was a single fixed three-second extension -- the wrong *shape*, not merely the wrong
+*number*. The evidence this project has (reviews 625-630) shows a real child still `P_WEXIT`-set
+at the moment a **five-second** budget expired; it contains no duration for how much longer was
+needed. A three-second extension is smaller than the one budget already observed to be
+insufficient, and chosen relative to that budget rather than to any measured dwell -- the tell
+that a fixed duration was the wrong knob regardless of its value.
+
+**The reshape**: `decide_on_timeout` now takes `extended_by: Duration` and a `ceiling: Duration`
+rather than an `already_extended: bool`, and `wait_for_child_outcome` keeps extending in the same
+10ms steps its own poll loop already takes, for as long as `pid_has_committed_to_exit` keeps
+answering true, up to `COMMITTED_EXIT_EXTENSION_CEILING` (30s, set deliberately generously and
+disclosed as such -- a ceiling only has to be "not too small," a weaker claim than "this many
+seconds is enough"). `report_committed_exit_extension` still logs the grant and the resolution,
+now once each per call rather than once per fixed extension, so real firings supply the
+distribution the ceiling can be tightened against. The three `decide_on_timeout` tests are kept,
+with `Duration` arguments in place of the old bools, pinning the same three cases (extend, give up
+at the ceiling, give up when never committed) against the new shape.

@@ -854,6 +854,61 @@ fn project_szomb_matches_the_real_platform_constant() {
     assert_eq!(super::launch::SZOMB, libc::SZOMB);
 }
 
+/// Review 657 round 2: `wait_for_child_outcome`'s own choice at timeout
+/// (`termination::decide_on_timeout`), exercised against fixed inputs
+/// rather than by waiting to catch the real `P_WEXIT` window -- the same
+/// shape review 656 earned for `decide_gone_or_going`, and for the same
+/// reason: the real `committed_to_exit` reading is a live, load-
+/// dependent `sysctl` call this test cannot construct on demand.
+/// `#[cfg]`-free, like the function itself: nothing in this decision is
+/// platform-specific once `committed_to_exit` has already been reduced
+/// to a `bool`. Round 2 moved the shape from "extend once by a fixed
+/// duration" to "keep extending while still under a ceiling," per the
+/// response: the evidence has no sourced duration, only a condition, so
+/// the ceiling is the thing worth asserting against, not a number.
+#[test]
+fn decide_on_timeout_extends_again_when_committed_and_under_the_ceiling() {
+    assert_eq!(
+        super::termination::decide_on_timeout(true, Duration::ZERO, Duration::from_secs(30)),
+        super::termination::TimeoutDecision::ExtendAgain
+    );
+}
+
+/// The bound that keeps the extension from becoming the already-rejected
+/// "widen the timeout unconditionally" fix: committed-to-exit alone is
+/// not enough once the ceiling itself has been reached.
+#[test]
+fn decide_on_timeout_gives_up_once_the_ceiling_is_reached_even_if_still_committed() {
+    assert_eq!(
+        super::termination::decide_on_timeout(
+            true,
+            Duration::from_secs(30),
+            Duration::from_secs(30)
+        ),
+        super::termination::TimeoutDecision::GiveUp
+    );
+}
+
+/// The negative case: a child that has not committed to exiting gets no
+/// extension, regardless of how much of the ceiling remains -- pinning
+/// both sides of `extended_by`, not just the one the first test above
+/// already covers.
+#[test]
+fn decide_on_timeout_gives_up_when_not_committed_to_exit() {
+    assert_eq!(
+        super::termination::decide_on_timeout(false, Duration::ZERO, Duration::from_secs(30)),
+        super::termination::TimeoutDecision::GiveUp
+    );
+    assert_eq!(
+        super::termination::decide_on_timeout(
+            false,
+            Duration::from_secs(30),
+            Duration::from_secs(30)
+        ),
+        super::termination::TimeoutDecision::GiveUp
+    );
+}
+
 /// RFC-043 D2's own opt-out, asserted on purpose rather than merely
 /// tolerated: `setsid` is the standard, documented way a user (or a
 /// script) says "this should outlive my terminal," by leaving the

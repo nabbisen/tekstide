@@ -1362,6 +1362,59 @@ pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t) {
 #[cfg(all(any(test, feature = "test-support"), not(target_os = "macos")))]
 pub(super) fn report_pid_p_stat_via_sysctl(_pid: libc::pid_t) {}
 
+/// Review 657: a different question than [`is_gone_or_going`] asks about
+/// the same bit. That function answers "exclude this pid from the
+/// containment sweep" (`SZOMB` *or* `P_WEXIT`, review 656); this one
+/// answers "is this exact child, right now, worth `termination.rs`'s own
+/// `wait_for_child_outcome` waiting a little longer for" --
+/// `P_WEXIT`-only, deliberately: a `SZOMB` reading for *this* pid would
+/// mean `try_wait` should already have reaped it moments earlier in the
+/// very same loop, so asking again here would only duplicate that
+/// question, not add to it. A failed `sysctl` read answers `false`, the
+/// same direction every unqueryable case in this file already takes --
+/// nothing to extend a wait for if the pid cannot even be read.
+///
+/// Unconditional on macOS, not `#[cfg(test)]`-restricted like the
+/// diagnostics above: `wait_for_child_outcome` is production code with
+/// no `cfg` of its own, so this has to compile and run in every shipped
+/// macOS binary, not only a test build.
+#[cfg(target_os = "macos")]
+pub(super) fn pid_has_committed_to_exit(pid: u32) -> bool {
+    let pid = pid as libc::pid_t;
+    p_stat_and_flag_via_sysctl(pid).is_some_and(|(_, p_flag)| p_flag & P_WEXIT != 0)
+}
+
+/// Linux has no measured `proc_exit`-window analogue to extend a wait
+/// for -- [`is_gone_or_going`]'s own Linux body already makes this same
+/// point about the sweep-exclusion question; this is the identical
+/// answer for the wait-extension question. Always `false`, so
+/// `wait_for_child_outcome`'s own timeout behaviour is unchanged on this
+/// platform.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn pid_has_committed_to_exit(_pid: u32) -> bool {
+    false
+}
+
+/// Review 657: logs the one bounded extension `wait_for_child_outcome`
+/// can take, and how it resolved -- the "how late" measurement
+/// `test-process-leak.md`'s own standing constraint on this exact kind
+/// of fix asks for ("widening the timeout is not a fix... unless a
+/// probe shows a real exit arriving late *and* how late"), which the
+/// extension's own bound (`termination::COMMITTED_EXIT_EXTENSION`) does
+/// not yet have. `#[cfg(all(test, target_os = "macos"))]`, the same
+/// shape [`report_child_status_at_timeout`] already takes: never
+/// reachable in a shipped binary, a no-op everywhere else so the
+/// platform-neutral caller needs no `cfg` of its own.
+#[cfg(all(test, target_os = "macos"))]
+pub(super) fn report_committed_exit_extension(pid: u32, phase: &str, elapsed: Duration) {
+    eprintln!(
+        "[committed-exit-extension] pid {pid}: {phase} -- elapsed since wait started: {elapsed:?}"
+    );
+}
+
+#[cfg(not(all(test, target_os = "macos")))]
+pub(super) fn report_committed_exit_extension(_pid: u32, _phase: &str, _elapsed: Duration) {}
+
 /// `proc_pidinfo`'s own documented way to read a process's `p_stat`
 /// field without `/proc` -- `result != size` covers both an outright
 /// failure (the pid is already gone) and a short read, treated the same

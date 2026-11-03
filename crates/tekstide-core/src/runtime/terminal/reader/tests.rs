@@ -163,14 +163,21 @@ fn the_wake_notifier_wakes_when_real_pty_output_arrives() {
 /// [`the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming`] used to
 /// assert the same `wait_for_exit` outcome a second time; removed there as a duplicate, not a
 /// second finding, so a macOS intermittent in this property does not also fail that one.
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "known-intermittent: the shell can sit in proc_exit (P_WEXIT) past wait_for_exit's \
-              5s budget on macOS, a timing property of that platform's exit path, not of this \
-              test's own assertion -- see rfcs/handoffs/test-process-leak.md, \"Reopened on \
-              macOS, 2026-10-19\" and its 2026-10-21 correction. A release decision, revisited \
-              each release, not a closure."
-)]
+///
+/// **Review 657: `cfg_attr(macos, ignore)` lifted, not just revisited.** This is the exact
+/// failure mode named above -- `wait_for_exit` returning `None` because the shell is still
+/// inside `proc_exit` (`P_WEXIT` set), not because this property is false -- and `wait_for_exit`
+/// -> `wait_for_child_outcome` (`termination.rs`) now takes one bounded extra wait exactly when
+/// `pid_has_committed_to_exit` says that bit is set, before giving up. **Honest caveat, not
+/// hidden**: this has not run on a real macOS process yet -- `decide_on_timeout`'s own logic is
+/// proven deterministically, but nothing in this session can reproduce the live window to
+/// confirm the fix resolves it there. This project's own register history already says "it has
+/// not flaked since" is worthless; the inverse ("it has not been confirmed to pass yet") is
+/// disclosed for the same reason, not asserted as settled. If this still times out on a real
+/// `macos-measurement` run, that is evidence the fix's own extension window
+/// (`termination::COMMITTED_EXIT_EXTENSION`) is too short, not that the hypothesis was wrong --
+/// re-add the ignore and widen the constant rather than reverting the mechanism, and say so in
+/// the register.
 #[test]
 fn the_shell_still_exits_normally_after_the_first_wake_is_observed() {
     let _real_process_slot = RealProcessLimiter::acquire();

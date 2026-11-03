@@ -1938,3 +1938,249 @@ fn the_install_sh_release_yml_asset_name_check_catches_a_planted_violation_in_ei
         install_sh_release_yml_asset_name_disagreements(&installer_names, &extra_in_workflow_names);
     assert_eq!(workflow_only, vec!["tekstide-x86_64-windows"]);
 }
+
+// --- Review 657: the macOS-conditional ignore count guard, owed since review 652 ---
+//
+// Review 652's own required finding: CHANGELOG.md's own published macOS-conditional ignore
+// count drifted three times (seven -> nine -> seven) because it was re-derived by hand every
+// time a slice changed the set, and the drift went uncaught until a reviewer re-counted by
+// hand. "Third occurrence is where a guard pays for itself... It would have caught all three."
+// Built now because review 657 moved the count a fourth time (lifting
+// `the_shell_still_exits_normally_after_the_first_wake_is_observed`'s own ignore), which is
+// this guard's own trigger, named in the instruction that asked for it.
+
+/// Every `.rs` file under `dir`, recursively -- the same shape [`markdown_files`] already uses
+/// for `.md`.
+fn rust_source_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            rust_source_files(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+}
+
+/// The two shapes this project's own macOS-conditional ignore count is built from, counted in
+/// `source` (one file's full text): `#[cfg_attr(target_os = "macos", ignore ...)]` on a test
+/// that runs everywhere else and is ignored only on macOS, and a bare `#[ignore ...]` on a test
+/// whose own `#[cfg(target_os = "macos")]` means it does not exist on any other platform at all
+/// (`dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname`'s own shape -- there is no
+/// `cfg_attr` to write when the whole item is already macOS-only).
+///
+/// **Scoped per item by the blank line above it, not by the next `fn` keyword.** An earlier
+/// draft of this walked forward from one `fn` line to the next and treated everything in
+/// between as "this item's own cluster," which is wrong: that span is the *previous* function's
+/// entire body, and several doc comments in this codebase discuss the ignore pattern in prose
+/// (backtick-quoted, to explain why a *different* test is or isn't ignored) -- exactly the text
+/// that would get wrongly attributed to whatever function happened to follow. rustfmt always
+/// separates one item from the one before it with exactly one blank line in this codebase, so
+/// walking backward from each `fn` line to the nearest blank line (or the top of the file)
+/// reliably isolates only the doc-comment-and-attribute cluster that actually belongs to it.
+///
+/// **A real attribute is never backtick-quoted; a doc comment's own mention of one always is.**
+/// This codebase's own doc comments routinely say things like `` "**`#[cfg_attr(target_os = \
+/// \"macos\", ignore)]`, not deleted or weakened.**" `` while explaining a *real* attribute that
+/// sits a few lines below in the same cluster -- a plain substring search would count that
+/// sentence as a second, spurious match. [`contains_real_attribute`] requires the match not be
+/// preceded by a backtick within a short lookback (covers plain `` ` `` and markdown emphasis
+/// like `` **` ``), so prose describing the pattern does not count as the pattern.
+fn macos_conditional_ignore_count(source: &str) -> usize {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut count = 0;
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let is_fn_start = trimmed.starts_with("fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("pub(crate) fn ")
+            || trimmed.starts_with("pub(super) fn ")
+            || trimmed.starts_with("async fn ");
+        if !is_fn_start {
+            continue;
+        }
+        let mut start = index;
+        while start > 0 && !lines[start - 1].trim().is_empty() {
+            start -= 1;
+        }
+        let cluster: String = lines[start..index].join("\n");
+        let stripped: Vec<char> = cluster.chars().filter(|c| !c.is_whitespace()).collect();
+        let is_conditionally_ignored =
+            contains_real_attribute(&stripped, "#[cfg_attr(target_os=\"macos\",ignore");
+        let is_macos_only_and_ignored =
+            contains_real_attribute(&stripped, "#[cfg(target_os=\"macos\")]")
+                && contains_real_attribute(&stripped, "#[ignore");
+        if is_conditionally_ignored || is_macos_only_and_ignored {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// `true` when `needle` occurs in `haystack` (both already whitespace-stripped) at least once
+/// without a backtick in the four characters immediately before it -- see
+/// [`macos_conditional_ignore_count`]'s own doc comment for why that distinguishes a real
+/// attribute from a doc comment's backtick-quoted mention of one.
+fn contains_real_attribute(haystack: &[char], needle: &str) -> bool {
+    let needle: Vec<char> = needle.chars().collect();
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+    haystack
+        .windows(needle.len())
+        .enumerate()
+        .any(|(start, window)| {
+            if window != needle.as_slice() {
+                return false;
+            }
+            let lookback_start = start.saturating_sub(4);
+            !haystack[lookback_start..start].contains(&'`')
+        })
+}
+
+/// `"Seven macOS-conditional test ignores"` -> `7`. Spelled-out, not digits -- `CHANGELOG.md`'s
+/// own prose style throughout, so this reads the number the way the paragraph actually states
+/// it rather than requiring the paragraph to change its own voice for this check's convenience.
+fn spelled_out_ignore_count(changelog: &str) -> Option<usize> {
+    const WORDS: &[(&str, usize)] = &[
+        ("Zero", 0),
+        ("One", 1),
+        ("Two", 2),
+        ("Three", 3),
+        ("Four", 4),
+        ("Five", 5),
+        ("Six", 6),
+        ("Seven", 7),
+        ("Eight", 8),
+        ("Nine", 9),
+        ("Ten", 10),
+    ];
+    for line in changelog.lines() {
+        if !line.contains("macOS-conditional test ignore") {
+            continue;
+        }
+        // The paragraph leads with markdown emphasis (`**Seven macOS-conditional...`), so the
+        // number word is not the first *character* of the line, only the first *word* -- found
+        // empirically: an earlier version of this checked `starts_with` against the untrimmed
+        // line, which never matched this real paragraph at all, so the whole guard silently
+        // passed without ever comparing a number. Caught by running this check against the real
+        // file before trusting it, not by inspection.
+        let word_start = line.trim_start().trim_start_matches(['*', '_']);
+        for (word, value) in WORDS {
+            if word_start.starts_with(word) {
+                return Some(*value);
+            }
+        }
+    }
+    None
+}
+
+/// The violation, if any: the real macOS-conditional ignore count this check derives from
+/// source does not match the number `changelog` publishes.
+fn macos_ignore_count_disagreement(real_count: usize, changelog: &str) -> Option<String> {
+    let published = spelled_out_ignore_count(changelog)?;
+    (published != real_count).then(|| {
+        format!(
+            "CHANGELOG.md's own macOS-conditional ignore paragraph states {published}, but \
+             grepping the real `#[cfg_attr(target_os = \"macos\", ignore ...)]` and macOS-only \
+             `#[ignore ...]` attributes in crates/tekstide-core/src and crates/tekstide/src \
+             finds {real_count}. Re-derive the paragraph's count and its member list from the \
+             source, not from memory of the last count -- this is the drift review 652 named \
+             three times running."
+        )
+    })
+}
+
+#[test]
+fn the_macos_conditional_ignore_count_matches_the_changelogs_own_published_number() {
+    let Ok(changelog) = std::fs::read_to_string(repo_root().join("CHANGELOG.md")) else {
+        eprintln!("skipped: CHANGELOG.md is not packaged with this crate");
+        return;
+    };
+    let mut files = Vec::new();
+    for crate_src in ["crates/tekstide-core/src", "crates/tekstide/src"] {
+        let dir = repo_root().join(crate_src);
+        if !dir.is_dir() {
+            eprintln!("skipped: {crate_src} is not packaged with this crate");
+            return;
+        }
+        rust_source_files(&dir, &mut files);
+    }
+    let real_count: usize = files
+        .iter()
+        .map(|path| {
+            let source = std::fs::read_to_string(path).expect("source file should be readable");
+            macos_conditional_ignore_count(&source)
+        })
+        .sum();
+    assert!(
+        real_count > 0,
+        "the scan itself found nothing to count, which means the scanner broke, not that the \
+         project stopped ignoring anything on macOS"
+    );
+    // Asserted separately from `macos_ignore_count_disagreement`'s own `?`, not folded into
+    // it: an unparseable paragraph must fail loudly, not silently read as "no disagreement" --
+    // which is exactly what an earlier draft of `spelled_out_ignore_count` did against the real
+    // file (`starts_with` against the untrimmed line, which never matched the real
+    // `**Seven ...`-leading paragraph), discovered only by running this test against real
+    // content rather than trusting the self-test's synthetic fixture alone.
+    assert!(
+        spelled_out_ignore_count(&changelog).is_some(),
+        "CHANGELOG.md's own macOS-conditional ignore paragraph could not be parsed for a number \
+         at all -- its wording changed in a way this check's own word list does not cover, or \
+         the paragraph was removed. Either way this is not \"no disagreement\"; fix the parser \
+         or the paragraph."
+    );
+    if let Some(message) = macos_ignore_count_disagreement(real_count, &changelog) {
+        panic!("{message}");
+    }
+}
+
+#[test]
+fn the_macos_conditional_ignore_count_check_catches_a_planted_violation_in_either_direction() {
+    let source = "\
+/// A normal test, not ignored anywhere.
+#[test]
+fn ordinary_test() {}
+
+/// Ignored on macOS only; runs everywhere else.
+#[cfg_attr(
+    target_os = \"macos\",
+    ignore = \"a reason\"
+)]
+#[test]
+fn conditionally_ignored_test() {}
+
+/// macOS-only, and ignored there too -- no cfg_attr to write since the whole item already
+/// only exists on this platform.
+#[cfg(target_os = \"macos\")]
+#[test]
+#[ignore = \"a reason\"]
+fn macos_only_ignored_test() {}
+
+/// macOS-only, but NOT ignored -- must not be counted just for mentioning `ignore` in a doc
+/// comment discussing a *different* test's own `#[ignore]` by name.
+#[cfg(target_os = \"macos\")]
+#[test]
+fn macos_only_test_whose_doc_comment_mentions_ignore_in_prose() {}
+";
+    assert_eq!(macos_conditional_ignore_count(source), 2);
+
+    let changelog_agreeing = "## Unreleased\n\nTwo macOS-conditional test ignores, named above.\n";
+    assert!(macos_ignore_count_disagreement(2, changelog_agreeing).is_none());
+
+    // Plant the violation the check exists for: the paragraph says a number the source does
+    // not back up, in both directions.
+    let changelog_too_high = "## Unreleased\n\nThree macOS-conditional test ignores.\n";
+    let message = macos_ignore_count_disagreement(2, changelog_too_high)
+        .expect("a stated count higher than the real one must be caught");
+    assert!(message.contains("states 3") && message.contains("finds 2"));
+
+    let changelog_too_low = "## Unreleased\n\nOne macOS-conditional test ignore.\n";
+    let message = macos_ignore_count_disagreement(2, changelog_too_low)
+        .expect("a stated count lower than the real one must be caught");
+    assert!(message.contains("states 1") && message.contains("finds 2"));
+}

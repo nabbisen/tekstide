@@ -4,8 +4,9 @@ use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
 use super::launch::{
-    processes_in_session, report_child_status_at_timeout, report_pty_responsiveness_at_timeout,
-    session_confirmed_empty, session_id_of, session_leader_known_to_still_exist,
+    pid_has_committed_to_exit, processes_in_session, report_child_status_at_timeout,
+    report_committed_exit_extension, report_pty_responsiveness_at_timeout, session_confirmed_empty,
+    session_id_of, session_leader_known_to_still_exist,
 };
 use super::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeError, TerminalRuntimeEvent,
@@ -17,6 +18,76 @@ use super::{
 /// holds a handful of processes -- so a pathological session can never
 /// turn the enumerate-then-signal step below into an unbounded loop.
 const MAX_SESSION_SIGNAL_ITERATIONS: usize = 256;
+
+/// Review 657 round 2: the hard ceiling on how long `wait_for_child_outcome`
+/// will keep extending past its caller's own `timeout`, while
+/// [`pid_has_committed_to_exit`] keeps answering true -- never
+/// unconditionally, which is the entire difference between this and the
+/// already-rejected "widen the timeout" fix (`test-process-leak.md`,
+/// "Standing constraint on the fix", "Reopened on macOS, 2026-10-19").
+///
+/// **Round 1's own fixed three-second extension was the wrong shape, not
+/// just the wrong number, and the response said why rather than letting
+/// me guess harder.** The evidence this project has (reviews 625-630)
+/// establishes that a real child was still `P_WEXIT`-set at the moment a
+/// *five-second* budget expired -- the dwell outlasted the one budget
+/// this project has actually watched it against, which makes a
+/// three-second extension smaller than the thing it exists to cover. The
+/// evidence contains no duration for how much longer was needed, which
+/// is exactly the tell that a fixed duration is the wrong knob at all.
+///
+/// **The shape that needs no guess**: extend in the same short steps
+/// `wait_for_child_outcome`'s own 10ms poll already takes, for as long as
+/// `pid_has_committed_to_exit` keeps saying yes, up to this ceiling. The
+/// common case then costs whatever the kernel actually needs, not a
+/// fixed number; a pid that stays committed forever is still bounded.
+///
+/// **The ceiling itself is set generously, on purpose, and that is
+/// disclosed rather than hidden.** Unlike a fixed extension, a ceiling
+/// only has to be *not too small* -- a much weaker claim than "this many
+/// seconds is enough" -- so thirty seconds is a deliberately loose
+/// starting point, not a sourced constant. [`report_committed_exit_extension`]
+/// logs every extension's own grant and resolution, so real firings
+/// supply the distribution this ceiling can be tightened against,
+/// instead of it being guessed twice.
+const COMMITTED_EXIT_EXTENSION_CEILING: Duration = Duration::from_secs(30);
+
+/// The choice [`TerminalRuntime::wait_for_exit`]'s own
+/// `wait_for_child_outcome` makes once its deadline has elapsed without
+/// `try_wait` producing a status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TimeoutDecision {
+    /// Report `None` to the caller: an outcome this budget did not
+    /// observe, not a claim that one will never arrive.
+    GiveUp,
+    /// Keep polling -- the condition that justified extending still
+    /// holds, and the ceiling has not been reached.
+    ExtendAgain,
+}
+
+/// Review 657: pulled out pure, the same reason review 656 extracted
+/// `decide_gone_or_going` (`launch.rs`) -- the real `committed_to_exit`
+/// reading behind this choice is a live, load-dependent `sysctl` call
+/// that cannot be constructed on demand, so the choice itself has to be
+/// exercised against a fixed input instead of waited for. `#[cfg]`-free,
+/// unlike `decide_gone_or_going` was before its own round 2: nothing
+/// here is platform-specific by the time it reaches this function.
+///
+/// `extended_by` is how long `wait_for_child_outcome` has already spent
+/// past its caller's own `timeout`, re-derived by the caller every poll
+/// (`elapsed.saturating_sub(timeout)`) rather than accumulated as a
+/// separate counter -- one clock, not two that could disagree.
+pub(super) fn decide_on_timeout(
+    committed_to_exit: bool,
+    extended_by: Duration,
+    ceiling: Duration,
+) -> TimeoutDecision {
+    if committed_to_exit && extended_by < ceiling {
+        TimeoutDecision::ExtendAgain
+    } else {
+        TimeoutDecision::GiveUp
+    }
+}
 
 impl TerminalRuntime {
     pub fn wait_for_exit(
@@ -199,6 +270,15 @@ impl TerminalRuntime {
         // `try_wait` call below already needs is the only fallible call
         // left, keeps the production path byte-for-byte what it was.
         let child_pid = self.session_mut(handle)?.child.id();
+        // Review 657 round 2: `extending` only gates the two log lines
+        // (so the start and the resolution are each logged once, not
+        // every 10ms); the bound itself is `decide_on_timeout`'s own
+        // `extended_by < ceiling` check, re-derived every iteration from
+        // `started`/`timeout` rather than accumulated separately -- one
+        // clock, not two that could disagree. See `decide_on_timeout`'s
+        // own doc comment for why this is bounded, not a disguised
+        // version of the already-rejected unconditional widening.
+        let mut extending = false;
 
         loop {
             if let Some(status) = self
@@ -212,25 +292,64 @@ impl TerminalRuntime {
                 })?
             {
                 self.sessions.remove(&handle.terminal_id);
+                if extending {
+                    report_committed_exit_extension(
+                        child_pid,
+                        "resolved during the extension",
+                        started.elapsed(),
+                    );
+                }
                 return Ok(Some(outcome_from_exit_status(status)));
             }
 
-            if started.elapsed() > timeout {
-                // Review 608/615: a no-op everywhere except a `#[cfg(test)]`
-                // macOS build (see its own doc comment) -- the last item in
-                // 596's triage, probing whether the child this call is
-                // giving up on is genuinely slow or stopped (`SSTOP`),
-                // right at the moment that distinction would otherwise be
-                // lost.
-                report_child_status_at_timeout(child_pid);
-                // Review 625: a second, independent diagnostic at the
-                // same moment -- re-sending the readiness probe, not
-                // re-deriving the session or touching the child's own
-                // process state, so it carries none of 618's own hazard.
-                // See `report_pty_responsiveness_at_timeout`'s own doc
-                // comment for why this is safe here.
-                report_pty_responsiveness_at_timeout(self, handle);
-                return Ok(None);
+            let elapsed = started.elapsed();
+            if elapsed > timeout {
+                let extended_by = elapsed.saturating_sub(timeout);
+                match decide_on_timeout(
+                    pid_has_committed_to_exit(child_pid),
+                    extended_by,
+                    COMMITTED_EXIT_EXTENSION_CEILING,
+                ) {
+                    TimeoutDecision::ExtendAgain => {
+                        if !extending {
+                            extending = true;
+                            report_committed_exit_extension(
+                                child_pid,
+                                "extension begins: P_WEXIT set, no exit status yet",
+                                elapsed,
+                            );
+                        }
+                        // Falls through to the ordinary poll sleep below --
+                        // the next iteration's own `try_wait`/`elapsed`
+                        // check is the next "short step."
+                    }
+                    TimeoutDecision::GiveUp => {
+                        if extending {
+                            report_committed_exit_extension(
+                                child_pid,
+                                "extension ends without a status",
+                                elapsed,
+                            );
+                        }
+                        // Review 608/615: a no-op everywhere except a
+                        // `#[cfg(test)]` macOS build (see its own doc
+                        // comment) -- the last item in 596's triage,
+                        // probing whether the child this call is giving
+                        // up on is genuinely slow or stopped (`SSTOP`),
+                        // right at the moment that distinction would
+                        // otherwise be lost.
+                        report_child_status_at_timeout(child_pid);
+                        // Review 625: a second, independent diagnostic at
+                        // the same moment -- re-sending the readiness
+                        // probe, not re-deriving the session or touching
+                        // the child's own process state, so it carries
+                        // none of 618's own hazard. See
+                        // `report_pty_responsiveness_at_timeout`'s own
+                        // doc comment for why this is safe here.
+                        report_pty_responsiveness_at_timeout(self, handle);
+                        return Ok(None);
+                    }
+                }
             }
 
             std::thread::sleep(Duration::from_millis(10));

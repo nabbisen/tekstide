@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### Fixed — review 657: `wait_for_child_outcome` never consulted `P_WEXIT` either, the same early-exit shape review 656 just fixed one level up
+
+`termination.rs` mentioned `P_WEXIT` twice, in comments, and consulted it nowhere: `wait_for_exit`
+→ `wait_for_child_outcome` is a bare `child.try_wait()` + sleep loop that gives up the moment its
+caller's timeout elapses, with no way to tell "this child is genuinely stuck" from "this child has
+already committed to exiting and the kernel just hasn't finished reaping it yet" — exactly the
+cause `the_shell_still_exits_normally_after_the_first_wake_is_observed`'s macOS intermittent was
+already registered against (`test-process-leak.md`, "Reopened on macOS, 2026-10-19").
+
+**Fixed by extending in short steps while `P_WEXIT` stays set, up to a generous ceiling —
+gated, not unconditional.** A new `pid_has_committed_to_exit` (`launch.rs`) reuses the same
+`sysctl(KERN_PROC_PID)` reading review 656 already trusts; `decide_on_timeout` (`termination.rs`)
+is the pure choice this makes, tested deterministically against fixed inputs rather than a live
+reproduction — the same shape review 656 earned for `decide_gone_or_going`. Gated on purpose:
+widening the timeout unconditionally is already rejected (`test-process-leak.md`, "Standing
+constraint on the fix"), and this is not that — it extends only for as long as the kernel has
+already begun reaping this exact pid. **Round 2, on review**: a single fixed three-second
+extension was the wrong shape, not just the wrong number — the evidence (reviews 625-630) shows a
+real child still `P_WEXIT`-set at the moment a *five-second* budget expired, with no measured
+duration for how much longer was needed, so a fixed extension smaller than the one budget already
+seen to be insufficient was never going to be defensible. Replaced with a 30-second ceiling,
+deliberately loose (a ceiling only has to be "not too small," unlike a fixed wait) and disclosed
+as unmeasured; `report_committed_exit_extension` logs every grant and resolution so real firings
+can tighten it on evidence.
+
+**Six macOS-conditional test ignores, named with their reasons — down from seven.** Re-derived by
+grep at write time, not carried forward from the last count: four APFS non-UTF-8-filename tests
+(`scanner_preserves_non_utf8_filename_identity_in_relative_path`,
+`a_non_utf8_name_is_asked_as_its_bytes_and_the_answer_lands_on_its_row`,
+`a_non_utf8_path_is_skipped_from_the_map_but_still_counted`,
+`a_non_utf8_filename_survives_the_round_trip`) and `dev_fd_magic_path_follows_the_fd_not_a_renamed_pathname`
+(macOS-only) — five in `tekstide-core`, plus one in `tekstide`:
+`closing_a_project_with_a_backgrounded_descendant_kills_it_through_a_real_close`.
+`the_shell_still_exits_normally_after_the_first_wake_is_observed`'s own ignore is **lifted, not
+just revisited**: this fix directly targets its documented failure mode. Disclosed as unconfirmed,
+not settled — this has not run against a real macOS process in this session, only proven
+deterministically against `decide_on_timeout`'s own logic in isolation. If it still times out on a
+real `macos-measurement` run, that is evidence the extension's own bound is too short, not that
+the hypothesis was wrong; re-add the ignore and widen the bound rather than reverting the
+mechanism. **The count's own reconciliation against this paragraph is now a standing check**
+(`rfc_docs_invariants::the_macos_conditional_ignore_count_matches_the_changelogs_own_published_number`),
+owed since review 652's own repeated drift (seven → nine → seven) and built now because this is
+the subject that moved the count again.
+
 ### Changed — a forward reference by number, removed from `0.38.0`'s own released section
 
 `0.38.0`'s symlink-canonicalization entry said nine near-identical sandbox builders were "an input
