@@ -4114,3 +4114,38 @@ real platform (grant, bounded extension, clean give-up, no hang) and the lifted 
 regressed. Whether the extension actually rescues the target flake is still unconfirmed -- this
 run did not produce the window to rescue. Watch for the next real occurrence rather than read this
 quiet run as proof, per this document's own standing rule for exactly this situation.
+
+### The next run (`2e67eae`'s own predecessor push, run `41598987645`) produced the window, and the extension did not resolve it -- the ignore is re-added
+
+**Not a quiet run this time.** `the_shell_still_exits_normally_after_the_first_wake_is_observed`
+failed, `reader/tests.rs:230`, `left: None / right: Some(Exited { exit_status: 0 })` -- the exact
+property, the exact assertion, that the un-ignoring targeted. Verbatim from the same job:
+
+```
+[committed-exit-extension] pid 10129: extension begins: P_WEXIT set, no exit status yet -- elapsed since wait started: 5.069120917s
+[committed-exit-extension] pid 10129: extension ends without a status -- elapsed since wait started: 35.047737333s
+```
+
+The extension was granted at the original deadline and ran the entire 30-second ceiling without
+ever seeing a status -- exactly the outcome the review that authorized this fix named as the
+honest response to ("that is evidence the bound is too short, not that the hypothesis was
+wrong").
+
+**One more datum this run adds that the instruction's own framing did not anticipate.**
+`report_child_status_at_timeout`'s own three samples, taken at the moment of giving up (35s
+elapsed), read `p_stat=2 (SRUN), p_flag=0x6006 (P_WEXIT set)` -- **identical** to the reading
+`report_committed_exit_extension` logged at the 5-second mark when the extension began. Thirty
+seconds of waiting produced no observable change in this pid's own state at all. "The bound is
+too short" implicitly predicts that waiting longer eventually sees the state change; this run is
+consistent with that, but it is equally consistent with a wedge that will not resolve inside any
+finite extension -- the two are indistinguishable from one occurrence, and treating this as
+settled either way would be a guess dressed as a finding.
+
+**Disposition**: the ignore is re-added (`2e67eae`), with the real evidence in its own doc
+comment rather than the round-1 hope that preceded it. `CHANGELOG.md`'s count returns to seven.
+**Not decided here, left open rather than guessed**: whether the right next move is a larger
+ceiling, or treating "P_WEXIT set and unchanging across tens of seconds" as a distinct condition
+from "P_WEXIT set and about to clear," which this fix's own `pid_has_committed_to_exit` currently
+cannot tell apart from a single reading. Whoever picks this up next should not read one more
+unchanged-ceiling run as confirmation of either answer, for the same reason "it has not flaked
+since" has never been accepted as one in this document.
