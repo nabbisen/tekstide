@@ -31,6 +31,13 @@ fn main() -> iced::Result {
     iced::application(boot, shell::update, timed_view)
         .title(shell::State::window_title)
         .subscription(shell::subscription)
+        // RFC-076 D1: `application.rs`'s own `scale_factor(impl Fn(&P::State)
+        // -> f32)`, the pinned `iced 0.14.0` builder method this whole
+        // feature is built on. Never resizes the window itself (nothing
+        // in this crate calls a window-resize action for it) -- `iced`
+        // scales the logical layout space inside the fixed physical
+        // window, which is D1's own required property, by construction.
+        .scale_factor(shell::State::interface_scale)
         .run()
 }
 
@@ -230,6 +237,20 @@ fn boot() -> shell::State {
     }
 
     let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
+    // RFC-076 D1/D5: a third, independent `default_for_host()` resolution
+    // (`instance_marker`/`store` above each already have their own) --
+    // "a cheap, stateless env-var read," the same reasoning `instance_
+    // marker`'s own comment gives for not sharing a provider across
+    // these three. `None` only when the environment itself cannot be
+    // resolved, same as the other two; degrades to
+    // `tekstide_core::interface_scale::INTERFACE_SCALE_RESET`, never a
+    // boot failure -- the scale control is one keypress away either way.
+    let interface_scale = match AppStatePathProvider::default_for_host() {
+        Ok(path_provider) => {
+            tekstide_core::interface_scale::load_interface_scale(path_provider.state_dir())
+        }
+        Err(_) => tekstide_core::interface_scale::INTERFACE_SCALE_RESET,
+    };
     // RFC-049 D2: the open trigger for a project opened here runs inside
     // `State::new`, not from this function (response 397, U2) -- a call site
     // here would be a line someone can delete with no test noticing, which is
@@ -241,6 +262,7 @@ fn boot() -> shell::State {
         configuration,
         instance_marker,
         cli_project_open_blocked,
+        interface_scale,
     )
     .with_recent_project_list_repair(recent_projects_repair)
 }

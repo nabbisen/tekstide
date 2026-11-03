@@ -75,6 +75,22 @@ fn action_catalog_key(action: NavigationAction) -> Option<&'static str> {
         NavigationAction::SaveAllDocuments => Some("keyboard-help-save-all-documents"),
         NavigationAction::OpenDiffReview => Some("keyboard-help-open-diff-review"),
         NavigationAction::OpenAuditView => Some("keyboard-help-open-audit-view"),
+        NavigationAction::SetInterfaceScaleToStep1 => {
+            Some("keyboard-help-set-interface-scale-to-step-1")
+        }
+        NavigationAction::SetInterfaceScaleToStep2 => {
+            Some("keyboard-help-set-interface-scale-to-step-2")
+        }
+        NavigationAction::SetInterfaceScaleToStep3 => {
+            Some("keyboard-help-set-interface-scale-to-step-3")
+        }
+        NavigationAction::SetInterfaceScaleToStep4 => {
+            Some("keyboard-help-set-interface-scale-to-step-4")
+        }
+        NavigationAction::SetInterfaceScaleToStep5 => {
+            Some("keyboard-help-set-interface-scale-to-step-5")
+        }
+        NavigationAction::ResetInterfaceScale => Some("keyboard-help-reset-interface-scale"),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,
@@ -261,6 +277,19 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
              not a stopgap awaiting a tab bar -- the explorer's own row navigation (which can \
              also reach an open document, since PR-065-B's dedup switches to it) is itself \
              keyboard-only with no mouse row click either. Permanent for this design.",
+        )),
+        NavigationAction::SetInterfaceScaleToStep1
+        | NavigationAction::SetInterfaceScaleToStep2
+        | NavigationAction::SetInterfaceScaleToStep3
+        | NavigationAction::SetInterfaceScaleToStep4
+        | NavigationAction::SetInterfaceScaleToStep5
+        | NavigationAction::ResetInterfaceScale => Some(ControlCoverage::KeyboardOnly(
+            "RFC-076 D1 names this a keyboard-bound scale with no visible control of its own \
+             -- D4 (visible controls for first-contact actions, its own later slice) names the \
+             handful of actions a first-time reader needs by enumeration (open a project, \
+             help, audit, settings), and a scale step is not among them. Permanent for this \
+             design, not a gap D4 is expected to close: D4's own point is that the chord stays \
+             the expert path even for the actions it does add a button to.",
         )),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog

@@ -1310,6 +1310,28 @@ pub struct State {
     /// in that case rather than failing the boot a missing environment variable should
     /// not be able to crash.
     _instance_marker: Option<tekstide_core::recovery::InstanceMarker>,
+    /// RFC-076 D1/D5: the whole-UI scale factor, loaded in `boot()` from
+    /// `tekstide_core::interface_scale::load_interface_scale` (never from
+    /// `config.toml`, D5's own requirement) and read by `interface_scale`
+    /// below, the function this crate's own `iced::application` builder
+    /// passes to `.scale_factor(...)` in `main.rs`. One of
+    /// [`tekstide_core::interface_scale::INTERFACE_SCALE_STEPS`] once a
+    /// user presses one of the six new chords; the loaded value, possibly
+    /// off that list (an older file, or one from a future version), until
+    /// then -- `set_interface_scale` is the only production writer.
+    interface_scale: f32,
+    /// RFC-076, review 659's own required item: whether `set_interface_
+    /// scale`'s own most recent persistence attempt failed. **Read fresh
+    /// by `project_board_interface_scale_notifications` every render**
+    /// (`WhileConditionHolds`, not `ForTheStartItHappened`) -- a later
+    /// successful save clears it, so the notice disappears the moment
+    /// the underlying problem (a full disk, a read-only state
+    /// directory) resolves, rather than staying pinned for the rest of
+    /// the session once shown. `false` at boot: a load failure already
+    /// degrades silently to the reset value by design (one keypress
+    /// restores the preference either way), and this field is
+    /// specifically about *writes*, not reads.
+    interface_scale_save_failed: bool,
 }
 
 /// RFC-045 PR-045-B: what `boot()` made of the user's configuration
@@ -1504,6 +1526,7 @@ impl State {
         configuration: ConfigurationState,
         instance_marker: Option<tekstide_core::recovery::InstanceMarker>,
         cli_project_open_blocked: Option<ProjectOpenBlockedNotice>,
+        interface_scale: f32,
     ) -> Self {
         // RFC-032 PR-032-C, response 245: the audit store, not the
         // user-writable recent-projects cache, is authoritative for
@@ -1636,6 +1659,8 @@ impl State {
             audited_agent_runs: std::collections::HashMap::new(),
             audit_view: AuditViewState::default(),
             _instance_marker: instance_marker,
+            interface_scale,
+            interface_scale_save_failed: false,
         };
         // RFC-054 PR-054-B: the configured family, before the first frame.
         crate::theme::set_ui_font(state.theme.font());
@@ -1683,6 +1708,18 @@ impl State {
 
     pub fn window_title(&self) -> String {
         self.catalog.get("app-title")
+    }
+
+    /// RFC-076 D1: `main.rs`'s own `iced::application(...).scale_factor(
+    /// shell::State::interface_scale)` reads this every frame iced asks
+    /// for a scale factor -- the same `Fn(&State) -> f32` shape
+    /// `window_title` above already fills for `.title(...)`. The window
+    /// itself is never resized by a scale change (this project's own GUI
+    /// rule, size fixed at launch): `iced` scales the logical layout
+    /// space inside the fixed physical window instead, which is the
+    /// whole mechanism D1 asks for.
+    pub fn interface_scale(&self) -> f32 {
+        self.interface_scale
     }
 
     /// Whether `content_area` should substitute the synthetic
@@ -2699,6 +2736,45 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
                 state
                     .app_shell
                     .cycle_to_next_open_document_in_active_project();
+            }
+            // RFC-076 D1, PR-076-B: absolute steps, not relative --
+            // `app_command_for`'s own doc on this group explains why
+            // none of the six is in that function's `Some` group.
+            // `set_interface_scale` is the one place that mutates and
+            // persists `state.interface_scale`; everything below only
+            // decides which fixed value to hand it.
+            if action == NavigationAction::SetInterfaceScaleToStep1 {
+                set_interface_scale(
+                    state,
+                    tekstide_core::interface_scale::INTERFACE_SCALE_STEPS[0],
+                );
+            }
+            if action == NavigationAction::SetInterfaceScaleToStep2 {
+                set_interface_scale(
+                    state,
+                    tekstide_core::interface_scale::INTERFACE_SCALE_STEPS[1],
+                );
+            }
+            if action == NavigationAction::SetInterfaceScaleToStep3 {
+                set_interface_scale(
+                    state,
+                    tekstide_core::interface_scale::INTERFACE_SCALE_STEPS[2],
+                );
+            }
+            if action == NavigationAction::SetInterfaceScaleToStep4 {
+                set_interface_scale(
+                    state,
+                    tekstide_core::interface_scale::INTERFACE_SCALE_STEPS[3],
+                );
+            }
+            if action == NavigationAction::SetInterfaceScaleToStep5 {
+                set_interface_scale(
+                    state,
+                    tekstide_core::interface_scale::INTERFACE_SCALE_STEPS[4],
+                );
+            }
+            if action == NavigationAction::ResetInterfaceScale {
+                set_interface_scale(state, tekstide_core::interface_scale::INTERFACE_SCALE_RESET);
             }
         }
         Message::Input(RoutedInput::Surface(surface_input)) => {
@@ -6568,6 +6644,38 @@ fn save_active_document_button_pressed(state: &mut State) {
     attempt_save_active_document(state);
 }
 
+/// RFC-076 D1/D5: the real effect of all six scale actions --
+/// `update`'s `Shell` arm calls this with the one step (or
+/// `tekstide_core::interface_scale::INTERFACE_SCALE_RESET`) each chord
+/// names. Updates `state.interface_scale` unconditionally (there is
+/// nothing to refuse: every caller passes one of six fixed, known-good
+/// values, never user text), then persists it best-effort through
+/// [`resolve_agent_run_state_dir`] -- reused rather than a second
+/// `AppStatePathProvider::default_for_host()` resolution written fresh,
+/// per that function's own doc on why every state-writing call site in
+/// this crate should share it: free test isolation, not only
+/// deduplication. **A write failure changes nothing about this session**
+/// -- the scale still applies immediately either way; only next
+/// launch's own starting value is at risk, and `load_interface_scale`'s
+/// own "any problem at all degrades to the reset value" rule already
+/// covers that.
+///
+/// **Review 659's own required item: the failure is no longer
+/// invisible.** `state.interface_scale_save_failed` is updated from the
+/// real `Result`, not left at whatever it was -- a failure sets it, a
+/// *success* clears it, so a transient problem (a full disk that frees
+/// up) stops being reported the moment a later press actually saves.
+/// `project_board_interface_scale_notifications` is what a user sees
+/// for this; this function is only ever the writer of the flag, never
+/// its reader.
+fn set_interface_scale(state: &mut State, scale: f32) {
+    state.interface_scale = scale;
+    let saved = resolve_agent_run_state_dir().is_some_and(|state_dir| {
+        tekstide_core::interface_scale::save_interface_scale(&state_dir, scale).is_ok()
+    });
+    state.interface_scale_save_failed = !saved;
+}
+
 /// RFC-065 PR-065-D, D6: new work, not a loop around
 /// [`attempt_save_active_document`] -- unlike that function, this never auto-opens the
 /// external-change dialog for the active document specifically: with several documents in
@@ -8516,6 +8624,19 @@ fn app_command_for(action: NavigationAction) -> Option<AppCommand> {
         // write to disk, so `update`'s `Shell` arm special-cases it directly
         // (`save_all_documents_button_pressed`) rather than through a route/mode `AppCommand`.
         NavigationAction::SaveAllDocuments => None,
+        // RFC-076 D1, PR-076-B: no core route or mode changes -- the
+        // whole-UI scale is shell-local `State` (`interface_scale`), the
+        // same reason `SwitchActiveProject`/`SwitchActiveDocument` above
+        // are `None`. `update`'s `Shell` arm special-cases all six
+        // directly (`set_interface_scale`), persisting the new value
+        // through `tekstide_core::interface_scale::save_interface_scale`
+        // rather than through any `AppCommand`.
+        NavigationAction::SetInterfaceScaleToStep1
+        | NavigationAction::SetInterfaceScaleToStep2
+        | NavigationAction::SetInterfaceScaleToStep3
+        | NavigationAction::SetInterfaceScaleToStep4
+        | NavigationAction::SetInterfaceScaleToStep5
+        | NavigationAction::ResetInterfaceScale => None,
     }
 }
 
@@ -9606,6 +9727,12 @@ pub(crate) enum NotificationKind {
     TranscriptRetention,
     /// RFC-056 D7: a run's record was set aside.
     RunRecordSetAside,
+    /// RFC-076 D1, review 659's own required item: `interface-scale.json`
+    /// failed to write. Last in declaration order -- the lowest render
+    /// priority of the six -- because losing this preference costs one
+    /// keypress to restore, never unsaved work or a security-relevant
+    /// fact, so it must never visually compete with a notice that does.
+    InterfaceScalePersistenceFailed,
 }
 
 /// RFC-025 D1: one model for every board notification — scope, kind, the text
@@ -9636,18 +9763,21 @@ fn ordered_by_kind(mut notifications: Vec<Notification>) -> Vec<Notification> {
 }
 
 /// RFC-025 D2/D7: **the one place notifications reach the board.** Collects
-/// all four migrated producers, in whatever order their own conditions
-/// happened to resolve, and hands back the deterministic, kind-ordered
-/// result. This is what `content_area`'s `ProjectBoard` arm renders; it never
-/// calls a `*_lines` function directly (grepped — the only remaining callers
-/// of those four are the tests each notice's own RFC already wrote, which
-/// this migration's whole acceptance is that it does not have to touch).
+/// all six producers (RFC-076 D1 adds the sixth,
+/// `project_board_interface_scale_notifications`), in whatever order their
+/// own conditions happened to resolve, and hands back the deterministic,
+/// kind-ordered result. This is what `content_area`'s `ProjectBoard` arm
+/// renders; it never calls a `*_lines` function directly (grepped — the only
+/// remaining callers of those are the tests each notice's own RFC already
+/// wrote, which this migration's whole acceptance is that it does not have
+/// to touch).
 fn project_board_notifications(state: &State) -> Vec<Notification> {
     let mut notifications = project_board_audit_notifications(state);
     notifications.extend(project_board_configuration_notifications(state));
     notifications.extend(project_board_recent_projects_reset_notifications(state));
     notifications.extend(project_board_transcript_cleanup_notifications(state));
     notifications.extend(project_board_run_record_notifications(state));
+    notifications.extend(project_board_interface_scale_notifications(state));
     ordered_by_kind(notifications)
 }
 
@@ -9998,6 +10128,26 @@ fn project_board_run_record_notifications(state: &State) -> Vec<Notification> {
         ));
     }
     notifications
+}
+
+/// RFC-076 D1, review 659's own required item: the one visible trace of a
+/// failed `interface-scale.json` write. Read fresh from
+/// `state.interface_scale_save_failed` every call -- the next successful
+/// save clears the flag, so this disappears the moment the problem does,
+/// never held past the condition it names. `WhileConditionHolds` is the
+/// honest tag for exactly that reason.
+fn project_board_interface_scale_notifications(state: &State) -> Vec<Notification> {
+    if !state.interface_scale_save_failed {
+        return Vec::new();
+    }
+    vec![Notification {
+        scope: None,
+        kind: NotificationKind::InterfaceScalePersistenceFailed,
+        text: state
+            .catalog
+            .get("project-board-interface-scale-save-failed"),
+        lifetime: NotificationLifetime::WhileConditionHolds,
+    }]
 }
 
 #[cfg(test)]

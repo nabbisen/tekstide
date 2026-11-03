@@ -579,6 +579,12 @@ fn advertised_bindings_are_exactly_the_live_ones() {
             "Ctrl+Alt+F",
             "Ctrl+Shift+S",
             "Ctrl+Alt+V",
+            "Ctrl+Alt+1",
+            "Ctrl+Alt+2",
+            "Ctrl+Alt+3",
+            "Ctrl+Alt+4",
+            "Ctrl+Alt+5",
+            "Ctrl+Alt+0",
         ],
     );
 
@@ -771,8 +777,8 @@ fn every_advertised_chord_round_trips() {
         checked += 1;
     }
     assert_eq!(
-        checked, 21,
-        "twenty-one chords are held (twenty bound, one reserved)"
+        checked, 27,
+        "twenty-seven chords are held (twenty-six bound, one reserved)"
     );
 }
 
@@ -860,11 +866,17 @@ fn every_action_has_one_config_name_and_the_list_matches_the_policy() {
             NavigationAction::from_config_name(action.config_name()),
             Some(action)
         );
+        // RFC-076 D1: the first config names to carry a digit at all --
+        // `set_interface_scale_to_step_1` through `_5`, matching the
+        // `Ctrl+Alt+<digit>` chords they bind by construction. Widened
+        // from lowercase-and-underscore-only deliberately, not
+        // overlooked: every other action name predates a reason to need
+        // one.
         assert!(
             action
                 .config_name()
                 .chars()
-                .all(|c| c.is_ascii_lowercase() || c == '_'),
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "{}",
             action.config_name()
         );
@@ -1050,4 +1062,60 @@ fn refusing_one_rebind_can_refuse_another_and_the_result_never_holds_a_duplicate
             assert!(seen.insert(chord.to_owned()), "{chord} reaches two actions");
         }
     }
+}
+
+/// RFC-076 D1, PR-076-B: the six `Ctrl+Alt+<digit>` additions, pinned and
+/// checked for collisions the same mechanical way every other rule's own
+/// test above is -- not by inspection alone, the lesson this file's own
+/// history (`open_audit_view_shortcut_is_a_candidate_that_collides_with_no_other_rule`
+/// and its siblings) already established.
+#[test]
+fn interface_scale_shortcuts_are_candidates_that_collide_with_no_other_rule() {
+    let policy = KeybindingPolicy::linux_mvp();
+    let expected = [
+        (NavigationAction::SetInterfaceScaleToStep1, "Ctrl+Alt+1"),
+        (NavigationAction::SetInterfaceScaleToStep2, "Ctrl+Alt+2"),
+        (NavigationAction::SetInterfaceScaleToStep3, "Ctrl+Alt+3"),
+        (NavigationAction::SetInterfaceScaleToStep4, "Ctrl+Alt+4"),
+        (NavigationAction::SetInterfaceScaleToStep5, "Ctrl+Alt+5"),
+        (NavigationAction::ResetInterfaceScale, "Ctrl+Alt+0"),
+    ];
+    for (action, default_chord) in expected {
+        let rule = policy
+            .rule_for(action)
+            .unwrap_or_else(|| panic!("{action:?} should have a keyboard policy"));
+        assert_eq!(rule.default_binding(), Some(default_chord));
+        assert_eq!(rule.status(), KeybindingStatus::Bound);
+
+        let collisions: Vec<NavigationAction> = policy
+            .rules
+            .iter()
+            .filter(|other| other.action != action)
+            .filter(|other| other.default_binding() == rule.default_binding())
+            .map(|other| other.action)
+            .collect();
+        assert!(
+            collisions.is_empty(),
+            "{default_chord} must not collide with any other rule, reserved or not: {collisions:?}"
+        );
+    }
+}
+
+/// RFC-076 D1: the chord grammar's own refusal of `=`/`-` is why the
+/// instruction's first draft was withdrawn -- pinned here, directly
+/// against the real parser, rather than only asserted in a comment.
+/// `Ctrl+0` alone would parse (a digit is a legal key); `Ctrl+=` and
+/// `Ctrl+-` do not, which is what makes the set as a whole inexpressible,
+/// not merely two-thirds of it.
+#[test]
+fn the_withdrawn_plus_minus_zero_chords_confirm_why_they_were_withdrawn() {
+    assert!(Chord::parse("Ctrl+0").is_ok());
+    assert!(matches!(
+        Chord::parse("Ctrl+="),
+        Err(ChordError::KeyNotRebindable)
+    ));
+    assert!(matches!(
+        Chord::parse("Ctrl+-"),
+        Err(ChordError::KeyNotRebindable)
+    ));
 }

@@ -128,13 +128,47 @@ pub enum NavigationAction {
     /// is a surface that shows what happened across every project, so
     /// requiring one to already be open would contradict it.
     OpenAuditView,
+    /// RFC-076 D1, PR-076-B: sets the whole-UI scale factor to
+    /// `tekstide_core::interface_scale::INTERFACE_SCALE_STEPS[0]`
+    /// (smallest) -- one of five absolute-step actions, `SetInterfaceScale
+    /// ToStep2` through `SetInterfaceScaleToStep5` below it. Absolute, not
+    /// relative: this is "the interface is now exactly this size," never
+    /// "one notch smaller than whatever it was," which is what makes the
+    /// set bounded and enumerated by construction (D1) rather than by a
+    /// clamp on a repeatable `+`/`-` accumulator -- the original chords
+    /// `Ctrl+=`/`Ctrl+-` the RFC first specified would have needed.
+    SetInterfaceScaleToStep1,
+    /// The second step -- `tekstide_core::interface_scale::
+    /// INTERFACE_SCALE_STEPS[1]`, which is also [`tekstide_core::
+    /// interface_scale::INTERFACE_SCALE_RESET`]'s own value today. A
+    /// distinct action from `ResetInterfaceScale` even so: see that
+    /// action's own doc comment for why the two are not the same thing
+    /// wearing two names.
+    SetInterfaceScaleToStep2,
+    /// The third step -- `tekstide_core::interface_scale::
+    /// INTERFACE_SCALE_STEPS[2]`.
+    SetInterfaceScaleToStep3,
+    /// The fourth step -- `tekstide_core::interface_scale::
+    /// INTERFACE_SCALE_STEPS[3]`.
+    SetInterfaceScaleToStep4,
+    /// The fifth and largest step -- `tekstide_core::interface_scale::
+    /// INTERFACE_SCALE_STEPS[4]`.
+    SetInterfaceScaleToStep5,
+    /// RFC-076 D1: resets the scale to exactly `tekstide_core::
+    /// interface_scale::INTERFACE_SCALE_RESET` (`1.0`) -- not "jump to
+    /// step 2," even though the two coincide today. A fixed escape hatch
+    /// independent of the step table, the same way `Ctrl+0` resets zoom
+    /// to "100%" in a browser regardless of which preset the zoom menu
+    /// currently shows, so a future change to the step values can never
+    /// silently change what this chord does.
+    ResetInterfaceScale,
 }
 
 impl NavigationAction {
     /// Every action, in declaration order. `config_name` is an exhaustive match,
     /// so adding an action without a name does not compile; a test holds this
     /// list to the policy so adding one without a rule does not pass.
-    pub const ALL: [NavigationAction; 23] = [
+    pub const ALL: [NavigationAction; 29] = [
         Self::OpenProjectBoard,
         Self::OpenProjectEntryField,
         Self::SwitchActiveProject,
@@ -158,6 +192,12 @@ impl NavigationAction {
         Self::SwitchActiveDocument,
         Self::SaveAllDocuments,
         Self::OpenAuditView,
+        Self::SetInterfaceScaleToStep1,
+        Self::SetInterfaceScaleToStep2,
+        Self::SetInterfaceScaleToStep3,
+        Self::SetInterfaceScaleToStep4,
+        Self::SetInterfaceScaleToStep5,
+        Self::ResetInterfaceScale,
     ];
 
     /// The key a `[keybindings]` entry uses for this action: the identifier in
@@ -188,6 +228,12 @@ impl NavigationAction {
             Self::SwitchActiveDocument => "switch_active_document",
             Self::SaveAllDocuments => "save_all_documents",
             Self::OpenAuditView => "open_audit_view",
+            Self::SetInterfaceScaleToStep1 => "set_interface_scale_to_step_1",
+            Self::SetInterfaceScaleToStep2 => "set_interface_scale_to_step_2",
+            Self::SetInterfaceScaleToStep3 => "set_interface_scale_to_step_3",
+            Self::SetInterfaceScaleToStep4 => "set_interface_scale_to_step_4",
+            Self::SetInterfaceScaleToStep5 => "set_interface_scale_to_step_5",
+            Self::ResetInterfaceScale => "reset_interface_scale",
         }
     }
 
@@ -583,6 +629,36 @@ impl KeybindingPolicy {
                 // `open_audit_view_shortcut_is_a_candidate_that_collides_with_no_other_rule`,
                 // not by inspection alone).
                 KeybindingRule::bound(NavigationAction::OpenAuditView, "Ctrl+Alt+V"),
+                // RFC-076 D1, PR-076-B: the instruction's own first draft
+                // named `Ctrl+=`/`Ctrl+-`/`Ctrl+0` -- withdrawn before
+                // landing, because two of the three cannot be expressed:
+                // `chord.rs`'s own grammar refuses any key that is not
+                // `is_ascii_alphanumeric()`, and widening it to admit `=`/
+                // `-` would reintroduce the exact failure `chord.rs`'s own
+                // `No Shift with a digit` rule already refuses for `=` and
+                // `-`'s own reason -- both sit elsewhere, or behind
+                // `Shift`, on AZERTY and QWERTZ, so a chord spelled with
+                // either would silently never match on those layouts.
+                // `Ctrl+Alt+1` through `Ctrl+Alt+5` instead: digits are
+                // layout-stable unshifted on every Latin layout, which is
+                // the whole reason to prefer them here, and every
+                // `Ctrl+Alt+<digit>` was free -- unclaimed by any
+                // `Ctrl+Alt+<letter>` rule above and not `Ctrl+Shift+P`'s
+                // `Reserved` command-palette binding, so none collides
+                // with anything else here (checked mechanically by
+                // `interface_scale_shortcuts_are_candidates_that_collide_with_no_other_rule`,
+                // not by inspection alone).
+                KeybindingRule::bound(NavigationAction::SetInterfaceScaleToStep1, "Ctrl+Alt+1"),
+                KeybindingRule::bound(NavigationAction::SetInterfaceScaleToStep2, "Ctrl+Alt+2"),
+                KeybindingRule::bound(NavigationAction::SetInterfaceScaleToStep3, "Ctrl+Alt+3"),
+                KeybindingRule::bound(NavigationAction::SetInterfaceScaleToStep4, "Ctrl+Alt+4"),
+                KeybindingRule::bound(NavigationAction::SetInterfaceScaleToStep5, "Ctrl+Alt+5"),
+                // `Ctrl+Alt+0`: the reset, following the same digit shape
+                // as the five steps above -- `0` is the one digit none of
+                // them claims, and not `Ctrl+Shift+P`'s `Reserved`
+                // binding either, so it collides with nothing (checked
+                // mechanically by the same test named above).
+                KeybindingRule::bound(NavigationAction::ResetInterfaceScale, "Ctrl+Alt+0"),
             ],
         }
     }

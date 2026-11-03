@@ -53,6 +53,7 @@ fn state_with_configuration(
         configuration,
         None,
         None,
+        tekstide_core::interface_scale::INTERFACE_SCALE_RESET,
     )
 }
 
@@ -12301,8 +12302,163 @@ fn opening_help_through_a_real_key_event_shows_every_live_binding() {
     );
     assert_eq!(
         lines.len(),
-        20,
+        26,
         "the Help modal's own data source must list every live binding, Ctrl+Alt+K included"
+    );
+}
+
+// RFC-076 D1, PR-076-B: the whole-UI scale, through the real key-press pipeline.
+
+fn press_interface_scale_action(
+    state: &mut State,
+    action: tekstide_core::navigation::NavigationAction,
+) {
+    let shell_input = crate::input::shell_input_for_test(action);
+    let _ = super::update(
+        state,
+        Message::Input(crate::input::RoutedInput::Shell(shell_input)),
+    );
+}
+
+/// Each of the five step chords sets `state.interface_scale` to exactly
+/// its own entry in `INTERFACE_SCALE_STEPS` -- real dispatch through
+/// `update`, not `set_interface_scale` called directly, the same
+/// "proof of reachability" discipline `press_trust_settings_action`'s
+/// own doc comment names. Pressing step 3 then step 1 proves the value
+/// is absolute, not relative: it lands on step 1's own number, never on
+/// "one step down from step 3."
+#[test]
+fn each_scale_step_chord_sets_the_scale_to_exactly_that_step() {
+    use tekstide_core::interface_scale::INTERFACE_SCALE_STEPS;
+    use tekstide_core::navigation::NavigationAction;
+
+    let mut state = state_with(ApplicationShell::new());
+    assert_eq!(
+        state.interface_scale(),
+        tekstide_core::interface_scale::INTERFACE_SCALE_RESET,
+        "test precondition: boots at the reset value with no saved state"
+    );
+
+    let steps = [
+        (
+            NavigationAction::SetInterfaceScaleToStep1,
+            INTERFACE_SCALE_STEPS[0],
+        ),
+        (
+            NavigationAction::SetInterfaceScaleToStep2,
+            INTERFACE_SCALE_STEPS[1],
+        ),
+        (
+            NavigationAction::SetInterfaceScaleToStep3,
+            INTERFACE_SCALE_STEPS[2],
+        ),
+        (
+            NavigationAction::SetInterfaceScaleToStep4,
+            INTERFACE_SCALE_STEPS[3],
+        ),
+        (
+            NavigationAction::SetInterfaceScaleToStep5,
+            INTERFACE_SCALE_STEPS[4],
+        ),
+    ];
+    for (action, expected) in steps {
+        press_interface_scale_action(&mut state, action);
+        assert_eq!(state.interface_scale(), expected, "{action:?}");
+    }
+
+    // Absolute, not relative: landing on step 1 after step 5 proves this
+    // is not "one notch down from wherever it was."
+    press_interface_scale_action(&mut state, NavigationAction::SetInterfaceScaleToStep1);
+    assert_eq!(state.interface_scale(), INTERFACE_SCALE_STEPS[0]);
+}
+
+/// `Ctrl+Alt+0` resets to exactly `INTERFACE_SCALE_RESET`, independent
+/// of which step was last pressed -- not "jump to step 2," even though
+/// the two coincide today (`INTERFACE_SCALE_STEPS[1] ==
+/// INTERFACE_SCALE_RESET`). Pressed from the largest step, the one
+/// furthest from the default, so a bug that reset to "whichever step is
+/// closest" rather than the fixed value would be caught.
+#[test]
+fn reset_action_returns_to_exactly_1_0_from_the_largest_step() {
+    use tekstide_core::interface_scale::{INTERFACE_SCALE_RESET, INTERFACE_SCALE_STEPS};
+    use tekstide_core::navigation::NavigationAction;
+
+    let mut state = state_with(ApplicationShell::new());
+    press_interface_scale_action(&mut state, NavigationAction::SetInterfaceScaleToStep5);
+    assert_eq!(state.interface_scale(), INTERFACE_SCALE_STEPS[4]);
+
+    press_interface_scale_action(&mut state, NavigationAction::ResetInterfaceScale);
+    assert_eq!(state.interface_scale(), INTERFACE_SCALE_RESET);
+}
+
+/// D5: the scale persists across a reboot of `State`, through the real
+/// save/load pair, in an isolated state directory -- `resolve_agent_
+/// run_state_dir`'s own test-mode body (`set_interface_scale`'s doc
+/// comment explains why it was reused rather than a fresh resolution).
+/// **Never `config.toml`**: nothing here touches `ConfigurationState`
+/// at all, which is the structural half of that guarantee -- there is
+/// no code path from a scale action to a configuration write for a
+/// test to even exercise the absence of.
+#[test]
+fn the_scale_persists_across_a_reboot_through_the_isolated_test_state_dir() {
+    use tekstide_core::interface_scale::INTERFACE_SCALE_STEPS;
+    use tekstide_core::navigation::NavigationAction;
+
+    let mut state = state_with(ApplicationShell::new());
+    press_interface_scale_action(&mut state, NavigationAction::SetInterfaceScaleToStep4);
+    assert_eq!(state.interface_scale(), INTERFACE_SCALE_STEPS[3]);
+
+    let state_dir = resolve_agent_run_state_dir().expect("the test-mode state dir should resolve");
+    let reloaded = tekstide_core::interface_scale::load_interface_scale(&state_dir);
+    assert_eq!(
+        reloaded, INTERFACE_SCALE_STEPS[3],
+        "a fresh load from the same (isolated, test-mode) state dir must see what was just saved"
+    );
+}
+
+/// RFC-076 D1, review 659's own required design item: a save failure is
+/// no longer invisible. Forced through the real `fs::write`/`fs::rename`
+/// failure path -- a read-only state directory, the same technique
+/// `a_failed_quarantine_withholds_every_save_for_the_session` already
+/// uses for `recent-projects.json` -- not a hand-set flag, so this
+/// proves the real writer sets `interface_scale_save_failed`, never
+/// only that the producer reads it correctly once set. Clears the
+/// instant a later press succeeds, the property that makes
+/// `WhileConditionHolds` the honest tag rather than
+/// `ForTheStartItHappened`.
+#[test]
+fn a_save_failure_shows_a_notice_that_clears_on_the_next_successful_save() {
+    use tekstide_core::navigation::NavigationAction;
+
+    let mut state = state_with(ApplicationShell::new());
+    let state_dir = resolve_agent_run_state_dir().expect("the test-mode state dir should resolve");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    let mut permissions = std::fs::metadata(&state_dir).unwrap().permissions();
+    permissions.set_mode(0o500);
+    std::fs::set_permissions(&state_dir, permissions).unwrap();
+
+    press_interface_scale_action(&mut state, NavigationAction::SetInterfaceScaleToStep5);
+
+    assert!(
+        super::project_board_notifications(&state)
+            .iter()
+            .any(|notification| notification.kind
+                == super::NotificationKind::InterfaceScalePersistenceFailed),
+        "a write that could not happen must say so, not stay silent"
+    );
+
+    let mut permissions = std::fs::metadata(&state_dir).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&state_dir, permissions).unwrap();
+
+    press_interface_scale_action(&mut state, NavigationAction::SetInterfaceScaleToStep1);
+
+    assert!(
+        !super::project_board_notifications(&state)
+            .iter()
+            .any(|notification| notification.kind
+                == super::NotificationKind::InterfaceScalePersistenceFailed),
+        "a later successful save clears the notice -- it is never held past the condition it names"
     );
 }
 
@@ -13136,6 +13292,7 @@ fn a_cli_launched_second_attempt_at_a_locked_project_sets_the_real_board_notice(
         ConfigurationState::unconfigured(),
         None,
         Some(blocked),
+        tekstide_core::interface_scale::INTERFACE_SCALE_RESET,
     );
 
     let lines = project_board_lines(&state);
@@ -22189,6 +22346,7 @@ fn state_holds_the_instance_marker_for_its_whole_lifetime_so_a_normal_exit_remov
         ConfigurationState::unconfigured(),
         Some(startup.marker),
         None,
+        tekstide_core::interface_scale::INTERFACE_SCALE_RESET,
     );
     assert!(
         marker_path.is_file(),

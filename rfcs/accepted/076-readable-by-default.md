@@ -28,6 +28,10 @@ Three findings, measured against the code rather than impressions:
    16.0, status 13.0 (`appearance.rs:270-272`), against `MAX_FONT_SIZE_PX = 32.0`. The heading is
    2 px larger than body, so the hierarchy reads as emphasis rather than structure, and the status
    bar — which carries the state a reader most needs — is the smallest text in the product.
+   **True of the pre-change state, named precisely rather than left to teach the wrong lesson**:
+   D2's own dated amendment below found the actual defect was that 13 px is too small to read
+   comfortably, an absolute problem, not the relative one this finding states — see that
+   amendment for the correction and why it changed D2's own numbers.
 3. **There is no way to change text size without editing a file.** I grepped the navigation
    actions and the shell for `Zoom`, `scale_factor` and any equivalent: **there is none.** The only
    path is `config.toml` plus `Ctrl+Alt+C`.
@@ -46,6 +50,18 @@ A single user-facing scale, bound to `Ctrl+=` / `Ctrl+-` / `Ctrl+0`, implemented
 `iced::application::Application::scale_factor` (present in the pinned `iced 0.14.0`,
 `application.rs:410`/`:518`).
 
+**Amended 2026-11-04, dated, not a silent edit: `Ctrl+=`/`Ctrl+-`/`Ctrl+0`, withdrawn before
+landing.** `chord.rs`'s own grammar refuses any key that is not `is_ascii_alphanumeric()` --
+`Ctrl+0` parses, `Ctrl+=` and `Ctrl+-` do not, and widening the grammar to admit them would
+reintroduce the exact failure it already refuses `Shift`+digit for: `=` and `-` sit elsewhere, or
+behind `Shift`, on AZERTY and QWERTZ, so a chord spelled with either would silently never match on
+those layouts, in a feature whose whole purpose is reaching a user who is struggling. Replaced
+with six absolute steps instead of a relative accumulator: `Ctrl+Alt+1` through `Ctrl+Alt+5` set
+the scale to exactly one of five fixed sizes (smallest to largest), and `Ctrl+Alt+0` resets to
+exactly `1.0`, independent of which step was last pressed. Digits are layout-stable unshifted on
+every Latin layout, which is the whole reason to prefer them; "bounded, enumerated set" (below) is
+satisfied by construction this way, not by clamping a repeatable `+`/`-` press.
+
 **Why the whole UI rather than text only.** Scaling text alone leaves buttons, hit targets, focus
 rings and spacing at their original size — which is the wrong half for a reader who also has
 reduced precision. `scale_factor` scales layout with the type, so the control a user has to hit
@@ -62,6 +78,16 @@ them. `NFR-UX-004`'s configurability is unaffected.
   measures a 26-row window of a 10 000-row tree against a frame budget, and row count is a function
   of scale. Any test that asserts a row count or a frame cost must state the scale it assumes, or
   it will drift the first time the default changes.
+  **Checked at implementation time, PR-076-B, and found imprecise in the same way D2's own
+  "smallest text" finding was**: row count is a function of font size, not of `scale_factor`
+  directly. `iced`'s own layout runs entirely in logical pixels (`iced_core::window::Settings`'s
+  own doc: *"the initial **logical** dimensions"*) -- `scale_factor` governs only the
+  logical-to-physical conversion at the windowing boundary, never the layout math itself, so a
+  live-measured viewport (`state.explorer_viewport`, re-measured by `iced` on every relayout,
+  scale changes included) and a logical font size stay mutually consistent at any scale with no
+  code change. The frame-cost test itself passes a hardcoded viewport height directly, never
+  constructs a `State` or a scale factor at all, so it is untouched by this feature by
+  construction, not by a state-the-scale discipline this amendment first expected to need.
 
 ### D2. Raise the defaults: body 16, status 16, heading 20
 

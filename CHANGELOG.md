@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Added — PR-076-B (RFC-076 D1): a whole-UI scale factor, five fixed steps and a reset
+
+`Ctrl+Alt+1` through `Ctrl+Alt+5` set the interface — not only text, but buttons, focus rings and
+spacing with it — to exactly one of five absolute sizes (`0.9`/`1.0`/`1.15`/`1.3`/`1.5`, smallest
+to largest); `Ctrl+Alt+0` resets to exactly `1.0`, independent of which step was last pressed. All
+six are real, rebindable navigation actions (`configuration.md`'s own table lists them), and go
+through `iced::application::Application::scale_factor` — the pinned `iced 0.14.0`'s own
+whole-layout mechanism, not a multiplier on the three font-size keys, so hit targets grow with the
+type a reader needs larger. The window itself is never resized; a scale change alters how much
+fits inside the one you already have.
+
+**The RFC's own first draft specified `Ctrl+=`/`Ctrl+-`/`Ctrl+0`, and two of the three cannot be
+expressed.** `chord.rs`'s own grammar refuses any key that is not alphanumeric — admitting `=`/`-`
+would reintroduce the exact failure the grammar already refuses `Shift`+digit for (`=`/`-` sit
+elsewhere, or behind `Shift`, on AZERTY and QWERTZ, so either would silently never match on those
+layouts). Withdrawn before landing, dated in the accepted RFC rather than silently corrected,
+replaced with digit-keyed absolute steps instead — layout-stable on every Latin layout, and
+"bounded, enumerated" by construction (one key is one size) rather than by clamping a relative
+accumulator.
+
+**Persisted outside `config.toml` (D5)**: a new `interface-scale.json` under the state directory,
+written only once a scale chord is pressed, never on an ordinary launch — `local-data-and-
+privacy.md` names the path. A hand-set `config.toml` font size stays the starting value the scale
+multiplies from; nothing here rewrites a file a user hand-edited.
+
+**Checked, not assumed: `scale_factor` does not interact with this project's own existing
+row-count/frame-cost measurements at all.** `iced`'s layout runs entirely in logical pixels;
+`scale_factor` governs only the logical-to-physical conversion at the windowing boundary. The
+explorer's own frame-cost test passes a hardcoded viewport height directly and never constructs a
+scale factor, so it is untouched by construction — see RFC-076 D1's own dated amendment for the
+full account, including where the RFC's own original concern about this was itself imprecise.
+
 ### Changed — PR-076-A (RFC-076 D2): the three default font sizes are raised — body 16, heading 20, status 16
 
 From 14.0/16.0/13.0. The amendment RFC-076's own acceptance carries to external design §4.2 (that

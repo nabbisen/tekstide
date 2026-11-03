@@ -40,7 +40,15 @@ find it with three characters changed rather than inside a new feature.
 
 ## PR-076-B — D1: one scale factor
 
-**Deliverable**: a user-facing scale bound to `Ctrl+=` / `Ctrl+-` / `Ctrl+0`, applied through
+**Amended at implementation time, dated rather than silently corrected: `Ctrl+=`/`Ctrl+-` cannot
+be expressed.** `chord.rs`'s own grammar refuses any key that is not `is_ascii_alphanumeric()` --
+`Ctrl+0` parses, `Ctrl+=`/`Ctrl+-` do not, and admitting them would reintroduce the exact failure
+the grammar already refuses `Shift`+digit for (both sit elsewhere, or behind `Shift`, on AZERTY
+and QWERTZ). See RFC-076's own D1 for the full account; this plan's own "three new navigation
+actions" below is also superseded by that amendment -- six, not three.
+
+**Deliverable**: a user-facing scale bound to `Ctrl+Alt+1` through `Ctrl+Alt+5` (five absolute
+steps, smallest to largest) and `Ctrl+Alt+0` (reset to exactly `1.0`), applied through
 `iced::application::Application::scale_factor` (present in the pinned `iced 0.14.0` —
 `application.rs:410` is the builder, `:518` the trait method).
 
@@ -54,9 +62,9 @@ implement this by multiplying the three font sizes.
    scale change alters what fits inside the window, never the window.
 2. **A bounded, enumerated set of steps**, not free zoom — and state the set. An unbounded
    multiplier interacts with `MAX_FONT_SIZE_PX` in ways nobody has reasoned about.
-3. **`Ctrl+0` returns to 1.0**, exactly, not to "approximately the default".
-4. **Three new navigation actions**, named and rebindable like every other, which means
-   `configuration.md`'s rebindable-action list and
+3. **`Ctrl+Alt+0` returns to 1.0**, exactly, not to "approximately the default".
+4. **Six new navigation actions** (five steps plus reset, not three), named and rebindable like
+   every other, which means `configuration.md`'s rebindable-action list and
    `rfc_docs_invariants::the_configuration_page_lists_every_rebindable_action_with_its_default_chord`
    both apply. That test is why the chords are part of this slice and not an afterthought.
 5. **Persistence per D5: state, never `config.toml`.** The app must not rewrite a file the user

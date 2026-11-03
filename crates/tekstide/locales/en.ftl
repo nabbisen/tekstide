@@ -375,6 +375,11 @@ project-board-run-record-left-in-place = { $count ->
     [one] { $count } agent run record could not be read, and could not be renamed either. It stays where it was, and its run is listed as a transcript with no run.
    *[other] { $count } agent run records could not be read, and could not be renamed either. They stay where they were, and their runs are listed as transcripts with no run.
 }
+# RFC-076 D1, review 659's own required item: the scale still applies on
+# screen either way -- this names only that the next launch will not start
+# from it, so a reader who deliberately set the scale knows to try again
+# rather than conclude they imagined pressing the chord.
+project-board-interface-scale-save-failed = Interface scale: the last change could not be saved. It is still in effect now, but the next launch will start from the previous one. Try the chord again.
 project-board-configuration-ignored = Configuration: ignored, defaults in force. The problem is at { $key }.
 # RFC-058 D8/D9, corrected RFC-028 review 603: a second attempt to open a
 # project another live Tekstide process already holds. Deliberately
@@ -1461,6 +1466,12 @@ keyboard-help-switch-active-project = Switch to the next open project
 keyboard-help-switch-active-document = Switch to the next open document
 keyboard-help-save-all-documents = Save every open document
 keyboard-help-open-audit-view = Audit View: every recorded event, filterable and paged
+keyboard-help-set-interface-scale-to-step-1 = Interface scale: smallest
+keyboard-help-set-interface-scale-to-step-2 = Interface scale: step 2
+keyboard-help-set-interface-scale-to-step-3 = Interface scale: step 3
+keyboard-help-set-interface-scale-to-step-4 = Interface scale: step 4
+keyboard-help-set-interface-scale-to-step-5 = Interface scale: largest
+keyboard-help-reset-interface-scale = Interface scale: reset to 100%
 
 # RFC-044 D2/PR-044-C: the surface-grouped section, generated from
 # `SURFACE_ACTION_ORDER`/`surface_action_entry` in `keyboard_help.rs`, not

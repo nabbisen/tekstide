@@ -7,6 +7,7 @@ pub mod command;
 pub mod config;
 pub mod content;
 pub mod domain;
+pub mod interface_scale;
 pub mod navigation;
 pub mod project;
 pub mod project_board;

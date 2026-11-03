@@ -35,6 +35,22 @@ tells you which happened: restored from the last saved copy, or reset with nothi
 **Restoring the list never restores trust.** Every restored project is re-checked against the audit
 store, and one with no recorded grant is Restricted again.
 
+## The interface scale
+
+`$XDG_STATE_HOME/tekstide/interface-scale.json`
+(`~/.local/state/tekstide/interface-scale.json` if `XDG_STATE_HOME` is unset; `~/Library/Application
+Support/tekstide/interface-scale.json` on macOS), written the first time you press one of
+[Interface scale](./configuration.md#interface-scale)'s six chords — not created on an ordinary
+launch that never touches them.
+
+It holds one number: the scale you last chose. **Never `config.toml`** — a runtime zoom is not a
+setting you hand-wrote, and this application does not rewrite a file you edited yourself. There is
+no backup copy and no recovery step for this file: if it is ever missing, unreadable, or written by
+a future version this one does not understand, the scale silently resets to 100% rather than
+refusing to start or showing an error — the control that set it is one keypress away again.
+
+There is no in-app command to clear it. Delete the file to reset it.
+
 ## The audit store
 
 `$XDG_STATE_HOME/tekstide/audit/audit.sqlite3`

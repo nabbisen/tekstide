@@ -99,6 +99,12 @@ terminal, and a dialog still swallows every key but its own.
 | `switch_active_document` | `Ctrl+Alt+F` |
 | `save_all_documents` | `Ctrl+Shift+S` |
 | `open_audit_view` | `Ctrl+Alt+V` |
+| `set_interface_scale_to_step_1` | `Ctrl+Alt+1` |
+| `set_interface_scale_to_step_2` | `Ctrl+Alt+2` |
+| `set_interface_scale_to_step_3` | `Ctrl+Alt+3` |
+| `set_interface_scale_to_step_4` | `Ctrl+Alt+4` |
+| `set_interface_scale_to_step_5` | `Ctrl+Alt+5` |
+| `reset_interface_scale` | `Ctrl+Alt+0` |
 
 **Two actions have no chord and cannot be rebound**, and neither is an oversight:
 `cycle_visible_terminal_session` (there is no handler — a new terminal becomes the one that receives
@@ -195,6 +201,24 @@ file.
 
 The word `[ui]` in an older draft of this schema is not read; its settings are `[theme]` and
 `[font]`.
+
+## Interface scale
+
+Six chords, each a fixed, absolute size rather than a step up or down from wherever the scale
+happens to be: `Ctrl+Alt+1` through `Ctrl+Alt+5` set the whole interface — not only text, but
+buttons, focus rings and spacing with it — to exactly one of five sizes, smallest to largest.
+`Ctrl+Alt+0` resets to exactly 100%, independent of which of the five you last pressed. Rebindable
+like every other action above, under the same names (`set_interface_scale_to_step_1` through
+`set_interface_scale_to_step_5`, `reset_interface_scale`).
+
+**Not a setting in this file.** The scale you choose lives in your per-user state, the same place
+the recent-projects list does — never in `config.toml` — so pressing a chord never rewrites a file
+you hand-edited. [Local data and privacy](./local-data-and-privacy.md) names the exact path. A
+`body_size`/`heading_size`/`status_size` you set above is still what the scale multiplies from —
+this is a second control on top of those, not a replacement for them.
+
+**The window itself never resizes.** A scale change alters how much fits inside the window you
+already have, not the window's own size.
 
 ## Terminal scrollback
 
