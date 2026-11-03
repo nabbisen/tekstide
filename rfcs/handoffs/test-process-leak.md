@@ -3819,3 +3819,62 @@ fallback_...` and carries no `cfg`, so it runs on both platforms. Either the nam
 chasing or the test needs a platform. Left for whoever next works in the termination/containment
 area -- the same area the reserved `P_WEXIT` successor subject already owns -- rather than decided
 here by the person who only pushed documentation.
+
+## New row, 2026-11-03 (same day, second one) -- a fourth distinct macOS test, a fourth documentation-only commit, and the pattern that matters more than the row
+
+Run `41578465407`, commit `46b7d29` -- **the commit that disclosed the previous row.** No code
+again. `macos-measurement` failed a different test:
+
+```
+project::watch::tests::a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request
+crates/tekstide-core/src/project/watch/tests.rs:877
+the change is waiting on its window
+test result: FAILED. 1167 passed; 1 failed; 10 ignored
+```
+
+**What is established.** The kernel notice arrived -- the `.recv_timeout(10s).expect("the kernel
+reports the new file")` above the failing line did not fire -- so the watcher reported the new
+file. What failed is the next step: `record_changed_paths(&paths, at)` left
+`watcher.has_pending_scans()` false, so the reported paths produced no pending scan.
+
+**Candidate mechanism, recorded as a hypothesis.** The paths were reported but not matched to the
+watched root. This file's own header already names the macOS shape that does that -- `$TMPDIR`
+reached via `/var` -> `/private/var`, which is why `watch_test_root()` canonicalizes. A notice
+carrying one spelling of the root against a watcher holding the other would drop silently in
+exactly this way. Not measured; the probe is to print the reported paths beside the watcher's own
+root on failure, which this assertion does not currently do -- *that* is the first thing to fix
+here, because a message reading "the change is waiting on its window" cannot distinguish "no
+notice" from "notice dropped".
+
+**Not D2's pinning test, checked rather than assumed.** RFC-028 D2's own scope item added
+`a_real_content_change_travels_through_record_changed_paths_to_a_scan_request` (same file, line
+1180). This is a different, create-based sibling. But it fails on the **same**
+`record_changed_paths` -> `has_pending_scans` step that the pinning test also exercises, so its
+reliability bears on the evidence for the `macos_fsevent` decision even though it is not that
+test.
+
+### The pattern, stated because four rows in one area is no longer four incidents
+
+Four **distinct** macOS tests have failed on first attempt across recent pushes, each on a
+**documentation-only** commit, each passing on a rerun of the same commit:
+
+| Commit | Test | Shape |
+| --- | --- | --- |
+| `58bb7e1` | `drawing_the_largest_tree_...fits_inside_a_frame` | wall-clock frame budget |
+| `9171c17` | `a_real_backgrounded_job_is_dead_after_a_real_close` | `P_WEXIT` cluster |
+| `57fc983` | `linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup` | a timeout asserted and not reached |
+| `46b7d29` | `a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request` | a notice reported and not matched |
+
+**A measurement caveat that matters for anyone counting this later**: `gh run list`'s own
+`conclusion` is rewritten by a rerun, so three of those four now read `success` in the visible
+history. The first-attempt failure rate is therefore **understated** by the run list, and cannot
+be recovered from it -- only from rows like these. That is an argument for writing the row every
+time, not for trusting the dashboard.
+
+**Why this is escalated rather than filed.** RFC-074's entire mechanism is that each stage is
+proven by a green gate on both platforms, with a bound that ratchets. A gate that reddens on
+documentation commits cannot prove a stage: every stage would land under a cloud of "was that red
+mine?". So macOS suite stability is now a precondition for RFC-074's staging, not a parallel
+concern -- and the reserved `P_WEXIT` successor subject is the nearest existing home for it, with
+its target already pinned to `launch.rs:1351-1366`. The decision of what runs next is the owner's;
+this row exists so it is made on the measurement rather than on the impression.
