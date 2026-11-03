@@ -542,13 +542,32 @@ fn linux_runtime_uses_sigkill_fallback_for_a_job_that_ignores_sighup() {
     runtime
         .write_input(
             &handle,
-            b"(trap '' HUP; printf 'hup-ignoring-job-started\\n'; sleep 30) &\n",
+            b"(trap '' HUP; printf 'hup-ignoring-job-started subshell-pid=%s\\n' \"$$\"; \
+              sleep 30) & printf 'backgrounded-job-table-pid=%s\\n' \"$!\"\n",
         )
         .expect("hup-ignoring background command should write to PTY");
     let output = read_until_contains(&mut runtime, &handle, b"hup-ignoring-job-started");
     assert!(
         contains_subsequence(&output, b"hup-ignoring-job-started"),
         "PTY output should contain the background-job marker; captured: {}",
+        String::from_utf8_lossy(&output)
+    );
+    // Review 657's own trap-survival probe, not an assertion: the marker
+    // above proves the subshell ran and `trap '' HUP` executed, but not
+    // that the trap still governed the *process that actually received*
+    // `SIGHUP` later. `request_terminate` signals the session leader
+    // alone; the leader's own shell is what forwards `SIGHUP` to this
+    // job's process group, tracked by `$!` in the parent's own job
+    // table -- which may or may not be the same pid the subshell reports
+    // about itself as `$$`. Printed so a failing run has both pids to
+    // compare by hand, instead of only the fact that it failed -- this
+    // register's own history already says "it has not flaked since" is
+    // worthless, and asserting a relationship between these two pids
+    // before measuring one on a real failure would be guessing, not
+    // fixing.
+    eprintln!(
+        "[trap-survival-probe] subshell-pid ($$) vs job-table-pid ($!), compare on a failing \
+         run: {}",
         String::from_utf8_lossy(&output)
     );
 

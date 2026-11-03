@@ -745,8 +745,26 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
     // truncating, then decide the lock and the truncate from one
     // `fstat`, not two separate reads that could disagree.
     let survivors = processes_in_session(session_id);
+    let session_is_empty = survivors.as_ref().is_some_and(|members| members.is_empty());
+    // Review 657: sample each survivor's own p_stat/p_flag *before* the
+    // panic below, not after -- the fifth `test-process-leak.md` cluster
+    // row found this guard firing on a non-leader survivor with no way
+    // to tell a real containment leak (review 656's own pre-registered
+    // worst case: a P_WEXIT-set pid that is genuinely still alive) from
+    // a re-enumeration race (a pid mid-proc_exit, correctly excluded by
+    // is_gone_or_going, that will finish departing on its own). Only
+    // fires on the branch that is about to panic -- a passing run has
+    // nothing to sample, and this must not itself touch the state the
+    // assertion below is about to re-describe. `report_pid_p_stat_via_
+    // sysctl` already exists (review 636/637) and already prints exactly
+    // this reading; it was simply never called from this path.
+    if !session_is_empty {
+        for &pid in survivors.as_deref().unwrap_or_default() {
+            report_pid_p_stat_via_sysctl(pid);
+        }
+    }
     assert!(
-        survivors.as_ref().is_some_and(|members| members.is_empty()),
+        session_is_empty,
         "RunningTerminal::drop's own containment sequence for session {session_id} finished, \
          but a real re-enumeration afterward still found: {survivors:?}. Possible causes, not \
          narrowed to one: a backgrounded job escaped containment \
@@ -755,7 +773,9 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
          on purpose); or a real, live survivor this enumeration has not yet excluded for some \
          other reason. State what was observed here, not which of these it is -- that \
          determination belongs in whoever reads this failure, with the actual pids and their own \
-         /proc/<pid>/stat in hand, not in this message."
+         /proc/<pid>/stat in hand, not in this message. On macOS, each survivor's own p_stat/ \
+         p_flag was logged above (review 657) -- P_WEXIT set there is this subject's own \
+         pre-registered failure mode, not yet seen."
     );
 }
 
@@ -1301,9 +1321,15 @@ fn p_stat_and_flag_via_sysctl(pid: libc::pid_t) -> Option<(u8, u32)> {
 /// does to a corpse. A `None` is reported as "could not read," never
 /// folded into one of the three readings above.
 ///
-/// `#[cfg(test)]`-only, a no-op everywhere else, the same shape every
-/// diagnostic in this file already takes.
-#[cfg(all(test, target_os = "macos"))]
+/// **Review 657: `cfg(any(test, feature = "test-support"))`, not bare
+/// `cfg(test)`.** [`assert_session_is_empty`] now calls this on every
+/// survivor before it panics, and that function has needed the broader
+/// gate since review 643 for the same reason named on its own doc
+/// comment: most real terminal launches live in the `tekstide` binary
+/// crate, which builds under `feature = "test-support"`, not this
+/// crate's own `cfg(test)`. A diagnostic reachable only from a path that
+/// is reachable in both builds has to compile in both.
+#[cfg(all(any(test, feature = "test-support"), target_os = "macos"))]
 pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t) {
     match p_stat_and_flag_via_sysctl(pid) {
         Some((p_stat, p_flag)) => {
@@ -1333,7 +1359,7 @@ pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t) {
     }
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(any(test, feature = "test-support"), not(target_os = "macos")))]
 pub(super) fn report_pid_p_stat_via_sysctl(_pid: libc::pid_t) {}
 
 /// `proc_pidinfo`'s own documented way to read a process's `p_stat`

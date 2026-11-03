@@ -876,7 +876,9 @@ fn a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request() {
     watcher.record_changed_paths(&paths, at);
     assert!(
         watcher.has_pending_scans(),
-        "the change is waiting on its window"
+        "the change is waiting on its window -- review 657: this alone cannot tell \"no notice \
+         arrived\" from \"a notice arrived and was dropped\"; reported paths: {paths:?}, watched \
+         root: {directory:?}"
     );
     assert!(
         watcher.drain_due(at).is_empty(),
