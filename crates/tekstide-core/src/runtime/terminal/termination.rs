@@ -19,38 +19,46 @@ use super::{
 /// turn the enumerate-then-signal step below into an unbounded loop.
 const MAX_SESSION_SIGNAL_ITERATIONS: usize = 256;
 
-/// Review 657 round 2: the hard ceiling on how long `wait_for_child_outcome`
-/// will keep extending past its caller's own `timeout`, while
-/// [`pid_has_committed_to_exit`] keeps answering true -- never
-/// unconditionally, which is the entire difference between this and the
-/// already-rejected "widen the timeout" fix (`test-process-leak.md`,
-/// "Standing constraint on the fix", "Reopened on macOS, 2026-10-19").
+/// Review 657 round 3: **tried, measured, and withdrawn -- not deleted,
+/// because its own history is worth more than a quiet revert.** This used
+/// to be a real 30-second ceiling (round 2); run `41598987645` is why it
+/// no longer is.
 ///
-/// **Round 1's own fixed three-second extension was the wrong shape, not
-/// just the wrong number, and the response said why rather than letting
-/// me guess harder.** The evidence this project has (reviews 625-630)
-/// establishes that a real child was still `P_WEXIT`-set at the moment a
-/// *five-second* budget expired -- the dwell outlasted the one budget
-/// this project has actually watched it against, which makes a
-/// three-second extension smaller than the thing it exists to cover. The
-/// evidence contains no duration for how much longer was needed, which
-/// is exactly the tell that a fixed duration is the wrong knob at all.
+/// **What round 2 got wrong, named precisely rather than just "too
+/// short."** Review 656 sourced `P_WEXIT` as *irreversible*: once set, a
+/// process cannot return to userspace. This extension was built on a
+/// second claim this project never sourced -- that `P_WEXIT` also implies
+/// *prompt*, i.e. that a status will shortly follow. Those are different
+/// properties, and round 2's own fix conflated them. Irreversibility is
+/// exactly what review 656's containment use needs (a pid that cannot
+/// come back may stop being counted); promptness is what this extension
+/// needed, and nothing before run `41598987645` had ever measured it.
 ///
-/// **The shape that needs no guess**: extend in the same short steps
-/// `wait_for_child_outcome`'s own 10ms poll already takes, for as long as
-/// `pid_has_committed_to_exit` keeps saying yes, up to this ceiling. The
-/// common case then costs whatever the kernel actually needs, not a
-/// fixed number; a pid that stays committed forever is still bounded.
+/// **The measurement that falsifies the second claim.** The 30-second
+/// ceiling fired twice in that one run (pids `10129` and `13520`), and
+/// [`report_committed_exit_extension`]'s own two log points -- the grant
+/// at the original deadline and the give-up thirty seconds later -- read
+/// `p_stat=2 (SRUN), p_flag=0x6006` **identically** at both ends. Thirty
+/// seconds produced no observable change, twice, in one run. A bound that
+/// is merely too short shows movement; this showed none. That is not "the
+/// ceiling needs to be bigger" -- it is "the process this was built to
+/// catch is stuck, not departing-but-slow," which no ceiling, however
+/// large, helps with.
 ///
-/// **The ceiling itself is set generously, on purpose, and that is
-/// disclosed rather than hidden.** Unlike a fixed extension, a ceiling
-/// only has to be *not too small* -- a much weaker claim than "this many
-/// seconds is enough" -- so thirty seconds is a deliberately loose
-/// starting point, not a sourced constant. [`report_committed_exit_extension`]
-/// logs every extension's own grant and resolution, so real firings
-/// supply the distribution this ceiling can be tightened against,
-/// instead of it being guessed twice.
-const COMMITTED_EXIT_EXTENSION_CEILING: Duration = Duration::from_secs(30);
+/// **So the wait is withdrawn; the measurement that caught this is not.**
+/// [`pid_has_committed_to_exit`] and [`report_committed_exit_extension`]
+/// stay -- cheap, correct, and the only reason this project knows
+/// promptness was the wrong assumption. Only the waiting is removed: this
+/// ceiling is now effectively zero (one poll step, `10ms`, the smallest
+/// value that still lets both log points fire at all, rather than a
+/// literal zero that would silently suppress the "begins" line and make
+/// the instrumentation look unused). `decide_on_timeout`'s own shape is
+/// kept, unchanged, for whatever the eventual answer turns out to be --
+/// review 657's own closing question (why a process sits runnable in
+/// `proc_exit` for tens of seconds) is a thread-level question a
+/// process-level reading cannot answer, reserved as its own subject, not
+/// carried forward here by raising this number again without evidence.
+const COMMITTED_EXIT_EXTENSION_CEILING: Duration = Duration::from_millis(10);
 
 /// The choice [`TerminalRuntime::wait_for_exit`]'s own
 /// `wait_for_child_outcome` makes once its deadline has elapsed without
@@ -77,6 +85,17 @@ pub(super) enum TimeoutDecision {
 /// past its caller's own `timeout`, re-derived by the caller every poll
 /// (`elapsed.saturating_sub(timeout)`) rather than accumulated as a
 /// separate counter -- one clock, not two that could disagree.
+///
+/// **Round 3: the extension this decides was tried, measured, and
+/// withdrawn, with the run that withdrew it on record.** Run
+/// `41598987645` found `P_WEXIT` holding *irreversibility* (review 656's
+/// own sourced claim, unchallenged) but not *promptness* (this
+/// extension's own unsourced assumption) -- the same reading, unchanged,
+/// at both ends of a real 30-second wait, twice in one run. See
+/// [`COMMITTED_EXIT_EXTENSION_CEILING`]'s own doc comment for the full
+/// account. This function's own shape is kept exactly as it was proven
+/// correct, against the day there is a reason to extend again --
+/// `committed_to_exit` alone was never wrong; waiting on it alone was.
 pub(super) fn decide_on_timeout(
     committed_to_exit: bool,
     extended_by: Duration,

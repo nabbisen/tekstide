@@ -4149,3 +4149,41 @@ from "P_WEXIT set and about to clear," which this fix's own `pid_has_committed_t
 cannot tell apart from a single reading. Whoever picks this up next should not read one more
 unchanged-ceiling run as confirmation of either answer, for the same reason "it has not flaked
 since" has never been accepted as one in this document.
+
+### Round 3, 2026-11-03 -- the open question answered by the response: irreversible is not the same claim as prompt, and the ceiling is withdrawn
+
+**The review's own finding, not mine, and it is the real one.** Review 656 sourced `P_WEXIT` as
+*irreversible* -- once set, a process cannot return to userspace -- and that claim stands,
+unchallenged, and is exactly what containment needs (a pid that cannot come back may stop being
+counted). This fix's own extension was built on a second, never-sourced claim: that `P_WEXIT` also
+implies *prompt* -- that a status will shortly follow. Those are different properties. Round 2's
+own measurement (the identical `p_stat`/`p_flag` reading at both ends of a real 30-second wait,
+on two separate pids, in one run) **falsifies promptness specifically**, not merely "the ceiling
+was too short" -- a bound that is too short shows movement; this showed none, twice. The two
+readings this document's own round-2 entry said one occurrence could not distinguish (short
+bound vs. genuine wedge) turned out to be distinguishable after all, by the unchanged-state
+evidence itself.
+
+**Disposition: the wait is withdrawn; the measurement that caught this is not.**
+`pid_has_committed_to_exit` and `report_committed_exit_extension` stay -- cheap, correct, and the
+only reason this project knows promptness was the wrong assumption. `COMMITTED_EXIT_EXTENSION_
+CEILING` drops from 30s to 10ms (one poll step -- the smallest value that still lets both log
+points fire, rather than a literal zero that would silently suppress the "begins" line).
+`decide_on_timeout`'s own shape is kept unchanged, documented as tried-measured-withdrawn with
+the run id, for whatever the eventual answer turns out to be.
+
+**Reserved, not carried forward implicitly: why does a process sit *runnable* in `proc_exit` for
+tens of seconds?** Process-level sampling (`sysctl(KERN_PROC_PID)`'s own `p_stat`/`p_flag`) has
+now said everything it can say about this -- it answered "is this pid still mid-exit," not "what
+is the thread inside that exit actually blocked on." The next measurement this would need is
+thread-level, almost certainly outside what this project's own macOS sandboxed CI access can
+reach today. **This is its own future subject, not a continuation of 657** -- do not reopen this
+row by raising the ceiling again without that measurement; raising it without evidence repeats
+exactly the mistake round 2 made with the first number.
+
+**Also reserved, named by the same response**: a `TerminationOutcome` variant meaning "committed
+to exiting, no status collected" is now evidenced (this run's own finding is the case that shows
+it exists in reality), but `TerminationOutcome` is published API and the question of whether it
+may change shape before the next release is the owner's, left open since RFC-074's own Status
+line. Proposed in the held review-request for this subject, not implemented -- see that file for
+the call sites a new variant would and would not force to change.
