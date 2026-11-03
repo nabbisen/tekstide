@@ -4081,3 +4081,36 @@ now once each per call rather than once per fixed extension, so real firings sup
 distribution the ceiling can be tightened against. The three `decide_on_timeout` tests are kept,
 with `Duration` arguments in place of the old bools, pinning the same three cases (extend, give up
 at the ceiling, give up when never committed) against the new shape.
+
+### The pushed reshape's own real macOS run (`cdfb644`, run `41597878207`) -- the extension fired for real, on a different test than the target one
+
+**`the_shell_still_exits_normally_after_the_first_wake_is_observed` passed**, `ok`, without
+triggering any extension this run -- `committed-exit-extension` appears nowhere correlated with
+it in the job log. `tekstide-core` `1172/0/9` on macOS, ignored down by one from the pre-657
+baseline of 10. **Not yet evidence the extension rescues this test's own flake window**: this run
+simply did not hit the window, which the test is already known to do roughly two runs in three.
+
+**The extension did fire, for real, on the standing `libproc-visibility measurement` diagnostic**
+(reviews 625-630's own deliberately wedged pty child, pid 14213 this run). Verbatim:
+
+```
+[committed-exit-extension] pid 14213: extension begins: P_WEXIT set, no exit status yet -- elapsed since wait started: 5.015312167s
+[committed-exit-extension] pid 14213: extension ends without a status -- elapsed since wait started: 35.005593542s
+```
+
+Granted at the original 5s deadline; ran the full 30s ceiling without a status; gave up cleanly
+(`Ok(None)`, confirmed not a hang). **This is the harder case, not the target one**: this
+diagnostic's own child is never reaped by design (its point is measuring `libproc`'s own
+blindness to it -- `proc_pidinfo`/`proc_listallpids` report `ESRCH` while `kill`/`sysctl` still
+see it alive, the same signature reviews 617-618 established), so never resolving inside 30s is
+consistent with that design, not evidence the real shell-exit case needs a longer ceiling. One
+run cannot tell the two apart. **A real, measured cost**: this diagnostic step's own runtime went
+from the old ~5s give-up to **35.71s** (`finished in 35.71s`) -- nothing failed, but the
+generosity of the ceiling has a real, now-measured price on every run that happens to exercise
+this path, not only the target one.
+
+**Verdict, stated as what it is**: the mechanism is confirmed wired correctly end to end on the
+real platform (grant, bounded extension, clean give-up, no hang) and the lifted ignore has not
+regressed. Whether the extension actually rescues the target flake is still unconfirmed -- this
+run did not produce the window to rescue. Watch for the next real occurrence rather than read this
+quiet run as proof, per this document's own standing rule for exactly this situation.
