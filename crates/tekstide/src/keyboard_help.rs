@@ -278,19 +278,39 @@ pub(crate) fn control_coverage(action: NavigationAction) -> Option<ControlCovera
              also reach an open document, since PR-065-B's dedup switches to it) is itself \
              keyboard-only with no mouse row click either. Permanent for this design.",
         )),
+        // RFC-076 PR-076-C: D4's own amendment corrected the enumeration this reason used
+        // to cite -- it predated D1's own feature. The top bar's own "Text size" button
+        // now exists (`top_bar_title_and_actions_row`), but it is a *relative* control
+        // (cycle to the next step, clamped at the largest -- response 660's own required
+        // correction, since unlike a filter cycle, text size has a direction and wrapping
+        // back to the smallest would make the control occasionally shrink the text it
+        // exists to grow) rather than six static per-step targets, so it cannot honestly
+        // claim any one of these five actions by name -- there is no literal `.on_press`
+        // dispatch of e.g. `SetInterfaceScaleToStep3` specifically for the same reason
+        // `AuditViewCycleFamilyPressed` names no one `AuditEventFamily`. `ResetInterfaceScale`
+        // is different: the control's own "Reset" button targets that exact, named value,
+        // so it moves to `VisibleControl` below instead.
         NavigationAction::SetInterfaceScaleToStep1
         | NavigationAction::SetInterfaceScaleToStep2
         | NavigationAction::SetInterfaceScaleToStep3
         | NavigationAction::SetInterfaceScaleToStep4
-        | NavigationAction::SetInterfaceScaleToStep5
-        | NavigationAction::ResetInterfaceScale => Some(ControlCoverage::KeyboardOnly(
-            "RFC-076 D1 names this a keyboard-bound scale with no visible control of its own \
-             -- D4 (visible controls for first-contact actions, its own later slice) names the \
-             handful of actions a first-time reader needs by enumeration (open a project, \
-             help, audit, settings), and a scale step is not among them. Permanent for this \
-             design, not a gap D4 is expected to close: D4's own point is that the chord stays \
-             the expert path even for the actions it does add a button to.",
+        | NavigationAction::SetInterfaceScaleToStep5 => Some(ControlCoverage::KeyboardOnly(
+            "RFC-076 PR-076-C: the top bar's own \"Text size\" button (top_bar_title_and_\
+             actions_row) reaches the interface scale visibly, but as a single relative \
+             control that advances one step at a time, clamped at the largest rather than \
+             wrapping, not six static targets -- there is no on-press dispatch that names \
+             this specific step. D4's original reasoning (that a scale step was not in its \
+             enumeration) no longer holds now that the enumeration is corrected; this \
+             exclusion stands on the control's own relative shape instead. Permanent for \
+             this design: a clamped cycle plus a separate Reset is simpler and no less \
+             discoverable than five separate buttons would be, and `ResetInterfaceScale` \
+             below is the one step worth a direct target.",
         )),
+        NavigationAction::ResetInterfaceScale => Some(ControlCoverage::VisibleControl {
+            description: "the top bar's own \"Reset\" button, beside \"Text size\" \
+                          (top_bar_title_and_actions_row, RFC-076 PR-076-C)",
+            on_press_snippet: ".on_press(Message::ResetInterfaceScaleButtonPressed)",
+        }),
         NavigationAction::CycleVisibleTerminalSession
         | NavigationAction::OpenSafeCloseDialog
         | NavigationAction::OpenCommandPalette => None,

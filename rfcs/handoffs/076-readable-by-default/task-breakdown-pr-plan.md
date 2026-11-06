@@ -84,6 +84,12 @@ D3 (default theme toward AAA — the floor stays AA and is not touched), D4 (vis
 first-contact actions, the largest of the five), D5's own doc additions beyond the one path B needs.
 And nothing about the view layout's structure: the RFC explicitly declines to propose there.
 
+**Amended 2026-11-04, dated: "the largest of the five" was wrong about D4.** PR-076-C measured it
+instead of estimating it: `control_coverage` already discharged D4's own enumerated scope (14 of
+21 coverage-table entries were already a verified visible control, including every action D4
+named), and the one real gap was a single top-bar control plus two corrected records — not the
+largest slice of the five, the smallest.
+
 ## One thing that is not yours to decide
 
 `.git-exclude/specs/tekstide-external-design-v0.md` §4.2 still authors "Default base font size:

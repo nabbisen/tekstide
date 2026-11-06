@@ -610,6 +610,8 @@ fn generic_args() -> CatalogArgs<'static> {
         .number("min", 1u32)
         .number("max", 1u32)
         .number("max_family_chars", 1u32)
+        // RFC-076 PR-076-C: `top-bar-text-size-button`'s `$percent`.
+        .number("percent", 100u32)
         // RFC-056 PR-056-D: `agent-run-report-classification-custom`'s `$label`,
         // the user's own string, so it goes through the real `quote_untrusted`.
         .untrusted(

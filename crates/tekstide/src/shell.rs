@@ -1895,6 +1895,30 @@ pub enum Message {
     /// project; this route does not). `Ctrl+Alt+V` is the accelerator;
     /// both converge on [`open_audit_view`].
     OpenAuditViewButtonPressed,
+    /// RFC-076 PR-076-C, D4's own amendment: the top bar's own real
+    /// "Text size" button -- visible without a chord, the control a
+    /// reader who cannot read the text (and so cannot discover
+    /// `Ctrl+Alt+<digit>`) can actually find. Advances
+    /// `state.interface_scale()` to the next of
+    /// [`tekstide_core::interface_scale::INTERFACE_SCALE_STEPS`],
+    /// **clamped at the largest step** (response 660's own required
+    /// correction -- unlike `AuditViewCycleFamilyPressed` below, text
+    /// size has a direction, so wrapping back to the smallest would make
+    /// the one control that exists to make text larger occasionally make
+    /// it smaller instead, right when a reader pressed it because they
+    /// could not read the screen). "Reset" is the way back to default.
+    /// Deliberately not six messages, one per
+    /// `NavigationAction::SetInterfaceScaleToStep*` -- a single relative
+    /// control, not a static per-step one, which is also why those five
+    /// actions stay `ControlCoverage::KeyboardOnly`: `control_coverage`'s
+    /// own doc comment names this.
+    CycleInterfaceScaleButtonPressed,
+    /// RFC-076 PR-076-C: the same control's own "Reset" affordance,
+    /// beside it -- unlike the cycle above, this targets one specific,
+    /// named value, the same value `NavigationAction::ResetInterfaceScale`
+    /// does, so that action's own `control_coverage` entry becomes
+    /// `VisibleControl` through this button.
+    ResetInterfaceScaleButtonPressed,
     /// RFC-059 D4: cycles the audit view's own family filter, wrapping
     /// through `None` ("All") and every `AuditEventFamily`.
     AuditViewCycleFamilyPressed,
@@ -2300,6 +2324,11 @@ fn click_message_kind(message: &Message) -> Option<ClickMessageKind> {
         // shown record's "view chain" button) -- each handler carries
         // the identical `state.modal.is_some()` guard the ten above do.
         | Message::OpenAuditViewButtonPressed
+        // RFC-076 PR-076-C: the top bar's own Text size cycle and Reset
+        // controls -- the identical `state.modal.is_some()` guard every
+        // background control above already carries.
+        | Message::CycleInterfaceScaleButtonPressed
+        | Message::ResetInterfaceScaleButtonPressed
         | Message::AuditViewCycleFamilyPressed
         | Message::AuditViewCycleOutcomePressed
         | Message::AuditViewCycleProjectPressed
@@ -3159,6 +3188,8 @@ fn update_message(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenHelpButtonPressed => open_help(state),
         Message::OpenDiffReviewButtonPressed => open_diff_review(state),
         Message::OpenAuditViewButtonPressed => open_audit_view(state),
+        Message::CycleInterfaceScaleButtonPressed => cycle_interface_scale_button_pressed(state),
+        Message::ResetInterfaceScaleButtonPressed => reset_interface_scale_button_pressed(state),
         Message::AuditViewCycleFamilyPressed => audit_view::cycle_family(state),
         Message::AuditViewCycleOutcomePressed => audit_view::cycle_outcome(state),
         Message::AuditViewCycleProjectPressed => audit_view::cycle_project(state),
@@ -6676,6 +6707,48 @@ fn set_interface_scale(state: &mut State, scale: f32) {
     state.interface_scale_save_failed = !saved;
 }
 
+/// RFC-076 PR-076-C, D4's own amendment: `Message::CycleInterfaceScaleButtonPressed`'s
+/// handler -- the top bar's own "Text size" button. Advances to the next entry of
+/// [`tekstide_core::interface_scale::INTERFACE_SCALE_STEPS`], **clamped at the largest
+/// step, never wrapping back to the smallest** (response 660's own required correction:
+/// wrapping would make the one button that exists to make text larger occasionally make it
+/// smaller instead, at the exact moment a reader pressed it because they could not read the
+/// screen -- the one population this control cannot assume will read its own label closely
+/// enough to notice). "Reset" (below) is the only way back to the default from here, which
+/// is the model a reader already has: *bigger*, and a separate, explicit *back to normal*.
+/// A scale that is not exactly one of the five steps (never true in practice -- every
+/// writer is this function or [`reset_interface_scale_button_pressed`], and both always
+/// assign one of the five constants or
+/// [`tekstide_core::interface_scale::INTERFACE_SCALE_RESET`] verbatim, never a derived
+/// float) starts at the smallest step rather than panicking on a position that does not
+/// exist.
+fn cycle_interface_scale_button_pressed(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    use tekstide_core::interface_scale::INTERFACE_SCALE_STEPS;
+    let current_index = INTERFACE_SCALE_STEPS
+        .iter()
+        .position(|&step| step == state.interface_scale());
+    let next_index = match current_index {
+        Some(index) => (index + 1).min(INTERFACE_SCALE_STEPS.len() - 1),
+        None => 0,
+    };
+    set_interface_scale(state, INTERFACE_SCALE_STEPS[next_index]);
+}
+
+/// RFC-076 PR-076-C: `Message::ResetInterfaceScaleButtonPressed`'s handler -- the same
+/// top-bar control's own "Reset" affordance, beside the cycle button above. Unlike that
+/// button, this targets one specific, named value, the same one `Ctrl+Alt+0`
+/// (`NavigationAction::ResetInterfaceScale`) does -- which is what lets that action's own
+/// `control_coverage` entry read `VisibleControl` rather than `KeyboardOnly`.
+fn reset_interface_scale_button_pressed(state: &mut State) {
+    if state.modal.is_some() {
+        return;
+    }
+    set_interface_scale(state, tekstide_core::interface_scale::INTERFACE_SCALE_RESET);
+}
+
 /// RFC-065 PR-065-D, D6: new work, not a loop around
 /// [`attempt_save_active_document`] -- unlike that function, this never auto-opens the
 /// external-change dialog for the active document specifically: with several documents in
@@ -9217,6 +9290,32 @@ fn top_bar_title_and_actions_row(state: &State) -> Element<'_, Message> {
             .size(state.theme.font_size_heading())
             .into(),
     ];
+    // RFC-076 PR-076-C, D4's own amendment: the text-size control, placed first among
+    // the action buttons -- "visible without a chord" and "reachable on the first
+    // screen" are this slice's own acceptance criteria, and a reader who cannot read
+    // the window title needs this before Trust Settings, Audit or Help.
+    let interface_scale_percent = (state.interface_scale() * 100.0).round() as i64;
+    actions.push(
+        crate::theme::button(
+            state.theme,
+            text(state.catalog.get_with_args(
+                "top-bar-text-size-button",
+                &CatalogArgs::new().number("percent", interface_scale_percent),
+            ))
+            .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::CycleInterfaceScaleButtonPressed)
+        .into(),
+    );
+    actions.push(
+        crate::theme::button(
+            state.theme,
+            text(state.catalog.get("top-bar-text-size-reset-button"))
+                .size(state.theme.font_size_body()),
+        )
+        .on_press(Message::ResetInterfaceScaleButtonPressed)
+        .into(),
+    );
     if top_bar_offers_trust_settings(state) {
         actions.push(
             crate::theme::button(

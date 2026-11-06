@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Added — PR-076-C (RFC-076 D4): a top-bar "Text size" control, re-scoped on a measurement
+
+A reader who cannot read the text cannot discover `Ctrl+Alt+<digit>` — the control that fixes it
+was keyboard-only. The top bar gains two global, always-shown buttons beside `?` and `Audit`:
+"Text size", which steps up through the five scale steps one press at a time, clamped at the
+largest rather than wrapping back to the smallest (review 660's own required correction — the one
+button that exists to make text larger must never make it smaller instead), and "Reset", which
+returns to 100% in one press from any step. Both are labelled in words, not an icon, since this is
+the one control whose audience may not resolve a small glyph. The six chords are unchanged and
+remain the faster, expert path to the same setting.
+
+**D4's own original scope was measured, not estimated, before writing anything — and most of it
+was already done.** `keyboard_help.rs`'s `control_coverage` (which verifies each claimed control
+against a real, current `.on_press` snippet in the source, mechanically) showed 14 of its 21
+coverage-table entries already a verified visible control, including every action D4 named by
+enumeration (open a project, help, audit, settings). **The one real gap was the one D4's own
+enumeration had excluded**, because it was written before D1 existed as a feature: the interface
+scale. D4's enumeration in the accepted RFC is amended, dated, to add "change text size" to the
+list of first-contact actions, and `control_coverage`'s own reason for the six scale actions is
+corrected — `ResetInterfaceScale` now reads `VisibleControl` (the new "Reset" button targets it by
+name), while the five step actions stay `KeyboardOnly`, honestly: the "Text size" button is a
+single relative cycle through all five, not five static per-step targets.
+
 ### Added — PR-076-B (RFC-076 D1): a whole-UI scale factor, five fixed steps and a reset
 
 `Ctrl+Alt+1` through `Ctrl+Alt+5` set the interface — not only text, but buttons, focus rings and

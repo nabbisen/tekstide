@@ -1004,6 +1004,18 @@ top-bar-help-button = ?
 # is app-wide, the same no-active-project-required shape `Help` already
 # has.
 top-bar-audit-button = Audit
+# RFC-076 PR-076-C, D4's own amendment: the fourth global, always-shown
+# action -- "Text size" names what it does in words, not an icon, since
+# this is the one control whose audience may not resolve a small glyph.
+# Advances through the five steps (`Ctrl+Alt+1`-`5`'s own values),
+# clamped at the largest -- response 660's own required correction:
+# wrapping back to the smallest would make this button occasionally
+# shrink the text it exists to grow, at the exact moment a reader
+# pressed it because they could not read the screen. "Reset" is its own
+# button beside it, so the one most useful jump (back to 100%) never
+# costs more than one press regardless of which step this one is on.
+top-bar-text-size-button = Text size: { $percent }%
+top-bar-text-size-reset-button = Reset
 
 # RFC-032: `ProjectOpenSurface::TrustSettings`'s own view. `$state` is a
 # compile-time literal symbol (`trust_state_symbol`), never

@@ -135,7 +135,26 @@ audit, settings) should each have a visible control, with the chord remaining th
 top bar's own `?` and `Audit` buttons are already this pattern; D4 extends it rather than inventing
 it.
 
-**Not** a menu bar, and **not** a control for all 23. Scope is first contact.
+**Amended 2026-11-04, dated, not a silent edit: the enumeration above predated D1's own feature,
+and that is the fault, not a reason to leave it standing.** The "23" figure above is itself now
+stale — PR-076-B added six more chords, and `advertised_bindings_are_exactly_the_live_ones` counts
+**26** live bindings today, not 23. PR-076-C's own measurement, against `keyboard_help.rs`'s
+`control_coverage` (checked mechanically, not by inspection: `VisibleControl`'s `on_press_snippet`
+must literally appear in the source a claimed button lives in), found D4's scope *as originally
+enumerated* already discharged — of its own 21 coverage-table entries (one shared entry covers the
+six interface-scale actions together, so 21 counts entries, not raw action variants), 14 already
+had a verified visible control, including every one of "open a project," "help," "audit,"
+"settings" by name. The real gap PR-076-C found was the one this enumeration *excluded by
+omission*: when D4 was written, D1 was not yet implemented, so there was no scale feature to
+enumerate, and the exclusion that followed from that (the six interface-scale actions were filed
+`KeyboardOnly`, citing this very list as authority) was never a considered decision — it was an
+absence this list could not have named. The corrected list: **open a project, help, audit,
+settings, and change text size.** For the population this RFC exists for, a reader who cannot read
+the text cannot discover a keyboard-only control that fixes it, which makes a visible text-size
+control not merely *a* first-contact action but the first one. PR-076-C's own top-bar "Text size"
+(cycle) and "Reset" buttons close this; see that slice's own evidence capture.
+
+**Not** a menu bar, and **not** a control for all 26 live actions. Scope is first contact.
 
 ### D5. The scale persists in state, not in the user's configuration file
 

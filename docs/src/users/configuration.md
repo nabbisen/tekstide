@@ -220,6 +220,14 @@ this is a second control on top of those, not a replacement for them.
 **The window itself never resizes.** A scale change alters how much fits inside the window you
 already have, not the window's own size.
 
+**A top-bar control reaches the same scale with no chord at all.** "Text size" steps up through
+the five sizes one press at a time, stopping at the largest rather than wrapping back to the
+smallest — the one button that exists to make text larger never makes it smaller instead. "Reset"
+beside it returns to 100% in one press regardless of which step it is on. Both are mouse-clickable
+and labelled in words, for the one population here most likely not to know the chords exist or to
+be unable to read the help that lists them. The six chords above are unaffected — they stay the
+faster, expert path to the same setting.
+
 ## Terminal scrollback
 
 `[terminal] scrollback_lines` is how many lines of history each terminal keeps above what is on

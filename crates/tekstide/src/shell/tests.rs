@@ -12416,6 +12416,75 @@ fn the_scale_persists_across_a_reboot_through_the_isolated_test_state_dir() {
     );
 }
 
+/// RFC-076 PR-076-C, response 660's own required correction: the top
+/// bar's own "Text size" button advances toward the largest step and
+/// stops there -- it must never wrap back to the smallest, which would
+/// make the one control that exists to make text larger occasionally
+/// make it smaller instead, at the exact moment a reader pressed it
+/// because they could not read the screen. Through the real dispatch
+/// path (`super::update`, not `cycle_interface_scale_button_pressed`
+/// called directly) -- `press_interface_scale_action`'s own doc comment
+/// names the reachability discipline this repeats. Presses through
+/// every step in order up to the largest, then presses once more *from*
+/// the largest -- the sequence that distinguishes clamping from
+/// wrapping, the same way `reset_action_returns_to_exactly_1_0_from_
+/// the_largest_step` was chosen to catch a nearest-step bug rather than
+/// a fixed-value one.
+#[test]
+fn the_text_size_button_clamps_at_the_largest_step_rather_than_wrapping() {
+    use tekstide_core::interface_scale::INTERFACE_SCALE_STEPS;
+
+    let mut state = state_with(ApplicationShell::new());
+    assert_eq!(
+        state.interface_scale(),
+        INTERFACE_SCALE_STEPS[1],
+        "test precondition: boots at the reset value"
+    );
+
+    let expected = [
+        INTERFACE_SCALE_STEPS[2],
+        INTERFACE_SCALE_STEPS[3],
+        INTERFACE_SCALE_STEPS[4],
+    ];
+    for (press, expected_scale) in expected.into_iter().enumerate() {
+        let _ = super::update(&mut state, Message::CycleInterfaceScaleButtonPressed);
+        assert_eq!(
+            state.interface_scale(),
+            expected_scale,
+            "press {} of 3",
+            press + 1
+        );
+    }
+
+    // Now at the largest step. One more press must not decrease the
+    // scale -- the property that distinguishes clamping from wrapping.
+    let _ = super::update(&mut state, Message::CycleInterfaceScaleButtonPressed);
+    assert_eq!(
+        state.interface_scale(),
+        INTERFACE_SCALE_STEPS[4],
+        "pressing Text size at the largest step must clamp, never wrap back to the smallest"
+    );
+}
+
+/// RFC-076 PR-076-C: the same control's own "Reset" button, through the
+/// real dispatch path -- targets exactly `INTERFACE_SCALE_RESET`
+/// regardless of which step the cycle button left the scale on,
+/// pressed from the step furthest from default for the same
+/// "nearest step" bug `reset_action_returns_to_exactly_1_0_from_the_
+/// largest_step` already guards against for the chord.
+#[test]
+fn the_reset_button_returns_to_exactly_1_0_from_the_largest_step() {
+    use tekstide_core::interface_scale::{INTERFACE_SCALE_RESET, INTERFACE_SCALE_STEPS};
+    use tekstide_core::navigation::NavigationAction;
+
+    let mut state = state_with(ApplicationShell::new());
+    press_interface_scale_action(&mut state, NavigationAction::SetInterfaceScaleToStep5);
+    assert_eq!(state.interface_scale(), INTERFACE_SCALE_STEPS[4]);
+
+    let _ = super::update(&mut state, Message::ResetInterfaceScaleButtonPressed);
+    assert_eq!(state.interface_scale(), INTERFACE_SCALE_RESET);
+}
+
 /// RFC-076 D1, review 659's own required design item: a save failure is
 /// no longer invisible. Forced through the real `fs::write`/`fs::rename`
 /// failure path -- a read-only state directory, the same technique
@@ -15457,6 +15526,8 @@ fn click_message_kind_classifies_every_real_on_press_message() {
         Message::OpenApprovalHistoryButtonPressed,
         Message::OpenTrustSettingsButtonPressed,
         Message::OpenHelpButtonPressed,
+        Message::CycleInterfaceScaleButtonPressed,
+        Message::ResetInterfaceScaleButtonPressed,
     ];
     for message in &background_controls {
         assert!(
