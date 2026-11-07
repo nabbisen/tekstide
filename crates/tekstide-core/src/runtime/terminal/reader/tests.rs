@@ -968,17 +968,18 @@ fn transcript_write_blocking_also_blocks_every_later_send() {
     // this module's own contract) until its cumulative total stops
     // growing for a sustained window -- the real stall signature, not a
     // guessed sleep duration.
-    let mut drained_total = 0_usize;
+    let mut drained_bytes: Vec<u8> = Vec::new();
     let mut stable_since = Instant::now();
     let deadline = Instant::now() + Duration::from_secs(10);
     while stable_since.elapsed() < Duration::from_millis(500) && Instant::now() < deadline {
         let drain = reader.drain_available();
         if !drain.bytes().is_empty() {
-            drained_total += drain.bytes().len();
+            drained_bytes.extend_from_slice(drain.bytes());
             stable_since = Instant::now();
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+    let drained_total = drained_bytes.len();
 
     // `FIONREAD` reports how many bytes are currently queued in the
     // FIFO's own kernel buffer *without consuming them* -- exactly "how
@@ -998,7 +999,9 @@ fn transcript_write_blocking_also_blocks_every_later_send() {
         "the channel drained {drained_total} bytes but only {written_to_transcript} bytes were \
          ever actually committed to the transcript (queued in the FIFO's own kernel buffer) -- \
          the channel must never get ahead of the transcript it is supposed to be a subset of; \
-         if it does, some byte was sent before its own write ever reached the transcript"
+         if it does, some byte was sent before its own write ever reached the transcript. \
+         Drained bytes: {}",
+        describe_drained_bytes(&drained_bytes)
     );
 
     // Cleanup: `yes` never exits on its own, so kill it first (stops
@@ -1053,6 +1056,26 @@ fn transcript_write_blocking_also_blocks_every_later_send() {
         .join()
         .expect("fifo drain thread should not panic");
     drop(dirs);
+}
+
+/// The `left: 43` instruction: a `drained_total` count alone does not
+/// say what was drained, so three macOS reds told us nothing. Escaped
+/// (via `Debug` on a lossily-decoded `&str`, so control bytes and a raw
+/// CR/LF read as `\r`/`\n` rather than silently as whitespace) and
+/// bounded, so a genuinely large drain (the `142,148`-byte ablation this
+/// file's own doc comment records) does not flood a CI log.
+fn describe_drained_bytes(bytes: &[u8]) -> String {
+    const MAX_SHOWN: usize = 4096;
+    if bytes.len() <= MAX_SHOWN {
+        format!("{:?}", String::from_utf8_lossy(bytes))
+    } else {
+        format!(
+            "{:?} ... ({} more byte(s), {} total)",
+            String::from_utf8_lossy(&bytes[..MAX_SHOWN]),
+            bytes.len() - MAX_SHOWN,
+            bytes.len()
+        )
+    }
 }
 
 /// `ioctl(fd, FIONREAD, ...)`: bytes currently queued and readable on
@@ -1306,17 +1329,19 @@ fn required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_chil
     // just the one that failed. Poll for a sustained window rather than
     // a single snapshot, so a reader that resumed reading a moment
     // later would still be caught.
-    let mut drained_total = 0_usize;
+    let mut drained_bytes: Vec<u8> = Vec::new();
     let deadline = Instant::now() + Duration::from_millis(500);
     while Instant::now() < deadline {
-        drained_total += reader.drain_available().bytes().len();
+        drained_bytes.extend_from_slice(reader.drain_available().bytes());
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(
-        drained_total, 0,
+        drained_bytes.len(),
+        0,
         "RequiredLocalBounded must stop reading entirely on capture failure -- any bytes \
          reaching the channel after CaptureFailed would be unrecorded output making it to the \
-         display, exactly what D2's ordering guarantee exists to prevent"
+         display, exactly what D2's ordering guarantee exists to prevent. Drained bytes: {}",
+        describe_drained_bytes(&drained_bytes)
     );
 
     // The child is stalled, not killed: still alive, blocked on its own
