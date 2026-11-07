@@ -313,7 +313,12 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
     let small_best = small_best.max(Duration::from_millis(1));
     let ratio = big_best.as_secs_f64() / small_best.as_secs_f64();
     assert!(
-        ratio < 8.0,
+        // TEMPORARY, deliberate: forces this assertion to fail on every
+        // platform so the load_average_report() message can be read off a
+        // real macOS runner -- the macOS-load-diagnostic instruction's own
+        // required procedure (RFC-028 D5 piece 3 precedent). Reverted in
+        // the very next commit; never land this line.
+        ratio < -1.0,
         "a capped scan's cost must not scale with the real directory's size: \
          {BREADTH_ENTRIES} entries took {ratio:.1}x as long as {SMALL_BREADTH} entries \
          ({big_best:?} vs {small_best:?}). This is a scaling assertion, not a load-sensitive \
