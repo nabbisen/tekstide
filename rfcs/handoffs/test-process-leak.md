@@ -97,6 +97,69 @@ load-average string: an instrument that reports a number without the one detail 
 it. Two rows, two reds made uninterpretable by their own messages. Worth treating as a pattern when
 writing the next measurement assertion, not as two coincidences.
 
+## 2026-11-07 -- the probe this document asked for on 2026-11-03 came back, and it found a production defect, not a flake
+
+`macos-measurement` run
+[42358814225](https://github.com/nabbisen/tekstide/actions/runs/42358814225), commit `460f78d` --
+again markdown only, again `gate` green. One failure,
+`project::watch::tests::a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request`
+(`watch/tests.rs:877`), and this time the message carries the probe the 2026-11-03 section demanded:
+
+```
+the change is waiting on its window -- review 657: this alone cannot tell "no notice arrived"
+from "a notice arrived and was dropped"; reported paths: ["/private/tmp/tci/tekfeed-real"],
+watched root: "/private/tmp/tci/tekfeed-real"
+```
+
+**The recorded candidate mechanism is refuted.** That section's hypothesis was two spellings of the
+root -- `$TMPDIR` via `/var` against the canonicalized `/private/var` -- dropping a notice silently.
+The two strings in this message are **byte-identical**. Canonicalization is not the problem.
+
+**What the message actually shows, read against the code.** The reported path **is** the watched
+directory, not a file inside it. `WatchOwner::record_changed_paths`
+(`crates/tekstide-core/src/project/watch/owner.rs:155-167`) records a notice against the reported
+path's **parent**, and only if that parent is watched:
+
+```rust
+for path in paths {
+    let Some(parent) = path.parent() else { continue; };
+    if self.scope.is_watched(parent) {
+        self.batcher.record(parent.to_path_buf(), at);
+    }
+}
+```
+
+Its own doc comment states the assumption out loud: *"a non-recursive watch reports changes in its
+own directory, so the parent of a real event is always watched."* That is **inotify's** contract --
+Linux reports `watched_dir/filename`, whose parent is the watched directory. For the reported path
+in this failure, `parent()` is `/private/tmp/tci`, which nothing watches, so the notice is dropped
+without a trace. The code is doing exactly what it says; what it says is only true on Linux.
+
+**So this is not a test-reliability row any more.** The backend is
+`notify::RecommendedWatcher` (`watch/backend.rs:44`), which on macOS is FSEvents, and FSEvents
+reports directory-granularity events and coalesces them. In production that means: **a file change
+inside a watched directory, reported at directory granularity, produces no scan request at all on
+macOS** -- the watcher silently does nothing. Shipped in `0.38.0`. The intermittency is the
+symptom, not the bug: when FSEvents happens to name the file, the path's parent is the watched
+directory and everything works; when it coalesces to the directory, the change is lost. A busy
+machine makes coalescing likelier, which is why this looked like load for four days.
+
+**A second, related hypothesis -- explicitly not confirmed.** The other `project::watch` failure in
+this window, `reading_a_watched_file_is_not_reported_but_writing_it_is` (*left: 3*, *right: 0*,
+2026-11-07, run 42357157545 attempt 2), is the mirror image: three events where none were expected.
+`WatchOwner` filters reads at `owner.rs:62` with `matches!(event.kind,
+notify::EventKind::Access(_))`, which again encodes inotify's fidelity (`IN_ACCESS`). If FSEvents
+reports a read as `Modify` or `Any` instead, that filter cannot catch it and reads become changes.
+**Not measured** -- the probe is to print the event *kinds* alongside the paths, the same way the
+path probe was added here. Recorded as a hypothesis with a named probe, not as a finding.
+
+**Priority, restated.** This outranks the `left: 43` echo row I put first an hour ago, and both
+outrank the load-average diagnostic and RFC-076 D3. It is a functional defect in a shipped
+platform's support, found because someone insisted the message print its evidence. That is the
+second time today a disclosed number turned out to carry its own answer once the content beside it
+was printed -- the first being the echo arithmetic. **Write the probe into the assertion, not into
+the review response.**
+
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
 a wall-clock view-build measurement (`suite-assumes-it-owns-the-machine.md`, item 2) asserting a
