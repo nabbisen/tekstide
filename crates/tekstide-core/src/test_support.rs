@@ -267,8 +267,71 @@ pub const SHELL_READINESS_MARKER: &[u8] = b"tek2";
 /// See [`SHELL_READINESS_PROBE_COMMAND`].
 pub const SHELL_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The macOS load-average diagnostic: a measurement assertion whose message
+/// blames load has to report the load it actually measured, or say plainly
+/// that it could not read one -- never an empty string and never a
+/// plausible-looking zero, which is exactly what `std::fs::read_to_string(
+/// "/proc/loadavg")` degraded to on macOS (no `/proc` there) and what put
+/// `drawing_the_largest_tree`'s own register row in a four-day
+/// misattributed state: every one of its five macOS occurrences printed
+/// `("")`, and nobody noticed the instrument itself was the thing broken.
+///
+/// `getloadavg(3)` rather than `/proc/loadavg` on Linux and something else
+/// on macOS: one mechanism that works on both, declared in `libc` for both
+/// (`unix/bsd/mod.rs`, which `unix/bsd/apple` shares, and `unix/linux_like`)
+/// -- a second mechanism per platform is a second thing that can silently
+/// return nothing, the exact failure mode this function exists to stop.
+/// The core count comes from `std::thread::available_parallelism`, so a
+/// caller's message can state the comparison ("load average well above
+/// core count") rather than only assert it, the second defect the
+/// `drawing_the_largest_tree` message had alongside its empty string.
+///
+/// Returns a ready-to-print fragment, never panics, and never silently
+/// loses a reading: either both numbers, or an explicit statement of
+/// which one (or both) could not be obtained.
+pub fn load_average_report() -> String {
+    let mut samples: [libc::c_double; 1] = [0.0];
+    // SAFETY: `samples` is a valid, correctly-sized buffer for `nelem = 1`,
+    // and `getloadavg` writes at most that many elements into it.
+    let obtained = unsafe { libc::getloadavg(samples.as_mut_ptr(), 1) };
+    let load = (obtained == 1).then_some(samples[0]);
+    let cores = std::thread::available_parallelism().map(usize::from).ok();
+    match (load, cores) {
+        (Some(load), Some(cores)) => {
+            format!("load average (1 min): {load:.2}, {cores} core(s)")
+        }
+        (Some(load), None) => {
+            format!("load average (1 min): {load:.2}, core count unavailable")
+        }
+        (None, Some(cores)) => format!("load average unavailable, {cores} core(s)"),
+        (None, None) => "load average and core count both unavailable".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// The real `getloadavg(3)` on this machine, not a mock -- proves the
+    /// call succeeds and the report carries an actual number, at least on
+    /// whichever platform this test runs on. Does not and cannot prove the
+    /// macOS branch returns real data from here; that is what the
+    /// deliberately-forced macOS run (quoted verbatim in the review
+    /// request) is for.
+    #[test]
+    fn load_average_report_carries_a_real_reading_on_this_machine() {
+        let report = super::load_average_report();
+        eprintln!("load_average_report(): {report}");
+        assert!(
+            !report.is_empty() && !report.contains("(\"\")"),
+            "must never be empty or the old broken format's own empty string: {report:?}"
+        );
+        assert!(
+            report.contains("core(s)"),
+            "the core count must always be stated when available (and \
+             std::thread::available_parallelism() succeeds on every platform this suite \
+             targets), not silently dropped alongside a missing load reading: {report:?}"
+        );
+    }
+
     /// Review 422: a builder that hands its path to
     /// `remove_when_this_test_ends` leaves nothing behind once the test's
     /// thread ends -- for a directory with contents, and for a bare file.

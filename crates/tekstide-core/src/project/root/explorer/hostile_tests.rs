@@ -316,7 +316,12 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
         ratio < 8.0,
         "a capped scan's cost must not scale with the real directory's size: \
          {BREADTH_ENTRIES} entries took {ratio:.1}x as long as {SMALL_BREADTH} entries \
-         ({big_best:?} vs {small_best:?})"
+         ({big_best:?} vs {small_best:?}). This is a scaling assertion, not a load-sensitive \
+         one (best-of-5 on both sides, a same-run ratio) -- but a red here was once \
+         dispositioned against load with no measurement to back it \
+         (rfcs/handoffs/test-process-leak.md, 2026-11-07), so the reading is included rather \
+         than assumed either way: {}",
+        crate::test_support::load_average_report()
     );
 }
 
