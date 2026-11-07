@@ -48,7 +48,7 @@ resulting pressure, each disclosed separately and each moved past:
 
 | `project::watch::tests::reading_a_watched_file_is_not_reported_but_writing_it_is` | **New row, 2026-11-07** — `macos-measurement`, attempt 2 of run [42357157545](https://github.com/nabbisen/tekstide/actions/runs/42357157545) (commit `d09970a`, a markdown-only commit containing no code; `gate` on Linux passed in the same attempt). Verbatim: *"assertion `left == right` failed: reads are not changes"*, *left: 3*, *right: 0* (`crates/tekstide-core/src/project/watch/tests.rs:1156`) — **three** change events reported for a watched file that was only read, where the property is that reads produce none. **Not previously on file**, on any platform. Not caused by the commit, which contains no code. Not yet investigated and deliberately **not** filed as load-sensitive: the assertion is a count of events, not a wall-clock budget, so the shape that explains this row has to explain why *extra* events appear, not why something took too long — macOS file-system notification semantics (coalescing, or an earlier setup write attributed to the read phase) is the first thing to check, and that is a platform-behaviour question rather than a timing one. Recorded as an observation with its text captured, which is all that this first occurrence supports. |
 
-| `project::root::explorer::hostile_tests::a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it` | **New row, 2026-11-07** — `macos-measurement` run [42373629865](https://github.com/nabbisen/tekstide/actions/runs/42373629865) (commit `53c0e60`, the macOS-watch-semantics narrow-rule fix; `gate` on Linux passed in the same run, and every `project::watch` test in this same run passed, including the directory-granularity fix and the both-match addition). Verbatim: *"a capped scan's cost must not scale with the real directory's size: 100000 entries took 9.8x as long as 300 entries (77.931333ms vs 7.949208ms)"* (`hostile_tests.rs:315`). **Not caused by that push**: the diff touches `project::watch`, not `project::root::explorer`, and every watch test in the same run passed. Unrelated to this subject, and the same class of load-sensitive ratio assertion `drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame`'s own row already tracks (a wall-clock measurement against a bound, on a shared macOS runner during a window this document's own recent rows already show is noisy) — not merged into that row, since it is a different test with a different bound, but recorded with the same reading rather than chased further. Disclosed and carried past, per the macOS-watch-semantics instruction's own "if `macos-measurement` reds on something unrelated, disclose it with its verbatim text and carry on." **Reviewer's correction, response 662 round 2: this row is UNEXPLAINED, not load-sensitive, and it is not the same class as `drawing_the_largest_tree`'s own row.** That row asserts an **absolute** wall-clock bound, where load crossing it is the obvious reading. This one asserts a **ratio of two best-of-5 measurements**, and its own comment (`hostile_tests.rs:283-288`) documents that design as the defence against precisely this: *"Best-of-N discards both"* directions of noise, because *"one scheduler spike on the big side trips the assertion on its own, and a spike on the small side hides a real regression."* A measurement built to be load-immune failing anyway is a stronger observation than a budget being crossed, and inheriting the budget's disposition erases it. **The small side's own number is the evidence:** `7.949208ms`, against this test's own documented expectation of *"a few hundred microseconds"* with a 1 ms floor called *"a generous margin above that"* (`hostile_tests.rs:309-312`) -- so the trivial 300-entry case ran roughly 8-20x slower than its own stated premise, and the floor never engaged. That says the runner was severely degraded. But under **uniform** degradation a ratio is preserved -- that is the entire reason to use one -- so for the ratio to reach 9.8 against a bound of 8.0 while *both* sides were inflated, the degradation must be **non-uniform**, hitting the 100 000-entry scan harder than the 300-entry one. Plausible (far more syscalls, far more page-cache pressure) and **unmeasured**. By the standard this document set earlier the same day and then applied to the reviewer's own fifth `drawing_the_largest_tree`, a load attribution requires a load measurement and this one has none: **unexplained.** The load-average diagnostic slice's scope is extended to this assertion for that reason -- every measurement assertion whose message blames load must print the load it measured, or say it could not read one. |
+| `project::root::explorer::hostile_tests::a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it` | **New row, 2026-11-07** — `macos-measurement` run [42373629865](https://github.com/nabbisen/tekstide/actions/runs/42373629865) (commit `53c0e60`, the macOS-watch-semantics narrow-rule fix; `gate` on Linux passed in the same run, and every `project::watch` test in this same run passed, including the directory-granularity fix and the both-match addition). Verbatim: *"a capped scan's cost must not scale with the real directory's size: 100000 entries took 9.8x as long as 300 entries (77.931333ms vs 7.949208ms)"* (`hostile_tests.rs:315`). **Not caused by that push**: the diff touches `project::watch`, not `project::root::explorer`, and every watch test in the same run passed. Unrelated to this subject, and the same class of load-sensitive ratio assertion `drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame`'s own row already tracks (a wall-clock measurement against a bound, on a shared macOS runner during a window this document's own recent rows already show is noisy) — not merged into that row, since it is a different test with a different bound, but recorded with the same reading rather than chased further. Disclosed and carried past, per the macOS-watch-semantics instruction's own "if `macos-measurement` reds on something unrelated, disclose it with its verbatim text and carry on." **Reviewer's correction, response 662 round 2: this row is UNEXPLAINED, not load-sensitive, and it is not the same class as `drawing_the_largest_tree`'s own row.** That row asserts an **absolute** wall-clock bound, where load crossing it is the obvious reading. This one asserts a **ratio of two best-of-5 measurements**, and its own comment (`hostile_tests.rs:283-288`) documents that design as the defence against precisely this: *"Best-of-N discards both"* directions of noise, because *"one scheduler spike on the big side trips the assertion on its own, and a spike on the small side hides a real regression."* A measurement built to be load-immune failing anyway is a stronger observation than a budget being crossed, and inheriting the budget's disposition erases it. **The small side's own number is the evidence:** `7.949208ms`, against this test's own documented expectation of *"a few hundred microseconds"* with a 1 ms floor called *"a generous margin above that"* (`hostile_tests.rs:309-312`) -- so the trivial 300-entry case ran roughly 8-20x slower than its own stated premise, and the floor never engaged. That says the runner was severely degraded. But under **uniform** degradation a ratio is preserved -- that is the entire reason to use one -- so for the ratio to reach 9.8 against a bound of 8.0 while *both* sides were inflated, the degradation must be **non-uniform**, hitting the 100 000-entry scan harder than the 300-entry one. Plausible (far more syscalls, far more page-cache pressure) and **unmeasured**. By the standard this document set earlier the same day and then applied to the reviewer's own fifth `drawing_the_largest_tree`, a load attribution requires a load measurement and this one has none: **unexplained.** The load-average diagnostic slice's scope is extended to this assertion for that reason. **Reviewer's own correction, appended immediately: the sentence that stood here said "every measurement assertion whose message blames load must print the load it measured", and that rule does not reach this assertion at all** -- its message blames nothing, it states a scaling property (*"a capped scan's cost must not scale with the real directory's size"*). Exactly one assertion message in the workspace mentions a load average, `surface/explorer/tests.rs:1005`, checked by grep. What *attributed* this failure to load was the register row above, not the test. The rule that does reach it: **an assertion the register has had to disposition against load must report the load it measured, or say it could not read one** -- the set is defined by this document's own dispositions, enumerated from it rather than guessed. See the dated section at the end of this document, which found something larger while correcting this. |
 
 ## 2026-11-07, later the same day -- the `left: 43` is the input line's own echo, and that is a mechanism, not a load story
 
@@ -288,6 +288,61 @@ finished until its CI has been read -- committed by the person who wrote the rul
 writing it. Disclosed here rather than quietly appended to the row above, because the gap in the
 record is the part worth remembering: for roughly two hours this document was missing a data point
 about the very row whose disposition it had just tightened.
+
+## 2026-11-07 -- the `drawing_the_largest_tree` row has been citing its own cure as a diagnosis since 2026-10-21
+
+Found while correcting a sentence of my own on the `hostile_tests` row above. It is the more
+important of the two.
+
+**The citation.** That row opens by filing itself as *"a load-sensitive timing budget, the same
+class as `change_review_content_view_build_cost_by_line_count_measurement` above."* Read that row
+(row 29 of the table):
+
+> **Fixed, `0.29.0`: rewritten as a paired ratio against a reference workload timed in the same
+> run, so load no longer decides it** [...] Re-confirmed closed by the test-flake-disposition pass
+> (2026-10-09): still passes, no recurrence since the fix.
+
+So the test `drawing_the_largest_tree` was filed as "the same class as" **stopped being that class
+in `0.29.0`**, by a shape change, and has not recurred since. The row cited the cure and read it as
+a diagnosis. Five occurrences later, the shape change has still not been applied to the test that
+cited it.
+
+**The project has already written the rule down, in code.** `hostile_tests.rs:283-288`:
+
+> a ratio is a *scaling* assertion, not a *budget* one (the budget lives in qa-evidence.md and the
+> measurement harness, which do use worst-of-N -- what a user can suffer)
+
+and `shell/tests.rs`'s change-review assertion says the consequence out loud:
+
+> Both sides of this ratio were measured back to back, so machine load affects them almost equally
+> -- this is a real slowdown in the view-build path, not noise.
+
+**The split this implies, which two of three rows already follow.** A *budget* -- what a user can
+suffer -- belongs in the measurement harness and `qa-evidence.md`, worst-of-N. A *suite assertion*
+belongs in a ratio measured in the same run, which load scales on both sides. `hostile_tests`
+follows it. The change-review test was converted to follow it and stopped flaking.
+`drawing_the_largest_tree` does not: it carries an **absolute** bound (80 ms debug / 8 ms release)
+in the suite, which is the shape this codebase abandoned once already for this exact reason.
+
+**And it is redundant with its own second assertion.** That test already measures a reference
+workload -- `whole`, building all 10 000 rows -- and already asserts `windowed * 10 < whole`
+(*"virtualisation must be worth it"*). That assertion is a ratio, measured in the same run, and it
+has **never** failed across five occurrences; every one of the five was the absolute bound. The
+load-robust half of this test has been quietly doing its job the whole time.
+
+**So the recommendation changes.** The load-average diagnostic stays worth doing -- a measurement
+that cannot report its own conditions is a bad instrument regardless -- but it is no longer the
+answer for this row. The answer is the one this project already validated: **move the user-facing
+budget to where budgets live, and let the suite assert the scaling property it can actually hold.**
+That is a design decision, it is mine, and it is now written as its own instruction rather than
+bolted onto the diagnostic slice.
+
+**What this says about the four days.** Every disposition on this row traced back to a precedent
+that was itself a record of a fix. Nobody followed the citation. I did not follow it either, through
+five occurrences, a disposition I wrote, and a correction I wrote to that disposition -- I only
+followed it today because I had to go and read a sibling assertion's message to correct a different
+mistake of mine. The lesson is not "check citations"; it is that a register row citing another row
+should quote what it is relying on, so a stale precedent cannot be inherited silently.
 
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
