@@ -83,3 +83,17 @@ parity.
   (checked against a control package to prove the query form). There is no `pkgver` to compare, so
   the standing watch is not discharged by this release; `aur-ci-publishing.md` holds the scope and
   schedule for doing it from CI.
+- **Correction, 2026-11-07: the entry above conflated two different steps, and the second one was
+  left undone.** The *watch* — "both AUR packages' `pkgver` match the version just released" —
+  genuinely could not be discharged, for the reason stated: nothing is published, so there is no
+  live `pkgver` to compare against. But the checklist's own **AUR Package** section carries a
+  separate step that is not conditional on the package being published: after `cargo publish`
+  lands, bump `packaging/aur/PKGBUILD`'s `pkgver`, reset `pkgrel`, replace `sha256sums` with the
+  new tarball's sum, regenerate `.SRCINFO`, and prove it with a real `makepkg` and `namcap` run.
+  That was not done. `packaging/aur/PKGBUILD` is still pinned at **`pkgver=0.37.0`** with 0.37.0's
+  checksum, one release behind, which is exactly the condition reviews 561-562 added the watch
+  for — reached this time through the repository file rather than the published page. It is
+  unfinished 0.38.0 work, it is mine (I ran this cut), and it is not a defect in the released
+  binaries: nothing in the product reads this file. Also recorded here because the owner asked
+  about preparing for AUR publication: that preparation starts with this bump, not with the
+  reserved CI RFC.
