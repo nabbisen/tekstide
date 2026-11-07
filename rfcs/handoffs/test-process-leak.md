@@ -194,6 +194,36 @@ next time this test fails naturally on macOS; forcing more CI runs to go looking
 intermittent is the load-sensitivity mistake this same document spent four days correcting,
 applied to a different row.
 
+## 2026-11-07 -- a fifth `drawing_the_largest_tree`, recorded as UNEXPLAINED, and the reviewer did not read his own push's CI
+
+**Fifth occurrence**, `macos-measurement` run
+[42359486070](https://github.com/nabbisen/tekstide/actions/runs/42359486070), commit `d47fe9b` --
+the reviewer's own push, the one that wrote the macOS-watch production-defect section above.
+Documentation only; `gate` green in the same run. Verbatim:
+
+```
+the windowed view of a 10000-row tree took 101.724375ms (best of 5). A number just over the
+bound while the machine's load average ("") is well above its core count points at load, not a
+regression: re-run when it is idle.
+```
+
+`explorer/tests.rs:1002`, same empty `("")` load-average string as all four before it.
+
+**Recorded as UNEXPLAINED, not as load.** This is the disposition made earlier the same day
+applying to itself: *"Until it is fixed, no further occurrence of this row may be dispositioned as
+load -- a fifth occurrence with an empty string is recorded as unexplained, not as more of the
+same."* The diagnostic is still broken, so there is still no measurement, so this datum says only
+that the assertion failed at `101.724375ms`. It is the largest of the five (`100.922167`, `85.044`,
+`83.712292`, `85.519333`, `101.724375`), which is worth nothing without the load number beside it.
+
+**And the method failure, which is mine.** I pushed `d47fe9b`, announced it, and did not read its
+CI. The red sat undisclosed until the dev team's own request 662 listed the run history and I saw
+it there. This is the same failure I have corrected in review responses repeatedly -- a push is not
+finished until its CI has been read -- committed by the person who wrote the rule, one commit after
+writing it. Disclosed here rather than quietly appended to the row above, because the gap in the
+record is the part worth remembering: for roughly two hours this document was missing a data point
+about the very row whose disposition it had just tightened.
+
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
 a wall-clock view-build measurement (`suite-assumes-it-owns-the-machine.md`, item 2) asserting a
