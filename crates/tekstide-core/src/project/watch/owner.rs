@@ -95,6 +95,14 @@ impl WatchEvents {
 /// `[watch-notice-probe]`'s own implementation -- `#[cfg(test)]`-only, the same shape
 /// `runtime::git::git_gate_probe_origin_for_key` already establishes. Consumes nothing,
 /// proposes nothing: reports the kind and paths pair and returns.
+///
+/// **This gating works because the test that needs it lives in this crate.**
+/// `reading_a_watched_file_is_not_reported_but_writing_it_is` is an inline `tests` module
+/// in `tekstide-core` itself, so `cfg(test)` is set when it runs and the `#[cfg(test)]`
+/// arm fires. Moving a watch test that depends on this probe into `crates/tekstide` (which
+/// depends on `tekstide-core` as a plain, non-test dependency, where `cfg(test)` is never
+/// set) would silently switch every call site to the `#[cfg(not(test))]` no-op below --
+/// exactly the data this probe exists to capture, gone without a compile error to flag it.
 #[cfg(test)]
 fn watch_notice_probe(outcome: &str, kind: &notify::EventKind, paths: &[PathBuf]) {
     eprintln!("[watch-notice-probe] {outcome}: kind={kind:?} paths={paths:?}");
