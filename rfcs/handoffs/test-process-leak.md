@@ -48,6 +48,55 @@ resulting pressure, each disclosed separately and each moved past:
 
 | `project::watch::tests::reading_a_watched_file_is_not_reported_but_writing_it_is` | **New row, 2026-11-07** — `macos-measurement`, attempt 2 of run [42357157545](https://github.com/nabbisen/tekstide/actions/runs/42357157545) (commit `d09970a`, a markdown-only commit containing no code; `gate` on Linux passed in the same attempt). Verbatim: *"assertion `left == right` failed: reads are not changes"*, *left: 3*, *right: 0* (`crates/tekstide-core/src/project/watch/tests.rs:1156`) — **three** change events reported for a watched file that was only read, where the property is that reads produce none. **Not previously on file**, on any platform. Not caused by the commit, which contains no code. Not yet investigated and deliberately **not** filed as load-sensitive: the assertion is a count of events, not a wall-clock budget, so the shape that explains this row has to explain why *extra* events appear, not why something took too long — macOS file-system notification semantics (coalescing, or an earlier setup write attributed to the read phase) is the first thing to check, and that is a platform-behaviour question rather than a timing one. Recorded as an observation with its text captured, which is all that this first occurrence supports. |
 
+## 2026-11-07, later the same day -- the `left: 43` is the input line's own echo, and that is a mechanism, not a load story
+
+**Third occurrence of
+`runtime::terminal::reader::tests::required_local_bounded_marks_capture_failed_stops_reading_and_
+stalls_the_child_without_killing_it`**, `macos-measurement` run
+[42358236195](https://github.com/nabbisen/tekstide/actions/runs/42358236195), commit `17c6d91` --
+again a markdown-only commit containing no code, again `gate` (Linux) green in the same run, again
+verbatim *left: 43*, *right: 0*, `reader/tests.rs:1315`. Three occurrences inside about 24 hours
+(`16a108f`, `d09970a` attempt 2, `17c6d91`), on three code-free commits.
+
+**And the identical `43` has an explanation that is not load.** The test writes exactly one line of
+input before it starts counting (`reader/tests.rs:1291`):
+
+```rust
+.write_input(&handle, b"yes never-drained-because-reading-stopped
+")
+```
+
+That is **42** bytes written; the payload without its newline is **41**; and a PTY in its default
+mode echoes the line back with CRLF translation, which is **41 + 2 = 43** -- the observed number,
+exactly, on all three occurrences. Nothing in `runtime/terminal/` sets `termios`/`ECHO`, so the
+default applies on both platforms.
+
+So the 43 bytes are almost certainly **the test's own input echo**, produced by the PTY when
+`write_input` was called -- *before* `CaptureFailed` -- and drained after it. That hypothesis
+explains every feature of this row that "load-sensitive" does not:
+
+- **Why the count is identical every time.** It is a fixed line, not a variable amount of `yes`
+  output. `yes` flooding the channel would be far more than 43 bytes and would differ run to run.
+- **Why `yes`'s own output never appears.** The reader really did stop; the property it names holds.
+- **Why it is timing-dependent at all.** The only variable is whether the echo is drained before or
+  after `CaptureFailed` is observed, and Linux's faster PTY/scheduler path usually wins that race.
+
+**What this does to the disposition.** The "load-sensitive, re-run when idle" framing is wrong for
+this row: load only decides who wins the race, it is not the cause. The real question is a product
+one and it is still open -- *should bytes read before a capture failure be delivered after it?* By
+the assertion's own words they are unrecorded output reaching the display, and a real user's
+keystroke echo would produce the same bytes as this fixture does. So the test may be right and the
+product may have a small ordering hole, or the assertion's window may simply be wider than the
+property it means to state. **That is a decision, and it needs the measurement before it, not
+another rerun.** Investigation instruction issued.
+
+**One more thing both of this document's open diagnostics have in common.** This assertion reports
+`drained_total` as a *length* and never the bytes. Had it printed the content, this would have been
+answered on the first occurrence instead of the third -- the same shape as the explorer row's empty
+load-average string: an instrument that reports a number without the one detail that would identify
+it. Two rows, two reds made uninterpretable by their own messages. Worth treating as a pattern when
+writing the next measurement assertion, not as two coincidences.
+
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
 a wall-clock view-build measurement (`suite-assumes-it-owns-the-machine.md`, item 2) asserting a
