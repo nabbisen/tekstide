@@ -3832,6 +3832,22 @@ or removed:
    server's own rejection path does read first, narrowing the window relative to (8)'s, but the
    same non-assertable gap (review 651 round 5, this row).
 
+## Recurrence, 2026-11-08 -- item 4 above, declared fixed at review 645, failed again
+
+`macos-measurement` run [42384777504](https://github.com/nabbisen/tekstide/actions/runs/42384777504)
+(`workflow_dispatch` on commit `7d1c7ce`, the macOS-load-diagnostic slice's own register-only
+commit -- no code at all in that diff, nothing touching `approval::` or `channel.rs`; `gate` on
+Linux passed in the same run). `approval::tests::channel::serve_concurrently_refuses_connections_
+beyond_the_concurrency_cap` failed, verbatim: *"set the check's read timeout while the peer is
+still connected: Os { code: 22, kind: InvalidInput, message: \"Invalid argument\" }"*
+(`approval/tests/channel.rs:1655`) -- the identical `EINVAL`-on-a-closed-peer shape item 4's own
+fix (moving `set_read_timeout` into the connect loop, review 645, `dd31fb1`) was meant to close.
+Disclosed as an observation found incidentally while chasing a different subject's own `left: 43`
+row, not investigated further here -- out of scope for the macOS-load-diagnostic and `left: 43`
+slices both, and this row already has its own extensive disposition history above to build on. Not
+merged into item 4's own numbered list; left as its own dated entry so the recurrence is visible
+rather than silently folded into a "fixed" claim that did not hold on this run.
+
 ## New row, 2026-10-31 -- a duplicate assertion, not a fourth cluster member; fixed the same shape as review 650 round 3
 
 Run `41190734667` (`e3f432d`, review 653's own push, docs/workflow/checklist only --
