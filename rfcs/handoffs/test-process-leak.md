@@ -160,6 +160,40 @@ second time today a disclosed number turned out to carry its own answer once the
 was printed -- the first being the echo arithmetic. **Write the probe into the assertion, not into
 the review response.**
 
+**2026-11-07, later the same day -- step 1 reproduced, step 3 instrumented, not yet captured.**
+Per the macOS-watch-semantics instruction: `project::watch::tests::a_change_reported_as_the_
+watched_directory_itself_is_dropped` (new, `watch/tests.rs`) reproduces the directory-granularity
+drop on **Linux**, platform-independently, by constructing the notice directly rather than
+depending on what any one kernel reports -- confirming the defect is in `record_changed_paths`'s
+own matching rule, not the backend, exactly as this section's own reading already concluded.
+Verbatim, before any fix:
+
+```
+a change reported at the watched directory's own granularity (FSEvents' coalesced shape) must
+still produce a scan request for that directory -- the reported path is
+"/dev/shm/tek-directory-granularity", the watched directory is "/dev/shm/tek-directory-granularity",
+and the current matching rule treats only a path whose *parent* is watched as a change, so this
+one is dropped
+```
+
+Left `#[ignore]`d rather than fixed: which rule replaces the dropped match (accept the reported
+path itself when it is watched, narrow; or walk up to the nearest watched ancestor, wide) is the
+owner's own call -- `record_changed_paths_drops_a_grandchild_of_an_admitted_directory` exists
+specifically to keep the "never recurses" boundary the wide option would put real pressure on, so
+this is not a free choice between two equivalent fixes. Both readings and a recommendation are in
+review request 662.
+
+The sibling's own probe (`[watch-notice-probe]`, `owner.rs`'s `wait_for_notice`) is committed and
+live -- confirmed working on Linux (reads print `Access(Open(Any))` and are filtered, the one
+write prints `Modify(Data(Any))` and is reported, exactly as expected) -- but **two macOS CI runs
+since committing it** (`42368241443`, a push; `42368714835`, a manual `workflow_dispatch` retry)
+both came back fully green, so `reading_a_watched_file_is_not_reported_but_writing_it_is` did not
+fail on either and there is no real macOS event-kind message yet to report. Not chased further
+with more retries -- the probe is in place and will capture the real message automatically the
+next time this test fails naturally on macOS; forcing more CI runs to go looking for an
+intermittent is the load-sensitivity mistake this same document spent four days correcting,
+applied to a different row.
+
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
 a wall-clock view-build measurement (`suite-assumes-it-owns-the-machine.md`, item 2) asserting a
