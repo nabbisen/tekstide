@@ -56,11 +56,35 @@ impl WatchEvents {
     /// reads its own file, so without this filter every refresh would be answered by a notice
     /// that asks for another refresh (RFC-026 D8, found by the burst measurement: 239 root scans
     /// in two minutes).
+    ///
+    /// **`[watch-notice-probe]` instrumentation, review's own instruction (macOS watch
+    /// semantics): `reading_a_watched_file_is_not_reported_but_writing_it_is` fails
+    /// intermittently on macOS (`left: 3`, `right: 0` on `reported_by_reads`) with a
+    /// hypothesis -- the `Access(_)` match may be inotify's own fidelity, and FSEvents may
+    /// report a read as `Modify`/`Any` instead, which this filter would then let through.
+    /// Printed here, at the one place that observes the real `event.kind` before it is
+    /// reduced away, rather than guessed at from the already-filtered result -- the same
+    /// "print the thing it counted" discipline `test-process-leak.md`'s own 2026-11-07
+    /// section names. Measurement only; this line changes no behavior and should come out
+    /// once the hypothesis is confirmed or refuted on real macOS output.
     pub fn wait_for_notice(&mut self) -> Option<WatchNotice> {
         loop {
             match self.receiver.recv().ok()? {
-                Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => continue,
-                Ok(event) => return Some(WatchNotice::Changed(event.paths)),
+                Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => {
+                    eprintln!(
+                        "[watch-notice-probe] filtered as Access, not reported: kind={:?} \
+                         paths={:?}",
+                        event.kind, event.paths
+                    );
+                    continue;
+                }
+                Ok(event) => {
+                    eprintln!(
+                        "[watch-notice-probe] reported as Changed: kind={:?} paths={:?}",
+                        event.kind, event.paths
+                    );
+                    return Some(WatchNotice::Changed(event.paths));
+                }
                 Err(_) => return Some(WatchNotice::Failed),
             }
         }

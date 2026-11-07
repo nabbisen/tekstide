@@ -891,6 +891,52 @@ fn a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request() {
     let _ = std::fs::remove_dir_all(directory);
 }
 
+/// `rfcs/handoffs/test-process-leak.md`'s 2026-11-07 section: a real macOS
+/// `macos-measurement` failure (`a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_
+/// request`, run 42358814225) reported a changed path **equal to the watched directory
+/// itself** -- FSEvents' own directory-granularity, coalesced shape, not
+/// `watched_dir/filename`. `record_changed_paths`'s own `path.parent()` match only
+/// recognizes the latter (inotify's contract, stated in that function's own doc comment),
+/// so a path with no further-watched parent is silently dropped regardless of platform.
+/// Reproduced here platform-independently, the same "construct the notice directly" shape
+/// `record_changed_paths_drops_a_grandchild_of_an_admitted_directory` below already uses,
+/// rather than depending on what any one kernel actually reports -- this is a defect in the
+/// matching rule itself, not the backend, so it reproduces identically on Linux. **Confirmed
+/// failing** (verbatim panic text in the macOS-watch-semantics instruction's own review
+/// request) before any fix -- `#[ignore]`d rather than fixed here, because which rule
+/// replaces the dropped match (accept the reported path when it is itself watched, or walk
+/// up to the nearest watched ancestor) is the owner's own call, not mine, and the two
+/// readings change what this test's own assertion should check. Remove the `#[ignore]` the
+/// moment that decision lands and the fix is in.
+#[test]
+#[ignore = "fails today by design -- reproduces the confirmed macOS watch-semantics defect; \
+            blocked on the owner's choice of replacement rule, not re-run until the fix lands"]
+fn a_change_reported_as_the_watched_directory_itself_is_dropped() {
+    use std::time::Instant;
+
+    let directory = &watch_test_root().join("tek-directory-granularity");
+    let _ = std::fs::remove_dir_all(directory);
+    std::fs::create_dir_all(directory).unwrap();
+
+    let mut watcher = super::ProjectWatcher::open();
+    watcher.reconcile(
+        &BTreeSet::from([WatchedDirectory::for_test(directory)]),
+        Vec::new(),
+    );
+
+    let at = Instant::now();
+    watcher.record_changed_paths(std::slice::from_ref(directory), at);
+    assert!(
+        watcher.has_pending_scans(),
+        "a change reported at the watched directory's own granularity (FSEvents' coalesced \
+         shape) must still produce a scan request for that directory -- the reported path is \
+         {directory:?}, the watched directory is {directory:?}, and the current matching rule \
+         treats only a path whose *parent* is watched as a change, so this one is dropped"
+    );
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
 /// B2 step 3: a changed path whose parent is not watched is dropped, not recorded. This is
 /// what keeps an empty or unwatched directory from ever reaching the batcher.
 #[test]
