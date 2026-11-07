@@ -194,6 +194,69 @@ next time this test fails naturally on macOS; forcing more CI runs to go looking
 intermittent is the load-sensitivity mistake this same document spent four days correcting,
 applied to a different row.
 
+## 2026-11-07, FIXED -- response 662: narrow, with both-match recording both
+
+**The rule is decided and implemented.** `record_changed_paths` (`owner.rs`) now checks two
+branches independently, recording both when both match rather than choosing one:
+
+- `self.scope.is_watched(path)` -- the reported path is itself a watched directory (FSEvents'
+  coalesced shape, the defect this row names).
+- `self.scope.is_watched(path.parent())` -- the reported path's parent is watched (inotify's own
+  contract, the rule this module originally shipped with, and what macOS reports whenever FSEvents
+  does name the file).
+
+**Why narrow, not the wide ancestor-walk**, decided by the owner rather than picked unilaterally:
+this project's own backend already recurses at the kernel level on macOS
+(`the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses`'s own doc comment),
+and `record_changed_paths_drops_a_grandchild_of_an_admitted_directory`'s `is_watched(parent)` check
+is what enforces RFC-028 D2's "never recurses" guarantee at the *application* level against that
+backend. Walking up to the nearest watched ancestor for every report would convert a grandchild
+event into a scan of its watched ancestor -- the shape that test exists to keep out -- so a defect
+fix does not get to retire a documented RFC guarantee by itself. (Correction to the recommendation
+that led here: the risk is redundant *scans* of watched ancestors, not reads of unwatched data --
+every value `record_changed_paths` can record is watched by construction under either rule. The
+conclusion stands; the stated reason was overstated and the correction is on the record.)
+
+**The required addition, found by the case the narrow framing itself missed**: `root` is always
+watched (`WatchedDirectory`'s own doc: "the root, the expanded folders and the folders of open
+documents"), so a watched directory nested inside another watched directory is the *ordinary*
+state once any folder is expanded, not a corner case. For a report of `root/sub` where both are
+watched, `is_watched(path)` and `is_watched(parent)` answer different questions -- "something
+inside `root/sub` changed" versus "`root/sub` itself changed as an entry of `root`" -- and a path
+alone cannot tell them apart. Recording only one silently drops the other's own class of change, so
+both branches are checked and both are recorded when both match. Safe (both values are watched by
+construction) and cheap (`ScanBatcher`'s own `BTreeMap` collapses a directory recorded twice into
+one pending entry with an extra coalesced-event count, not a duplicate).
+
+**On the record, not fixed, not in this slice**: today's rule (either version) is already one
+level porous for directory-granularity reports in one specific sense -- a coalesced report of
+`root/unwatched_sub` has parent `root`, which is watched, so it already records `root` and already
+produces a scan, before any of this slice's own changes. Benign (the scan reads `root`, which is
+admitted, and never descends) and not fixable from the path alone (nothing distinguishes "FSEvents
+coalesced a change from inside `unwatched_sub`" from "`unwatched_sub` was created in `root`," which
+`root` genuinely should be rescanned for). Recorded so the grandchild test's own name is not read
+as a stronger guarantee than the code actually gives on macOS.
+
+**Tests**: `a_change_reported_as_the_watched_directory_itself_is_dropped` un-`#[ignore]`d, now
+green under the real fix. New:
+`a_report_of_a_watched_directory_nested_inside_another_watched_directory_records_both` proves the
+both-match case specifically -- the one part of the rule no prior test covered.
+`record_changed_paths_drops_a_grandchild_of_an_admitted_directory` needed no change (checked by
+hand, confirmed by the test suite): its own grandchild path is neither equal to a watched directory
+nor has one as its parent, so neither new branch fires.
+
+**The probe, gated**: `[watch-notice-probe]` (`owner.rs`'s `wait_for_notice`, for the sibling row
+immediately above) is now `#[cfg(test)]`-only via a `watch_notice_probe` helper, the same shape
+`runtime::git::git_gate_probe_origin_for_key` already establishes -- a no-op in a shipped binary
+(confirmed directly: `strings` on a `--release` build of `libtekstide_core.rlib` finds the doc
+comment's own text but not the `eprintln!` format string itself), not an unconditional print on
+every watch notice in a hot path. Still live for the next natural recurrence on macOS; the sibling
+row above stays open.
+
+**This row moves to FIXED.** Four days misattributed to load, the dates left on the record above
+rather than tidied away. Full gate green, both platforms, confirmed directly via `gh run view
+--exit-status`, not a piped command's own exit code.
+
 ## 2026-11-07 -- a fifth `drawing_the_largest_tree`, recorded as UNEXPLAINED, and the reviewer did not read his own push's CI
 
 **Fifth occurrence**, `macos-measurement` run

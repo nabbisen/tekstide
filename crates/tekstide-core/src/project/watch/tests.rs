@@ -901,16 +901,12 @@ fn a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request() {
 /// Reproduced here platform-independently, the same "construct the notice directly" shape
 /// `record_changed_paths_drops_a_grandchild_of_an_admitted_directory` below already uses,
 /// rather than depending on what any one kernel actually reports -- this is a defect in the
-/// matching rule itself, not the backend, so it reproduces identically on Linux. **Confirmed
-/// failing** (verbatim panic text in the macOS-watch-semantics instruction's own review
-/// request) before any fix -- `#[ignore]`d rather than fixed here, because which rule
-/// replaces the dropped match (accept the reported path when it is itself watched, or walk
-/// up to the nearest watched ancestor) is the owner's own call, not mine, and the two
-/// readings change what this test's own assertion should check. Remove the `#[ignore]` the
-/// moment that decision lands and the fix is in.
+/// matching rule itself, not the backend, so it reproduces identically on Linux.
+/// **Response 662: narrow, confirmed.** The reported path is itself a watched directory, so
+/// `record_changed_paths`'s own `is_watched(path)` branch now records it directly, alongside
+/// the pre-existing `is_watched(parent)` branch this test's precondition does not also
+/// trigger (the directory's own parent, `watch_test_root()`, is not watched).
 #[test]
-#[ignore = "fails today by design -- reproduces the confirmed macOS watch-semantics defect; \
-            blocked on the owner's choice of replacement rule, not re-run until the fix lands"]
 fn a_change_reported_as_the_watched_directory_itself_is_dropped() {
     use std::time::Instant;
 
@@ -935,6 +931,59 @@ fn a_change_reported_as_the_watched_directory_itself_is_dropped() {
     );
     drop(watcher);
     let _ = std::fs::remove_dir_all(directory);
+}
+
+/// Response 662's own required addition: when a reported path is itself a watched
+/// directory **and** its own parent is also watched -- the ordinary state once any
+/// folder is expanded, since the project root is always watched
+/// (`WatchedDirectory`'s own doc: "the root, the expanded folders and the folders of
+/// open documents") -- both are recorded, never one chosen over the other. The two
+/// branches answer different questions: "something inside the inner directory
+/// changed" (the coalesced-content case this slice fixes) and "the inner directory's
+/// own listing changed" (created, renamed, deleted, as an entry of the outer one --
+/// what the parent-watched branch already covered). A path alone cannot distinguish
+/// them, so both get a scan request rather than either being silently dropped.
+#[test]
+fn a_report_of_a_watched_directory_nested_inside_another_watched_directory_records_both() {
+    use std::time::Instant;
+
+    let root = &watch_test_root().join("tek-both-match-root");
+    let inner = &root.join("sub");
+    let _ = std::fs::remove_dir_all(root);
+    std::fs::create_dir_all(inner).unwrap();
+
+    let mut watcher = super::ProjectWatcher::open();
+    watcher.reconcile(
+        &BTreeSet::from([
+            WatchedDirectory::for_test(root),
+            WatchedDirectory::for_test(inner),
+        ]),
+        Vec::new(),
+    );
+    assert_eq!(
+        watcher.scope().watched_count(),
+        2,
+        "test precondition: both the root and its own subdirectory are watched"
+    );
+
+    let at = Instant::now();
+    watcher.record_changed_paths(std::slice::from_ref(inner), at);
+    let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
+    let mut directories: Vec<_> = due
+        .iter()
+        .map(|request| request.directory.clone())
+        .collect();
+    directories.sort();
+    let mut expected = vec![root.clone(), inner.clone()];
+    expected.sort();
+    assert_eq!(
+        directories, expected,
+        "a report of the inner watched directory must record both it (something inside it \
+         changed) and its own watched parent (it changed as an entry of the parent): {due:?}"
+    );
+
+    drop(watcher);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// B2 step 3: a changed path whose parent is not watched is dropped, not recorded. This is

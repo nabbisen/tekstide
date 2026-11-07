@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed — a macOS file change could be missed by the file watcher
+
+On macOS, a file change reported at directory granularity (the platform's own coalesced shape) was
+silently dropped rather than triggering a rescan — the watcher's own matching rule only recognized
+a change reported as `watched_directory/filename`, the Linux shape. How often this happened in
+practice is not measured; it is now fixed rather than quantified.
+
 ### Fixed — PR-076-C2: a damaged or hand-edited interface-scale file no longer starts the app at an unusable size
 
 `load_interface_scale` now rejects a `scale` that is not exactly one of the five enumerated steps,

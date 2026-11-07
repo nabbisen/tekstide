@@ -57,32 +57,33 @@ impl WatchEvents {
     /// that asks for another refresh (RFC-026 D8, found by the burst measurement: 239 root scans
     /// in two minutes).
     ///
-    /// **`[watch-notice-probe]` instrumentation, review's own instruction (macOS watch
-    /// semantics): `reading_a_watched_file_is_not_reported_but_writing_it_is` fails
-    /// intermittently on macOS (`left: 3`, `right: 0` on `reported_by_reads`) with a
-    /// hypothesis -- the `Access(_)` match may be inotify's own fidelity, and FSEvents may
-    /// report a read as `Modify`/`Any` instead, which this filter would then let through.
-    /// Printed here, at the one place that observes the real `event.kind` before it is
-    /// reduced away, rather than guessed at from the already-filtered result -- the same
-    /// "print the thing it counted" discipline `test-process-leak.md`'s own 2026-11-07
-    /// section names. Measurement only; this line changes no behavior and should come out
-    /// once the hypothesis is confirmed or refuted on real macOS output.
+    /// **`[watch-notice-probe]` instrumentation, response 662's own required gating:**
+    /// `reading_a_watched_file_is_not_reported_but_writing_it_is` fails intermittently on
+    /// macOS (`left: 3`, `right: 0` on `reported_by_reads`) with a hypothesis -- the
+    /// `Access(_)` match may be inotify's own fidelity, and FSEvents may report a read as
+    /// `Modify`/`Any` instead, which this filter would then let through. Printed here, at
+    /// the one place that observes the real `event.kind` before it is reduced away, rather
+    /// than guessed at from the already-filtered result -- the same "print the thing it
+    /// counted" discipline `test-process-leak.md`'s own 2026-11-07 section names.
+    /// `watch_notice_probe` is `#[cfg(test)]`-only (a no-op in a shipped binary, the same
+    /// shape `runtime::git::git_gate_probe_origin_for_key` already establishes), not an
+    /// unconditional `eprintln!` on every notice in a hot path -- it would otherwise be
+    /// terminal noise for anyone running the app, indefinitely, waiting on a natural
+    /// recurrence with no fixed end. Remove the call sites once the hypothesis is confirmed
+    /// or refuted on real macOS output.
     pub fn wait_for_notice(&mut self) -> Option<WatchNotice> {
         loop {
             match self.receiver.recv().ok()? {
                 Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => {
-                    eprintln!(
-                        "[watch-notice-probe] filtered as Access, not reported: kind={:?} \
-                         paths={:?}",
-                        event.kind, event.paths
+                    watch_notice_probe(
+                        "filtered as Access, not reported",
+                        &event.kind,
+                        &event.paths,
                     );
                     continue;
                 }
                 Ok(event) => {
-                    eprintln!(
-                        "[watch-notice-probe] reported as Changed: kind={:?} paths={:?}",
-                        event.kind, event.paths
-                    );
+                    watch_notice_probe("reported as Changed", &event.kind, &event.paths);
                     return Some(WatchNotice::Changed(event.paths));
                 }
                 Err(_) => return Some(WatchNotice::Failed),
@@ -90,6 +91,17 @@ impl WatchEvents {
         }
     }
 }
+
+/// `[watch-notice-probe]`'s own implementation -- `#[cfg(test)]`-only, the same shape
+/// `runtime::git::git_gate_probe_origin_for_key` already establishes. Consumes nothing,
+/// proposes nothing: reports the kind and paths pair and returns.
+#[cfg(test)]
+fn watch_notice_probe(outcome: &str, kind: &notify::EventKind, paths: &[PathBuf]) {
+    eprintln!("[watch-notice-probe] {outcome}: kind={kind:?} paths={paths:?}");
+}
+
+#[cfg(not(test))]
+fn watch_notice_probe(_outcome: &str, _kind: &notify::EventKind, _paths: &[PathBuf]) {}
 
 /// Shared access to a project's one [`WatchEvents`]. Cloning shares the slot, not the
 /// receiver: whichever clone calls [`Self::take`] first gets it, and every later call gets
@@ -170,18 +182,42 @@ impl ProjectWatcher {
         }
     }
 
-    /// The feed into the batcher (D3). Each changed path is recorded against its parent
-    /// directory, **only if that directory is one we watch**: a non-recursive watch reports
-    /// changes in its own directory, so the parent of a real event is always watched, and
-    /// anything else (a path with no parent, or a directory we do not watch) is dropped
-    /// rather than recorded. A directory this feed never names as empty cannot reach the
-    /// batcher.
+    /// The feed into the batcher (D3). A reported path can mean one of two things, and both
+    /// are checked independently -- **recording both when both match, never choosing one**:
+    ///
+    /// - **The path itself is a watched directory.** FSEvents reports at directory
+    ///   granularity and coalesces, so a content change *inside* a watched directory can
+    ///   arrive as the directory's own path, not `watched_dir/filename`
+    ///   (`rfcs/handoffs/test-process-leak.md`'s 2026-11-07 section: confirmed in production,
+    ///   `macos-measurement` run 42358814225). Recording the path itself when it is watched
+    ///   is what this half catches.
+    /// - **The path's parent is a watched directory.** inotify's own contract --
+    ///   `watched_dir/filename` -- reports a watched directory's own entry changing
+    ///   (created, renamed, deleted), not its content. This is the rule the module
+    ///   originally shipped with, and macOS reports this shape too whenever FSEvents does
+    ///   name the file.
+    ///
+    /// These answer different questions ("something inside this directory changed" versus
+    /// "this directory's own listing changed") and a path alone cannot tell them apart when
+    /// both a directory and its own subdirectory are watched -- the ordinary case once any
+    /// folder is expanded, since the project root is always watched
+    /// (`WatchedDirectory`'s own doc: "the root, the expanded folders and the folders of
+    /// open documents"). Recording only one would silently drop the other's own class of
+    /// change, so both branches are checked and both are recorded when both match; neither
+    /// can ever record an *unwatched* directory, since each is gated on its own
+    /// `is_watched` check.
+    ///
+    /// A path with neither an admitted directory as itself nor as its parent (no parent at
+    /// all, or a directory we do not watch) is dropped rather than recorded. A directory
+    /// this feed never names as changed cannot reach the batcher.
     pub fn record_changed_paths(&mut self, paths: &[PathBuf], at: Instant) {
         for path in paths {
-            let Some(parent) = path.parent() else {
-                continue;
-            };
-            if self.scope.is_watched(parent) {
+            if self.scope.is_watched(path) {
+                self.batcher.record(path.clone(), at);
+            }
+            if let Some(parent) = path.parent()
+                && self.scope.is_watched(parent)
+            {
                 self.batcher.record(parent.to_path_buf(), at);
             }
         }
