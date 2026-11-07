@@ -1314,11 +1314,18 @@ pub struct State {
     /// `tekstide_core::interface_scale::load_interface_scale` (never from
     /// `config.toml`, D5's own requirement) and read by `interface_scale`
     /// below, the function this crate's own `iced::application` builder
-    /// passes to `.scale_factor(...)` in `main.rs`. One of
-    /// [`tekstide_core::interface_scale::INTERFACE_SCALE_STEPS`] once a
-    /// user presses one of the six new chords; the loaded value, possibly
-    /// off that list (an older file, or one from a future version), until
-    /// then -- `set_interface_scale` is the only production writer.
+    /// passes to `.scale_factor(...)` in `main.rs`. **Always exactly a
+    /// member of [`tekstide_core::interface_scale::INTERFACE_SCALE_STEPS`]
+    /// or [`tekstide_core::interface_scale::INTERFACE_SCALE_RESET`]** --
+    /// PR-076-C2's own fix closed the one door a value outside that set
+    /// could arrive through: `load_interface_scale` now rejects a
+    /// malformed or hand-edited current-version file's `scale` the same
+    /// way it already rejected a missing/unreadable/unparseable file or a
+    /// future `state_version`, and `set_interface_scale` is the only
+    /// production writer besides the loader, always passed one of the
+    /// same values. Nothing an older file or a future version could hold
+    /// reaches here either: a future `state_version` is its own rejected
+    /// case, and this format has had no predecessor to be "older" than.
     interface_scale: f32,
     /// RFC-076, review 659's own required item: whether `set_interface_
     /// scale`'s own most recent persistence attempt failed. **Read fresh
@@ -6726,15 +6733,22 @@ fn cycle_interface_scale_button_pressed(state: &mut State) {
     if state.modal.is_some() {
         return;
     }
-    use tekstide_core::interface_scale::INTERFACE_SCALE_STEPS;
+    use tekstide_core::interface_scale::{INTERFACE_SCALE_RESET, INTERFACE_SCALE_STEPS};
     let current_index = INTERFACE_SCALE_STEPS
         .iter()
         .position(|&step| step == state.interface_scale());
-    let next_index = match current_index {
-        Some(index) => (index + 1).min(INTERFACE_SCALE_STEPS.len() - 1),
-        None => 0,
+    let next_scale = match current_index {
+        Some(index) => INTERFACE_SCALE_STEPS[(index + 1).min(INTERFACE_SCALE_STEPS.len() - 1)],
+        // PR-076-C2: unreachable in production now that `load_interface_scale` itself
+        // rejects any scale off the table -- every writer, loader included, only ever
+        // hands `state.interface_scale()` a member of `INTERFACE_SCALE_STEPS` or
+        // `INTERFACE_SCALE_RESET`. Kept because a total `match` on a value from
+        // another crate is still the right shape, but defended: landing on the reset
+        // value, never `INTERFACE_SCALE_STEPS[0]`, so even this dead path cannot make
+        // the one "make text larger" button make text smaller instead.
+        None => INTERFACE_SCALE_RESET,
     };
-    set_interface_scale(state, INTERFACE_SCALE_STEPS[next_index]);
+    set_interface_scale(state, next_scale);
 }
 
 /// RFC-076 PR-076-C: `Message::ResetInterfaceScaleButtonPressed`'s handler -- the same

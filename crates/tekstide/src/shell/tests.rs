@@ -12466,6 +12466,33 @@ fn the_text_size_button_clamps_at_the_largest_step_rather_than_wrapping() {
     );
 }
 
+/// PR-076-C2: defence against an unreachable state, proven on the
+/// unreachable state directly. `load_interface_scale`'s own PR-076-C2
+/// fix means no production path can leave `state.interface_scale()`
+/// off `INTERFACE_SCALE_STEPS` any more -- there is no call site this
+/// test could drive through the real `update` dispatch to construct
+/// that precondition, so it writes the private field directly
+/// (`tests` is a descendant module of `shell`, so this compiles; no
+/// production code anywhere does the same). What it proves: even from
+/// that state, a press of the cycle button must not decrease the
+/// scale -- it must land on the reset value, not `INTERFACE_SCALE_
+/// STEPS[0]` (the smallest step), matching
+/// `cycle_interface_scale_button_pressed`'s own `None` arm.
+#[test]
+fn the_text_size_button_lands_on_reset_not_the_smallest_step_from_an_unreachable_off_table_state() {
+    use tekstide_core::interface_scale::INTERFACE_SCALE_RESET;
+
+    let mut state = state_with(ApplicationShell::new());
+    state.interface_scale = 7331.0;
+
+    let _ = super::update(&mut state, Message::CycleInterfaceScaleButtonPressed);
+    assert_eq!(
+        state.interface_scale(),
+        INTERFACE_SCALE_RESET,
+        "an off-table scale must clamp to the reset value, never decrease to the smallest step"
+    );
+}
+
 /// RFC-076 PR-076-C: the same control's own "Reset" button, through the
 /// real dispatch path -- targets exactly `INTERFACE_SCALE_RESET`
 /// regardless of which step the cycle button left the scale on,

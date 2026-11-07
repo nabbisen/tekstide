@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed — PR-076-C2: a damaged or hand-edited interface-scale file no longer starts the app at an unusable size
+
+`load_interface_scale` now rejects a `scale` that is not exactly one of the five enumerated steps,
+the same way it already rejected a missing, unreadable, unparseable or future-version file —
+closing the one writer (a corrupt or hand-edited `interface-scale.json`) that did not already
+honour the enumerated set.
+
 ### Added — PR-076-C (RFC-076 D4): a top-bar "Text size" control, re-scoped on a measurement
 
 A reader who cannot read the text cannot discover `Ctrl+Alt+<digit>` — the control that fixes it

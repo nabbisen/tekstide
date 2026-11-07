@@ -74,9 +74,29 @@ pub fn interface_scale_file(state_dir: &Path) -> PathBuf {
 /// Loads the persisted scale, or [`INTERFACE_SCALE_RESET`] on **any**
 /// problem at all -- a missing file (the ordinary case: nobody has
 /// scaled the interface yet), one that cannot be read, one that does not
-/// parse, or one written by a future, incompatible version. A lost scale
+/// parse, one written by a future, incompatible version, or one whose
+/// `scale` is not exactly a member of [`INTERFACE_SCALE_STEPS`] (a
+/// corrupt or hand-edited current-version file -- PR-076-C2's own fix:
+/// every other writer already only ever stores one of the five steps or
+/// [`INTERFACE_SCALE_RESET`] itself, so this is the one door a value
+/// outside the set could previously walk through). A lost scale
 /// preference is never worth refusing to boot over, or telling the user
 /// about: the control that set it is one keypress away, every time.
+///
+/// Membership is checked by exact equality against the table, never a
+/// tolerance or a nearest-step snap -- a snap would silently honour a
+/// value nobody chose, which is exactly the kind of quiet substitution
+/// this module exists to avoid. `NaN` would fail `==` against every
+/// member (including itself) if it ever reached this check, so there is
+/// no separate `is_nan()` arm; in practice it never gets this far
+/// either way -- `serde_json` serializes `f32::NAN` as JSON `null`,
+/// which fails to deserialize into `f32` at all, so a `NaN` `scale` is
+/// already caught by the deserialization `Err` above, the same branch
+/// an unparseable file hits (confirmed directly, not assumed --
+/// `interface_scale/tests.rs`'s own
+/// `the_membership_check_rejects_nan_on_its_own_terms_even_though_no_real_file_can_deliver_one`
+/// tests the predicate's own correctness instead, since no real file
+/// can reach it with one).
 pub fn load_interface_scale(state_dir: &Path) -> f32 {
     let Ok(contents) = fs::read_to_string(interface_scale_file(state_dir)) else {
         return INTERFACE_SCALE_RESET;
@@ -85,6 +105,9 @@ pub fn load_interface_scale(state_dir: &Path) -> f32 {
         return INTERFACE_SCALE_RESET;
     };
     if state.state_version != INTERFACE_SCALE_STATE_VERSION {
+        return INTERFACE_SCALE_RESET;
+    }
+    if !INTERFACE_SCALE_STEPS.contains(&state.scale) {
         return INTERFACE_SCALE_RESET;
     }
     state.scale
