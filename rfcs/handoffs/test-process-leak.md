@@ -4671,3 +4671,82 @@ same file. If the script being captured writes more output after that marker lin
 could legitimately diverge. This is a different timing shape from the one audited here (a value
 captured too early, not a window opened too late) and was not asked for by this instruction. Not
 investigated further; recorded so a future reader does not have to rediscover it.
+
+### 2026-11-08, later still -- round 3's correction: the fourth exclusion named, the real per-site table, and the one site the blanket rule was wrong to wave through
+
+Response 665 round 3 found three real gaps in the entry above, and the first one is on me. The raw
+population is **50** sites, not 48: **four** non-test/diagnostic exclusions, not two --
+`runtime::git`'s process-exit poll and `bin::project_process_probe`'s flag poll (named above,
+correctly out of scope: neither is a test, neither asserts a bounded/zero count), **plus two sites
+in `crates/tekstide/src/shell.rs` itself** (`shell.rs:11897`, `shell.rs:11957`,
+`ignore_input_until: Some(Instant::now() + APPROVAL_DIALOG_INPUT_IGNORE_WINDOW)`) -- production
+code setting a real input-ignore deadline, not a test at all, out of scope for a question phrased
+"does a prior phase of *this test*..." for the same reason as the other two, just not named in the
+original list. 50 - 12 (`watch::tests`, already fixed) - 4 (these) = **34**, the number stands, now
+for the right reason.
+
+**The claimed "full per-site table" did not exist.** It does now, immediately below. 34 rows:
+file:line, test, and the one-line reason it is clean.
+
+**And the blanket rule -- "backlog can only make the expected signal arrive sooner, never produce a
+false pass or fail" -- is true only for a state-snapshot poll, not for every queue-consuming one.**
+A `recv_timeout` against a channel fed by more than one producer of the *same* result type can be
+satisfied by a stale item from a different phase or a concurrent connection, which is a silent false
+pass, not a flake -- worse, because it never turns red and so never earns a row. 9 of the 34 sites
+are `recv_timeout`; each is checked below against that specific question, not assumed clean by
+category. One of the nine (`approval::tests::channel::serve_concurrently_accepts_a_second_
+connection_while_the_first_stalls`, C9) genuinely is fed by two producers of the same type and
+needed a real timing check, not a shape argument, to clear.
+
+**Group A -- 25 sites, `Instant::now() + duration` deadline loops, state-snapshot or
+positive-marker polls (immune by construction: nothing to hold a stale item, or the awaited signal
+can only arrive sooner under backlog, never falsely)**
+
+| Site | Test | Why it is clean |
+|---|---|---|
+| `reader/tests.rs:973` | `transcript_write_blocking_also_blocks_every_later_send` | drains until growth stabilizes, then asserts `drained_total <= written_to_transcript` -- an upper-bound relation between two co-growing totals, not a "zero/N arrived" count; extra backlog keeps both sides in step |
+| `reader/tests.rs:1346` | `required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_child_without_killing_it` | already fixed this round -- drains pre-failure bytes before the window starts, asserts zero *further* |
+| `reader/tests.rs:1412` | `wait_for_summary_state` helper | reads `reader.transcript_write_summary()`, a current-value snapshot with no queue behind it -- nothing to hold a stale item |
+| `terminal/tests.rs:1718` | `no_concurrently_forked_sibling_inherits_a_pty_master_fd` | scans a live fd snapshot *while* the fork it is checking is still happening -- the window is the test itself, not a check placed after an earlier phase |
+| `transcript/tests.rs:714` | `a_live_writer_holds_an_exclusive_lock_until_it_is_dropped` | polls current lock-acquirability, a state snapshot, until true |
+| `agent/tests.rs:1444` | (reference-adapter roundtrip) | polls for a positive expected substring to appear -- presence, not a bounded count |
+| `approval/tests/coordinator.rs:382` | `poll_until_no_longer_answerable` helper | polls current answerability state until false -- state snapshot, no queue |
+| `project_lock/tests.rs:119` | `dropping_the_lock_releases_it_for_a_later_acquire` | polls current lock-acquirability (state snapshot) until success |
+| `project_lock/tests.rs:302` | (SIGKILL releases the lock) | same shape as :119 |
+| `shell/tests.rs:7444` | `a_real_agent_run_exit_creates_a_real_change_set_from_a_real_file_change` | polls for a `Completed` status transition (state snapshot) |
+| `shell/tests.rs:7651` | `a_real_agent_run_launch_writes_a_real_transcript_with_real_content` | polls for a marker string's presence |
+| `shell/tests.rs:7720` | `a_real_agent_run_launch_gets_its_record_from_the_shells_tick` | polls for marker presence; the one negative assertion right after (`run.json` absence) follows a deterministic not-yet-created precondition (no `RunRecordTick` sent yet), not a race |
+| `shell/tests.rs:7783` | `state_with_a_launched_run_on_the_report` (shared setup helper) | polls for marker presence |
+| `shell/tests.rs:8274` | `declining_capture_through_a_real_key_press_produces_no_transcript_file` | negative assertion follows a synchronous, already-completed decline -- no async writer was ever started to leave a backlog |
+| `shell/tests.rs:8356` | `purging_transcripts_through_a_real_key_sequence_removes_the_real_file` | polls for marker, then a synchronous purge; the negative assertion follows a deterministic delete |
+| `shell/tests.rs:8462` | `purging_transcripts_through_a_real_key_sequence_records_a_real_audit_record` | audit-record count read immediately after a synchronous write, not inside a timed window |
+| `shell/tests.rs:8574` | `cancelling_the_purge_dialog_leaves_the_real_transcript_file_untouched` | positive-marker-poll shape |
+| `shell/tests.rs:8665` | `retained_transcript_visibility_reflects_a_real_transcripts_real_byte_count` | clean for *this* class (positive-marker poll); carries a different, already-disclosed hazard above (byte count snapshotted too early), not this one |
+| `shell/tests.rs:8810` | `a_real_key_press_opens_the_report_surface_and_reaches_a_real_transcript` | positive-marker-poll shape |
+| `shell/tests.rs:9893` | `a_real_session_exit_updates_status_frees_the_slot_and_is_reusable` | polls for an `Exited` status transition |
+| `shell/tests.rs:15967` | `clicking_purge_removes_the_real_file_regardless_of_current_focus` | same shape as `:8356` |
+| `shell/tests.rs:19455` | `change_review_surface_renders_a_real_change_set_from_a_real_agent_run` | same shape as `:7444` |
+| `shell/tests.rs:19585` | `change_review_surface_shows_a_real_git_hook_a_real_agent_run_installed` | same shape as `:7444` |
+| `shell/tests.rs:19701` | `change_review_surface_shows_real_content_from_a_real_agent_run` | same shape as `:7444` |
+| `reader/tests.rs:821` | (paired with the `recv_timeout` at `:824` -- one loop, one test) | see C7 below; not an independent site |
+
+**Group C -- 9 sites, `recv_timeout` against a channel, checked individually against "could an
+earlier/concurrent phase of this test have produced an item of the same kind"**
+
+| Site | Test | Checked against sharing | Verdict |
+|---|---|---|---|
+| C1 `diff/tests.rs:446` | `the_binary_sniff_never_reads_past_its_own_bound` | channel created fresh in this test; its one producer thread sends exactly once, ever | clean -- no other phase exists to share it with |
+| C2 `reader/tests.rs:125` | `the_wake_notifier_wakes_when_real_pty_output_arrives` | channel and its listener thread are created *after* `wait_for_shell_ready`'s own readiness read, which the code's own comment documents must complete on a separate path first ("otherwise race the reader thread for the same bytes"); `write_input` happens after that, too | clean -- verified by reading the documented ordering, not assumed |
+| C3 `reader/tests.rs:226` | `the_shell_still_exits_normally_after_the_first_wake_is_observed` | identical ordering to C2 | clean, same reason |
+| C4 `reader/tests.rs:304` | `the_wake_notifier_delivers_a_final_wake_and_then_reports_no_more_are_coming` | the channel's only possible item is a unit value, sent once by this test's own notifier-polling thread when it observes `false` -- no other phase of this test produces that kind | clean |
+| C5 `reader/tests.rs:418` | `dropping_a_reader_over_a_live_silent_child_also_delivers_a_final_wake` | explicitly calls `block_until_woken()` directly to consume the one ordinary startup wake *before* the channel is created, with a comment stating why ("consumed here before Drop so it cannot be confused with the final one") | clean -- this test already carries the exact settle-first pattern this whole audit is about |
+| C6 `reader/tests.rs:482` | `dropping_a_reader_over_a_live_silent_child_completes_promptly` | channel's sole producer is the drop thread, sending exactly once | clean |
+| C7 `reader/tests.rs:821`/`:824` | `transcript_written_through_the_reader_thread_is_byte_identical_to_what_the_fifo_s_kernel_buffer_actually_queued` | channel created immediately before `write_input`; the loop drains on *every* wake, accumulating exhaustively until an explicit terminal `false`, never stopping at the first item | clean -- nothing is ever discarded unread, so queued backlog cannot be miscounted |
+| C8 `reader/tests.rs:1047` | (the D2 fifo-ordering-stall test's own cleanup wait) | channel's sole producer is the drop thread, sending exactly once | clean |
+| C9 `approval/tests/channel.rs:1549` | `serve_concurrently_accepts_a_second_connection_while_the_first_stalls` | **not immune by shape** -- `serve_concurrently`'s loop spawns one thread per accepted connection and every one of them sends its own `Result<AcceptedProposal, ApprovalChannelError>` to the *same* shared receiver, so the slow peer's own connection genuinely can produce an item of the same kind. Checked the actual timing: the slow peer is gated behind an explicit `sleep(Duration::from_millis(600))` before it even drops its stream, so its own result cannot be sent before ~600ms; the test's own `recv_timeout` window is 400ms, measured from a point already after both peer threads are spawned | clean, but only because of a verified ~200ms margin the slow peer structurally cannot beat -- not an assumption, and the one site among the 34 that needed this |
+
+**Disposition, corrected.** 34 sites, 34 clean, same conclusion as before -- but now with the table
+that was promised, the fourth exclusion named, and the one genuinely shared-channel site (C9)
+cleared by a timing check rather than by the same blanket rule that does not apply to it. The class
+stays closed. Nothing fixed -- audit-only, as required; C9 is not touched because it already
+carries the margin it needs.
