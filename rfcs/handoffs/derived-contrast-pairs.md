@@ -230,3 +230,41 @@ worth more than the compatibility question, which is why it is recorded here.
   palettes at RFC-023, not here.
 - Promoting `theme/contrast.rs` out of `#[cfg(test)]`. That is RFC-023's decision and is
   already recorded in its handoff pack.
+
+## snora 0.57.0's notice to app teams, read 2026-11-09 -- what it does and does not mean here
+
+Received at `.git-exclude/upstream/snora/receive/0.57.0/`. **No reply needed** (the letter says so),
+and nothing in it obliges us to act: snora is not a dependency -- declined twice, per *Not in
+scope* above, and verified absent from both `Cargo.toml` and `Cargo.lock` before writing this. So
+every consumer-facing item is inapplicable to us: 0.57's two removals (`toast::sweep_expired`,
+`ToastLifetime::DEFAULT`), the deprecation table with its removal versions, the
+`snora-control` -> `snora-interaction` rename, the "skip 0.55.0" warning, and the `cargo audit`
+note (which is specifically about *snora's own* lockfile not binding a consumer's).
+
+**It is, however, our first notice covering 0.54-0.56** -- this directory jumps 0.53 to 0.57 -- and
+three of those items bear on RFC-076, which is the RFC currently open.
+
+1. **snora 0.54 shipped two AAA presets.** That is prior art for **RFC-076 D3** (the default theme
+   toward AAA, enforced AA floor untouched) from a project pinned to the same `iced 0.14`, by the
+   team this document already trades contrast findings with in both directions. **Read their
+   0.53 -> 0.54 guide before scoping D3**, and read it as evidence rather than as a design to copy:
+   their colour roles are not ours, and the derived-pair guardrail above is the thing to check their
+   presets against.
+2. **snora 0.55 grows targets and icons with the text.** A different answer to the problem RFC-076
+   D1 solved with a whole-UI `scale_factor`. Not a defect in ours -- scaling the layout space grows
+   targets by construction -- but worth knowing when D3 touches theme values, because their
+   approach decouples target size from text size and ours does not.
+3. **snora 0.54 withdrew the claim that its controls were keyboard-reachable under `iced 0.14`, and
+   0.55 restored it** once an application routes Tab (`snora::keyboard::traverse`). The obvious
+   question is whether we carry the same claim and owe the same withdrawal. **Checked: we do not,
+   and the reason is structural.** We never use iced's focus system for modal buttons at all --
+   Tab and Shift+Tab route to `ModalFocusNext`/`ModalFocusPrevious` (`crates/tekstide/src/shell.rs`,
+   the two `Named::Tab` arms), nine call sites cycle our *own* highlight index, and
+   `keyboard_help.rs`'s own doc comment already records the asymmetry that actually matters here:
+   modal buttons are reachable **by construction**, surface-local buttons are **not**, because
+   `FocusZone` cycles zones rather than widgets -- which is the stated reason `control_coverage`
+   exists. So the six catalog entries whose on-screen hint reads *"Tab/Shift+Tab moves focus; Enter
+   activates"* are true as written, and snora's withdrawal does not transfer.
+
+**One datum worth keeping for the dependency record**: snora is still on `iced 0.14`. Our own pin is
+not lagging a peer building the same kind of application on the same substrate.
