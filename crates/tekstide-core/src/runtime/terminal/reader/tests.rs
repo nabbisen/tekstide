@@ -1489,6 +1489,72 @@ fn make_path_always_fail_writes(transcript_file: &Path) -> fs::File {
         .expect("non-blocking read-end open of the fresh FIFO should succeed")
 }
 
+/// Response 665's own required investigation: `required_local_bounded_marks_capture_failed_
+/// stops_reading_and_stalls_the_child_without_killing_it`'s own `left: 43` was traced by
+/// deduction to a write that *succeeded* immediately after `make_path_always_fail_writes`'s
+/// own read-end guard was dropped -- meaning the macOS FIFO fixture's own promise ("every
+/// write after this point fails") did not hold for at least one write. This test drives the
+/// exact same sequence `launch_with_unwritable_transcript_capture` does -- `mkfifo`, open the
+/// read end non-blocking, `BoundedTranscriptWriter::create` (the real writer's own blocking
+/// open for write, which only succeeds because the read end is still open), drop the read-end
+/// guard -- and then attempts one write **immediately**, through the real writer, reporting
+/// whether it succeeded or failed rather than assuming either. `#[cfg(target_os = "macos")]`:
+/// the mechanism under investigation does not exist on Linux, where `/dev/full` already fails
+/// deterministically.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_macos_fifo_fixture_s_first_write_after_the_guard_drop_is_probed_not_assumed() {
+    let dirs = TestDirs::new("macos-fifo-first-write-probe");
+    let request = TranscriptPathRequest::new(
+        &dirs.state_root,
+        &dirs.project_root,
+        ProjectId::for_test(1),
+        AgentRunId::for_test(1),
+    );
+    let storage_path = TranscriptPathResolver
+        .resolve_agent_run(request)
+        .expect("test storage path should resolve");
+    std::fs::create_dir_all(storage_path.transcript_dir())
+        .expect("transcript dir should be creatable");
+
+    let read_end_guard = make_path_always_fail_writes(storage_path.transcript_file());
+
+    let config = TranscriptWriterConfig::new(
+        storage_path.clone(),
+        TranscriptRetentionLimits::agent_run_default(),
+        TranscriptCaptureMode::RequiredLocalBounded,
+    );
+    let mut writer = crate::transcript::BoundedTranscriptWriter::create(config).expect(
+        "the real writer's own blocking open-for-write should succeed while the \
+                 read end is still open, mirroring production exactly",
+    );
+
+    // The guard drop production relies on to turn later writes into EPIPE -- see
+    // `make_path_always_fail_writes`'s own doc comment.
+    drop(read_end_guard);
+
+    // Immediately, no delay: the exact window `ReaderTranscriptState::record_write`'s first
+    // real call would see in production, if a chunk were ready to write the instant the
+    // guard drops.
+    let probe_bytes = b"macos-fifo-first-write-probe";
+    let result = writer.append(probe_bytes).and_then(|_| writer.flush());
+    let _ = std::fs::remove_dir_all(&dirs.base);
+
+    // TEMPORARY, deliberate: this test always "fails" so its own result is visible in CI
+    // output regardless of outcome -- a passing test's stdout/stderr is not shown. Read the
+    // real macOS message, then revert in the very next commit (the same procedure 663/664
+    // already used). Never land this panic.
+    panic!(
+        "[macos-fifo-first-write-probe] write of {} byte(s) immediately after the read-end \
+         guard dropped: {}",
+        probe_bytes.len(),
+        match &result {
+            Ok(summary) => format!("Ok({summary:?})"),
+            Err(error) => format!("Err({error:?})"),
+        }
+    );
+}
+
 /// Same shape as [`launch_with_transcript_capture`], except the resolved
 /// transcript path is made to always fail a write first -- see
 /// [`make_path_always_fail_writes`] for the platform-specific mechanism and
