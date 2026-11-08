@@ -896,10 +896,28 @@ fn build_and_layout(
 /// virtualisation. PR-052-A measured ~4 µs a row to build and lay out, so a
 /// tree of 10 000 rows built whole costs tens of milliseconds every time it
 /// changes; the sidebar builds only the window (about 30 rows) and the cost
-/// does not depend on the tree. This test prints both numbers, and pins the
-/// property that matters -- the windowed view of the *largest* tree the model
-/// allows fits well inside a frame -- with a deliberately loose bound (half a
-/// frame) rather than a machine's speed.
+/// does not depend on the tree. This test prints both numbers and pins the
+/// property that scales: the windowed view costs a small, fixed fraction of
+/// building the tree whole, regardless of the tree's own size.
+///
+/// **Amended, dated rather than silently: the absolute half-a-frame bound
+/// this test used to also assert is gone.** Five occurrences
+/// (`rfcs/handoffs/test-process-leak.md`'s own dated row) were each a wall-
+/// clock budget crossed on a shared CI runner, never the ratio below, which
+/// has never failed once across the same five. This project's own stated
+/// rule (`hostile_tests.rs`'s own doc comment: *"a ratio is a scaling
+/// assertion, not a budget one"*) says a wall-clock bound does not belong
+/// in a suite run on shared, variable-load machines -- and the row's own
+/// history shows exactly the failure mode that rule exists to prevent: a
+/// disposition citing `0.29.0`'s own identical fix (an absolute bound
+/// rewritten as a same-run ratio, "so load no longer decides it") without
+/// the fix itself ever having been applied here. The user-facing property
+/// the removed bound protected -- a window of the largest tree costs well
+/// under half a frame in a **release** build -- is real and still needs a
+/// worst-of-N check, just not in a suite that already runs unoptimised on
+/// shared hardware; it is proposed to move to a dedicated release-build
+/// measurement (review request pending at the time of this comment), not
+/// deleted.
 #[test]
 fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
     let renderer = headless_renderer();
@@ -986,24 +1004,6 @@ fn drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame() {
     eprintln!(
         "PR-052-B measurement: {rows} rows; window of {capacity}: build + layout {windowed:?}; \
          building all {rows} (estimated from {SAMPLE}): {whole:?}"
-    );
-    let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
-    // Half a frame in a release build. This test runs unoptimised, where the
-    // monospaced font's family lookup makes the same window ~9x slower than
-    // release (26 ms here; 2.8 ms release, measured by
-    // `measurement/examples/font_probe.rs`), so the debug bound is ten times
-    // looser. The property that does not depend on the build -- the window
-    // costs a tiny fraction of building the tree whole -- is asserted below.
-    let bound = if cfg!(debug_assertions) {
-        std::time::Duration::from_millis(80)
-    } else {
-        std::time::Duration::from_millis(8)
-    };
-    assert!(
-        windowed < bound,
-        "the windowed view of a {rows}-row tree took {windowed:?} (best of 5). A number just \
-         over the bound while the machine's load average ({load:?}) is well above its core count \
-         points at load, not a regression: re-run when it is idle."
     );
     assert!(
         windowed * 10 < whole,

@@ -344,6 +344,32 @@ followed it today because I had to go and read a sibling assertion's message to 
 mistake of mine. The lesson is not "check citations"; it is that a register row citing another row
 should quote what it is relying on, so a stale precedent cannot be inherited silently.
 
+## 2026-11-07, later still -- the shape change landed: the absolute bound is gone, the ratio carries the test
+
+Per `tekstide-start-explorer-frame-budget-shape.md`. `drawing_the_largest_tree_builds_only_the_
+window_and_fits_inside_a_frame` no longer asserts `windowed < bound` (the 80ms debug / 8ms release
+absolute budget, and the `eprintln!` of `/proc/loadavg` that only ever printed `("")` on macOS,
+both removed together). `windowed * 10 < whole` is now the test's only assertion -- the same-run
+ratio that has never failed across all five prior occurrences, exactly the shape `0.29.0`'s own
+fix for `change_review_content_view_build_cost_by_line_count_measurement` already validated, and
+exactly what `hostile_tests.rs:283-288`'s own rule asks for.
+
+**Not a red-silencing change**: the reasoning is unchanged by whether this test ever fails again --
+the assertion removed was the wrong shape for a suite run on shared, variable-load hardware, and
+was redundant with an assertion already in the same test that has never once needed a rerun.
+
+**The budget is not deleted, only moved — and the move is proposed, not yet landed**, per the
+instruction's own "bring me the proposal before you implement it": see review request for the
+home proposal (a dedicated release-build, worst-of-N measurement) and the owner's own decision
+before that measurement exists anywhere. Until then, the user-facing property this bound protected
+(a window of the largest tree costs well under half a frame in a release build) is checked nowhere
+in CI -- a real, acknowledged gap for the span between this commit and whichever follow-up lands
+the new measurement, not an oversight.
+
+**Every dated entry above, including the four misattributed recurrences and the full disposition
+section, is left exactly as written.** That history is the evidence this change is justified by,
+not something to tidy away now that it is resolved.
+
 **Row 7 is a different cause, added deliberately rather than by accident.** Every row above shares
 the process-leak (later, audit-store) pressure this document investigates; row 7 does not -- it is
 a wall-clock view-build measurement (`suite-assumes-it-owns-the-machine.md`, item 2) asserting a
