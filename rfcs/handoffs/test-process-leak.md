@@ -3940,6 +3940,68 @@ connected and its timeout is 30 ms, not 5 s.
 -- the habit the 2026-11-07 entry above records me failing at one commit after tightening the rule
 that depends on it.
 
+**FIXED, 2026-11-09, instruction "approval-channel-einval-sites" -- the family moves off
+"recurring intermittent" to a named cause: an incomplete application of review 645's own fix, not a
+new mechanism.** `:738` (`malformed_frame_is_rejected_not_partially_parsed`) and `:778`
+(`oversized_declared_length_is_rejected_before_reading_the_body`) now tolerate
+`set_read_timeout` failing, the same shape `:670` and `:1091` already used -- `if
+stream.set_read_timeout(..).is_ok() { let _ = stream.read(..); }` -- each with a comment specific
+to its own test rather than `:670`'s paragraph copied three times: `:738`'s probe only ever delayed
+this thread's own close so the server's already-read-first ordering had room to land, not what
+produced that ordering; `:778`'s probe proves nothing about a body that the server's own
+rejection path never reads in the first place, so skipping it when the peer is already gone loses
+nothing the assertion depends on.
+
+**`:1655` (`serve_concurrently_refuses_connections_beyond_the_concurrency_cap`), the one judgment
+call, brought rather than picked.** My reading: tolerating here is safe, and not merely in the
+same way as the other two -- it cannot weaken this test's own assertion at all. `EINVAL` at this
+exact call site (inside the `.map()` that builds `held`, immediately after `connect`) means the
+*server* has already accepted this connection, found it over `MAX_CONCURRENT_CONNECTIONS`, and
+dropped its own end -- before this client thread could even configure its own socket option. That
+is not a weaker signal of refusal than the later bounded read; it is a stronger, earlier one. And
+the later uniform loop (`for mut stream in held { ... stream.read(&mut buffer) ... }`) does not
+need the timeout to have been set for a peer that is already gone: a `read()` on a socket whose
+peer already closed returns `Ok(0)` immediately regardless of whether `SO_RCVTIMEO` was ever set
+-- there is no live peer left to wait on, so the absence of a timeout cannot cause a hang here,
+only on a peer that is still open and silent, which is exactly the case where `set_read_timeout`
+already succeeds. So: recommend converting `:1655` to the identical tolerate pattern, `held`
+unchanged (the stream still gets collected and still gets read in the later loop); not a
+per-connection signal, which the question in the instruction raised as the alternative if
+tolerating turned out to weaken the test -- it does not, so the simpler fix applies. **Not
+implemented** -- the instruction reserved this one for the reviewer's own call, not mine, so the
+code at `:1655` is unchanged pending that answer.
+
+**The C9 cross-reference in the instruction does not hold, checked directly.** The instruction
+says `:1655` is "the site my own round-4 response to 665 examined for a different reason (C9's
+~100ms margin)." It is not. C9 (665's own round 4, this file's own dated section above) is
+`serve_concurrently_accepts_a_second_connection_while_the_first_stalls`'s `recv_timeout` call,
+which is at `channel.rs:1549` both before and after this change -- confirmed by grep against the
+current tree, and that test's own code is untouched by this slice. `:1655` is a `set_read_timeout`
+call inside the unrelated `serve_concurrently_refuses_connections_beyond_the_concurrency_cap`,
+confirmed the same way, and by this row's own 2026-11-08 entry above recording that exact verbatim
+panic at that exact line months before 665 existed. Two different sites, two different tests, two
+different mechanisms (arrival order on a shared receiver versus a socket option failing) that
+happen to share a module and, apparently, a line number the instruction mis-copied. **So: this
+slice's own change, whichever way `:1655` is ultimately decided, cannot affect C9's margin in any
+direction** -- there is no shared code, channel, or timing path between the two tests for it to
+touch.
+
+**Gate, full workspace, kept log.** `tekstide` **792/0/8**, `rfc_docs_invariants` **28/0**,
+`tekstide-core` **1185/0/4** -- unchanged counts, no test added or removed, only three call sites'
+own handling and comments changed. Zero failures, zero `error[E…]` lines, checked by grep against
+the kept log. `cargo fmt --check` and `clippy --workspace --all-targets --all-features -D
+warnings` both clean. `find $TMPDIR -mindepth 1 | wc -l` is `0` after the run, `pgrep tekstide`
+empty.
+
+**Disposition.** Two of three sites fixed and landed (`:738`, `:778`); the third (`:1655`) has a
+recommendation, reasoned through rather than assumed, held for the reviewer's own call per the
+instruction's own reservation. The family's cause is now named rather than left as a recurring
+intermittent: review 645's fix pattern (set the timeout while the peer is certainly alive, block
+briefly, let the server's own close unblock the read) was correct, but its own `.expect()` on the
+`set_read_timeout` call itself was never updated to tolerate the exact race the surrounding fix was
+built to survive -- at three of five sites. Every prior dated occurrence above stands as evidence;
+nothing is retracted, only completed.
+
 ## New row, 2026-10-31 -- a duplicate assertion, not a fourth cluster member; fixed the same shape as review 650 round 3
 
 Run `41190734667` (`e3f432d`, review 653's own push, docs/workflow/checklist only --

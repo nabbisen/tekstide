@@ -724,19 +724,29 @@ fn malformed_frame_is_rejected_not_partially_parsed() {
         // absent**: `accept()` can return before this thread's own
         // `write_all` does, so there is no structural ordering that rules
         // the server out finishing first on a sufficiently loaded runner.
-        // This `.expect()` has not been observed to fail here across this
-        // cluster's own history; that is evidence of a smaller
-        // probability, not of a closed race. `peer_credential_mismatch_
-        // is_rejected` and `wrong_token_is_rejected_without_a_dialog`
-        // (below) both tolerate this call failing instead, for exactly
-        // this reason. Uniformising this one onto the tolerant shape too
-        // is deliberately deferred to the B1 socket-path fix's own
-        // subject, which touches this module anyway, rather than
-        // churning a passing test to close a window never observed open.
-        stream
+        //
+        // **2026-11-09, tolerated rather than asserted, same shape as
+        // `:670` and `:1091`.** The "not observed to fail" claim above
+        // stopped being true (`test-process-leak.md`'s own 2026-11-09
+        // entry: this exact `.expect` reddened on the reviewer's own
+        // markdown-only push, `EINVAL`). Tolerating costs nothing this
+        // test needs: the read below exists only to *delay* this
+        // thread's own close so the server's read-first behaviour (the
+        // narrowing argument above) has room to land before anything
+        // here closes -- it is not what makes the server read the frame
+        // before verdict; that is `authenticate_and_read`'s own
+        // production ordering, true regardless of whether this probe
+        // runs at all. If `set_read_timeout` itself fails with `EINVAL`,
+        // the peer is already gone, which on this test's own server path
+        // only happens *after* the frame has already been read and the
+        // verdict reached -- so skipping the read in that case loses
+        // nothing this assertion depends on.
+        if stream
             .set_read_timeout(Some(Duration::from_secs(5)))
-            .expect("set the sender's own bound");
-        let _ = stream.read(&mut [0_u8; 1]);
+            .is_ok()
+        {
+            let _ = stream.read(&mut [0_u8; 1]);
+        }
     });
 
     let result = endpoint.accept_proposal();
@@ -773,10 +783,32 @@ fn oversized_declared_length_is_rejected_before_reading_the_body() {
         // server's read and win, reporting `ConnectionClosed` instead of
         // exercising the oversized-length rejection this test is named
         // for.
-        stream
+        //
+        // **2026-11-09, tolerated rather than asserted, same shape as
+        // `:670` and `:1091`.** This is the site that actually reddened
+        // (`test-process-leak.md`, 2026-11-09 -- twice, once on the
+        // reviewer's own markdown-only push), and unlike the
+        // malformed-frame case above, the server's rejection path here
+        // never reads the body at all: `OversizedFrame` is decided from
+        // the 4-byte length prefix alone, so the window for this thread's
+        // own `set_read_timeout` to lose the race is wide, not narrow.
+        // The one-byte read below exists only to hold this thread open
+        // long enough that it does not close before the server's verdict
+        // -- it proves nothing about the body (there is no body; the
+        // whole point is that the server never asks for one). If
+        // `set_read_timeout` itself fails with `EINVAL`, the peer -- this
+        // test's own endpoint -- is already gone, which only happens
+        // after it has already reached `OversizedFrame` and dropped its
+        // own end; skipping the read in that case observes the same
+        // verdict `endpoint.accept_proposal()` already has, just without
+        // this thread also blocking on a read that cannot teach it
+        // anything new.
+        if stream
             .set_read_timeout(Some(Duration::from_secs(5)))
-            .expect("set the sender's own bound");
-        let _ = stream.read(&mut [0_u8; 1]);
+            .is_ok()
+        {
+            let _ = stream.read(&mut [0_u8; 1]);
+        }
     });
 
     let result = endpoint.accept_proposal();
