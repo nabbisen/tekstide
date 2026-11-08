@@ -1324,11 +1324,24 @@ fn required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_chil
         TranscriptRetentionState::CaptureFailed
     );
 
+    // Response 665's own required correction: `record_write`'s first line
+    // (`if self.failed { return Send; }`) means every chunk read *before*
+    // the first failing write is `Send`, correctly recorded and correctly
+    // forwarded -- not a violation of anything. The loop's own
+    // `Suppress { stop_reading: true }` arm returns into `wait_for_
+    // shutdown_only` immediately on the *first* failing write, so nothing
+    // can reach the channel between that failure and this test observing
+    // `CaptureFailed` above. What can legitimately be sitting in the
+    // channel right now is whatever arrived *before* the failure --
+    // correctly-recorded output, not what this test means to forbid.
+    // Drained (not asserted empty) at this exact observation point, so
+    // the window below only ever counts what arrives *after* it.
+    let pre_failure_bytes = reader.drain_available().into_bytes();
+
     // "Stops reading altogether": every chunk `yes` produces after the
-    // first (failing) one must never reach the channel either -- not
-    // just the one that failed. Poll for a sustained window rather than
-    // a single snapshot, so a reader that resumed reading a moment
-    // later would still be caught.
+    // failure must never reach the channel either. Poll for a sustained
+    // window rather than a single snapshot, so a reader that resumed
+    // reading a moment later would still be caught.
     let mut drained_bytes: Vec<u8> = Vec::new();
     let deadline = Instant::now() + Duration::from_millis(500);
     while Instant::now() < deadline {
@@ -1339,9 +1352,13 @@ fn required_local_bounded_marks_capture_failed_stops_reading_and_stalls_the_chil
         drained_bytes.len(),
         0,
         "RequiredLocalBounded must stop reading entirely on capture failure -- any bytes \
-         reaching the channel after CaptureFailed would be unrecorded output making it to the \
-         display, exactly what D2's ordering guarantee exists to prevent. Drained bytes: {}",
-        describe_drained_bytes(&drained_bytes)
+         reaching the channel after CaptureFailed was observed would be unrecorded output \
+         making it to the display, exactly what D2's ordering guarantee exists to prevent. \
+         Drained bytes (after observation): {}. For comparison, bytes already queued *before* \
+         this test observed CaptureFailed (legitimately recorded output, not part of this \
+         assertion): {}",
+        describe_drained_bytes(&drained_bytes),
+        describe_drained_bytes(&pre_failure_bytes)
     );
 
     // The child is stalled, not killed: still alive, blocked on its own

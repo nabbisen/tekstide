@@ -1243,6 +1243,24 @@ fn reading_a_watched_file_is_not_reported_but_writing_it_is() {
         }
     });
 
+    // Response 664's own required correction: the watch starts *after* this test's own setup
+    // (`create_dir_all`, the initial `write`), but a real macOS capture
+    // (`[watch-notice-probe]`, `macos-measurement` run 42383460767) showed those same setup
+    // events arriving anyway -- three `Changed` notices (a folder create, a file create, a
+    // content modify) delivered late, counted against the read-only window below rather than
+    // discarded as the setup noise they are. Settled here instead: drain and discard whatever
+    // arrives in a short grace window right after the watch starts, before the property this
+    // test actually means to check (reads produce nothing) begins counting.
+    let settled: Vec<super::WatchNotice> =
+        std::iter::from_fn(|| notices.recv_timeout(Duration::from_millis(300)).ok()).collect();
+    if !settled.is_empty() {
+        eprintln!(
+            "[reading-watched-file-settle] discarded {} backlogged setup notice(s) before the \
+             read-only window: {settled:?}",
+            settled.len()
+        );
+    }
+
     for _ in 0..5 {
         let _ = std::fs::read(&file).unwrap();
     }
