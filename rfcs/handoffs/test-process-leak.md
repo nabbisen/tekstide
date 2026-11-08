@@ -4750,3 +4750,30 @@ that was promised, the fourth exclusion named, and the one genuinely shared-chan
 cleared by a timing check rather than by the same blanket rule that does not apply to it. The class
 stays closed. Nothing fixed -- audit-only, as required; C9 is not touched because it already
 carries the margin it needs.
+
+**2026-11-08, later still -- round 4's correction to C9: the margin is ~100ms, not ~200ms, and the
+exposure is an ordinary flake, not the silent false pass warned about above.** Two errors in C9's
+own row, both in the direction of overstating safety:
+
+- **The arithmetic dropped the 100ms head start.** The slow peer's thread spawns at T0 and cannot
+  send before T0+600ms (the `sleep(600ms)` inside it, before it drops its stream). But the window
+  does not open at T0+400ms -- the main thread sleeps 100ms (the deliberate head start,
+  `channel.rs:1515`) *before* `well_behaved_peer` is even spawned and `started` is taken, so the
+  `recv_timeout(400ms)` window closes at **T0+500ms**, not T0+400ms. 600 - 500 = **~100ms**, half
+  what the row said. "Structurally cannot beat" is also too strong regardless of the number: this
+  is a wall-clock margin on a runner this same document records at load average 15.92 on 3 cores, a
+  measured margin, not a guarantee -- the risk only runs one direction (a slow `well_behaved_peer`
+  spawn shrinks the 100ms further; delaying the slow peer only helps), but it is real exposure, not
+  zero.
+- **The severity claim above does not apply to C9.** A queue-consuming poll satisfied by a stale
+  item is a silent false pass only when the test cannot tell the items apart. Here it can: the slow
+  peer's item is `Err(ApprovalChannelError::ReadTimedOut)` (or whichever error its own stream-drop
+  produces), and the line right after the receive is
+  `result.expect("the well-behaved peer's proposal must be accepted")` -- a mis-ordered receive
+  fails loudly, not quietly. C9's exposure under its true ~100ms margin is an ordinary flake, not
+  the dangerous kind the queue-consuming warning above was written for.
+
+**Not restructured** -- it is clean under its real margin, and an untriggered restructure here
+would be exactly the thing this audit was told not to do to the other 33. If C9 ever reds: do not
+widen the sleep (same shape, bigger margin, same fragility); select the well-behaved result by its
+own proposal id or a per-connection channel instead of trusting arrival order.
