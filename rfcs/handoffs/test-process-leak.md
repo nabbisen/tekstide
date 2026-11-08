@@ -3885,6 +3885,61 @@ argument\" }"*, followed by *"sender thread must not panic: Any {{ .. }}"* (`cha
 -- the identical `EINVAL` shape, a different one of the nine tests this row's own disposition
 history already enumerates by number. Not investigated further, same reason as above.
 
+## 2026-11-09 -- a third EINVAL occurrence, on the reviewer's own push, and the fix for it is already in the same file at two of five sites
+
+`macos-measurement` run
+[42530938275](https://github.com/nabbisen/tekstide/actions/runs/42530938275), commit `8d2907c` --
+**my own push**, a single markdown section appended to
+`rfcs/handoffs/derived-contrast-pairs.md`, no code at all; `gate` (Linux) green in the same run.
+`approval::tests::channel::oversized_declared_length_is_rejected_before_reading_the_body` failed,
+verbatim:
+
+```
+thread '<unnamed>' panicked at crates/tekstide-core/src/approval/tests/channel.rs:778:14:
+set the sender's own bound: Os { code: 22, kind: InvalidInput, message: "Invalid argument" }
+thread 'approval::tests::channel::oversized_declared_length_is_rejected_before_reading_the_body'
+panicked at crates/tekstide-core/src/approval/tests/channel.rs:783:19:
+sender thread must not panic: Any { .. }
+```
+
+**Second occurrence of this exact test and message** (the first was run 42440617484 on `74ab17d`,
+recorded above), and the **third** in the `EINVAL`-on-a-closed-peer family inside about 24 hours --
+all three on commits containing no `approval::`/`channel.rs` code:
+
+| Run | Commit | Test | Site |
+| --- | --- | --- | --- |
+| 42440617484 | `74ab17d` | `oversized_declared_length_is_rejected_before_reading_the_body` | `channel.rs:778` |
+| (recorded above) | `7d1c7ce` | `serve_concurrently_refuses_connections_beyond_the_concurrency_cap` | `channel.rs:1655` |
+| 42530938275 | `8d2907c` | `oversized_declared_length_is_rejected_before_reading_the_body` | `channel.rs:778` |
+
+**And the answer is already written in this file's own source, applied to two of five sites.**
+`set_read_timeout(Some(..))` appears at five places in the spawned peer threads -- `:670`, `:737`,
+`:777`, `:1091`, `:1654`. Two of them (`:670`, `:1091`) already **tolerate** a failure instead of
+asserting it, and `:670`'s own comment states the general case outright:
+
+> Tolerated, not asserted, the same shape `peer_credential_mismatch_is_rejected` uses: skip the
+> read if the timeout itself fails, rather than claiming a guarantee only the credential-check path
+> lacks when **every spawned-thread site in this module has the same underlying race at different
+> odds**.
+
+The remaining three (`:738`, `:778`, `:1655`) still `.expect(...)`. **Two of those three are
+exactly the two tests that have reddened in this window**; the third is the same shape and has
+simply not been unlucky yet.
+
+**Disposition.** This is not a new intermittent and not a load story. It is **an incomplete
+application of a fix whose own comment argues for the complete one.** The call that review 645 added
+to *prevent* a close/read race is itself subject to that race: on macOS, `setsockopt` on a socket
+whose peer has already gone returns `EINVAL`, so the guard panics on precisely the condition it was
+guarding against, and `.expect()` turns that into a test failure. Tolerating it is not a weakening:
+if the bound cannot be set because the peer is gone, there is nothing left to read, which is what
+both tolerating sites already say. Instruction issued for the three sites; `:1655` needs one
+judgment call rather than a mechanical edit, since its own message asserts the peer is still
+connected and its timeout is 30 ms, not 5 s.
+
+**Method note, mine.** This red was on my own push and I read it before reporting the push as done
+-- the habit the 2026-11-07 entry above records me failing at one commit after tightening the rule
+that depends on it.
+
 ## New row, 2026-10-31 -- a duplicate assertion, not a fourth cluster member; fixed the same shape as review 650 round 3
 
 Run `41190734667` (`e3f432d`, review 653's own push, docs/workflow/checklist only --
