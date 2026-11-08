@@ -4629,3 +4629,45 @@ half-frame budget, recorded in `results-run5-2026-11-08.txt`. `qa-evidence.md:35
 "bounded at 80 ms there and 8 ms in release" sentence is corrected in the same slice, pointing here.
 This row's own gap (checked nowhere in CI between the absolute bound's removal and this landing) is
 now closed.
+
+## 2026-11-08 -- the bounded audit response 665 round 2 required: a third instance of the "counting window opened before a prior phase drained" class, searched for properly this time and not found
+
+Response 665 round 2 rejected an earlier grep-based "only two instances" claim on the grounds that
+the pattern is not the assertion shape, it is the timing shape: a deadline loop or a bounded
+`recv_timeout` wait, placed right after a phase of the same test that can still be producing output
+asynchronously when the window opens. The instruction: walk every `Instant::now() + duration`
+deadline loop and every `recv_timeout` call under `crates/`, excluding `project::watch::tests`
+(already fixed this round) and the two non-test/diagnostic sites already ruled out
+(`runtime::git`'s process-exit poll, `bin::project_process_probe`'s flag poll -- neither is a test,
+neither asserts a bounded/zero count), and for each ask one question: does a prior phase of this
+test produce output asynchronously that could still be in flight when the window opens?
+
+**34 sites walked, all 34 CLEAN.** 19 under `tekstide-core` (`runtime::terminal::reader::tests`,
+`runtime::terminal::tests`, `transcript::tests`, `agent::tests`, `approval::tests::coordinator`,
+`approval::tests::channel`, `project_lock::tests`, `project::diff::tests`) and 15 under
+`tekstide::shell::tests`. Two shapes account for every site:
+
+- **Positive poll for an expected transition or marker, asserted on timeout by equality/presence**
+  (the large majority -- e.g. `reader/tests.rs`'s own wake-notifier tests, every
+  `shell/tests.rs` "real agent run" test polling for a `Completed`/marker string). Backlog from a
+  prior phase cannot falsify these: it can only make the expected signal arrive *sooner*, never
+  produce a false pass or false fail.
+- **A negative/absence assertion that follows a fully synchronous, already-completed prior action**
+  (e.g. `shell/tests.rs:8274`'s declined-capture test -- capture was synchronously declined before
+  launch, so there is no distinct async writer whose backlog could land late). Not the vulnerable
+  shape, because there is no prior *asynchronous* phase to drain in the first place.
+
+The two already-fixed sites (`reader/tests.rs`'s `required_local_bounded...` row above, and
+`watch/tests.rs`'s settle-window fix) remain the only two members of the class found on this pass,
+now in both audits, not one. **This closes the class**, per response 665 round 2's own terms: a
+real result, not every deadline loop restructured on spec. Nothing here was changed -- audit-only,
+as required ("do not restructure any test that is fine").
+
+**One incidental observation, out of scope for this audit, disclosed rather than silently
+dropped.** `shell/tests.rs:8665`,
+`retained_transcript_visibility_reflects_a_real_transcripts_real_byte_count`: `real_byte_count` is
+snapshotted the instant a marker line is first seen, then compared against a later read of the
+same file. If the script being captured writes more output after that marker line, the two values
+could legitimately diverge. This is a different timing shape from the one audited here (a value
+captured too early, not a window opened too late) and was not asked for by this instruction. Not
+investigated further; recorded so a future reader does not have to rediscover it.
