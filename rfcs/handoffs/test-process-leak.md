@@ -4606,3 +4606,15 @@ for this specific assertion, because the assertion itself will no longer exist. 
 instead wired into `project::root::explorer::hostile_tests::a_hundred_thousand_entry_directory_is_
 a_bounded_scan_not_a_walk_of_all_of_it`'s own row, which still needed one -- see that row for the
 real numbers from both platforms.
+
+**2026-11-08, later the same day — the budget landed in its new home, confirmed rather than left
+a declared gap.** Response 663's own required shape: not a new example (`font_probe.rs` is already
+"a number, not a check" per `release-checklist.md:392`'s own warning, and a second example would
+repeat exactly that mistake), but a `CHECK` line from the `measure` bin itself, so the checklist's
+own existing re-run step (`cargo run --release --locked`, compare `CHECK` lines against the newest
+`results-run*.txt`) covers it with no checklist edit. `CHECK D-window` (`measurement/src/main.rs`):
+a 22-row window, worst-of-5, in a real `--release` build — **well under 1 ms** against the 8.33ms
+half-frame budget, recorded in `results-run5-2026-11-08.txt`. `qa-evidence.md:358`'s own stale
+"bounded at 80 ms there and 8 ms in release" sentence is corrected in the same slice, pointing here.
+This row's own gap (checked nowhere in CI between the absolute bound's removal and this landing) is
+now closed.

@@ -38,7 +38,7 @@ use tekstide_core::project::root::{
     ExplorerNodeKind, ExplorerNodeState, FileExplorerScanPolicy, FileExplorerScanner,
     ProjectRootHandle, ProjectRootValidator, SymlinkPolicy,
 };
-use tekstide_core::project::{ProjectId, ProjectSession};
+use tekstide_core::project::{MAX_TREE_ROWS, ProjectId, ProjectSession};
 use tekstide_core::text_safety::quote_untrusted;
 
 #[derive(Clone, Debug)]
@@ -716,6 +716,102 @@ fn main() {
     }
     println!("(directories open, rows drawn, widget build + layout): {frame_rows:?}");
     let _ = std::fs::remove_dir_all(&wide);
+
+    println!(
+        "\n== F. The windowed sidebar view, {MAX_TREE_ROWS} rows (the product's own cap), \
+         worst-of-5 ==",
+    );
+    // RFC-052 review 663's own required home: the budget
+    // `drawing_the_largest_tree_builds_only_the_window_and_fits_inside_a_frame`
+    // used to assert in-suite (an absolute wall-clock bound, removed there --
+    // see that test's own doc comment and `qa-evidence.md`'s correction) moves
+    // here, worst-of-N rather than best-of-N, matching this file's own stated
+    // rule that a *budget* (what a user can suffer) belongs in the measurement
+    // harness while a *suite* assertion stays a same-run ratio.
+    //
+    // This crate has no dependency on `tekstide` (a `[[bin]]`-only crate with
+    // no library target to link against -- adding one is a real architectural
+    // change, not this slice's call to make unilaterally), so the row text
+    // below is a plausible approximation of what the product's own windowed
+    // view draws, the same precedent `font_probe.rs` already set for its own
+    // 28-row measurement, not a call into the product's own private
+    // `tree_lines`/`view` functions. The row *count* and the *widget kinds*
+    // (`iced::widget::text` in an `iced::widget::column`, `TREE_FONT` ==
+    // `Font::MONOSPACE` per the owner's own request, confirmed above) are
+    // real; the exact glyphs each row carries are not.
+    const WINDOW_ROWS: usize = 22; // measured directly: `drawing_the_largest_tree...`'s own
+    // now-removed test printed "window of 22" against a 700px-tall area at
+    // the default body font size, before this slice touched it.
+    let row_text = |index: usize| format!("file-{index:05}.rs");
+    // Built fresh inside the closure on every call, like the real
+    // `lay_out`/`build` split expects (and like the removed test's own
+    // `super::view::<()>(...)` call did) -- a `Vec<Element>` cannot be
+    // `Clone`d, and reusing one across iterations would also exclude the
+    // per-row widget construction this measurement means to time.
+    let mut windowed_worst = Duration::ZERO;
+    for _ in 0..5 {
+        let laid = lay_out(
+            || {
+                iced::widget::column(
+                    (0..WINDOW_ROWS)
+                        .map(|index| {
+                            iced::widget::text(row_text(index))
+                                .size(14)
+                                .font(Font::MONOSPACE)
+                                .wrapping(iced::widget::text::Wrapping::None)
+                                .into()
+                        })
+                        .collect::<Vec<Element<'_, Msg>>>(),
+                )
+                .spacing(2)
+                .into()
+            },
+            &mut renderer,
+        );
+        windowed_worst = windowed_worst.max(laid.build + laid.layout);
+    }
+    // What building every row would cost: the alternative the window rules
+    // out. Measured on a sample and scaled, the same way the removed test
+    // did, so this check does not itself cost ~9s every run.
+    const SAMPLE: usize = 500;
+    let sample_texts: Vec<String> = (0..SAMPLE).map(row_text).collect();
+    let laid = lay_out(
+        || {
+            iced::widget::column(
+                sample_texts
+                    .iter()
+                    .cloned()
+                    .map(|text| {
+                        iced::widget::text(text)
+                            .size(14)
+                            .font(Font::MONOSPACE)
+                            .wrapping(iced::widget::text::Wrapping::None)
+                            .into()
+                    })
+                    .collect::<Vec<Element<'_, Msg>>>(),
+            )
+            .spacing(2)
+            .into()
+        },
+        &mut renderer,
+    );
+    let whole_estimate = (laid.build + laid.layout) * (MAX_TREE_ROWS / SAMPLE) as u32;
+    println!(
+        "windowed ({WINDOW_ROWS} rows): worst of 5 build+layout {}; whole tree \
+         ({MAX_TREE_ROWS} rows, estimated from a {SAMPLE}-row sample): {}",
+        ms(windowed_worst),
+        ms(whole_estimate),
+    );
+    report.check(
+        "D-window windowed sidebar view fits well under half a frame (release, worst-of-5)",
+        windowed_worst < FRAME / 2,
+        format!(
+            "{WINDOW_ROWS}-row window: {} vs half a {} frame ({})",
+            ms(windowed_worst),
+            ms(FRAME),
+            ms(FRAME / 2),
+        ),
+    );
 
     println!("\n{} check(s) failed", report.failed);
     let _ = (Path::new(""), BIDI_NAME, NEWLINE_NAME, non_utf8_name());
