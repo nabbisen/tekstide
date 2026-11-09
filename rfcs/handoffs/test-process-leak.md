@@ -4002,6 +4002,63 @@ briefly, let the server's own close unblock the read) was correct, but its own `
 built to survive -- at three of five sites. Every prior dated occurrence above stands as evidence;
 nothing is retracted, only completed.
 
+### 2026-11-09, later the same day -- round 2's corrections: `:1686` landed narrowed, the review-645 comment fixed, and the cause reworded from the comment this diff deleted
+
+Response 666 confirmed the C9 cross-reference above was a genuine error (a line number copied from
+this row's own text without checking which test it belonged to, once line numbers had shifted to
+`:1686` after the first commit) and required three more things before closing.
+
+**`:1686` landed, narrowed to the one case production already narrowed to.** Unlike `:738`/`:778`,
+a failed `set_read_timeout` here does not skip the read -- `held` collects every stream regardless,
+and the later loop reads all of them unconditionally. Tolerating *every* failure would leave a
+genuinely live, silent, accepted connection's own read unbounded if its timeout failed for some
+other reason -- the exact hazard `authenticate_and_read`'s own production comment already names
+("an unbounded read in the approval path is the five-hour-hang lesson wearing a new hat"). So
+`:1686` now asserts the failure is specifically `cfg!(target_os = "macos") && error.raw_os_error()
+== Some(libc::EINVAL)` -- mirroring production's own narrowing exactly -- and still panics on
+anything else, same as before this change. `:670`, `:745`/`:778`'s new line, `:807`, and `:1091`
+are untouched: all four skip the read on any failure, so none of them can leave an unbounded read
+behind, and narrowing them was correctly not asked for.
+
+**The review-645 comment's own stale guarantee, corrected in the same commit.** It said "now the
+option can never be set after the close that would make it fail." Three reds said otherwise --
+moving the call into the connect loop narrows the window (the server can still accept, refuse, and
+drop between `connect()` returning and the next statement), it does not close it. Corrected in
+place, dated, so the next reader does not inherit a claim this row's own history already falsified.
+
+**The cause, reworded from the comment this diff deleted, not from my own paraphrase of it.** The
+`:729` site (now `:738`) carried this, before this slice removed it:
+
+> This `.expect()` has not been observed to fail here across this cluster's own history; that is
+> evidence of a smaller probability, not of a closed race. `peer_credential_mismatch_is_rejected`
+> and `wrong_token_is_rejected_without_a_dialog` (below) both tolerate this call failing instead,
+> for exactly this reason. Uniformising this one onto the tolerant shape too is deliberately
+> deferred to the B1 socket-path fix's own subject, which touches this module anyway, rather than
+> churning a passing test to close a window never observed open.
+
+So the cause is not merely "incomplete" -- it was **deliberate, correctly reasoned at the time, and
+deferred to a subject that came and went without picking it up** (B1 closed in October without
+touching this). The author knew it was a smaller probability rather than a closed race, said so in
+writing, and named exactly where the follow-through belonged; the follow-through never happened.
+Three reds later, the comment's own reasoning holds and its conclusion -- that deferring was safe
+-- does not: "it has not flaked since" is never acceptance, and this is that rule failing inside a
+code comment rather than a register row for once. `grep` for "not been observed"/"never observed"
+across `crates/` after this correction returns only this quote's own back-reference and the
+production comment's unrelated scoping statement -- no second instance of the shape found.
+
+**Gate, re-run after `:1686` and the two comment fixes.** `cargo fmt --check`, `clippy --workspace
+--all-targets --all-features -D warnings` both clean. `tekstide-core --lib -- approval::tests::
+channel::` 28/28, all four tests in play passing by name (`:738`, `:778`, `:1686`'s own test, and
+C9). Full workspace unchanged in count from the first commit (`tekstide` 792/0/8,
+`rfc_docs_invariants` 28/0, `tekstide-core` 1185/0/4) -- no test added or removed.
+
+**Disposition, closed.** All three sites now land (`:738`, `:778` tolerate unconditionally;
+`:1686` tolerates only the one narrowed case production already narrows to). The family's cause is
+named as a deliberately deferred, correctly-reasoned-at-the-time judgment call that was never
+revisited when its own deferred-to subject closed -- not an oversight, and not merely
+"incomplete". Every prior dated occurrence stands; the deleted comment's own words are preserved
+here rather than only in history, so the reasoning survives the deletion.
+
 ## New row, 2026-10-31 -- a duplicate assertion, not a fourth cluster member; fixed the same shape as review 650 round 3
 
 Run `41190734667` (`e3f432d`, review 653's own push, docs/workflow/checklist only --

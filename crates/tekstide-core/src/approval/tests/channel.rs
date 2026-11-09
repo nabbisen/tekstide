@@ -1677,14 +1677,43 @@ fn serve_concurrently_refuses_connections_beyond_the_concurrency_cap() {
     // panic was. Set here instead, in the same loop as `connect`, while
     // every peer this test owns is certainly still alive -- identical
     // semantics either way, since the timeout only governs the later
-    // reads below, but now the option can never be set after the close
-    // that would make it fail.
+    // reads below. **This narrows the window; it does not close it**
+    // (corrected 2026-11-09 -- the sentence here used to claim the
+    // option "can never be set after the close that would make it
+    // fail", which three real reds falsified: the endpoint's own accept
+    // loop can accept, refuse, and drop a surplus connection between
+    // `connect()` returning and the very next statement running, so the
+    // race this fix narrows is never fully closed by moving the call
+    // earlier).
+    //
+    // **2026-11-09, tolerated for exactly the one case production
+    // itself tolerates, not every failure.** A refused connection's peer
+    // is already gone when this fails, and that connection's later read
+    // (below, in the `held` loop) returns `Ok(0)` immediately with or
+    // without a timeout -- there is no live peer left to wait on, so
+    // skipping the timeout for *that* case loses nothing. But `held`
+    // collects every stream regardless, and the later loop reads every
+    // one of them unconditionally -- unlike `:745`/`:807` above, a
+    // failed timeout here does not skip the read, so tolerating every
+    // failure would leave a genuinely live, silent, accepted
+    // connection's own read unbounded if its timeout somehow failed for
+    // a different reason. Mirrors the one condition production's own
+    // `authenticate_and_read` already narrowed this error to
+    // (`channel.rs`'s own `set_read_timeout` call): only macOS `EINVAL`
+    // is the known closed-peer signature; anything else still panics,
+    // the same as before this change, so a genuinely unbounded read
+    // never happens silently.
     let held: Vec<UnixStream> = (0..40)
         .map(|_| {
             let stream = UnixStream::connect(&socket_path).expect("connect within/beyond the cap");
-            stream
-                .set_read_timeout(Some(Duration::from_millis(30)))
-                .expect("set the check's read timeout while the peer is still connected");
+            if let Err(error) = stream.set_read_timeout(Some(Duration::from_millis(30))) {
+                assert!(
+                    cfg!(target_os = "macos") && error.raw_os_error() == Some(libc::EINVAL),
+                    "set_read_timeout failed for a reason other than the known macOS \
+                     EINVAL-on-a-closed-peer race -- a live, silent peer's later read would be \
+                     unbounded: {error:?}"
+                );
+            }
             stream
         })
         .collect();
