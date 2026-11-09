@@ -7,6 +7,17 @@ open and neither blocks that slice**: which release slot this takes, and whether
 `tekstide-core`'s published API may change shape in that release — Stage 1 is API-compatible
 by construction (D3), so it does not wait on the second.
 
+**Updated 2026-11-09, dated rather than silently edited.** The second question is **answered:
+the owner accepted the `TerminationOutcome` variant proposal**, which was the concrete form that
+question had taken (review 657's own narrowing: *"when a consumer needs this distinction, may that
+release carry a breaking change to `TerminationOutcome`"*). So a release carrying this RFC's work
+may also carry a shape change to `tekstide-core`'s published API. **The release-slot question stays
+open**, and Stage 1 still does not depend on either. Separately, the macOS-gate hold that kept
+PR-074-A from starting is **lifted** — see `.git-exclude/reviewed/`'s own dated note for the
+attribution rule that replaces it; the three families that produced reds on code-free commits
+(explorer frame budget, watch semantics, the approval-channel `EINVAL` sites) are all closed, and
+the one still open has a greppable signature.
+
 Proposed 2026-11-03. Approved to follow RFC-028 by the human owner (review 595), and drafted
 only after RFC-028 closed and `0.38.0` shipped, as directed. The goal, the tier model and
 three of the decisions below were settled first, in
