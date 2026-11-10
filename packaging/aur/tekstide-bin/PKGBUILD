@@ -1,0 +1,41 @@
+# Maintainer: nabbisen <nabbisen@reflerd.com>
+pkgname=tekstide-bin
+# 2026-11-10 -- verification baseline, not the shipping version. Proven end to
+# end against the only real Linux release asset that exists as of this
+# writing (0.38.0); the instruction behind this package explicitly asked to
+# target the *next* cut, not this one, since 0.38.0 is already a release
+# behind what the source package (`packaging/aur/PKGBUILD`) will carry by the
+# time either package is actually published. At the next real release cut:
+# bump this to that version and recompute every `sha256sums` entry below from
+# the freshly downloaded assets -- never carry these four forward. The
+# `source=` URLs below resolve automatically once `pkgver` is bumped, since
+# they are built from it; only the checksums need a real re-download.
+pkgver=0.38.0
+pkgrel=1
+pkgdesc="Local-first, multi-project workbench for supervising terminal-based AI development workflows (prebuilt binary)"
+arch=('x86_64')
+url="https://github.com/nabbisen/tekstide"
+license=('Apache-2.0')
+# Mutually exclusive with the source package -- AUR's own guideline for a
+# -bin/source pair, and without this a user could end up with two
+# usr/bin/tekstide from two different packages installed at once.
+provides=('tekstide')
+conflicts=('tekstide')
+# Read from the real asset with `ldd`, not guessed from Cargo.toml and not
+# copied from the source package without checking -- confirmed identical
+# this time (same binary, same build), but that is a fact to verify each
+# release, not an assumption to carry forward. No `cargo`/`rust` makedepend:
+# this package builds nothing, it unpacks a prebuilt binary.
+depends=('gcc-libs')
+source=("tekstide-$pkgver::https://github.com/nabbisen/tekstide/releases/download/$pkgver/tekstide-$CARCH-linux"
+        "LICENSE-$pkgver::https://github.com/nabbisen/tekstide/releases/download/$pkgver/LICENSE"
+        "NOTICE-$pkgver::https://github.com/nabbisen/tekstide/releases/download/$pkgver/NOTICE")
+sha256sums=('bd09b3dbb385c88659be082c62e8e24049018e6a91c8715dfa582e83e6e490dd'
+            'f651689716d7e61870c050334baf1bfc0e44a2fb8f39c68b2a1412de140f97fe'
+            'f53da1b75c05a55a6475117bc34c97c02205a76978def7c5bf1112053b48e714')
+
+package() {
+  install -Dm755 "$srcdir/tekstide-$pkgver" "$pkgdir/usr/bin/tekstide"
+  install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/NOTICE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}

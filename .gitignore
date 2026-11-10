@@ -33,3 +33,10 @@ packaging/aur/pkg/
 packaging/aur/*.pkg.tar.*
 packaging/aur/*.log
 packaging/aur/*.crate
+
+# same, for the tekstide-bin package's own subdirectory -- it never downloads a .crate, so no
+# pattern for one here
+packaging/aur/tekstide-bin/src/
+packaging/aur/tekstide-bin/pkg/
+packaging/aur/tekstide-bin/*.pkg.tar.*
+packaging/aur/tekstide-bin/*.log

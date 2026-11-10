@@ -547,6 +547,11 @@ then deleted too** — a reader of the next cut should not wonder what used to b
 
 ## AUR Package
 
+Two packages, two separate procedures below — item 396 above is the standing watch that both
+`pkgver`s match the release; this section is what makes that true.
+
+### `tekstide` (source)
+
 RFC-029 PR-029-E, D6: `packaging/aur/PKGBUILD` builds from the `tekstide` crate's own crates.io
 tarball, not from a GitHub release asset — it is not blocked by anything above, but it does go
 stale every release, since `pkgver` is pinned, not tracked.
@@ -562,4 +567,32 @@ stale every release, since `pkgver` is pinned, not tracked.
       fix for.
 - [ ] `namcap PKGBUILD` and `namcap <built package>` both clean of anything beyond the
       implicitly-satisfied-glibc/gcc-libs warnings every Rust package gets.
+
+### `tekstide-bin` (prebuilt)
+
+`packaging/aur/tekstide-bin/PKGBUILD` builds from the Linux release asset
+(`tekstide-$CARCH-linux`, uploaded by `.github/workflows/release.yml`) rather than from source — it
+has no build step at all, so it cannot go stale the same way the source package's own `CFLAGS` fix
+can, but its `pkgver`, `source=` URLs and `sha256sums` are tied to a real, already-published
+release and so cannot be filled in before one exists. **Must only ever point at a release that has
+already landed**, never at the one still being prepared.
+
+- [ ] After this release's own assets are uploaded (the Linux binary, `LICENSE`, `NOTICE` all
+      present under `https://github.com/nabbisen/tekstide/releases/download/<v>/`): bump `pkgver`
+      to match, reset `pkgrel` to `1`. The three `source=` URLs resolve automatically from `pkgver`;
+      only the three `sha256sums` need recomputing, from the real downloaded assets
+      (`curl -fsSL <url> | sha256sum`), never carried forward from a prior release.
+- [ ] Regenerate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`, from inside
+      `packaging/aur/tekstide-bin/`).
+- [ ] `makepkg --noconfirm -f` completes (fast — an unpack-and-install, not a build; if it is slow,
+      something is being built that should not be) and the packaged `usr/bin/tekstide --version`
+      reports the new version.
+- [ ] `namcap PKGBUILD` and `namcap <built package>` both clean of anything beyond the
+      implicitly-satisfied-glibc/gcc-libs warnings every Rust package gets.
+- [ ] `ldd` against the real downloaded binary still matches `depends` — read it fresh each
+      release, not carried forward from the source package's own list, even though the two have so
+      far matched exactly (same binary, same build).
+
+### Both packages
+
 - [ ] Nothing here publishes to the real AUR. That is the owner's own account and action.
