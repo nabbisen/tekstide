@@ -4951,3 +4951,37 @@ own row, both in the direction of overstating safety:
 would be exactly the thing this audit was told not to do to the other 33. If C9 ever reds: do not
 widen the sleep (same shape, bigger margin, same fragility); select the well-behaved result by its
 own proposal id or a per-connection channel instead of trusting arrival order.
+
+## 2026-11-09 -- the macOS-gate hold on PR-074-A is lifted, and the rule that replaces it
+
+Supersedes nothing written above -- every dated entry in the window this hold covered stands as
+written, including the "**The hold on PR-074-A stays**" sentence a few paragraphs up. This entry
+records that the hold itself has since been lifted, by the owner's own decision, dated 2026-11-09,
+not by time passing.
+
+**Why it could be lifted.** Of the four families that produced reds on code-free commits during
+the hold's own window: explorer frame budget (closed -- the absolute bound replaced by the
+same-run ratio, the real budget relocated to `measure`'s own `CHECK D-window`), watch semantics
+(closed, and it was a real production defect: a directory-granularity change produced no scan
+request on macOS), approval-channel `EINVAL` (closed at three sites, narrowed at the one where the
+read is not skipped). The `proc_exit`/`P_WEXIT` cluster (six members) stays open -- not closed by
+this decision, bounded by it. Last fourteen `ci` runs before the decision: three genuine
+flake-reds, two already-fixed `EINVAL` occurrences and one from the still-open cluster; the three
+most recent runs green on both jobs at attempt 1.
+
+**The rule, stated so it is a rule rather than a judgment call repeated under a new name:**
+
+1. A `macos-measurement` red whose panic text matches a signature already registered in this file
+   is not a stage failure for RFC-074's own ratchet. Disclose it verbatim under its own row, re-run,
+   carry on. The open cluster's own signature (`left: None, right: Some(Exited { exit_status: 0 })`
+   with `p_flag=0x6006 (P_WEXIT set)`) is what makes this greppable rather than remembered.
+2. Anything else is a real stage failure and stops the ratchet until explained -- no re-run first,
+   no "probably the runner" without a matching row.
+3. The match is against this file, not against memory. A red that looks familiar with no row here
+   is case 2 until a row exists -- this is the direction the explorer-budget row was burned in:
+   five occurrences inheriting a disposition nobody had actually checked against the register.
+4. `gate` green while `macos-measurement` reds is evidence about the platform only when paired with
+   (1); on its own it is the argument that let four families sit misattributed for days.
+
+Not a substitute for the still-reserved thread-level `proc_exit` question -- it bounds what not
+answering that question costs, rather than answering it.
