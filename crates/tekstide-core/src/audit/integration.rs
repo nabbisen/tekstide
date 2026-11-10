@@ -754,8 +754,26 @@ impl<'a> AuditCoordinator<'a> {
 
         let reason_code = match outcome {
             TerminationOutcome::Exited { .. } => AuditReasonCode::ProcessExited,
+            // 2026-11-10: `CommittedToExit` joined here deliberately, not
+            // given a new code of its own. It was going to get one
+            // (`ProcessCommittedToExit`) until that turned out to need a
+            // real schema migration -- `reason_code`'s own `CHECK`
+            // constraint in `schema.rs`'s frozen v3 DDL enumerates every
+            // allowed value, and v3 is a frozen, already-shipped version
+            // the same way v1/v2 are, not something this slice should
+            // edit in place. That migration is real work (a v4 DDL, a
+            // `3 -> 4` `MigrationStep`, a convergence test) this
+            // proposal was never reviewed to include, so: reuse
+            // `ProcessTerminated` instead. The imprecision this carries
+            // (whether the process ended by its own hand or because
+            // something terminated it) is the same ambiguity
+            // `KilledAfterTimeout` already carries here -- an automatic
+            // escalation, not always a direct action either -- so this
+            // is one more case of an existing imprecision, not a new
+            // kind of one.
             TerminationOutcome::TerminatedBySignal { .. }
-            | TerminationOutcome::KilledAfterTimeout { .. } => AuditReasonCode::ProcessTerminated,
+            | TerminationOutcome::KilledAfterTimeout { .. }
+            | TerminationOutcome::CommittedToExit { .. } => AuditReasonCode::ProcessTerminated,
             // RFC-048 D1: a runtime failure **after the run started** is an
             // ending, and one the trail can state. Before this it was grouped
             // with `OrphanedUnknown` and recorded nothing, which said of an
@@ -1053,8 +1071,17 @@ impl<'a> AuditCoordinator<'a> {
     ) -> AuditObservationStatus {
         let reason_code = match outcome {
             TerminationOutcome::Exited { .. } => AuditReasonCode::ProcessExited,
+            // 2026-11-10: `CommittedToExit` joined here, reusing
+            // `ProcessTerminated` rather than a new code -- see this
+            // function's sibling (`apply_managed_agent_terminal_outcome`'s
+            // own mapping above) for why a new code was considered and
+            // rejected (it would need a real schema migration, which
+            // this proposal was never reviewed to include). Kept
+            // consistent with that site's choice rather than decided
+            // separately here.
             TerminationOutcome::TerminatedBySignal { .. }
-            | TerminationOutcome::KilledAfterTimeout { .. } => AuditReasonCode::ProcessTerminated,
+            | TerminationOutcome::KilledAfterTimeout { .. }
+            | TerminationOutcome::CommittedToExit { .. } => AuditReasonCode::ProcessTerminated,
             TerminationOutcome::OrphanedUnknown { .. } | TerminationOutcome::Failed { .. } => {
                 return AuditObservationStatus::NotRequired;
             }

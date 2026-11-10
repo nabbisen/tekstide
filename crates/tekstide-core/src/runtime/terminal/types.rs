@@ -271,6 +271,21 @@ pub enum TerminationSignal {
     Sigkill,
 }
 
+/// Deliberately not `#[non_exhaustive]`, the same decision already made
+/// for `ApprovalChannelErrorReason` (see that type's own doc comment)
+/// and for the same reason: adding `CommittedToExit` (see its own doc
+/// comment) is a breaking change for any exhaustive `match` over this
+/// enum in a downstream crate (`CHANGELOG.md`'s `Unreleased` entry), and
+/// marking this `#[non_exhaustive]` now would make the *next* addition
+/// non-breaking at the cost of permanently losing the compiler's own
+/// ability to enumerate, at every call site that matches an outcome,
+/// exactly where a new case needs a real decision rather than a
+/// wildcard's silent catch. That is not a hypothetical cost here: this
+/// variant's own review (657 round 3) found two call sites
+/// (`crates/tekstide/src/shell.rs`) that `#[non_exhaustive]`-shaped
+/// wildcards had already been hiding, found only by reading the code,
+/// not by the compiler -- the opposite failure mode this enum staying
+/// exhaustive-capable exists to keep rare.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminationOutcome {
     Exited {
@@ -282,6 +297,31 @@ pub enum TerminationOutcome {
     KilledAfterTimeout {
         initial_signal: TerminationSignal,
         fallback_signal: TerminationSignal,
+    },
+    /// The child has committed to exiting -- the kernel's own
+    /// bookkeeping says so, and that reading does not reverse -- but no
+    /// exit status became available inside the budget this runtime gave
+    /// it. **Not [`Self::OrphanedUnknown`]: nothing here is unknown.** The
+    /// kernel's own answer to "what is this process doing" is precise;
+    /// what is absent is a *status*, not a *reading*. **Not a timeout
+    /// in the ordinary sense either**: a caller that gave up on a child
+    /// that was never observed to have committed to exiting still gets
+    /// `None`, not this variant -- this is reported only when the
+    /// commitment was itself observed before the budget ran out.
+    ///
+    /// Added 2026-11-10 (owner's decision on the proposal review 657
+    /// round 3 produced): the one case `TerminalRuntime::wait_for_exit`
+    /// used to fold into a bare `None`, indistinguishable from "this
+    /// budget never saw anything resembling exit". See
+    /// `crates/tekstide-core/src/runtime/terminal/termination.rs`'s own
+    /// `wait_for_child_outcome` for the real producer, and
+    /// `rfcs/handoffs/test-process-leak.md`'s `proc_exit`/`P_WEXIT`
+    /// cluster for why the case exists in practice, not only in theory.
+    /// This variant makes the *reporting* honest; it does not explain
+    /// *why* a committed child can still sit without a status for tens
+    /// of seconds, which stays a reserved, thread-level question.
+    CommittedToExit {
+        summary: BoundedRuntimeSummary,
     },
     OrphanedUnknown {
         summary: BoundedRuntimeSummary,

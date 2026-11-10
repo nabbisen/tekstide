@@ -3643,15 +3643,53 @@ fn record_terminal_exit(
         // instead -- "the session bar stops lying" either way, best-effort
         // past this point for the same reason `launch_terminal`'s own
         // post-registration steps are.
+        //
+        // **2026-11-10: `CommittedToExit` pulled out of this match's own
+        // wildcard on purpose, not left for it to catch silently.** The
+        // session bar renders `TerminalStatus::Failed` as the literal word
+        // "failed" (`session_bar.rs`) -- showing that for a process that
+        // has committed to exiting, not errored, is the exact lie this
+        // variant exists to stop. `Terminating` was considered and
+        // rejected: `terminal_status_is_active` counts it as live, and
+        // this pane is about to be dropped from `state.terminal_panes`
+        // with nothing left to ever move it past `Terminating` again --
+        // a status that can never be observed moving is worse than an
+        // imprecise but *resting* one. Routed through the same
+        // no-exit-code path `Exited`'s own arm already proves safe
+        // (`mark_terminal_exited(.., None)`), the identical shape
+        // `TerminatedBySignal`/`KilledAfterTimeout` get at the
+        // agent-run-owned call site (`session.rs`) -- this branch has no
+        // agent-run status to also decide, so there is nothing further
+        // to choose here.
+        //
+        // **Review 668: the wildcard itself is gone, not only this
+        // variant's share of it.** A `_ =>` here would have stayed
+        // unreached by the compiler's own exhaustiveness check for any
+        // future variant, which is the exact failure mode this enum
+        // staying non-`#[non_exhaustive]` exists to catch -- the two
+        // sites below are the ones that check found open. Written out as
+        // `TerminatedBySignal | KilledAfterTimeout | OrphanedUnknown |
+        // Failed`, the same four cases the old wildcard covered, same
+        // grouping, so the next new variant fails to compile here instead
+        // of silently rendering as "failed."
         let _ = match &outcome {
             tekstide_core::runtime::terminal::TerminationOutcome::Exited { exit_status } => state
                 .app_shell
                 .state_mut()
                 .mark_terminal_exited(&terminal_id, Some(*exit_status)),
-            _ => state.app_shell.state_mut().transition_terminal_status(
-                &terminal_id,
-                tekstide_core::domain::TerminalStatus::Failed,
-            ),
+            tekstide_core::runtime::terminal::TerminationOutcome::CommittedToExit { .. } => state
+                .app_shell
+                .state_mut()
+                .mark_terminal_exited(&terminal_id, None),
+            tekstide_core::runtime::terminal::TerminationOutcome::TerminatedBySignal { .. }
+            | tekstide_core::runtime::terminal::TerminationOutcome::KilledAfterTimeout { .. }
+            | tekstide_core::runtime::terminal::TerminationOutcome::OrphanedUnknown { .. }
+            | tekstide_core::runtime::terminal::TerminationOutcome::Failed { .. } => {
+                state.app_shell.state_mut().transition_terminal_status(
+                    &terminal_id,
+                    tekstide_core::domain::TerminalStatus::Failed,
+                )
+            }
         };
         // RFC-030 PR-030-B, review 411 R-a: a plain terminal is still a
         // managed process the application launched, with its own audit
@@ -6151,11 +6189,30 @@ fn terminate_project_live_work(
             // plain terminal: a clean exit records the real exit code,
             // anything else transitions to `Failed` via the more general
             // status API -- the session bar stops lying either way.
+            //
+            // 2026-11-10: and mirrors that function's own 2026-11-10
+            // correction too, for the identical reason stated there --
+            // `CommittedToExit` is pulled out of the wildcard
+            // deliberately, not left for it to render as "failed."
+            //
+            // Review 668: and mirrors that site's own follow-up too --
+            // the wildcard itself is gone, written out as
+            // `TerminatedBySignal | KilledAfterTimeout | OrphanedUnknown
+            // | Failed`, so a future variant fails to compile here
+            // instead of silently joining "failed."
             let _ = match &outcome {
                 TerminationOutcome::Exited { exit_status } => {
                     project.mark_terminal_exited(&terminal_id, Some(*exit_status))
                 }
-                _ => project.transition_terminal_status(&terminal_id, TerminalStatus::Failed),
+                TerminationOutcome::CommittedToExit { .. } => {
+                    project.mark_terminal_exited(&terminal_id, None)
+                }
+                TerminationOutcome::TerminatedBySignal { .. }
+                | TerminationOutcome::KilledAfterTimeout { .. }
+                | TerminationOutcome::OrphanedUnknown { .. }
+                | TerminationOutcome::Failed { .. } => {
+                    project.transition_terminal_status(&terminal_id, TerminalStatus::Failed)
+                }
             };
             // RFC-030 PR-030-B, review 411 R-a: the same trigger
             // `record_terminal_exit`'s own plain-terminal branch now has,

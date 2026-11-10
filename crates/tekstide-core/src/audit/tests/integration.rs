@@ -383,6 +383,38 @@ fn plain_terminal_terminated_maps_a_signal_outcome_to_process_terminated() {
     );
 }
 
+/// Review 657 round 3's acceptance (`TerminationOutcome::CommittedToExit`):
+/// unlike `Failed`/`OrphanedUnknown` just below, this *is* audited, under
+/// `ProcessTerminated` -- reused rather than given a new code, since a
+/// new code would need a real schema migration (`schema.rs`'s frozen v3
+/// `CHECK` constraint enumerates every allowed value) this proposal was
+/// never reviewed to include. Kept consistent with the agent-run-linked
+/// path's identical choice (`apply_managed_agent_terminal_outcome`'s own
+/// test cluster, further down this file).
+#[test]
+fn plain_terminal_terminated_maps_a_committed_to_exit_outcome_to_process_terminated() {
+    let dirs = TestAuditDirs::new("plain-terminal-terminated-committed-to-exit");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+
+    let status = AuditCoordinator::new(&mut store, &mut health).record_plain_terminal_terminated(
+        ProjectId::new_uuid(),
+        TerminalId::new_uuid(),
+        &TerminationOutcome::CommittedToExit {
+            summary: BoundedRuntimeSummary::new(
+                "process has committed to exiting but no exit status arrived",
+            ),
+        },
+    );
+
+    assert_eq!(status, AuditObservationStatus::Persisted);
+    let records = store.query(&AuditQuery::latest(10)).unwrap().records;
+    assert_eq!(
+        records[0].record.reason_code,
+        Some(AuditReasonCode::ProcessTerminated)
+    );
+}
+
 /// `Failed`/`OrphanedUnknown` are ambiguous outcomes a plain, non-blocking
 /// exit check cannot itself resolve into a confident reason -- matching
 /// `ManagedProcessLifecycle`'s own precedent, nothing is written rather
@@ -1203,6 +1235,60 @@ fn a_post_start_runtime_failure_records_runtime_failure_without_its_summary() {
     assert_eq!(
         terminated.reason_code,
         Some(crate::audit::AuditReasonCode::RuntimeFailure)
+    );
+    let debug = format!("{terminated:?}");
+    assert!(
+        !debug.contains("sentinel") && !debug.contains("private"),
+        "no runtime summary text reaches the record (§2): {debug}"
+    );
+
+    let handle = TerminalRuntimeHandle::new(identity.terminal_id.clone(), project.id().clone());
+    wait_for_shell_ready(&mut runtime, &handle);
+    runtime.write_input(&handle, b"exit 0\n").unwrap();
+    let _ = runtime.wait_for_exit(&handle, Duration::from_secs(5));
+}
+
+/// Review 657 round 3's acceptance: the same shape as the runtime-failure
+/// test immediately above, for `TerminationOutcome::CommittedToExit` --
+/// an observed ending (unlike `OrphanedUnknown`, tested below), audited
+/// as `ProcessTerminated` rather than `RuntimeFailure` (the process has
+/// not failed) or silence. `ProcessTerminated`, not a new code: a new
+/// code would need a real schema migration (`schema.rs`'s frozen v3
+/// `CHECK` constraint enumerates every allowed `reason_code` value),
+/// which this proposal was never reviewed to include -- see this
+/// crate's `apply_managed_agent_terminal_outcome` for the full reasoning.
+#[test]
+fn a_committed_to_exit_outcome_records_process_terminated_without_its_summary() {
+    let dirs = TestAuditDirs::new("integration-agent-termination-committed-to-exit");
+    let mut store = AuditStore::open(dirs.storage_path.clone()).unwrap();
+    let mut health = AuditHealth::default();
+    let mut project = project_for(&dirs, 1);
+    let plan = launch_plan_for(&project, Path::new("/bin/sh"));
+    let mut runtime = TerminalRuntime::new();
+    let mut coordinator = AuditCoordinator::new(&mut store, &mut health);
+    let launched = coordinator
+        .launch_audited_agent_run(&mut project, plan, &mut runtime)
+        .unwrap();
+    let identity = launched.value.identity();
+    let committed = TerminationOutcome::CommittedToExit {
+        summary: BoundedRuntimeSummary::new("/home/someone/private/path sentinel"),
+    };
+
+    coordinator
+        .apply_agent_terminal_outcome(&mut project, &identity, &committed)
+        .unwrap();
+
+    let terminated = store
+        .query(&AuditQuery::latest(10))
+        .unwrap()
+        .records
+        .into_iter()
+        .map(|record| record.record)
+        .find(|record| record.outcome == AuditOutcome::Terminated)
+        .expect("a committed-to-exit outcome is an observed ending the trail can state");
+    assert_eq!(
+        terminated.reason_code,
+        Some(crate::audit::AuditReasonCode::ProcessTerminated)
     );
     let debug = format!("{terminated:?}");
     assert!(

@@ -2086,6 +2086,39 @@ fn project_session_maps_timeout_agent_run_outcome_to_cancelled() {
     cleanup_root(bin);
 }
 
+/// Review 657 round 3's acceptance (`TerminationOutcome::CommittedToExit`):
+/// joined to the same arm as the two signal-based outcomes above, not to
+/// `OrphanedUnknown` below -- `apply_agent_terminal_outcome`'s own
+/// 2026-11-10 comment says why (`AgentRunStatus::Detached` would set
+/// `RunEnding::Unknown`, which this variant exists specifically to not
+/// claim). Pinned here by the same property the other four already are:
+/// the real status this call produces, not the variant's own name.
+#[test]
+fn project_session_maps_committed_to_exit_agent_run_outcome_to_cancelled() {
+    let (mut project, agent_run_id, terminal_id, root, bin) =
+        project_with_running_agent_for_outcome("agent-outcome-committed-to-exit");
+
+    project
+        .apply_agent_terminal_outcome(
+            &agent_run_id,
+            &terminal_id,
+            &TerminationOutcome::CommittedToExit {
+                summary: BoundedRuntimeSummary::new(
+                    "process has committed to exiting but no exit status arrived",
+                ),
+            },
+        )
+        .expect("committed-to-exit terminal outcome should update AgentRun");
+
+    assert_eq!(project.agent_runs()[0].status, AgentRunStatus::Cancelled);
+    assert_eq!(
+        project.terminal_session(&terminal_id).unwrap().status(),
+        TerminalStatus::Exited
+    );
+    cleanup_root(root);
+    cleanup_root(bin);
+}
+
 #[test]
 fn project_session_maps_orphaned_agent_run_outcome_to_detached() {
     let (mut project, agent_run_id, terminal_id, root, bin) =

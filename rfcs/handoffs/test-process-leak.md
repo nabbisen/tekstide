@@ -4985,3 +4985,45 @@ most recent runs green on both jobs at attempt 1.
 
 Not a substitute for the still-reserved thread-level `proc_exit` question -- it bounds what not
 answering that question costs, rather than answering it.
+
+## 2026-11-10 -- `TerminationOutcome::CommittedToExit` lands: what it changes for this cluster's own six rows, and what it does not
+
+Rows 33-36, 43, and 45 above (the `proc_exit`/`P_WEXIT` cluster's six named members) all share one
+shape: `wait_for_exit` returns `None` where a real outcome was expected, with a `sysctl(KERN_PROC_
+PID)` sample at the same moment reading `p_stat=2 (SRUN: runnable), p_flag=0x6006 (P_WEXIT set)`.
+Review 657 round 3's own proposal, accepted by the owner 2026-11-09, is now built: `wait_for_
+child_outcome`'s give-up branch reports `TerminationOutcome::CommittedToExit` instead of a bare
+`None` whenever `pid_has_committed_to_exit` reads true at the exact moment the budget runs out --
+which is precisely the condition every one of these six rows' own `sysctl` samples already
+confirms held at their own moment of failure.
+
+**What changes.** Nothing about *when* the budget gives up, how long it waits, or what the kernel
+is actually doing -- `COMMITTED_EXIT_EXTENSION_CEILING` (10ms), the extension logic, and the
+platform read are all untouched. What changes is what a caller is told once giving-up happens
+while that reading is true: a distinct, honest `CommittedToExit` outcome instead of a `None`
+indistinguishable from "this budget observed nothing resembling exit." Every test in rows 33-36,
+43 and 45 still calls plain `wait_for_exit`/`check_exit` and still asserts against `None`/
+`Exited{..}` directly, so **none of the six rows above are rewritten by this landing** -- they
+would need their own pass to assert the new variant instead of (or alongside) tolerating `None`,
+which is not this slice's own scope and is not done here. This section exists so a future reader
+checking why six still-dated rows above were not touched by a production change that directly
+concerns their own mechanism does not have to wonder.
+
+**What does not change.** This variant makes the *reporting* honest; it is not a fix to the
+mechanism these six rows document and does not explain it. Why a process can sit `SRUN` inside
+`proc_exit` for tens of seconds with the PTY master already closed is still the reserved,
+thread-level question review 657 round 2's own withdrawal (`COMMITTED_EXIT_EXTENSION_CEILING`'s
+doc comment, this file's own 2026-11-03ish entries above) left open on purpose. A caller now
+*knows*, honestly, that this is what happened instead of being told nothing happened at all --
+that is the whole scope of what landed.
+
+**The one producer deliberately left unchanged -- reserved, not scheduled.** `wait_for_session_
+outcome` (`termination.rs`, `request_terminate`'s own session-wide wait, a different function from
+`wait_for_child_outcome`) has its own, independent timeout branch that returns a bare `None` and
+has never called `pid_has_committed_to_exit` at all -- not because the case does not apply there,
+but because teaching that function a check it never had would be new work beyond review 657's own
+reviewed proposal, not a case of a second producer being a superset the way `wait_for_child_
+outcome`'s one true give-up site is. Review 668 reserved this explicitly rather than scheduling it:
+the same honesty gap as the thread-level `proc_exit` question above, with nothing currently waiting
+on it. Recorded here so it is a known, named reservation for whoever next touches that function,
+not something rediscovered later and mistaken for a defect no one noticed.

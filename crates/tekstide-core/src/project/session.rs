@@ -897,8 +897,28 @@ impl ProjectSession {
                     self.transition_agent_run_status(agent_run_id, AgentRunStatus::Failed)?;
                 }
             }
+            // 2026-11-10: joined to the signal-based arm above rather
+            // than given its own, after checking what each existing
+            // option actually asserts downstream, not by default.
+            // `AgentRunStatus::Detached` was considered and rejected --
+            // `transition_to`'s own match sets `RunEnding::Unknown` for
+            // it (`domain/agent.rs`), which this variant exists
+            // specifically to not say: Tekstide *did* see this run end,
+            // it just cannot tell with what code. `Cancelled` sets
+            // `RunEnding::Ended(now)`, which is true here, at the cost of
+            // `Cancelled`'s own name implying a deliberate stop this
+            // runtime cannot actually confirm (this path is reachable
+            // from a spontaneous poll with no termination request in
+            // flight, not only from one) -- the same attribution
+            // imprecision `Cancelled` already carries for
+            // `KilledAfterTimeout` (an automatic escalation, not always a
+            // direct user action either), so this does not introduce a
+            // new kind of inaccuracy, only one more case of an existing
+            // one. Between a wrong *ending* and a wrong *cause*, the
+            // ending is the fact this variant was created to get right.
             TerminationOutcome::TerminatedBySignal { .. }
-            | TerminationOutcome::KilledAfterTimeout { .. } => {
+            | TerminationOutcome::KilledAfterTimeout { .. }
+            | TerminationOutcome::CommittedToExit { .. } => {
                 self.mark_terminal_exited(terminal_id, None)?;
                 self.transition_agent_run_status(agent_run_id, AgentRunStatus::Cancelled)?;
             }

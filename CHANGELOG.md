@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Changed — `TerminationOutcome` gains a `CommittedToExit` variant
+
+The one case `wait_for_exit` used to fold into a bare `None`: a child that has committed to
+exiting — the kernel's own bookkeeping says so, and that reading does not reverse — but produced
+no exit status inside the wait's own budget. `None` still means what it always meant, "not
+observed, not a claim it will never arrive"; this variant is for the case that used to be
+indistinguishable from it even though the runtime had, in fact, observed something definite. Not
+`OrphanedUnknown` either: nothing about this case is unknown. See `rfcs/handoffs/
+test-process-leak.md`'s `proc_exit`/`P_WEXIT` cluster for why the case is real, not theoretical —
+this makes the *reporting* honest; it does not explain why a committed child can still sit without
+a status for tens of seconds, which stays its own, reserved question.
+
+**This is a breaking change for anything matching `tekstide-core`'s `TerminationOutcome`
+exhaustively**: a `match` with no wildcard arm over this enum no longer compiles without handling
+the new variant. The enum is deliberately not `#[non_exhaustive]`, the same decision already made
+for `ApprovalChannelErrorReason` — see that type's own doc comment, and `TerminationOutcome`'s own,
+for why.
+
 ### Fixed — a macOS file change could be missed by the file watcher
 
 On macOS, a file change reported at directory granularity (the platform's own coalesced shape) was

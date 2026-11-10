@@ -108,6 +108,36 @@ pub(super) fn decide_on_timeout(
     }
 }
 
+/// Review 657 round 3's acceptance (`TerminationOutcome::CommittedToExit`):
+/// what `wait_for_child_outcome` reports once [`decide_on_timeout`] has
+/// already said `GiveUp`, pulled out pure for the identical reason that
+/// function already is -- the real `committed_to_exit` reading is a live
+/// platform call this module cannot construct on demand, so the choice
+/// made *from* that reading is what gets tested, against a fixed `bool`,
+/// not the reading itself.
+///
+/// `committed_to_exit == false` is the ordinary give-up: this budget
+/// never observed anything resembling a commitment to exit, so `None`
+/// stays exactly what it always meant -- an outcome not observed, not a
+/// claim that one will never arrive. `committed_to_exit == true` is the
+/// case `None` used to fold in by accident: the extension above either
+/// ran and then hit its own ceiling, or started and immediately did, and
+/// ending the loop does not make that reading stop being true. Reporting
+/// `None` there would be exactly the bug this variant exists to fix.
+pub(super) fn outcome_for_timeout_giveup(committed_to_exit: bool) -> Option<TerminationOutcome> {
+    if committed_to_exit {
+        Some(TerminationOutcome::CommittedToExit {
+            summary: BoundedRuntimeSummary::new(format!(
+                "process has committed to exiting (confirmed via platform process state, not \
+                 inferred) but no exit status arrived within the {:?} extension",
+                COMMITTED_EXIT_EXTENSION_CEILING
+            )),
+        })
+    } else {
+        None
+    }
+}
+
 impl TerminalRuntime {
     pub fn wait_for_exit(
         &mut self,
@@ -324,8 +354,22 @@ impl TerminalRuntime {
             let elapsed = started.elapsed();
             if elapsed > timeout {
                 let extended_by = elapsed.saturating_sub(timeout);
+                // Read once per iteration, reused below: the owner's own
+                // acceptance of the `CommittedToExit` proposal (review 657
+                // round 3) requires knowing, at the exact moment this loop
+                // gives up, whether that give-up is "never saw a reason to
+                // extend" (an ordinary `None`) or "extended on this
+                // reading, then the ceiling ran out anyway" (a real,
+                // irreversible commitment this budget simply could not
+                // wait out). Reading it twice -- once for `decide_on_
+                // timeout` below, once more inside `GiveUp` -- would reopen
+                // exactly the "one clock, not two that could disagree"
+                // problem `extending`'s own comment already states for
+                // `extended_by`, against a live `sysctl` call rather than
+                // a timer.
+                let committed_to_exit = pid_has_committed_to_exit(child_pid);
                 match decide_on_timeout(
-                    pid_has_committed_to_exit(child_pid),
+                    committed_to_exit,
                     extended_by,
                     COMMITTED_EXIT_EXTENSION_CEILING,
                 ) {
@@ -366,7 +410,7 @@ impl TerminalRuntime {
                         // `report_pty_responsiveness_at_timeout`'s own
                         // doc comment for why this is safe here.
                         report_pty_responsiveness_at_timeout(self, handle);
-                        return Ok(None);
+                        return Ok(outcome_for_timeout_giveup(committed_to_exit));
                     }
                 }
             }

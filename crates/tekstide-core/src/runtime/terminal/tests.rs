@@ -909,6 +909,49 @@ fn decide_on_timeout_gives_up_when_not_committed_to_exit() {
     );
 }
 
+/// Review 657 round 3's acceptance: once [`super::termination::
+/// decide_on_timeout`] has already said `GiveUp`, [`super::termination::
+/// outcome_for_timeout_giveup`] is the second, equally pure choice about
+/// *what to report* -- pulled out for the identical reason, and tested
+/// the identical way: by the property (`committed_to_exit`, a plain
+/// `bool`), not by platform or by waiting for a real `P_WEXIT` window.
+///
+/// The property this test pins: `committed_to_exit == true` must not
+/// report `None`, and must not report [`super::TerminationOutcome::
+/// OrphanedUnknown`] either -- the two shapes this variant exists to be
+/// distinguishable from, named in its own doc comment. A regression that
+/// folded this case back into either of those would pass every other
+/// test in this file (both are already well covered) and be caught only
+/// here.
+#[test]
+fn outcome_for_timeout_giveup_reports_committed_to_exit_not_none_and_not_orphaned_unknown() {
+    let outcome = super::termination::outcome_for_timeout_giveup(true);
+    match outcome {
+        Some(super::TerminationOutcome::CommittedToExit { summary }) => {
+            assert!(
+                !summary.as_str().is_empty(),
+                "the committed-to-exit summary must say something, not be blank"
+            );
+        }
+        other => panic!(
+            "committed_to_exit == true must report CommittedToExit, not {other:?} -- a bare \
+             None here is the exact bug this variant exists to fix, and OrphanedUnknown would \
+             relabel a known commitment as genuinely unknown"
+        ),
+    }
+}
+
+/// The negative case, pinning the other side: a give-up that never
+/// observed a commitment to exit must stay a bare `None` -- the ordinary
+/// meaning it always had ("not observed", not "will never arrive"), not
+/// upgraded into `CommittedToExit` just because this function now exists.
+/// Without this test, a careless `if true` typo in the positive case
+/// above would not be caught by it alone.
+#[test]
+fn outcome_for_timeout_giveup_reports_none_when_never_committed_to_exit() {
+    assert_eq!(super::termination::outcome_for_timeout_giveup(false), None);
+}
+
 /// RFC-043 D2's own opt-out, asserted on purpose rather than merely
 /// tolerated: `setsid` is the standard, documented way a user (or a
 /// script) says "this should outlive my terminal," by leaving the
