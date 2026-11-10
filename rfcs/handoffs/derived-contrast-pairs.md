@@ -268,3 +268,55 @@ three of those items bear on RFC-076, which is the RFC currently open.
 
 **One datum worth keeping for the dependency record**: snora is still on `iced 0.14`. Our own pin is
 not lagging a peer building the same kind of application on the same substrate.
+
+## snora 0.54's AAA presets read, and D3 measured against them, 2026-11-11
+
+The 2026-11-09 section above said to read snora's 0.53 -> 0.54 guide before scoping D3. **Read**, from
+the public index at <https://nabbisen.github.io/snora/guides/migrations.html> -- it needs no relay
+through the owner, which is worth knowing the next time a handoff defers an upstream question.
+
+**What they did**: `Tokens::light_aaa()` / `Tokens::dark_aaa()` hold "every declared text pair at 7:1
+(WCAG AAA), keeping Light's and Dark's background and surfaces", moving "only text roles, and fills
+whose own text needed it, move, in lightness only, with hue within 6 degrees". They shipped these as
+**two new presets beside an unchanged `light`/`dark`**, with `Tokens::presets()` for a picker. The
+only enforced minimum they raised was one widget's (the active sidebar item, "because a name is
+text"), not a global floor.
+
+**Why the mechanism does not transfer, recorded so it is not re-proposed**: their answer to AAA is
+*more presets*. We ship one palette and have no preset system, and building one would be a feature
+RFC-076 does not ask for. D3's own sentence is the design: the default theme moves, the floor stays.
+Their §5 (accent declared as text at 4.5:1) does not transfer either -- **`accent` is never text
+here**: its two production uses are a 2 px modal border (`crates/tekstide/src/shell.rs:11242`) and
+the editor caret fill (`crates/tekstide/src/surface/editor.rs:509`).
+
+**What does transfer** is their hierarchy note -- "with `text_muted` raised to 7:1, colour carries
+less of the text hierarchy" -- because we have exactly one analogue and it is the whole of D3's gap.
+
+**D3 measured, through the shipped formula over `Palette::default`** (scratch arithmetic, re-derived
+as committed scaffolding by PR-076-D, not by this note): `foreground` on `background` **14.62:1**, on
+`surface_elevated` **13.21:1**, and over the composited scrim 16.24/16.00 -- so **every text pair
+this document's derived list declares already clears AAA with room to spare**. The non-text roles sit
+at 6.38/5.77 (`accent`, `border_focused`) and 3.85/3.48 (`border_default`) against their 3.0
+threshold, and WCAG defines no AAA for component boundaries, so none of them is an AAA question at
+all.
+
+**The one text pair below 7:1 is the one this document's own mechanism cannot see.**
+`crates/tekstide/src/theme.rs:244-246` draws a disabled button's label as `foreground` at `a: 0.6`,
+which composites to **5.59:1** on `surface_elevated` (5.88:1 on `background`) -- clears AA, fails
+AAA, and is measured by nothing. The reason is structural and is the finding worth keeping: the alpha
+is applied at the **widget-style site, downstream of the exhaustive destructure**, which sees
+`foreground` opaque and cannot see a widget that dims it. `E0027` fires when a *role* is added;
+nothing fires when a *site* modifies one. That is this document's defect class reappearing one layer
+above where its guardrail reaches, and closing it is worth more than the 1.41 ratio points. A sweep
+of `crates/tekstide/src` excluding tests found this to be the **only** text colour in the GUI that is
+not a bare theme role.
+
+**A trap named before anyone falls in it**: "toward 7:1" is a floor to hold, not a target to move to.
+Taking `foreground` from 14.62 down to 7 would satisfy a literal reading of D3 and make the product
+worse for the population RFC-076 exists for. Nothing in D3 lowers a ratio.
+
+**One datum for the dependency record**: snora's guide index publishes migrations through
+**0.58 -> 0.59**, two minors past the 0.57.0 notice in `.git-exclude/upstream/snora/receive/`. The
+0.58 -> 0.59 guide reads as shipped (past tense, a removal slated for 0.60.0) but carries no date.
+Nothing follows -- snora is not a dependency -- but our received record is behind what they publish,
+which matters the next time a handoff cites "their latest".
