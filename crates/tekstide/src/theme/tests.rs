@@ -672,6 +672,17 @@ fn a_button_is_drawn_from_the_configured_roles() {
 /// applies [`super::button_style`]. (`a_button_is_drawn_from_the_configured_roles`
 /// holds the style itself; the scan in the shell holds that no view builds a
 /// button any other way.) Ablated by removing the `.style(..)`.
+///
+/// **Review 670 required-1.** Originally asserted `flat.contains(..)`, which
+/// a chained call after the expected expression survives (it would still
+/// *contain* the substring) -- the same hole review 670 found in
+/// `text_extent::tests::theme_text_overrides_nothing_the_harness_assumes_
+/// is_default` and asked to be fixed "in the same pass or filed with the
+/// reason." Fixed here, in the same pass: asserts the function body
+/// **equals** the expected expression exactly, via [`function_body`]'s
+/// bracket-depth extraction, so `.padding(..)` or anything else appended
+/// after `.style(button_style(theme))` fails this test rather than passing
+/// it.
 #[test]
 fn the_theme_button_applies_the_theme_style() {
     let source = std::fs::read_to_string(
@@ -679,9 +690,45 @@ fn the_theme_button_applies_the_theme_style() {
     )
     .expect("theme.rs");
     let shipped = source.split("#[cfg(test)]\nmod tests").next().unwrap();
-    let flat = shipped.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(
-        flat.contains("iced::widget::button(content).style(button_style(theme))"),
-        "`theme::button` must apply `button_style(theme)`"
+    let body = function_body(shipped, "pub(crate) fn button<");
+    let flat_body = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(
+        flat_body, "iced::widget::button(content).style(button_style(theme))",
+        "`theme::button`'s body must be exactly `iced::widget::button(content).style(\
+         button_style(theme))` -- nothing chained after it"
     );
+}
+
+/// Extracts the `{ ... }` body immediately following the first occurrence of
+/// `signature_prefix` in `source`, by bracket depth -- not by looking for
+/// the next `pub(crate) fn` (which a multi-line signature or a nested
+/// closure could shift) and not by a fixed line count. `text_extent::tests`
+/// carries its own copy of this same small shape rather than importing it:
+/// this module is private (`mod tests;`) and widening it for three lines of
+/// reuse across two sibling test modules was not worth it.
+fn function_body(source: &str, signature_prefix: &str) -> String {
+    let after_signature = source
+        .split(signature_prefix)
+        .nth(1)
+        .unwrap_or_else(|| panic!("{signature_prefix:?} not found in source"));
+    let bytes = after_signature.as_bytes();
+    let open = after_signature
+        .find('{')
+        .unwrap_or_else(|| panic!("no function body opens after {signature_prefix:?}"));
+    let mut depth: i32 = 0;
+    let mut i = open;
+    loop {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    after_signature[open + 1..i].to_owned()
 }

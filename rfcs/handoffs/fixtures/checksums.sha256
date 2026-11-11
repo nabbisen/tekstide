@@ -1,0 +1,5 @@
+# sha256sums of the fixtures in this directory -- see README.md's own convention.
+# Format: one `sha256sum`-style line per fixture, in the order added, with a one-line
+# comment directly above each entry naming where it came from and how to reproduce it.
+#
+# Empty on a fresh clone: no fixture has been added yet.

@@ -40,3 +40,10 @@ packaging/aur/tekstide-bin/src/
 packaging/aur/tekstide-bin/pkg/
 packaging/aur/tekstide-bin/*.pkg.tar.*
 packaging/aur/tekstide-bin/*.log
+
+# reusable test fixtures (large or slow to produce: a previous release's build, a real
+# downloaded asset) -- the files themselves are not committed, but README.md and
+# checksums.sha256 are, per that README's own convention
+rfcs/handoffs/fixtures/*
+!rfcs/handoffs/fixtures/README.md
+!rfcs/handoffs/fixtures/checksums.sha256

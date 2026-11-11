@@ -77,6 +77,18 @@ This checklist applies before creating a tag or package for a Tekstide release.
       `rfcs/handoffs/<rfc>/evidence/`.
 - [ ] **`./target/release/tekstide --help`** prints usage and exits, rather than treating the
       flag as a path.
+- [ ] **Every expensive, normally-skipped real-UI pass still runs once, on the release commit.**
+      `.git-exclude/rules/project-instructions-gui-common.md`'s Test Optimization Rules let a
+      costly pass (an upgrade test, a large download, a full end-to-end flow) skip when the code
+      it exercises did not change — but "still runs at least once per release" is the other half
+      of that rule, because a path filter that misses a path otherwise skips a pass silently
+      forever. **No pass in this project is currently skip-gated on an unchanged-code filter**
+      (`ci.yml`, `release.yml` and `docs.yml` each run unconditionally, by their own stated
+      design — see each workflow's "no `paths:` filter" comment) and Post-Publish Verification's
+      own install/download checks below already run unconditionally every release, not
+      skip-gated at all. This box exists for the day a tier-2 real-UI pass (PR-076-D3's own
+      follow-up, "GUI evidence prerequisites") is built with that optimization: confirm it ran on
+      this release's own commit before checking this box, and name which pass(es) did.
 
 This section exists because nothing above it opens a window. Every other gate here checks
 internal consistency — do the tests pass, does it compile, does the package contain the right

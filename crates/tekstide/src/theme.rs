@@ -34,6 +34,13 @@ use tekstide_core::config::{Colour, FontSettings, Palette, ThemeSettings};
 #[cfg(test)]
 mod contrast;
 
+// "GUI evidence prerequisites" (PR-076-D3 follow-up): a real text-extent
+// harness, matching what `text`/`ui_font` actually render -- no production
+// render path needs it either, for the same reason `contrast` above does
+// not.
+#[cfg(test)]
+pub(crate) mod text_extent;
+
 /// A colour role. Naming roles instead of exposing raw RGB fields keeps
 /// call sites like `theme.accent()` self-describing, and keeps this
 /// struct's shape stable if RFC-023 later needs to add a role without

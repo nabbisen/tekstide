@@ -12590,6 +12590,60 @@ fn ctrl_alt_k_opens_help_from_inside_terminal_immersion() {
     );
 }
 
+/// **"GUI evidence prerequisites" (PR-076-D3 follow-up), tier-2: one property,
+/// one surface, landed and ablated before any matrix.** `help_modal_view`
+/// renders every binding (`Chord::display_spelling`) with `.wrapping(
+/// Wrapping::None)` inside a column fixed at `help_modal_binding_column_px`
+/// -- `HELP_MODAL_BINDING_COLUMN_EMS * font_size_body()`, a crude ems
+/// multiplier, not a real measurement of the longest binding. If that
+/// multiplier is too small, a binding's own text overflows its column and
+/// either clips or crowds the description column beside it -- exactly the
+/// "nothing overflows" property the rule's own tier-2 examples name, and the
+/// defect class a column sized by a guessed constant is most likely to
+/// produce.
+///
+/// Measured with [`crate::theme::text_extent::unwrapped_extent`] (matching
+/// production's own `Font`/`LineHeight`/`Shaping` -- see that module's own
+/// doc comment for why the three literals `wrapped_height` originally used
+/// would have passed this property even if it were false), at
+/// `Theme::default().font_size_body()`, against every binding
+/// `keyboard_help_lines` actually advertises on this host -- one real
+/// surface, one real font size, not yet the five-step/three-size/two-locale
+/// matrix the handoff's own working assumption names for when this is
+/// widened.
+#[test]
+fn every_advertised_binding_fits_its_own_help_modal_column() {
+    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let theme = crate::theme::Theme::default();
+    let column_px = super::help_modal_binding_column_px(&theme);
+
+    let lines = crate::keyboard_help::keyboard_help_lines(
+        &catalog,
+        &tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
+    );
+    assert!(
+        !lines.is_empty(),
+        "keyboard_help_lines returned nothing to check -- this property would otherwise pass \
+         vacuously"
+    );
+
+    let mut overflows = Vec::new();
+    for line in &lines {
+        let measured =
+            crate::theme::text_extent::unwrapped_extent(&line.binding, theme.font_size_body());
+        if measured.width > column_px {
+            overflows.push(format!(
+                "{:?}: measured {:.2}px > column {:.2}px",
+                line.binding, measured.width, column_px
+            ));
+        }
+    }
+    assert!(
+        overflows.is_empty(),
+        "binding(s) overflow the help modal's own column ({column_px:.2}px): {overflows:?}"
+    );
+}
+
 /// `Escape` closes the Help modal -- `ModalDismiss`'s handler is already
 /// generic across every `ModalContent` variant, proven here for this
 /// one specifically since it is the newest.
