@@ -320,3 +320,152 @@ worse for the population RFC-076 exists for. Nothing in D3 lowers a ratio.
 0.58 -> 0.59 guide reads as shipped (past tense, a removal slated for 0.60.0) but carries no date.
 Nothing follows -- snora is not a dependency -- but our received record is behind what they publish,
 which matters the next time a handoff cites "their latest".
+
+## PR-076-D3 implemented, 2026-11-11, corrected under review 669 -- the ratio table re-derived, the one gap closed by deletion, and a guardrail for the gap's own class
+
+**The ratio table re-derived independently, not taken from the brief.** A fresh script run
+through the identical formula (`relative_luminance`'s 0.03928 boundary, `contrast_ratio`'s
+`(lighter + 0.05) / (darker + 0.05)`) over `Palette::default`'s literal values reproduced every
+figure the start-file's own §2 table gives, to four decimal places: `foreground` on `background`
+**14.6167**, on `surface_elevated` **13.2059**; over the composited scrim, **16.2409**/**16.0050**;
+`border_focused`/`accent` (identical colour) at **6.3813** on both backdrops; `border_default` at
+**3.8513**/**3.4796**. Every declared text pair clears AAA with room to spare, and the four
+non-text pairs are not an AAA question at all -- WCAG defines no AAA tier for a UI-component
+boundary. (The scrim-composited figures are addressed on their own, below -- review 669 found
+them re-derived but not declared anywhere, which is its own finding.)
+
+**The one text pair below 7:1 was real, and it is now gone, not tuned.**
+`button_style`'s disabled-label branch (`crates/tekstide/src/theme.rs`) dimmed `foreground` to
+`a: 0.6`, composited to **5.5939:1** on `surface_elevated` (**5.8849:1** on `background`) --
+clears AA, fails AAA, measured by nothing.
+
+**Reachability, corrected under review 669 -- the claim was true but short, in a way that made
+the deletion look more arguable than it is.** The first write-up said only that every
+`crate::theme::button(` call site reaches a concrete `.on_press(..)`, with no conditional form
+used (`on_press_maybe`/`on_press_with` appear nowhere in production). That count was also wrong on
+its own terms -- **53** sites, not 48 (`shell.rs` 44, `shell/run_report.rs` 3, `surface/editor.rs`
+3, `surface/board.rs` 2, `surface/explorer.rs` 1, found by script: production source only, cut at
+`#[cfg(test)]\nmod tests`, comments stripped), confirmed independently and matching the review's
+own count exactly. But that survey, even corrected, is a claim about *our* call sites, and review
+669 found a **second route to `Status::Disabled` inside iced itself**, independent of `on_press`
+entirely: `iced_widget 0.14.2`'s `Button::draw` renders via
+`theme.style(&self.class, self.status.unwrap_or(Status::Disabled))` (`button.rs:376`), and
+`status` starts `None` (`Button::new`, `:114`) and is only ever set to `Some` inside the `update`
+handler's own `RedrawRequested` branch (`:356-357`). A button that has not yet seen that event is
+therefore drawn `Disabled` **regardless of whether a press handler is set.** What keeps that from
+happening in practice is a property of the *runtime*, not of our call sites: `iced_winit 0.14.0`'s
+redraw loop (`lib.rs`, around `:813-838`) runs `interface.update(slice::from_ref(&redraw_event),
+..)` -- a synthetic `RedrawRequested` -- before every draw, so `status` is always `Some` by the
+time a button is actually styled. Both locked versions checked directly against `Cargo.lock`
+(`iced_widget 0.14.2`, `iced_winit 0.14.0`), not assumed from a doc comment.
+
+**This makes the deletion more right, not less.** Had that runtime guarantee ever lapsed, the old
+branch would have dimmed the label of a perfectly *enabled* button on its first draw -- a
+rendering defect, not an accommodation; "dead code carrying an unmeasurable claim" was generous to
+it. **Deleted, per the start file's own instruction for this branch**: a dead branch that fails
+AAA is a line to remove, not a number to tune. The now-updated
+`a_button_is_drawn_from_the_configured_roles` test asserts the opposite of what it used to --
+`Status::Disabled`'s text colour equals `Status::Active`'s -- so a future reintroduction of
+dimming fails that assertion before anything else, regardless of which route produced the
+`Disabled` status.
+
+**A new test holds `Theme::default` to AAA as its own standard, separate from the enforced
+floor.** `theme_default_text_pairs_meet_wcag_aaa_not_only_the_enforced_aa_floor`
+(`theme/tests.rs`) iterates `derived_contrast_pairs`' own `is_text` entries (a field added so the
+split is explicit rather than inferred from `threshold == 4.5`) and asserts each at 7:1, with its
+own message distinguishing this from `MIN_TEXT_CONTRAST`, which stays at 4.5 and ungoverned by
+this test -- raising it would retroactively refuse a user theme valid under `NFR-UX-003`. Passes
+today at 14.62/13.21; the point is that nothing stopped the default from regressing toward 4.6
+before this test existed, and now something does.
+
+**The guardrail gap itself -- replaced, under review 669, with the positive form rather than a
+wider ban-list, then widened again in round 2 to the full surface.** The first mechanism banned
+one receiver *spelling* of derivation (`..theme.<role>()` struct-update syntax) and was proven
+insufficient in review: `..state.theme.foreground()` and a two-step `let base = theme.foreground();
+Color { a: .., ..base }` both derive a modified colour from a role and neither matched a ban aimed
+at how a colour might be *produced* -- a space with no enumerable end (`self.theme`, any local
+binding, a future `Color::with_alpha`). What **is** enumerable is the small, finite set of field
+*assignments* that exist in shipped source -- not how a value might be derived, but where a value
+is finally *used*.
+
+`every_production_text_colour_is_a_bare_theme_role_or_a_declared_exception` (`theme/tests.rs`)
+enumerates every such assignment across **three** spellings, not one: the `text_color:` field (13
+sites: `Some(theme.foreground())` x7, `Some(state.theme.foreground())` x3, bare `theme.
+foreground()` x2, `Some(foreground)` x1), a direct `text::Style { color: .. }` construction (zero
+sites today -- production always reaches this field through a builder, never the literal), and the
+`.color(..)`/`.color_maybe(..)` builder calls `iced_core::widget::text::Text` and
+`iced_core::text::Span` both expose under that same method name (one site: `grid_colors.rs`,
+painting a terminal cell in the ANSI colour the running program chose). Round 1's own mechanism
+covered only the first of these three -- found by review 669 round 2 reading the pinned
+`iced_core` source for every place it sets a text colour, not by guessing at more receiver
+spellings -- and is why the claim is now scoped to "every spelling this function enumerates,"
+not "every site," which is the distinction round 1's own stale wording blurred.
+
+**Round 2 also corrected the exceptions list from value-keyed to path-keyed (required-6)**:
+`DECLARED_TEXT_COLOUR_EXCEPTIONS.contains(&value.as_str())` admitted `"Some(foreground)"` at *any*
+production site that happened to spell a local the same way, including a future one where that
+local was genuinely derived -- a sixteen-character coincidence, not a verified site. Each entry is
+now a `(file, value)` pair, checked against the path the assignment was found in, so an exception
+is a statement about one read, verified site, not a string that travels.
+
+**Ablated against three probes across round 1 and round 2, not described.** `Some(iced::Color {
+a: 0.5, ..state.theme.foreground() })` wired into `modal_dialog_box`'s real `text_color:` field,
+`Color { a: 0.5, ..probe_base }` (with `probe_base = theme.foreground()` bound first) wired into
+`button_style`'s, and `.color(iced::Color { a: 0.5, ..state.theme.foreground() })` chained onto
+the window-title `text(..)` in `top_bar_title_and_actions_row` -- all three caught, each reported
+by file, spelling and the exact violating value; each removed afterward and every touched file
+confirmed byte-identical to its pre-ablation state (`shell.rs`/`theme.rs` md5s matched the
+backups both review rounds independently took). **One correction of my own, named rather than
+left implicit**: round 1's own *first* two probes, as review 669 round 2 pointed out, were bare
+`let _ablation_probe = ..;` statements -- not `text_color:` assignments at all, so the literal
+probes would not have failed round 1's mechanism either, correctly, since an unused derived
+colour is not a text pair. What is recorded above as "ablated" is my own adaptation of those two
+probes into real field assignments before running them against the new, replaced mechanism --
+the right adaptation (the mechanism asks what a field is assigned, not how a colour was produced),
+but a different claim from "the literal probes failed," which the first write-up of this section
+did not distinguish and should have. The replaced mechanism's own stale claim ("provably covers
+every site... because struct-update syntax has no second spelling") is retracted along with the
+mechanism: the premise was true and the conclusion did not follow, because the pattern matched a
+receiver spelling, not the syntax itself.
+
+**The composited-scrim backdrop, settled rather than assumed -- review 669's fourth finding.**
+The re-derived table above includes `foreground` over the scrim composited on each real backdrop
+(16.2409 / 16.0050), and no entry in `derived_contrast_pairs` covers it; the existing scrim test
+(`modal_over_scrim_backdrop_clears_3_to_1_at_every_content_value`) is the *non-text* sweep for the
+modal card's own border/fill, not a text pair. Checked directly rather than assumed: `view`'s own
+`stack![base, opaque(scrim)]` gives the scrim-styled container exactly one child, `modal_view`, an
+exhaustive match over all 13 `ModalContent` variants. All 13 arms call a distinct function (12 in
+`shell.rs`, one -- `purge_dialog_view` -- in the inline `audit_view` module), and every one of
+those 13 functions' own final, top-level expression is a call to `modal_dialog_box` or
+`modal_dialog_box_split` -- read in full, not sampled, confirming no function places a `text(..)`
+sibling outside that call. `modal_dialog_box` itself sets `text_color: Some(state.theme.
+foreground())` over an opaque `background: Some(state.theme.surface_elevated())` -- the existing
+`foreground on surface_elevated` pair `derived_contrast_pairs` already declares and measures.
+**So no text is ever rendered against the composited scrim**; the figures above are a real,
+re-derivable property of the formula (and clear AAA by a wide margin either way), but not a
+declared pair, because `derived_contrast_pairs`' own convention -- "a pair only belongs here if
+the role is genuinely rendered on that backdrop" -- correctly excludes it. Recorded here, with the
+verified mapping, rather than left as the same "measured once, declared nowhere" shape this slice
+exists to close.
+
+**What this does not do.** No preset system, no change to `MIN_TEXT_CONTRAST`/`MIN_FOCUS_CONTRAST`
+or the derived list's `4.5`/`3.0` thresholds, no AAA claim for a non-text pair, nothing touching
+`grid_colors.rs` or screen-reader scope, nothing reopening D2's sizes -- all per the start file's
+own §6.
+
+## Filed by review 669, not required of PR-076-D3 -- the sibling class: a bare role declared non-text, used as text
+
+The new guard (`every_production_text_colour_is_a_bare_theme_role_or_a_declared_exception`) checks
+every `text_color:` assignment against a bare accessor or a declared exception; it does not, and
+is not meant to, check that a role used *outside* `text_color:` was declared with the right
+intended usage. `accent` is declared `is_text: false` at threshold 3.0 (5.77:1 on
+`surface_elevated`) because its two production uses are non-text (a 2px modal border, the editor
+caret fill) -- but nothing stops a future call site from passing `state.theme.accent()` to a
+`text_color:` field instead of the `color:` field it currently occupies at, e.g., `shell.rs:11242`.
+Such a site would pass the new guard (it is a bare accessor) while being held to the non-text 3.0
+threshold rather than the text 4.5 floor or the 7:1 AAA bar -- the same "on screen, in no list"
+shape this document exists to close, one declaration away. Not fixed here: the positive-form
+mechanism in review 669's required-1 fix would need to additionally check, for each bare-accessor
+`text_color:` hit, that the role's own `derived_contrast_pairs` declaration marks it `is_text:
+true` -- a small extension to the same test, left for whoever next touches this guard rather than
+built speculatively now.

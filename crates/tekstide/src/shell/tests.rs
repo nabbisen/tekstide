@@ -21122,7 +21122,11 @@ fn the_configuration_module_has_no_way_to_look_beside_a_project() {
 /// Production source under `crates/*/src`: no `tests` directory, no
 /// `tests.rs`, cut at its `#[cfg(test)] mod tests`, comment lines dropped -- so a
 /// count over it is a count of *code that ships*.
-fn production_sources() -> Vec<(String, String)> {
+///
+/// `pub(crate)`, PR-076-D3: shared with `theme::tests` (`no_production_text_
+/// colour_is_derived_from_a_role_undeclared`), the same source scan, a
+/// different pattern.
+pub(crate) fn production_sources() -> Vec<(String, String)> {
     fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
         for entry in std::fs::read_dir(dir).expect("source directory") {
             let path = entry.unwrap().path();

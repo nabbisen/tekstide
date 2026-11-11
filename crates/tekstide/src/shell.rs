@@ -16546,5 +16546,7 @@ fn external_change_modal_view<'a>(
     modal_dialog_box_split(state, lines, 3)
 }
 
+// `pub(crate)`, PR-076-D3: `theme::tests` reuses `tests::production_sources`
+// rather than duplicating its source-walk.
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

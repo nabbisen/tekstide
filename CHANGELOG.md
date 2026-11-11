@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Changed — PR-076-D3 (RFC-076 D3): the default theme is now verified against WCAG AAA, and a guardrail closes the gap that let one pair ship unmeasured
+
+The default theme's text is now held to WCAG AAA (7:1), by its own dedicated test, separate from
+— and never raising — `MIN_TEXT_CONTRAST`'s enforced 4.5:1 floor that every configured theme,
+including a user's, must still clear. `foreground` on `background` and on `surface_elevated` both
+already clear AAA with room to spare (14.62:1 and 13.21:1); the test exists so a future change to
+the default cannot silently regress toward the floor without being caught.
+
+One pair had never been measured at all and failed AAA when it finally was: a disabled button
+label dimmed to 60% opacity (5.59:1 composited). It is removed as dead code rather than tuned: no
+button in the shipped product is built without a concrete press handler, and the one other route
+iced has to a disabled-looking draw — a button that has not yet seen its first redraw event — is
+closed by the runtime's own redraw loop before anything is ever drawn. The gap that let an
+unmeasured pair like it ship in the first place — a widget's text colour derived from a theme role
+rather than reading it bare — now fails a dedicated test enumerating every such assignment in
+shipped source, the moment it recurs, rather than waiting to be found by reading.
+
 ### Changed — `TerminationOutcome` gains a `CommittedToExit` variant
 
 The one case `wait_for_exit` used to fold into a bare `None`: a child that has committed to

@@ -232,19 +232,48 @@ where
 /// this is what makes a configured `background` not sit beside two fixed-colour
 /// buttons (RFC-054 review 428). A button is still a box with its words inside
 /// it: the shape and the label carry the meaning, the colour only styles it.
+///
+/// **No `Status::Disabled` branch, on purpose -- PR-076-D3, 2026-11-11,
+/// corrected under review 669.** One used to dim `text_color` to `a: 0.6`
+/// here, which composites to 5.59:1 on `surface_elevated` -- clears WCAG AA,
+/// fails the AAA floor `derived-contrast-pairs.md`'s D3 section holds the
+/// default theme to, and was measured by nothing: the alpha was applied
+/// downstream of `derived_contrast_pairs`'s own exhaustive `Theme`
+/// destructure, which sees `foreground` opaque and cannot see a widget
+/// dimming it.
+///
+/// **No `crate::theme::button` call site in `crates/tekstide/src` can
+/// produce `Status::Disabled`** -- all 53 of them (enumerated by script, not
+/// a line-proximity scan) reach a `.on_press(..)` call whose argument is a
+/// concrete `Message`, and `.on_press_maybe`/`.on_press_with` (the only two
+/// ways iced lets a caller make a press handler conditional) appear nowhere
+/// in either crate's production source. **That is not, by itself, the whole
+/// claim** -- iced's own `Button::update` has a *second* route to
+/// `Status::Disabled`, independent of `on_press`: a button whose internal
+/// `status` field has not yet observed a `RedrawRequested` event is drawn
+/// via `self.status.unwrap_or(Status::Disabled)` (`iced_widget 0.14.2`,
+/// `button.rs:376`), defaulting to `Disabled` on its very first draw
+/// regardless of whether a press handler is set. What keeps that route from
+/// firing is a property of the **runtime**, not of this call-site survey:
+/// `iced_winit 0.14.0`'s redraw loop updates every widget with a
+/// `RedrawRequested` event before each draw, so `status` is always `Some` by
+/// the time a button is actually styled. Removed as dead code rather than
+/// tuned either way -- had that runtime guarantee ever lapsed, the deleted
+/// branch would have dimmed a perfectly *enabled* button's label on its
+/// first draw, a rendering defect rather than an accommodation, which makes
+/// the deletion more right than the first write-up of this comment claimed,
+/// not less. See `theme/tests.rs`'s `every_production_text_colour_is_a_bare_
+/// theme_role_or_a_declared_exception` for the guard that now stops a
+/// replacement from shipping unmeasured the same way.
 pub(crate) fn button_style(
     theme: Theme,
 ) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style {
     move |_base_theme: &iced::Theme, status: iced::widget::button::Status| {
         use iced::widget::button::Status;
         let raised = matches!(status, Status::Hovered | Status::Pressed);
-        let disabled = matches!(status, Status::Disabled);
         iced::widget::button::Style {
             background: Some(iced::Background::Color(theme.surface_elevated())),
-            text_color: Color {
-                a: if disabled { 0.6 } else { 1.0 },
-                ..theme.foreground()
-            },
+            text_color: theme.foreground(),
             border: iced::Border {
                 color: if raised {
                     theme.border_focused()

@@ -7,6 +7,14 @@ record of it. `.git-exclude/specs/tekstide-external-design-v0.md` is the owner's
 document and is left untouched; if they want the source line to match, that edit is theirs to
 make or to ask for.
 
+**Updated 2026-11-11, dated rather than silently edited.** D3 is implemented (PR-076-D3, review
+669): the default theme's own text pairs are held to WCAG AAA (7:1) by a dedicated test, separate
+from `MIN_TEXT_CONTRAST`, which stays at its enforced 4.5:1 exactly as D3 itself required — no
+user theme that passed before this slice can fail now. D3 was RFC-076's last open decision, so
+D1 through D5 are all implemented as of this update. The only step left for this RFC is the
+release that ships it, at which point it moves to `rfcs/done/` per
+`an_rfc_a_release_names_lives_in_done`.
+
 Proposed 2026-11-03, at the human owner's direction. The owner asked whether the view
 layout, typography and colour could be kinder to older users; this RFC is the answer to the two
 parts of that question where the code says yes, and an explicit statement of the part where it
