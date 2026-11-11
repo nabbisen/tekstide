@@ -405,7 +405,7 @@ Checked every release, because a watch that depends on someone remembering is no
 - [ ] **No git configuration from outside the repository reaches a read, on every supported platform.** The gate's R6 guarantee is that only the repository's own effective configuration is read (`runtime/git.rs`), and it is enforced by environment overrides in `spawn_git_command`. Those overrides were **measured insufficient on macOS** (review 621): Apple's git reads a `gitconfig` bundled in the Xcode toolchain that `GIT_CONFIG_SYSTEM` does not suppress, and its `credential.helper` withheld the content answer for every repository on every macOS machine -- review 407's own defect, through a door R6 did not close. So verify it per platform rather than assuming it: in a fresh repository, under the product's own environment, `git config --list --show-origin --null` must report **no** origin outside that repository. A guarantee stated in a comment and never re-measured on a new platform is how this one survived a release.
 - [ ] **Every containment guard has been shown to FAIL, on every supported platform.** A guard that has only ever been seen passing is not known to work; it may be unable to fail. Measured, review 625: on macOS `session_confirmed_empty` returns `true` whenever libproc cannot enumerate the session -- which it could not, for a live PTY child -- so `RunningTerminal::drop`'s SIGKILL escalation and `assert_session_is_empty` were both inoperative there, and review 608's "42 containment failures cleared" was the assertion losing the ability to fail, not containment beginning to work. So per platform: leak a process deliberately (a backgrounded job with `trap '' HUP`) and confirm the guard goes **red**. `rfcs/handoffs/ablate.sh` is the shape; a green guard is evidence of nothing until its red has been seen on that platform.
   **Confirmed on macOS, 2026-10-21/22 (RFC-028 D5 ablation pieces 1-3, `rfcs/handoffs/test-process-leak.md`'s own dated entry)**: `runtime::terminal::tests::a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member`/`a_real_close_kills_a_live_hup_immune_backgrounded_job` are now the standing `trap '' HUP` job this item asks for, pinned in code rather than built ad hoc each time. Piece 3 ran the actual suppression on the real macOS runner (`termination.rs`'s own `signal_session_survivors` call, temporarily replaced, pushed, reverted the very next commit) and got exactly the red this item asks for: `SessionConfirmedEmpty { confirmed: false }`, `OrphanedUnknown`. **This dated observation does not stand in for re-running the check**: re-do the same suppress/confirm-red/revert procedure each release rather than trusting that a guard shown broken once in the past is still breakable the same way now.
-- [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`.
+- [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
 ## Review
@@ -561,6 +561,36 @@ then deleted too** — a reader of the next cut should not wonder what used to b
 
 Two packages, two separate procedures below — item 396 above is the standing watch that both
 `pkgver`s match the release; this section is what makes that true.
+
+### First publication -- 0.39.0 only
+
+**Neither package exists on the AUR, and both procedures below are written as bumps.** The two names
+were booked with placeholder content on 2026-10-21 and deleted; publication is deferred to 0.39.0
+(decided 2026-11-12, `aur-ci-publishing.md`). At 0.39.0 these are therefore *first publications*,
+which is a different sequence from every release after it. It is written down because an unwritten
+step discovered during a cut is how `0.37.0`'s own gate went red for a reason that had nothing to do
+with the release.
+
+- [ ] For each of `tekstide` and `tekstide-bin`: clone `ssh://aur@aur.archlinux.org/<pkgbase>.git`.
+      **Expect history, not an empty repository.** A deleted package's repository "typically remains
+      available" (AUR submission guidelines), so the booking commits are still there and the usual
+      "you appear to have cloned an empty repository" warning will *not* appear. If it is empty,
+      something differs from what this section assumes -- find out why before pushing anything.
+- [ ] Put this release's real `PKGBUILD` and `.SRCINFO` on top of that history and **pull/rebase**;
+      never force-push. Force-pushing and rewriting AUR history are both ruled out
+      (`aur-ci-publishing.md`), so the booking commits remain in both packages' public history. That
+      is accepted, not a defect to repair.
+- [ ] Set `git config user.name`/`user.email` **in each clone, before committing**, if the global git
+      identity is not the one that should appear on a public package page. The guidelines warn this is
+      "very difficult to change after pushing", and the booking commits are the standing
+      demonstration.
+- [ ] After both pushes, confirm both packages are actually live, from the RPC rather than the web
+      pages: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'` must
+      report `resultcount: 2`, with each `Version` matching this release. A `0` here means the push
+      did not create the package, whatever the push appeared to say.
+- [ ] **Delete this subsection once both packages are live.** From the next release on, the
+      per-package procedures below are the whole of it -- a first-publication path left standing is
+      the same state-asserting-text failure the Run It section records.
 
 ### `tekstide` (source)
 

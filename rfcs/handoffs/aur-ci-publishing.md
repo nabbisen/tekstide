@@ -1,6 +1,6 @@
 ---
 title: "AUR publishing from CI: what it must do, what it must never do, and what stays the owner's"
-status: "Scope note. Opened 2026-10-21, after the owner registered both AUR packages. Not an RFC yet; it takes a number when the document is written."
+status: "Scope note. Opened 2026-10-21, after the owner registered both AUR packages. Not an RFC yet; it takes a number when the document is written. Corrected 2026-11-12: those packages were booked with placeholder content and deleted, so neither exists and neither name is held; first publication is deferred to 0.39.0."
 rfc_file: "none — the RFC is not written yet, so it has no number (see §Why this is an RFC)"
 target_milestone: "M14"
 created: "2026-10-21"
@@ -16,6 +16,47 @@ they be integrated with GitHub Actions CI:
   already carries its bump, `makepkg`, `namcap` and version-check steps.
 - `https://aur.archlinux.org/packages/tekstide-bin` — **new, and nothing in this repository builds it
   yet.** It needs its own `PKGBUILD` against a published Linux release asset.
+
+**Corrected 2026-11-12: neither package exists on the AUR, and neither name is held.** Both were
+created on 2026-10-21 with placeholder content, to book the names, and were subsequently deleted --
+so "registered", above, describes an intent the AUR does not honour. Verified rather than inferred:
+the AUR's own RPC returns `resultcount: 0` for both names
+(`rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin`), a name search for `tekstide` returns nothing, and
+the same call with a package that certainly exists (`yay`) returns it -- so the zero is a real
+absence and not a broken probe. **The AUR has no name reservation**: a package exists only while
+something is pushed to it, and deleting it frees the name for anyone. The booking also sat outside
+the rules of submission, which require that an upload be *useful* and install "general software and
+software-related content"; deleting was the right resolution and that part is closed.
+
+**What survives the deletion is the git history**, which is the part that costs something later. The
+submission guidelines state that a deleted package's repository "typically remains available", that
+a clone of a deleted `pkgbase` is *not* empty, and that one must "pull and rebase to resolve
+conflicts if `pkgbase` matches a deleted package". So the first real push to either name is a rebase
+onto the booking commits, not a push to an empty repository -- and because this note already rules
+out force-pushing and rewriting AUR history, those commits stay in both packages' public history
+permanently. They carry whatever global git identity made them, which the guidelines warn is "very
+difficult to change after pushing"; `git config user.name`/`user.email` per clone is the knob, and it
+only helps for commits not yet made.
+
+**First publication is deferred to 0.39.0. Decided 2026-11-12.** Publishing both at 0.38.0 was
+considered and declined: it is technically correct today -- 0.38.0 is live on crates.io
+(`53d88b44191ef911b50f54590a1122d75dc835cdf7e3e7e02035df1a5c0c77c8`, derived by the same method that
+reproduces the committed 0.37.0 sum exactly) and its Linux assets exist -- but it costs two full
+`makepkg`/`namcap` passes over the source package instead of one, and the first would be superseded
+within a single release. Nothing depends on the packages existing: not the release, not crates.io,
+not the GitHub assets, and no gate in `release-checklist.md` requires them at a particular version.
+The exposure accepted by waiting is that both names stay unclaimed until 0.39.0 ships -- judged small
+for a name this unusual, and recoverable through a merge or orphan request if it is not.
+
+**Two checks belong before the cut rather than in it**, and both are read-only: `ssh
+aur@aur.archlinux.org help`, which is the only thing that proves the public half of the key is on the
+account, and a clone of both repositories to see the booking history for what it is. The key behind
+`AUR_SSH_PRIVATE_KEY` was created on 2026-10-29, *after* the bookings, so the key CI holds is not
+known to be the key that pushed them, and a local push may use a third.
+
+**`tekstide-bin` is no longer unbuilt**, as the bullet above has it: its `PKGBUILD` landed on
+2026-11-10 (`d79cd98`), pinned to 0.38.0 as a verification baseline and proven end to end against
+that release's real assets. Its own header comment carries the bump instruction for the cut.
 
 This note is the scope, the constraints and the schedule. It is deliberately not a workflow: the
 credential and the publishing surface are new, so the design gets reviewed as its own **RFC** before any
