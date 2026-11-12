@@ -1546,6 +1546,14 @@ this slice's own instruction not to fix it in passing.
 
 ## `cargo doc` is not in the gate, and 37 warnings already reach docs.rs — found 2026-10-14, review 563
 
+**Corrected 2026-11-12: the 37 warnings are gone, measured rather than assumed.** `cargo doc
+--no-deps --workspace` from a clean target directory, with both crates actually documented and not
+served from cache, emits **zero** warnings. They were fixed somewhere between 2026-10-14 and
+`0.39.0` without this entry being updated — which is the drift this file exists to catch, found
+while checking whether RFC-074's own `cargo doc -D warnings` verification step was meetable. **The
+unaddressed half of this entry stands**: `cargo doc` is still not in the gate, so nothing stops
+them coming back.
+
 Found while checking a doc-comment edit, not sought out. Measured directly, not assumed from the
 review that first noticed it:
 
