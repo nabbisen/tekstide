@@ -95,3 +95,56 @@ largest slice of the five, the smallest.
 `.git-exclude/specs/tekstide-external-design-v0.md` §4.2 still authors "Default base font size:
 14 px". The accepted RFC supersedes it and is the record; the source document is the owner's.
 **Do not edit it**, and do not treat the mismatch as a defect to fix.
+
+## Final Acceptance Decision
+
+**Accepted 2026-11-12 by the reviewer, for release as `0.39.0`.** The owner authorised the release
+and the publish; RFC-076 moved to `rfcs/done/` at the candidate cut, deliberately before publish,
+the same discipline RFC-027's, RFC-065's and RFC-066's rows set. Written here because
+`.git-exclude/reviewed/` is correspondence and is not tracked: the pack is the record
+(`release-checklist.md`'s own Review item, added at review 526 after four shipped releases left
+this section blank).
+
+**The rounds.** Five slices and the release candidate, each held and each closed on its own
+evidence:
+
+| Round | Slice | Required changes, and what they were |
+| --- | --- | --- |
+| 658 | PR-076-A (D2, raised defaults) | One, small: the configuration page still illustrated the value this RFC raised *away* from. |
+| 659 | PR-076-B (D1, one scale factor) | One: the capture's own numbers disagreed with the claim it was offered as evidence for. Closed round 2. |
+| 660 | PR-076-C (D4, the top-bar control) | One: `(index + 1) % len()` wraps largest back to smallest, which is wrong for *this* control — a reader who has reached the largest step does not want the smallest next. Closed round 2. |
+| 661 | PR-076-C2 (persisted-scale validation) | Two: a non-finite scale **is** reachable from a real file, against the doc's claim that it is not; and the new check made one previously untested invariant load-bearing. Closed round 2. |
+| 669 | PR-076-D3 (D3, AAA and the guardrail) | Six across three rounds: the guardrail did not cover the class it claimed to (ablated false); a false claim about `Status::Disabled` having one route in `iced` when it has two; a call-site count of 53, not 48; an undeclared composited scrim backdrop; a guard that saw `text_color:` but not the text widget's own colour; and an exception keyed on a spelling rather than a site. Closed round 3. |
+| 671 | The `0.39.0` release candidate | Two: the release carried a dependency **security** fix (`RUSTSEC-2026-0459`/`CVE-2026-119375`, the bundled SQLite under the audit store) that the release notes did not mention at all; and the macOS disclosure question went unanswered. Both fixed in round 2; accepted. |
+
+**What the acceptance rests on**, as distinct from what was claimed:
+
+- D1–D5 are all implemented. The enforced AA floor (`MIN_TEXT_CONTRAST = 4.5`) is **untouched** —
+  "toward AAA" was read throughout as a floor to hold for the default theme, never as a target to
+  move the enforced minimum to.
+- The default theme is held to AAA by its own dedicated test, with a vacuity guard, and the whole
+  text-colour surface is covered by a positive-form guard with **path-keyed** exceptions — the
+  version that survives an appended override, which the first two drafts did not.
+- Gates: CI green at job level on the release commit, both workflows, and the full suite re-derived
+  locally by the reviewer (2017 passed, 0 failed, 12 ignored) rather than read from the round.
+- The Run It gate was performed on the **release** binary with a genuinely empty `argv`, and its
+  evidence is in `.git-exclude/release-evidence/0.39.0/`. The reviewer opened the screenshot: every
+  element the round described is on it, and nothing else.
+
+**Deferred rather than fixed, and recorded so nobody rediscovers them as defects:**
+
+- `.git-exclude/specs/tekstide-external-design-v0.md` §4.2 still authors a 14 px default. The
+  accepted RFC supersedes it; the source document is the owner's and was deliberately not edited.
+- The macOS Run It gate and the containment-guard watch's own suppress/confirm-red/revert procedure
+  were again not performed on real Apple hardware. RFC-028 *Acceptance* option (2); disclosed in
+  `0.39.0`'s own release notes rather than left silent.
+- A configuration diagnostic can name `<config-path>` instead of a real path
+  (`crates/tekstide/src/shell.rs:7593`), reachable when the configuration directory cannot be
+  resolved at all — found live while setting up this release's Run It gate. The product behaved as
+  designed (never refuse to start, degrade to compiled defaults, say so); the failure mode simply
+  has no path to show. Not this release's defect and not fixed here; the mistake that surfaced it
+  was at the launcher's own argument boundary and was fixed there.
+
+**What this acceptance does not cover.** The AUR first publication of `tekstide` and `tekstide-bin`
+is separate work with its own procedure (`release-checklist.md`, "First publication — 0.39.0 only")
+and its own authority: the pushes are the owner's.
