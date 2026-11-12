@@ -580,23 +580,40 @@ which is a different sequence from every release after it. It is written down be
 step discovered during a cut is how `0.37.0`'s own gate went red for a reason that had nothing to do
 with the release.
 
+**Corrected 2026-11-12, during the publication itself: a push does not restore a deleted package,
+and the sequence below is what the AUR actually requires.** The first draft of this subsection said
+clone, rebase, push. The clone part was right — the repository survives deletion and the booking
+commit is in it — but the push was declined by the AUR's own hook, in as many words: *"tekstide was
+deleted; pushing does not restore it."* No rebase was needed either; a clone gives an ordinary
+branch and the new commit sits on top of the booking commit cleanly.
+
 - [ ] For each of `tekstide` and `tekstide-bin`: clone `ssh://aur@aur.archlinux.org/<pkgbase>.git`.
-      **Expect history, not an empty repository.** A deleted package's repository "typically remains
-      available" (AUR submission guidelines), so the booking commits are still there and the usual
-      "you appear to have cloned an empty repository" warning will *not* appear. If it is empty,
-      something differs from what this section assumes -- find out why before pushing anything.
-- [ ] Put this release's real `PKGBUILD` and `.SRCINFO` on top of that history and **pull/rebase**;
-      never force-push. Force-pushing and rewriting AUR history are both ruled out
-      (`aur-ci-publishing.md`), so the booking commits remain in both packages' public history. That
-      is accepted, not a defect to repair.
-- [ ] Set `git config user.name`/`user.email` **in each clone, before committing**, if the global git
-      identity is not the one that should appear on a public package page. The guidelines warn this is
-      "very difficult to change after pushing", and the booking commits are the standing
-      demonstration.
+      **Expect the booking commit, not an empty repository** — a deleted package's repository
+      "typically remains available" (AUR submission guidelines), so the usual "you appear to have
+      cloned an empty repository" warning will *not* appear.
+- [ ] `ssh aur@aur.archlinux.org restore <pkgbase>`. **It comes back as an orphan**, carrying its
+      old content — so whatever was deleted is publicly visible again from this moment until the
+      real content is pushed. Keep that window short: have the new `PKGBUILD` and `.SRCINFO` built,
+      `makepkg`-proven and `namcap`-clean *before* running this, not after.
+- [ ] `ssh aur@aur.archlinux.org adopt <pkgbase>`. **This files a request; it does not make you the
+      maintainer.** *"A Package Maintainer must grant it before you become the maintainer"* — a
+      third party, on their own schedule, through the `aur-requests` list.
+- [ ] **Wait for the grant. Until then the push is refused**, with
+      *"<pkgbase> is orphaned … a Package Maintainer must grant it before you can push."* This is a
+      real dependency on someone outside this project and it is the reason a first publication
+      cannot be scheduled inside a release's own window. Plan it as its own step, after the release.
+- [ ] Once adoption is granted: `git push origin master`, and set
+      `git config user.name`/`user.email` **in each clone, before committing**, if the global git
+      identity is not the one that should appear on a public package page. The guidelines warn this
+      is "very difficult to change after pushing"; at this project's own booking commits the
+      identity used was the GitHub `users.noreply.github.com` address, and the real publication
+      commits match it deliberately.
 - [ ] After both pushes, confirm both packages are actually live, from the RPC rather than the web
       pages: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'` must
       report `resultcount: 2`, with each `Version` matching this release. A `0` here means the push
-      did not create the package, whatever the push appeared to say.
+      did not create the package, whatever the push appeared to say. **The RPC also lags**: a
+      restore was not visible through it minutes afterwards, so treat a `0` immediately after an
+      action as unknown rather than as a failure, and re-check.
 - [ ] **Delete this subsection once both packages are live.** From the next release on, the
       per-package procedures below are the whole of it -- a first-publication path left standing is
       the same state-asserting-text failure the Run It section records.

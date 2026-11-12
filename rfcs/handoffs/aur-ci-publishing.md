@@ -48,6 +48,27 @@ not the GitHub assets, and no gate in `release-checklist.md` requires them at a 
 The exposure accepted by waiting is that both names stay unclaimed until 0.39.0 ships -- judged small
 for a name this unusual, and recoverable through a merge or orphan request if it is not.
 
+**Measured 2026-11-12, at the publication itself — a deleted package cannot simply be pushed back,
+and this is the single most important fact in this note.** The AUR's own hook refuses: *"tekstide
+was deleted; pushing does not restore it."* The sequence is `restore` (it returns as an **orphan**,
+with its old content publicly visible again), then `adopt`, **which only files a request** — *"a
+Package Maintainer must grant it before you become the maintainer"* — and until that grant lands a
+push is refused outright. So a first publication after a deletion depends on a third party outside
+this project, on their schedule, and **cannot be planned inside a release window**. Both requests
+for `tekstide` and `tekstide-bin` were filed on 2026-11-12, after `0.39.0` was published and both
+packages were built, `makepkg`-proven and `namcap`-clean locally.
+
+**This is also what any CI design must account for.** A workflow that assumes "push to AUR" is one
+step is correct only for a package that already exists and is already maintained by the pushing
+account. It has nothing to say about restoring, adopting, or waiting on a grant — and it should not
+try to: those are account actions, not packaging ones.
+
+**The booking commits are dated 2026-10-20, not 2026-10-21** as this note's own header says — read
+from the commits themselves (`8e6ff9d`, `44ab7b3`, both `+0900`). Both are authored as
+`nabbisen <19984221+nabbisen@users.noreply.github.com>`, which the real publication commits match
+deliberately, and both are harmless `pkgver=0.0.0` placeholders whose `package()` echoes
+"Placeholder". They stay in both packages' permanent public history.
+
 **Two checks belong before the cut rather than in it**, and both are read-only: `ssh
 aur@aur.archlinux.org help`, which is the only thing that proves the public half of the key is on the
 account, and a clone of both repositories to see the booking history for what it is. The key behind
