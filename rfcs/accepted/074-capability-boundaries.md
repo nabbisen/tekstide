@@ -23,7 +23,7 @@ This RFC spanned more releases than one — D1–D4 are the gate and Stages 1–
 capability split proper, whose staging was deliberately unscoped until the gate had proven itself
 twice. A released section naming an RFC asserts that RFC shipped in that release
 (`an_rfc_a_release_names_lives_in_done`), so a `0.40.0` carrying only the first slice could not
-have named the RFC it was about — the same reason RFC-026 was split from RFC-065. **D5–D8 moved to
+have named the RFC it was about — the same reason RFC-026 was split from RFC-065. **D6–D8 moved to
 [RFC-077](./077-the-capability-split.md)**, carried forward as already-accepted decisions.
 **The release slot is `0.40.0`**, and **the published API may change shape in it**: Stage 1 is
 API-compatible by construction (D3), Stage 2 takes `test_support` out of the production graph.
@@ -160,16 +160,39 @@ largest component 9 → 8.
 This is listed as its own stage despite being two lines because of what it is: the gate in D1
 cannot honestly assert "no module reaches `test_support`" while production code does.
 
-### D5–D8 — moved to RFC-077 by the 2026-11-12 split
+### D5. Capability isolation is absolute. No allow-list. **Decided (goal document D-G3).**
 
-Capability isolation (D5), the rule that generates the capability list (D6), the `project/` split
-itself (D7) and the staging order derived from measured cut cost (D8) are **not in this RFC any
-more**. They were accepted on 2026-11-03 as part of it and are carried forward unchanged, as
+When capability A needs something from capability B there are exactly **three** legal moves, and
+no fourth:
+
+1. **The shared thing is vocabulary** → it belongs in T0. (`ProjectId` is the worked example.)
+2. **A defines a trait; orchestration supplies B.** The trait is owned by the *consumer* and has
+   only the methods that consumer calls — never a mirror of B's API.
+3. **The need is really orchestration's** → the logic moves to T2.
+
+An allow-list of permitted T1↔T1 pairs was considered and rejected: it is a list of exceptions,
+exceptions grow, and this codebase has already paid for that exact shape once — the two
+independently-maintained copies of `IGNORED_DIRECTORY_NAMES` whose own doc comment calls it *"a
+defect the day someone edits one without the other."* Each allowed pair is also a place where the
+authority rule can be violated with nothing failing.
+
+**The cost accepted, stated plainly**: indirection where a direct call would read more simply, and
+a T2 that grows because it becomes the only composer. The second is tolerable precisely because
+T2 is the one tier where a reviewer expects breadth; the first is bounded by the
+consumer-owned-trait rule, which keeps each trait as small as its single caller needs.
+
+### D6–D8 — moved to RFC-077 by the 2026-11-12 split
+
+The rule that generates the capability list (D6), the `project/` split itself (D7) and the staging
+order derived from measured cut cost (D8) are **not in this RFC any more**. **D5 stays**, above:
+its first real application is this RFC's own Stage 2, and a release should be able to cite the rule
+it applied without naming an RFC that has not shipped. They were accepted on 2026-11-03 as part of it and are carried forward unchanged, as
 accepted decisions, in [RFC-077](./077-the-capability-split.md). Nothing was re-opened, re-decided
 or weakened: the split changes which release closes which decision, and nothing else.
 
-What stays here is what `0.40.0` can actually close: the gate, the tier model it enforces, and the
-two moves whose effect on the graph is predicted before they land.
+What stays here is what `0.40.0` can actually close: the gate, the tier model it enforces, the
+isolation rule its second move is the first to exercise, and the two moves whose effect on the graph
+is predicted before they land.
 
 ## Out of scope, deliberately
 
