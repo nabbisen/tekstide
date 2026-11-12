@@ -267,13 +267,13 @@ through `test_support::process_is_alive` → `is_gone_or_going` directly. See
 
 **A vulnerability fixed and an unsoundness cleared, both found by this release's own
 `cargo audit` run against the candidate — review 671 Required 1.** The same storage engine the
-`0.18.0` entry above named is affected again: `rusqlite`/`libsqlite3-sys` power the durable local
+`0.18.0` entry below named is affected again: `rusqlite`/`libsqlite3-sys` power the durable local
 audit store, the one place on disk this project's own security and privacy guarantees depend on.
 
 - **`RUSTSEC-2026-0459` / `CVE-2026-119375` (6.8, medium) — fixed.** The bundled C SQLite
   carried a real vulnerability. `rusqlite` `0.40.2` → `0.42.0`, which moves `libsqlite3-sys`
   `0.38.2` → `0.40.0` and **bundled SQLite `3.53.2` → `3.54.1`** — the same pairing the `0.18.0`
-  entry above named, the engine under the audit store, not a Rust-level API change (zero source
+  entry below named, the engine under the audit store, not a Rust-level API change (zero source
   changes this bump required). `NOTICE` (root, `crates/tekstide-core`, `crates/tekstide` — the
   same text `--licenses` prints) updated to the new versions.
 - **`RUSTSEC-2026-0486` (`rustix`, unsound) — fixed.** The extended-attribute functions
