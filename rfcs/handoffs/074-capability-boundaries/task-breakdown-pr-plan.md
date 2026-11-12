@@ -2,7 +2,7 @@
 title: "RFC-074 — task breakdown and PR plan"
 rfc: "RFC-074"
 rfc_file: "../../accepted/074-capability-boundaries.md"
-source_rfc_status: "Accepted by the human owner 2026-11-03 — RFC-074 is in rfcs/accepted/"
+source_rfc_status: "Accepted by the human owner 2026-11-03; narrowed to D1–D4 by the 2026-11-12 split and scheduled as 0.40.0 — RFC-074 is in rfcs/accepted/"
 target_milestone: "M14"
 created: "2026-11-03"
 ---
@@ -92,3 +92,11 @@ published-API break, and D3's whole claim is that this stage has none.
 
 The `project/` split (D7), the remaining cuts in D8's table, any crate split, any rename, and the
 GUI's breadth. The RFC scopes them out or defers them; this pack does not reopen them.
+
+**Updated 2026-11-12, at the split.** D5 through D8 are no longer part of RFC-074 at all — they
+were moved to [RFC-077](../../accepted/077-the-capability-split.md), carried forward as
+already-accepted decisions, so that RFC-074 is a thing `0.40.0` can actually close. That changes
+nothing in this pack's own two slices: PR-074-A is still the gate and nothing else, PR-074-B is
+still Stages 1 and 2, and the bound still ratchets in the same commit as the move that earns it.
+The later staging is scoped in RFC-077's own handoff, only after this gate has behaved on two real
+stages.
