@@ -1,9 +1,9 @@
 # RFC-073: Locales That Survive Installation
 
-Status: **Proposed 2026-11-12.** Reserved 2026-09-24 as *"The `locales_dir()`/`CARGO_MANIFEST_DIR`
+Status: **Accepted by the human owner 2026-11-12** — D1 through D4 as written, in `0.40.0`, alongside RFC-074's first slice. Proposed the same day; reserved 2026-09-24 as *"The `locales_dir()`/`CARGO_MANIFEST_DIR`
 Locale-Loading Defect"*; written now because `0.39.0` turned the channels where it bites into this
-product's primary ones. **The release slot is already decided**: the owner accepted `0.40.0`'s
-scope on 2026-11-12, naming this RFC alongside RFC-074's first slice. What is open is D1–D4 below.
+product's primary ones. The release slot was decided with `0.40.0`'s scope
+on the same day, and the decisions below were accepted immediately after.
 
 ## Summary
 
