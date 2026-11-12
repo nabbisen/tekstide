@@ -237,3 +237,63 @@ retires if `window_clipboard` ever bumps past it, which nothing here depends on.
 **The gate's pass condition for `0.38.0`'s own tag is now zero vulnerabilities and exactly seven
 warnings** -- the six already accepted, plus `clipboard-win`. An eighth, or a `tokio` warning
 reappearing, is a finding.
+
+## 2026-11-12 -- the `0.39.0` candidate cut's own run found a real vulnerability and two more
+warnings; the vulnerability fixed, one warning fixed, two accepted
+
+**A real vulnerability this time, not only warnings -- `cargo audit` exited non-zero.**
+`libsqlite3-sys 0.38.2` (reached by `rusqlite 0.40.2` -> `tekstide-core` -> `tekstide`, a direct,
+normal, every-platform dependency: the audit store) carried `RUSTSEC-2026-0459`
+(CVE-2026-119375, 6.8 medium, the bundled C SQLite), dated 2026-10-30, fixed at
+`libsqlite3-sys >= 0.39.0`. **Checked before assuming a lockfile refresh would do it**:
+`cargo update -p rusqlite --dry-run` locked zero packages, because `rusqlite 0.40.2` pins
+`libsqlite3-sys` at exactly `0.38.2` -- the same shape `lru`'s own row above describes, a bound
+no dry-run update can cross. `rusqlite 0.42.0` (the newest published version; its own manifest
+confirmed, not assumed, before bumping: `libsqlite3-sys = "0.39.0"` on every target) needed a
+manifest change, not a lockfile one -- `rusqlite = "0.40"` raised to `rusqlite = "0.42"` in the
+root `Cargo.toml`. Resolves to `libsqlite3-sys 0.40.0`, inside the patched range. Full workspace
+suite re-run after the bump (`tekstide-core` 799/0/8, `tekstide` 1190/0/4, plus doctests and
+`rfc_docs_invariants` 28/0) clean, `cargo fmt --check` and `cargo clippy -- -D warnings` both
+clean, same as before it. **`cargo audit` afterward: zero vulnerabilities.**
+
+**Two new warnings arrived in the same run.** `pin-utils 0.1.0` (`RUSTSEC-2026-0441`,
+unmaintained, dated 2026-10-01) and `rustix 1.1.4` (`RUSTSEC-2026-0486`, **unsound** -- the
+extended-attribute functions mark unwritten bytes as initialized when given a zero-length
+buffer, dated 2026-10-27).
+
+**`rustix` fixed, not accepted -- a published fix existed and was reachable, the same shape
+`tokio` took at `0.38.0`'s own candidate.** `cargo tree -e normal -i rustix@1.1.4` shows it
+reached through `alacritty_terminal`, `async-io`/`async-process`/`async-signal`, `calloop`,
+`x11rb`, `wayland-backend` and more -- the whole windowing/terminal graph, every platform this
+project builds, not a lock-only entry. The advisory's own patched range is `>= 1.1.6`;
+`cargo update -p rustix@1.1.4 --dry-run` resolved to `1.1.6`, inside it (the `0.38.44` rustix
+also present in the graph is a separate, unaffected major line -- the advisory's own text says
+so: *"The 0.38 series ... is not affected"*). Applied for real, `Cargo.lock` only, no manifest or
+source change. `cargo audit` afterward: `rustix` gone, both the vulnerability and this warning
+cleared in the same pass.
+
+**`pin-utils` accepted, unreachable -- verified, not assumed from `cargo tree`'s default empty
+answer.** `cargo tree -e normal -i pin-utils@0.1.0` printed nothing with no `--target` flag,
+which asks only about the host target and can misread "not reached here" when the real answer is
+"reached on a target this run didn't ask about." Checked both ways: `--target all` finds it
+through `wasmtimer` -> `iced_futures` -> `iced` -> `tekstide`; `iced_futures`'s own manifest gates
+the dependency `[target.'cfg(target_arch = "wasm32")'.dependencies.wasmtimer]` -- **wasm32 only**,
+a target this project does not build for either platform it ships. Same shape as `paste`'s own
+macOS-only row above, the mirror image of it: a target this project never builds, not merely one
+build among several.
+
+**`async-executor` recorded, not fixed -- found from `0.38.0`'s own `clipboard-win` row's method,
+same conclusion.** `cargo tree -e normal -i async-executor@1.14.0` (and `--target all`, same
+result): `async-executor 1.14.0` <- `zbus 5.19.0` <- `mundy 0.2.3` <- `iced_winit` <- `iced` <-
+`tekstide` -- the identical `mundy` chain the `zvariant`/`zbus_names`/`zvariant_derive` row above
+already traces, which that row's own text already establishes as **Linux only**
+(`iced_winit`'s `[target.'cfg(target_os = "linux")'.dependencies.mundy]`). Reached at run time on
+Linux, through the same system-colour-scheme-detection feature, not a build-only or lock-only
+entry. A yanked version with no published advisory id, same shape as `clipboard-win`; retires if
+`zbus` or `mundy` ever moves off it, which nothing here depends on.
+
+**The gate's pass condition for `0.39.0`'s own tag is now zero vulnerabilities and exactly nine
+warnings** -- the seven already accepted (`paste`, `ttf-parser`, `lru`, `zvariant`, `zbus_names`,
+`zvariant_derive`, `clipboard-win`), plus `pin-utils` and `async-executor`. `rustix` and the
+`libsqlite3-sys` vulnerability are both gone, not merely unmentioned. A tenth warning, or either
+of those two reappearing, is a finding.
