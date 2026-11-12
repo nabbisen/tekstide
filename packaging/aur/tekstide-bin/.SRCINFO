@@ -1,6 +1,6 @@
 pkgbase = tekstide-bin
 	pkgdesc = Local-first, multi-project workbench for supervising terminal-based AI development workflows (prebuilt binary)
-	pkgver = 0.38.0
+	pkgver = 0.39.0
 	pkgrel = 1
 	url = https://github.com/nabbisen/tekstide
 	arch = x86_64
@@ -8,11 +8,11 @@ pkgbase = tekstide-bin
 	depends = gcc-libs
 	provides = tekstide
 	conflicts = tekstide
-	source = tekstide-0.38.0::https://github.com/nabbisen/tekstide/releases/download/0.38.0/tekstide-x86_64-linux
-	source = LICENSE-0.38.0::https://github.com/nabbisen/tekstide/releases/download/0.38.0/LICENSE
-	source = NOTICE-0.38.0::https://github.com/nabbisen/tekstide/releases/download/0.38.0/NOTICE
-	sha256sums = bd09b3dbb385c88659be082c62e8e24049018e6a91c8715dfa582e83e6e490dd
+	source = tekstide-0.39.0::https://github.com/nabbisen/tekstide/releases/download/0.39.0/tekstide-x86_64-linux
+	source = LICENSE-0.39.0::https://github.com/nabbisen/tekstide/releases/download/0.39.0/LICENSE
+	source = NOTICE-0.39.0::https://github.com/nabbisen/tekstide/releases/download/0.39.0/NOTICE
+	sha256sums = a7aaec430e7c91a19821cd3811970753309b8eef646140ee799581f161fd1567
 	sha256sums = f651689716d7e61870c050334baf1bfc0e44a2fb8f39c68b2a1412de140f97fe
-	sha256sums = f53da1b75c05a55a6475117bc34c97c02205a76978def7c5bf1112053b48e714
+	sha256sums = 3481bb45aec1abef480bae41c2761588cc1b2c1337a2366483914106dfa2a494
 
 pkgname = tekstide-bin

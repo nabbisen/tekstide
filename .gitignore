@@ -40,6 +40,13 @@ packaging/aur/tekstide-bin/src/
 packaging/aur/tekstide-bin/pkg/
 packaging/aur/tekstide-bin/*.pkg.tar.*
 packaging/aur/tekstide-bin/*.log
+# ...and its three `source=` downloads, which makepkg leaves *beside* the PKGBUILD rather than
+# under src/ -- added 2026-11-12, at 0.39.0's own publication, after a real run left a 30 MB
+# binary untracked in the tree. The names are version-suffixed, so these are globs; only
+# PKGBUILD and .SRCINFO are tracked in this directory, so nothing wanted is at risk.
+packaging/aur/tekstide-bin/tekstide-*
+packaging/aur/tekstide-bin/LICENSE-*
+packaging/aur/tekstide-bin/NOTICE-*
 
 # reusable test fixtures (large or slow to produce: a previous release's build, a real
 # downloaded asset) -- the files themselves are not committed, but README.md and

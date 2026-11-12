@@ -1,16 +1,15 @@
 # Maintainer: nabbisen <nabbisen@reflerd.com>
 pkgname=tekstide-bin
-# 2026-11-10 -- verification baseline, not the shipping version. Proven end to
-# end against the only real Linux release asset that exists as of this
-# writing (0.38.0); the instruction behind this package explicitly asked to
-# target the *next* cut, not this one, since 0.38.0 is already a release
-# behind what the source package (`packaging/aur/PKGBUILD`) will carry by the
-# time either package is actually published. At the next real release cut:
-# bump this to that version and recompute every `sha256sums` entry below from
-# the freshly downloaded assets -- never carry these four forward. The
-# `source=` URLs below resolve automatically once `pkgver` is bumped, since
-# they are built from it; only the checksums need a real re-download.
-pkgver=0.38.0
+# Bumped at every release, never carried forward. 0.38.0 was this package's
+# verification baseline (2026-11-10); 0.39.0 is the first version it was
+# actually published at, 2026-11-12. The `source=` URLs below resolve
+# automatically from `pkgver`, so a bump only needs the three `sha256sums`
+# recomputing -- and they must come from the real downloaded assets
+# (`gh release download <v>` then `sha256sum`), never from the previous
+# release and never from a local build. At 0.39.0 the binary's and NOTICE's
+# sums both changed and LICENSE's did not; that is a fact to re-measure each
+# time, not a pattern to rely on.
+pkgver=0.39.0
 pkgrel=1
 pkgdesc="Local-first, multi-project workbench for supervising terminal-based AI development workflows (prebuilt binary)"
 arch=('x86_64')
@@ -30,9 +29,9 @@ depends=('gcc-libs')
 source=("tekstide-$pkgver::https://github.com/nabbisen/tekstide/releases/download/$pkgver/tekstide-$CARCH-linux"
         "LICENSE-$pkgver::https://github.com/nabbisen/tekstide/releases/download/$pkgver/LICENSE"
         "NOTICE-$pkgver::https://github.com/nabbisen/tekstide/releases/download/$pkgver/NOTICE")
-sha256sums=('bd09b3dbb385c88659be082c62e8e24049018e6a91c8715dfa582e83e6e490dd'
+sha256sums=('a7aaec430e7c91a19821cd3811970753309b8eef646140ee799581f161fd1567'
             'f651689716d7e61870c050334baf1bfc0e44a2fb8f39c68b2a1412de140f97fe'
-            'f53da1b75c05a55a6475117bc34c97c02205a76978def7c5bf1112053b48e714')
+            '3481bb45aec1abef480bae41c2761588cc1b2c1337a2366483914106dfa2a494')
 
 package() {
   install -Dm755 "$srcdir/tekstide-$pkgver" "$pkgdir/usr/bin/tekstide"
