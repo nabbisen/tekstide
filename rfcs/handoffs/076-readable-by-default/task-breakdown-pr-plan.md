@@ -2,7 +2,7 @@
 title: "RFC-076 — task breakdown and PR plan"
 rfc: "RFC-076"
 rfc_file: "../../done/076-readable-by-default.md"
-source_rfc_status: "Implemented and closed 2026-11-12, as part of the 0.39.0 candidate cut (not yet published) — RFC-076 is in rfcs/done/"
+source_rfc_status: "Implemented and closed 2026-11-12, as part of the 0.39.0 release, published 2026-11-12 — RFC-076 is in rfcs/done/"
 target_milestone: "pre-1.0"
 created: "2026-11-03"
 ---

@@ -2,7 +2,7 @@
 
 ## 0.39.0 - Readable By Default
 
-Status: **candidate, not yet published.** RFC-076's D1 through D5 are all implemented and closed
+Status: **released 2026-11-12.** RFC-076's D1 through D5 are all implemented and closed
 as of this release — a whole-UI scale factor and its top-bar control, raised defaults, and the
 default theme held to WCAG AAA — the same decisions this entry's own sections below record as
 they landed. Also in this release: `TerminationOutcome::CommittedToExit`, a macOS file-watcher
