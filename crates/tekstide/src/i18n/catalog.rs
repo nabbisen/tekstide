@@ -73,11 +73,15 @@ pub(crate) fn build_bundle(locale: &str, ftl_text: &str) -> Result<Bundle, Catal
 
 /// Looks `locale` up in the compiled-in [`ADDITIONAL_LOCALES`] list and
 /// builds a bundle from it. `None` if `locale` is not one of the
-/// catalogs this build carries, or if its compiled-in text somehow
-/// failed to parse (covered by `tests::source_locale_catalog_parses`'s
-/// sibling for every additional locale, so this should never actually
-/// happen) -- callers fall back to the next link in RFC-016's fallback
-/// chain either way.
+/// catalogs this build carries, or if its compiled-in text fails to
+/// parse -- callers fall back to the next link in RFC-016's fallback
+/// chain either way, so a parse failure here degrades silently to
+/// English rather than failing the build or the boot. Review 673
+/// Required 1: every entry's text is asserted to parse by
+/// `tests::every_additional_locale_actually_parses`, so that silent
+/// degradation should never actually happen in practice -- but this
+/// function's own behaviour does not depend on that test existing, and
+/// the comment does not claim otherwise.
 pub(crate) fn load_compiled_locale(locale: &str) -> Option<Bundle> {
     let (_, ftl_text) = ADDITIONAL_LOCALES
         .iter()

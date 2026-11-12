@@ -11,6 +11,31 @@ fn source_locale_catalog_parses() {
     assert!(bundle.get_message("app-title").is_some());
 }
 
+/// **Review 673 Required 1.** `catalog::load_compiled_locale` folds a
+/// parse failure into `None`, silently falling back to English rather
+/// than failing the build or the boot -- correct behaviour for a
+/// runtime path, but it means a locale added to `locales/` *and* to
+/// `ADDITIONAL_LOCALES` with a syntax error in its `.ftl` would compile,
+/// pass `the_compiled_in_locale_list_matches_every_ftl_file_in_locales`
+/// (it is present on both sides), and serve English with nothing ever
+/// failing -- *listed but unparseable*, the same silent shape RFC-073
+/// D4 says stops existing, re-entered through the new mechanism instead
+/// of the old one. This is the sibling `source_locale_catalog_parses`
+/// above has for `en`, covering every other compiled-in locale
+/// explicitly rather than by the accident of `pl`'s own plural tests
+/// happening to exercise it.
+#[test]
+fn every_additional_locale_actually_parses() {
+    for (name, ftl_text) in catalog::ADDITIONAL_LOCALES {
+        assert!(
+            catalog::build_bundle(name, ftl_text).is_ok(),
+            "locales/{name}.ftl is listed in ADDITIONAL_LOCALES but its compiled-in text does \
+             not parse -- it would silently serve English instead, the exact state RFC-073 D4 \
+             says stops existing"
+        );
+    }
+}
+
 /// A key that exists in the source locale resolves to its real value,
 /// not the key itself -- the baseline the fallback tests below are
 /// contrasted against.
