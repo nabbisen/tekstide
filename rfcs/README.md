@@ -25,9 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is proposed and not yet accepted. RFC-076 was accepted on 2026-11-03, the
-same day it was proposed.)*
+| 073 | [Locales That Survive Installation](./proposed/073-locales-that-survive-installation.md) | **Proposed 2026-11-12**, reserved 2026-09-24. Every non-`en` catalog is loaded from a path baked in at build time, so it resolves on the machine that built the binary and silently falls back to English everywhere else. **`0.39.0` made the affected channels the primary ones** — the one-liner `README.md` leads with has never worked, and `tekstide-bin` repackages that same binary. D1 compile every catalog in and delete the runtime path rather than supplement it; D2 an explicit list gated against the directory; D3 replace the test that hid it with one an installed copy could fail; D4 fallback semantics unchanged. The release slot is already decided (`0.40.0`) |
 
 ## Accepted
 
@@ -57,7 +55,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 070 | Check For Updates | M14 |
 | 071 | Windows Packaging And The Microsoft Store | M14 |
 | 072 | A Non-Blocking Job For Quarantined Tests | M14 |
-| 073 | The `locales_dir()`/`CARGO_MANIFEST_DIR` Locale-Loading Defect | M14 |
 | 075 | Sending The Attention Knock | pre-1.0 |
 
 Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the

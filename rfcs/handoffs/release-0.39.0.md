@@ -94,3 +94,22 @@ directly this release, rather than leaving the extension to a reader who has to 
   (`FirstSubmitted`/`LastModified` timestamps from today, 2026-11-12, consistent with a very
   recent restore of the booking history rather than a stale record) — not `0.39.0`. The standing
   AUR `pkgver` watch stays undischarged until that changes; not this record's job to push it.
+
+  **Corrected 2026-11-12 by the reviewer, who did the AUR work: the pushes are not waiting on the
+  owner.** The owner authorised the AUR publication, and both pushes were attempted. They are
+  refused by the AUR itself, because a deleted package cannot be pushed back: *"tekstide was
+  deleted; pushing does not restore it."* `restore` returns it **as an orphan**, `adopt` only
+  **files a request**, and *"a Package Maintainer must grant it before you can push."* Both
+  requests were filed on 2026-11-12. The RPC's own answer is the visible proof — re-read at
+  2026-11-12: `resultcount: 2`, both at the placeholder `0.0.0-1`, and both with
+  **`Maintainer: None`**. Nobody can push to an orphan, including the owner. The block is a third
+  party on their own schedule, through the `aur-requests` list, and it is the reason
+  `release-checklist.md`'s corrected "First publication" subsection now says a first publication
+  after a deletion cannot be planned inside a release window.
+
+  **One consequence worth naming rather than discovering**: the restore made the booking
+  placeholders *publicly visible again* — two `pkgver=0.0.0` packages whose `package()` echoes
+  "Placeholder" — and that window stays open until the grant lands, because closing it early would
+  need a second deletion, which also needs a Package Maintainer. Both real packages are built,
+  `makepkg`-proven and `namcap`-clean and waiting (`a26941a`, `6a41133`); the push is one command
+  each the moment adoption is granted.
