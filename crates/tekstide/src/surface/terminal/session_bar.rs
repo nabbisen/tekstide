@@ -116,18 +116,12 @@ pub fn view<'a, Message: 'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
-
     use crate::i18n::LocalePreference;
 
     use super::*;
 
-    fn real_locales_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
-    }
-
     fn real_catalog() -> Catalog {
-        Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()))
+        Catalog::resolve(LocalePreference::default())
     }
 
     /// **Response 150 Required, the fix's own regression test.** Must

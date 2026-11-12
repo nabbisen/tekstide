@@ -1,16 +1,10 @@
-use std::path::{Path, PathBuf};
-
 use tekstide_core::navigation::{KeybindingPolicy, KeybindingStatus, NavigationAction};
 
 use super::{action_catalog_key, keyboard_help_lines, surface_action_help_lines, usage_text};
 use crate::i18n::{Catalog, LocalePreference};
 
-fn real_locales_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
-}
-
 fn real_catalog() -> Catalog {
-    Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()))
+    Catalog::resolve(LocalePreference::default())
 }
 
 /// `action_catalog_key`'s own contract, tested directly rather than

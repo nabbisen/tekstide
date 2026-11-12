@@ -5,9 +5,12 @@
 # plural categories (one / few / many / other) differ from English's
 # (one / other), which is the property this file exists to exercise.
 #
-# Loaded from disk (see `i18n::catalog::load_locale_from_disk`), not
-# compiled in -- only the source locale (`en`) is compiled into the
-# binary.
+# Compiled into the binary, the same as `en` (RFC-073 D1: every shipped
+# catalog is, selected at runtime by name via
+# `i18n::catalog::ADDITIONAL_LOCALES`). Loading from disk at the path
+# baked in at build time used to be how this file reached a running
+# process, and on any machine other than the one that built the binary
+# it never did -- see RFC-073 for the reproduction.
 
 app-title = Tekstide
 project-board-title = Tablica projektu

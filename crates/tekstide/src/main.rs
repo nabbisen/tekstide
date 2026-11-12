@@ -18,8 +18,6 @@ mod theme;
 #[cfg(test)]
 mod alloc_probe;
 
-use std::path::{Path, PathBuf};
-
 use tekstide_core::project::recent::{AppStatePathProvider, RecentProjectStore};
 use tekstide_core::shell::ApplicationShell;
 
@@ -116,8 +114,7 @@ fn handle_informational_flags() {
         print!("{NOTICE_TEXT}");
     }
     if wants_help {
-        let catalog =
-            i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
+        let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default());
         let executable = std::env::args()
             .next()
             .unwrap_or_else(|| "tekstide".to_owned());
@@ -236,7 +233,7 @@ fn boot() -> shell::State {
         std::process::exit(1);
     }
 
-    let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default(), Some(&locales_dir()));
+    let catalog = i18n::Catalog::resolve(i18n::LocalePreference::default());
     // RFC-076 D1/D5: a third, independent `default_for_host()` resolution
     // (`instance_marker`/`store` above each already have their own) --
     // "a cheap, stateless env-var read," the same reasoning `instance_
@@ -411,10 +408,6 @@ fn record_project_added_if_possible(
         let _ = tekstide_core::audit::AuditCoordinator::new(store, audit_health)
             .record_project_added(project_id);
     }
-}
-
-fn locales_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
 }
 
 #[cfg(test)]

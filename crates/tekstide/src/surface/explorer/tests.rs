@@ -15,12 +15,8 @@ use super::{
 };
 use crate::i18n::{Catalog, LocalePreference};
 
-fn real_locales_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
-}
-
 fn real_catalog() -> Catalog {
-    Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()))
+    Catalog::resolve(LocalePreference::default())
 }
 
 fn target_at(relative_path: &str) -> FileAccessTarget {

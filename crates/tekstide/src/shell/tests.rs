@@ -45,7 +45,7 @@ fn state_with_configuration(
     app_shell: ApplicationShell,
     configuration: ConfigurationState,
 ) -> State {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     State::new(
         app_shell,
         catalog,
@@ -6294,7 +6294,7 @@ fn a_cleared_confirmed_set_re_arms_the_first_use_gate() {
 /// compiled, which is the property D5 asked for.
 #[test]
 fn the_reload_configuration_command_is_advertised_in_help_and_usage_text() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let lines = crate::keyboard_help::keyboard_help_lines(
         &catalog,
         &tekstide_core::navigation::KeybindingPolicy::linux_mvp(),
@@ -7226,7 +7226,7 @@ fn the_decided_approval_is_visible_through_the_real_audit_view() {
     let _audit_state_dir =
         test_audit_state_dir(&temp_audit_state_dir("approval-visible-in-audit-view"));
     let (mut state, project_id) = state_with_a_real_project("approval-visible-in-audit-view");
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
 
     let agent_run_id = launch_real_managed_agent_run(&mut state);
     let received = poll_approval_channels_until(&mut state, |state| {
@@ -8921,7 +8921,7 @@ fn transcript_body_escapes_a_real_override_and_does_not_double_escape_literal_ma
 /// independent, never-conflated notices.
 #[test]
 fn reader_window_and_writer_truncation_render_as_distinct_notices() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let mut transcript = tekstide_core::domain::Transcript::metadata(
         tekstide_core::project::ProjectId::new_uuid(),
         tekstide_core::domain::TerminalId::new_uuid(),
@@ -12073,7 +12073,7 @@ fn a_bad_path_renders_a_notice_and_the_application_keeps_running() {
 /// user actually sees.
 #[test]
 fn a_directionality_override_in_the_typed_path_renders_as_a_visible_marker_not_obeyed() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let hostile_path = "/tmp/\u{202E}gpj.exe";
 
     let text = path_field_error_text(&catalog, hostile_path, PathFieldError::DoesNotExist);
@@ -12248,7 +12248,7 @@ fn escape_is_a_no_op_on_the_permanently_shown_empty_board_field() {
 /// instead of retargeting the binding).
 #[test]
 fn the_path_field_hint_names_the_paste_gesture_that_actually_works_here() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     // RFC-028 D9: the key now takes `$primary`, rendered via
     // `get_with_args` -- `"Ctrl"` here matches this test's own
     // assertion, which (like the rest of the product on this host) is
@@ -12613,7 +12613,7 @@ fn ctrl_alt_k_opens_help_from_inside_terminal_immersion() {
 /// widened.
 #[test]
 fn every_advertised_binding_fits_its_own_help_modal_column() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let theme = crate::theme::Theme::default();
     let column_px = super::help_modal_binding_column_px(&theme);
 
@@ -13434,7 +13434,7 @@ fn a_cli_launched_second_attempt_at_a_locked_project_sets_the_real_board_notice(
         "a second CLI attempt at a locked project must not add a session either (D8)"
     );
 
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let state = State::new(
         second_shell,
         catalog,
@@ -13830,7 +13830,7 @@ fn project_tab_label_truncates_a_long_display_name_with_an_ellipsis_marker() {
 /// colour-dependent.
 #[test]
 fn home_tab_label_marks_being_on_the_board_with_brackets_not_colour_or_the_project_symbol() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let name = catalog.get("project-tab-strip-home");
 
     let active_focused = super::home_tab_label(&catalog, true, true);
@@ -21036,7 +21036,7 @@ fn a_reload_applies_a_rebind_live_and_reserved_stays_reserved() {
 fn every_way_a_setting_falls_back_has_its_own_sentence() {
     use tekstide_core::config::{FallbackReason, SettingFallback};
     use tekstide_core::navigation::{ChordError, KeybindingStatus, NavigationAction};
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let reasons = [
         FallbackReason::NotAString,
         FallbackReason::BadChord(ChordError::Empty),
@@ -21333,7 +21333,7 @@ fn every_way_an_appearance_setting_falls_back_has_its_own_sentence() {
     use tekstide_core::config::{
         ColourError, ContrastRatio, FallbackReason, FamilyError, SettingFallback, ThemeRole,
     };
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let cases = [
         ("theme.accent", FallbackReason::NotAString),
         ("font.family", FallbackReason::NotAString),
@@ -21724,7 +21724,7 @@ fn the_ui_font_is_set_at_boot_and_at_every_reload() {
 #[test]
 fn a_reduced_value_says_what_it_was_reduced_to_not_that_its_default_stands() {
     use tekstide_core::config::{FallbackReason, SettingFallback};
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let line = |setting: &str, reason| {
         plain_words(&super::configuration_fallback_text(
             &catalog,
@@ -22494,7 +22494,7 @@ fn state_holds_the_instance_marker_for_its_whole_lifetime_so_a_normal_exit_remov
     );
 
     let app_shell = ApplicationShell::new();
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let state = State::new(
         app_shell,
         catalog,
@@ -23097,7 +23097,7 @@ fn dismissing_the_offer_leaves_every_record_on_disk_untouched() {
 /// against.
 #[test]
 fn recovery_offer_header_includes_the_no_undo_history_notice() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
 
     let [title, no_undo_notice] = super::recovery_offer_header_lines(&catalog, "demo-project");
 
@@ -23199,7 +23199,7 @@ fn all_families_and_outcomes_cover_every_declared_cycle_index_exactly_once() {
 fn audit_view_leads_with_the_disclosure_of_which_question_it_answers() {
     let app_shell = ApplicationShell::new();
     let mut state = state_with(app_shell);
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
 
     let lines = audit_view::lines(&state);
     let disclosure = lines
@@ -23221,7 +23221,7 @@ fn audit_view_leads_with_the_disclosure_of_which_question_it_answers() {
 fn audit_view_bounded_notice_is_a_bare_count_when_nothing_is_omitted() {
     let app_shell = ApplicationShell::new();
     let mut state = state_with(app_shell);
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     let record = audit_record(
         tekstide_core::audit::AuditEventFamily::AuditStoreRecovery,
         tekstide_core::audit::AuditOutcome::Completed,
@@ -23250,7 +23250,7 @@ fn audit_view_bounded_notice_is_a_bare_count_when_nothing_is_omitted() {
 fn audit_view_bounded_notice_reuses_count_text_wording_when_something_is_omitted() {
     let app_shell = ApplicationShell::new();
     let mut state = state_with(app_shell);
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     let record = audit_record(
         tekstide_core::audit::AuditEventFamily::AuditStoreRecovery,
         tekstide_core::audit::AuditOutcome::Completed,
@@ -23282,7 +23282,7 @@ fn audit_view_bounded_notice_reuses_count_text_wording_when_something_is_omitted
 fn audit_view_shows_count_unavailable_rather_than_claiming_nothing_is_omitted() {
     let app_shell = ApplicationShell::new();
     let mut state = state_with(app_shell);
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     let record = audit_record(
         tekstide_core::audit::AuditEventFamily::AuditStoreRecovery,
         tekstide_core::audit::AuditOutcome::Completed,
@@ -23319,7 +23319,7 @@ fn audit_view_shows_count_unavailable_rather_than_claiming_nothing_is_omitted() 
 #[test]
 fn audit_view_surfaces_a_degraded_audit_health_the_same_way_the_project_board_does() {
     let mut state = state_with(ApplicationShell::new());
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     state
         .audit_health
         .record_open_failure(tekstide_core::audit::AuditStoreErrorReason::Corrupt);
@@ -23352,7 +23352,7 @@ fn audit_view_surfaces_a_degraded_audit_health_the_same_way_the_project_board_do
 fn audit_view_load_error_is_shown_instead_of_a_bounded_notice() {
     let app_shell = ApplicationShell::new();
     let mut state = state_with(app_shell);
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     state
         .audit_view
         .fail_for_test(tekstide_core::audit::AuditStoreErrorReason::Busy);
@@ -23374,7 +23374,7 @@ fn audit_view_load_error_is_shown_instead_of_a_bounded_notice() {
 /// that none was recorded -- never a guessed or reconstructed one (§5).
 #[test]
 fn audit_view_row_text_names_the_project_or_says_none_was_recorded() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let project_id = tekstide_core::project::ProjectId::new_uuid();
 
     let mut with_project = audit_record(
@@ -23428,7 +23428,7 @@ fn audit_view_row_text_names_the_project_or_says_none_was_recorded() {
 fn opening_the_audit_view_through_a_real_key_event_loads_real_records_from_the_real_store() {
     let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("audit-view-real-records"));
     let (mut state, project_id) = state_with_a_real_project("audit-view-real-records");
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     // Opens the real Trust Grant dialog; granting needs the same
     // focus-then-activate round trip
     // `revoking_trust_through_the_real_route_records_a_single_applied_record`
@@ -23491,7 +23491,7 @@ fn opening_the_audit_view_through_a_real_key_event_loads_real_records_from_the_r
 fn audit_view_filter_cycling_and_show_operation_narrow_and_widen_the_real_page() {
     let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("audit-view-filter-cycling"));
     let (mut state, _project_id) = state_with_a_real_project("audit-view-filter-cycling");
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     let _ = super::update(&mut state, Message::ModalActivate);
@@ -23575,7 +23575,7 @@ fn audit_view_filter_cycling_and_show_operation_narrow_and_widen_the_real_page()
 /// and is not affected, the same "affirmative and by exclusion" shape.
 #[test]
 fn audit_purge_dialog_body_names_the_scope_count_and_irreversibility() {
-    let catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    let catalog = Catalog::resolve(LocalePreference::default());
     let project_id = tekstide_core::project::ProjectId::new_uuid();
 
     let trusted_project_modal = AuditPurgeModal {
@@ -23663,7 +23663,7 @@ fn audit_purge_dialog_body_names_the_scope_count_and_irreversibility() {
 #[test]
 fn audit_view_purge_receipt_shows_the_real_deleted_count() {
     let mut state = state_with(ApplicationShell::new());
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     state
         .audit_view
         .record_purge_for_test(Ok(tekstide_core::audit::AuditPurgeReceipt {
@@ -23687,7 +23687,7 @@ fn audit_view_purge_receipt_shows_the_real_deleted_count() {
 #[test]
 fn audit_view_purge_failure_is_shown_not_silently_dropped() {
     let mut state = state_with(ApplicationShell::new());
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     state
         .audit_view
         .record_purge_for_test(Err(tekstide_core::audit::AuditStoreErrorReason::Busy));
@@ -23733,7 +23733,7 @@ fn purging_a_project_through_the_real_dialog_removes_only_that_project_then_glob
         tekstide_core::app::AddProjectOutcome::FocusedExisting(id) => id,
     };
     let mut state = state_with(app_shell);
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
 
     // Grant trust on both real projects, through the real dialog flow --
     // each writes a real `trust_change` (`Authorized`, `Applied`) pair.
@@ -23839,7 +23839,7 @@ fn purging_a_project_through_the_real_dialog_removes_only_that_project_then_glob
 fn cancelling_the_audit_purge_dialog_deletes_nothing() {
     let _audit_state_dir = test_audit_state_dir(&temp_audit_state_dir("audit-view-purge-cancel"));
     let (mut state, project_id) = state_with_a_real_project("audit-view-purge-cancel");
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     let _ = super::update(&mut state, Message::ModalActivate);
@@ -23881,7 +23881,7 @@ fn purging_a_trusted_projects_records_demotes_it_once_trust_is_reverified() {
     let _audit_state_dir =
         test_audit_state_dir(&temp_audit_state_dir("audit-view-purge-demotes-trust"));
     let (mut state, project_id) = state_with_a_real_project("audit-view-purge-demotes-trust");
-    state.catalog = Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()));
+    state.catalog = Catalog::resolve(LocalePreference::default());
     press_trust_settings_action(&mut state);
     let _ = super::update(&mut state, Message::ModalFocusNext);
     let _ = super::update(&mut state, Message::ModalActivate);

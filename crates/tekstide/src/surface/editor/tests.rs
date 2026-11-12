@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tekstide_core::content::{
@@ -23,12 +23,8 @@ use super::{
 use crate::i18n::{Catalog, LocalePreference};
 use tekstide_core::recovery::{RecoveryPersistRefusal, RecoveryPersistRefusalReason};
 
-fn real_locales_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("locales")
-}
-
 fn real_catalog() -> Catalog {
-    Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()))
+    Catalog::resolve(LocalePreference::default())
 }
 
 /// A real, temp-dir-backed project root -- `TextDocument`'s only

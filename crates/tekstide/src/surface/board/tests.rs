@@ -13,7 +13,7 @@ fn real_locales_dir() -> PathBuf {
 }
 
 fn real_catalog() -> Catalog {
-    Catalog::resolve(LocalePreference::default(), Some(&real_locales_dir()))
+    Catalog::resolve(LocalePreference::default())
 }
 
 /// A row with every `CountDisplay` field `Unavailable` and a plain,

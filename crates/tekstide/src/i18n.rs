@@ -98,8 +98,6 @@
 
 mod catalog;
 
-use std::path::Path;
-
 use fluent_bundle::{FluentArgs, FluentValue};
 use tekstide_core::text_safety::DisplayText;
 use unic_langid::LanguageIdentifier;
@@ -205,27 +203,26 @@ pub struct Catalog {
 
 impl Catalog {
     /// Resolves the active locale per the precedence order documented
-    /// on the module, then builds the fallback-ready catalog.
-    /// `locales_dir` is where additional (non-source) locale `.ftl`
-    /// files are looked for; `None` means no additional locales can be
-    /// found on disk (every request falls through to the source
-    /// locale) -- a legitimate configuration, not an error.
-    pub fn resolve(preference: LocalePreference, locales_dir: Option<&Path>) -> Self {
+    /// on the module, then builds the fallback-ready catalog. RFC-073
+    /// D1/D4: every shipped locale is compiled in, so the only reason a
+    /// requested locale does not resolve is that this build never
+    /// carried it -- never a fact about the machine running it.
+    pub fn resolve(preference: LocalePreference) -> Self {
         let requested = preference
             .cli_flag
             .or(preference.configured)
             .or_else(sys_locale::get_locale)
             .unwrap_or_else(|| catalog::SOURCE_LOCALE.to_string());
-        Self::resolve_fallback_chain(&requested, locales_dir)
+        Self::resolve_fallback_chain(&requested)
     }
 
-    fn resolve_fallback_chain(requested: &str, locales_dir: Option<&Path>) -> Self {
-        if let Some(bundle) = Self::load(requested, locales_dir) {
+    fn resolve_fallback_chain(requested: &str) -> Self {
+        if let Some(bundle) = Self::load(requested) {
             return Self::with_resolved(requested.to_string(), bundle);
         }
         if let Some(language) = language_subtag(requested)
             && language != requested
-            && let Some(bundle) = Self::load(&language, locales_dir)
+            && let Some(bundle) = Self::load(&language)
         {
             return Self::with_resolved(language, bundle);
         }
@@ -235,11 +232,11 @@ impl Catalog {
         )
     }
 
-    fn load(locale: &str, locales_dir: Option<&Path>) -> Option<catalog::Bundle> {
+    fn load(locale: &str) -> Option<catalog::Bundle> {
         if locale == catalog::SOURCE_LOCALE {
             return Some(catalog::source_locale_bundle());
         }
-        locales_dir.and_then(|dir| catalog::load_locale_from_disk(dir, locale))
+        catalog::load_compiled_locale(locale)
     }
 
     fn with_resolved(locale: String, bundle: catalog::Bundle) -> Self {
@@ -302,6 +299,22 @@ impl Catalog {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+impl Catalog {
+    /// A catalog built directly from literal FTL text, bypassing locale
+    /// resolution and the compiled-in list entirely. For tests of
+    /// `get`/`get_with_args` interpolation behaviour itself (Fluent's
+    /// own formatting, `CatalogArgs`'s security boundary) -- which need
+    /// some catalog with a particular placeable, not a real, shipped
+    /// locale. RFC-073 D1 deleted the disk-loading mechanism a scratch
+    /// fixture used to come from; this is the replacement a test that
+    /// never needed disk in the first place can use instead.
+    pub(crate) fn for_test_from_literal_ftl(locale: &str, ftl: &str) -> Self {
+        let bundle = catalog::build_bundle(locale, ftl).expect("test fixture FTL must parse");
+        Self::with_resolved(locale.to_string(), bundle)
     }
 }
 

@@ -840,13 +840,10 @@ fn every_source_locale_key_resolves_in_every_shipped_locale() {
 
     let args = generic_args();
     for locale in shipped_additional_locales() {
-        let catalog = Catalog::resolve(
-            LocalePreference {
-                cli_flag: Some(locale.clone()),
-                ..LocalePreference::default()
-            },
-            Some(&real_locales_dir()),
-        );
+        let catalog = Catalog::resolve(LocalePreference {
+            cli_flag: Some(locale.clone()),
+            ..LocalePreference::default()
+        });
         assert_eq!(
             catalog.resolved_locale(),
             locale,
