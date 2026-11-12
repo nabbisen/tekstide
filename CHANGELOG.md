@@ -7,6 +7,12 @@ as of this release — a whole-UI scale factor and its top-bar control, raised d
 default theme held to WCAG AAA — the same decisions this entry's own sections below record as
 they landed. Also in this release: `TerminationOutcome::CommittedToExit`, a macOS file-watcher
 fix, and two more rounds of the `proc_exit`/`P_WEXIT` containment tracing started at review 656.
+**macOS, review 671 Required 2: `0.38.0`'s own disclosure (RFC-028 *Acceptance* option (2), no
+Apple hardware available to this project) covers this release too, unchanged** — the Run It gate
+and the macOS containment-guard watch's own fresh suppress/confirm-red/revert procedure were
+again not performed on real Apple hardware; CI's `macos-measurement` job (the full suite,
+including the standing `trap '' HUP` tests `0.38.0` pinned) is accepted as sufficient, the same
+way and for the same reason, not a new or separately-decided gap.
 
 ### Changed — PR-076-D3 (RFC-076 D3): the default theme is now verified against WCAG AAA, and a guardrail closes the gap that let one pair ship unmeasured
 
@@ -256,6 +262,34 @@ with no `is_gone_or_going` anywhere in it — a different mechanism inside the s
 (`a_real_backgrounded_job_is_dead_after_a_real_close`) was never ignored; its own assertion goes
 through `test_support::process_is_alive` → `is_gone_or_going` directly. See
 `test-process-leak.md`'s own review 656 entry for all five, traced.
+
+### Dependencies
+
+**A vulnerability fixed and an unsoundness cleared, both found by this release's own
+`cargo audit` run against the candidate — review 671 Required 1.** The same storage engine the
+`0.18.0` entry above named is affected again: `rusqlite`/`libsqlite3-sys` power the durable local
+audit store, the one place on disk this project's own security and privacy guarantees depend on.
+
+- **`RUSTSEC-2026-0459` / `CVE-2026-119375` (6.8, medium) — fixed.** The bundled C SQLite
+  carried a real vulnerability. `rusqlite` `0.40.2` → `0.42.0`, which moves `libsqlite3-sys`
+  `0.38.2` → `0.40.0` and **bundled SQLite `3.53.2` → `3.54.1`** — the same pairing the `0.18.0`
+  entry above named, the engine under the audit store, not a Rust-level API change (zero source
+  changes this bump required). `NOTICE` (root, `crates/tekstide-core`, `crates/tekstide` — the
+  same text `--licenses` prints) updated to the new versions.
+- **`RUSTSEC-2026-0486` (`rustix`, unsound) — fixed.** The extended-attribute functions
+  (`getxattr` and five siblings) marked unwritten bytes as initialized when given a zero-length
+  buffer, reachable through the whole windowing/terminal graph on every platform this project
+  builds, with a published fix inside the installed major: `rustix` `1.1.4` → `1.1.6`,
+  `Cargo.lock` only, no manifest change.
+- **If you are still on `0.38.0` or earlier: upgrade.** Neither defect is exploitable through
+  anything this project's own code does today — the audit store is local-only and the
+  extended-attribute path is not one this project calls directly — but a durable local data
+  store carrying a known, fixed engine vulnerability is a reason to move, not a reason to wait
+  for a feature you need. `cargo audit` against the previous release's lockfile would have
+  reported both; this release's own run reports neither.
+- Full trace (`cargo tree` chains, the dry-run update that confirmed each fix was reachable,
+  and the two further warnings this same run surfaced and registered as accepted) is in
+  `rfcs/handoffs/dependency-advisories.md`'s 2026-11-12 entry.
 
 ## 0.38.0 - macOS Support, And What It Does Not Claim
 

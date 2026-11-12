@@ -1,6 +1,6 @@
     Finished `release` profile [optimized] target(s) in 0.09s
      Running `target/release/measure`
-fixture: /tmp/t039/tekstide-hostile-measure-2589132-1794448473257625894
+fixture: /tmp/tekstide-hostile-measure-<pid>-<nonce>
 
 == A. DirectoryTree, as shipped, against the fixture ==
 drawn text: ["▾", "📂", "project", "▸", "📁", "breadth", "▸", "📁", "control", "▸", "📁", "depth", "▾", "📂", "escaping", "📄", "bad-��-name.txt", "📄", "invoice\u{202e}fdp.exe", "📄", "two\nlines.txt", "▾", "📂", "links", "📄", "broken", "📄", "escape-dir", "📄", "escape-file", "📄", "in-root", "▾", "⚠", "unreadable"]
@@ -11,10 +11,10 @@ CHECK D3.1b escape is *reported*, not silent FAIL the widget draws the escaping 
 CHECK D3.2 hostile names do not reach the screen raw FAIL labels come from file_name().to_string_lossy() with no hook to substitute ours
   raw U+202E drawn: true, raw newline drawn: true, U+FFFD drawn: true
 CHECK D3.3 per-node status is ours to draw   FAIL a row is icon + label(file_name) only; there is no slot for a badge or a word
-CHECK D3.4b unreadable directory is a row    PASS error carried on the node: Some("I/O error at /tmp/t039/tekstide-hostile-measure-2589132-1794448473257625894/project/unreadable: I/O error at /tmp/t039/tekstide-hostile-measure-2589132-1794448473257625894/project/unreadable: Permission denied (os error 13)")
+CHECK D3.4b unreadable directory is a row    PASS error carried on the node: Some("I/O error at /tmp/tekstide-hostile-measure-<pid>-<nonce>/project/unreadable: I/O error at /tmp/tekstide-hostile-measure-<pid>-<nonce>/project/unreadable: Permission denied (os error 13)")
 CHECK D3.5a it does not listen for keys itself PASS messages from ArrowDown+Enter: []
-  handle_key is a pure function the app must call: returned Some(Selected("/tmp/t039/tekstide-hostile-measure-2589132-1794448473257625894/project", true, Replace))
-  one click on a row emitted: [Directory(Drag(Entered("/tmp/t039/tekstide-hostile-measure-2589132-1794448473257625894/project/control"))), Directory(Drag(Pressed("/tmp/t039/tekstide-hostile-measure-2589132-1794448473257625894/project/control", true))), Directory(Drag(Released("/tmp/t039/tekstide-hostile-measure-2589132-1794448473257625894/project/control")))]
+  handle_key is a pure function the app must call: returned Some(Selected("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project", true, Replace))
+  one click on a row emitted: [Directory(Drag(Entered("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project/control"))), Directory(Drag(Pressed("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project/control", true))), Directory(Drag(Released("/tmp/tekstide-hostile-measure-<pid>-<nonce>/project/control")))]
 CHECK D3.6 drag-and-drop is absent unless asked for FAIL DirectoryTree has no switch: a row press is a drag-machine event
   words drawn that are not a file name (glyph-only strings are icons): []
 CHECK D3.7 no strings of its own are drawn   PASS (its Error Display, 'I/O error at ..', is never drawn: the row shows an icon and grey text)
