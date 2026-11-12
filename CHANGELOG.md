@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.39.0 - Readable By Default
+
+Status: **candidate, not yet published.** RFC-076's D1 through D5 are all implemented and closed
+as of this release — a whole-UI scale factor and its top-bar control, raised defaults, and the
+default theme held to WCAG AAA — the same decisions this entry's own sections below record as
+they landed. Also in this release: `TerminationOutcome::CommittedToExit`, a macOS file-watcher
+fix, and two more rounds of the `proc_exit`/`P_WEXIT` containment tracing started at review 656.
 
 ### Changed — PR-076-D3 (RFC-076 D3): the default theme is now verified against WCAG AAA, and a guardrail closes the gap that let one pair ship unmeasured
 
@@ -196,12 +202,14 @@ and built now because this is the subject that moved the count, twice in one day
 
 ### Changed — a forward reference by number, removed from `0.38.0`'s own released section
 
-`0.38.0`'s symlink-canonicalization entry said nine near-identical sandbox builders were "an input
-to RFC-074's own boundary work." That was a forward reference written while RFC-074 had no document,
-so `an_rfc_a_release_names_lives_in_done` had nothing to resolve it against and passed. Creating
-`rfcs/proposed/074-capability-boundaries.md` made it checkable, and it failed — correctly: an RFC
-named by a released section is asserted to have shipped in that release, and RFC-074 did not ship
-in `0.38.0`. Reworded to name the work rather than the number, per the check's own second remedy
+`0.38.0`'s symlink-canonicalization entry originally named nine near-identical sandbox builders as
+an input to the not-yet-written capability-boundaries RFC's own future work, by number. That was a
+forward reference written while that RFC had no document, so `an_rfc_a_release_names_lives_in_done`
+had nothing to resolve it against and passed. Creating `rfcs/proposed/074-capability-boundaries.md`
+made it checkable,
+and it failed — correctly: an RFC named by a released section is asserted to have shipped in that
+release, and the capability-boundaries work did not ship in `0.38.0`. Reworded to name the work
+rather than the number, per the check's own second remedy
 ("the section only MENTIONS it … reword the section and leave the RFC where it is"), rather than
 moving an unshipped RFC to `done/` to silence it. The check is not loosened: forbidding a released
 section from naming an RFC that did not ship in it is the property, not a false positive.

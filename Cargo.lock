@@ -3070,7 +3070,7 @@ dependencies = [
 
 [[package]]
 name = "tekstide"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "alacritty_terminal",
  "fluent-bundle",
@@ -3084,7 +3084,7 @@ dependencies = [
 
 [[package]]
 name = "tekstide-core"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "libc",
  "notify",

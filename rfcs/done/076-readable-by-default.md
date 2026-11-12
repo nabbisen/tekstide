@@ -1,18 +1,18 @@
 # RFC-076: Readable By Default — text scale, and defaults an older reader can use
 
-Status: **Accepted by the human owner 2026-11-03** — D1 through D5 as written, with D1 and D2
-as the first slice. **The acceptance carries external design §4.2's amendment with it**: that
-document's authored *"Default base font size: 14 px"* is superseded by D2, and this RFC is the
-record of it. `.git-exclude/specs/tekstide-external-design-v0.md` is the owner's own source
-document and is left untouched; if they want the source line to match, that edit is theirs to
-make or to ask for.
+Status: **Implemented and closed 2026-11-12, moved to `done/` as part of the `0.39.0` candidate
+cut (not yet published).** D1 through D5 as written, with D1 and D2 as the first slice. **The
+acceptance carries external design §4.2's amendment with it**: that document's authored *"Default
+base font size: 14 px"* is superseded by D2, and this RFC is the record of it.
+`.git-exclude/specs/tekstide-external-design-v0.md` is the owner's own source document and is left
+untouched; if they want the source line to match, that edit is theirs to make or to ask for.
+Accepted by the human owner 2026-11-03.
 
 **Updated 2026-11-11, dated rather than silently edited.** D3 is implemented (PR-076-D3, review
 669): the default theme's own text pairs are held to WCAG AAA (7:1) by a dedicated test, separate
 from `MIN_TEXT_CONTRAST`, which stays at its enforced 4.5:1 exactly as D3 itself required — no
 user theme that passed before this slice can fail now. D3 was RFC-076's last open decision, so
-D1 through D5 are all implemented as of this update. The only step left for this RFC is the
-release that ships it, at which point it moves to `rfcs/done/` per
+D1 through D5 are all implemented as of this update, which closes the RFC per
 `an_rfc_a_release_names_lives_in_done`.
 
 Proposed 2026-11-03, at the human owner's direction. The owner asked whether the view
