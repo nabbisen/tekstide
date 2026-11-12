@@ -308,6 +308,59 @@ pub fn load_average_report() -> String {
     }
 }
 
+/// Locates a sibling `[[bin]]` target a test wants to spawn as a real
+/// process (`reference_adapter`, `project_process_probe`,
+/// `audit_store_create_probe`) -- the one path-derivation rule six
+/// independently-maintained copies, across both crates, used to get
+/// wrong together the day cargo 1.100.0 moved where a unit test's own
+/// binary lives. One copy now, here: `tekstide`'s own test code already
+/// reaches this module through the `test-support` feature its
+/// `[dev-dependencies]` enables, and this function references no other
+/// module (`std` only), so it adds no new entry to the production graph
+/// RFC-074 D1's gate measures -- confirmed by re-running that gate
+/// after adding this, not assumed.
+///
+/// `CARGO_BIN_EXE_<name>` is set by cargo only for genuine integration
+/// test targets (`tests/*.rs`), never for a lib's own `#[cfg(test)]`
+/// unit tests -- which is every caller of this function -- so that fast
+/// path is checked first and, when absent, this searches rather than
+/// counts levels. Measured directly rather than read from a changelog:
+/// a unit test's own binary sits at `target/<profile>/deps/<crate>-
+/// <hash>` (so the `[[bin]]` target is two ancestors up, at the profile
+/// root) through at least cargo 1.99.x, and at `target/<profile>/
+/// build/<crate>-<hash>/out/<crate>-<hash>` (five ancestors up) from
+/// cargo 1.100.0 on. Ascending `current_exe()`'s ancestors and testing
+/// each for a sibling named `name`, bounded at a handful of levels,
+/// resolves correctly under either layout without hardcoding which one
+/// is current; the bound keeps a search that will never succeed from
+/// walking the whole filesystem to the root.
+pub fn spawned_helper_binary_path(name: &str) -> std::path::PathBuf {
+    if let Ok(path) = std::env::var(format!("CARGO_BIN_EXE_{name}")) {
+        return std::path::PathBuf::from(path);
+    }
+    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
+    const MAX_ANCESTORS: usize = 6;
+    let mut searched = Vec::new();
+    for ancestor in test_exe.ancestors().skip(1).take(MAX_ANCESTORS) {
+        let candidate = ancestor.join(name);
+        if candidate.is_file() {
+            return candidate;
+        }
+        searched.push(candidate);
+    }
+    panic!(
+        "could not find the `{name}` [[bin]] target near the running test binary ({}) -- the \
+         [[bin]] target may not have built, or cargo has moved the test binary's own location \
+         again. Searched:\n{}",
+        test_exe.display(),
+        searched
+            .iter()
+            .map(|path| format!("  {}", path.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
 #[cfg(test)]
 mod tests {
     /// The real `getloadavg(3)` on this machine, not a mock -- proves the
@@ -329,6 +382,76 @@ mod tests {
             "the core count must always be stated when available (and \
              std::thread::available_parallelism() succeeds on every platform this suite \
              targets), not silently dropped alongside a missing load reading: {report:?}"
+        );
+    }
+
+    /// Proves the fast path and the search both actually reach a real,
+    /// already-built `[[bin]]` target -- not merely that the function
+    /// returns without panicking. `CARGO_BIN_EXE_reference_adapter` is
+    /// set here (this crate's own test binary is a unit test, so cargo
+    /// does not set it on its own); unset, the fallback search must
+    /// still find the identical file by walking `current_exe()`'s
+    /// ancestors, on whichever cargo version is actually running this.
+    #[test]
+    fn spawned_helper_binary_path_finds_the_real_reference_adapter_both_ways() {
+        let via_env = std::env::var("CARGO_BIN_EXE_reference_adapter")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| super::spawned_helper_binary_path("reference_adapter"));
+        assert!(
+            via_env.is_file(),
+            "reference_adapter must already be built for this test to mean anything: {via_env:?}"
+        );
+
+        // SAFETY: this test does not spawn threads of its own, and no other
+        // test in this process reads or writes this exact variable.
+        let saved = std::env::var_os("CARGO_BIN_EXE_reference_adapter");
+        unsafe {
+            std::env::remove_var("CARGO_BIN_EXE_reference_adapter");
+        }
+        let via_search =
+            std::panic::catch_unwind(|| super::spawned_helper_binary_path("reference_adapter"));
+        // SAFETY: restoring exactly what was removed above, before any
+        // assertion below can leave it unset for a later test.
+        unsafe {
+            if let Some(value) = saved {
+                std::env::set_var("CARGO_BIN_EXE_reference_adapter", value);
+            }
+        }
+
+        let via_search = via_search.expect("the ancestor search must find the built binary");
+        assert!(via_search.is_file());
+        assert_eq!(
+            std::fs::canonicalize(&via_search).unwrap(),
+            std::fs::canonicalize(&via_env).unwrap(),
+            "the fast path and the ancestor search must resolve to the same real file"
+        );
+    }
+
+    /// **The search shown failing honestly, not only shown succeeding.**
+    /// A name that can never exist as a sibling at any ancestor must
+    /// panic with a message naming every directory it actually tried --
+    /// the property that matters here, since the previous, single-guess
+    /// version named one path that was never going to exist the moment
+    /// cargo changed layout, and nothing about *that* failure was
+    /// diagnosable without already knowing the answer.
+    #[test]
+    fn spawned_helper_binary_path_names_every_directory_it_searched_on_failure() {
+        let name = "tekstide-test-support-binary-that-does-not-exist-anywhere";
+        let result = std::panic::catch_unwind(|| super::spawned_helper_binary_path(name));
+        let error = result.expect_err("a name with no matching binary anywhere must panic");
+        let message = error
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| error.downcast_ref::<&str>().map(|s| (*s).to_string()))
+            .expect("panic payload should be a string");
+        assert!(
+            message.contains(name),
+            "the panic message must name what it was looking for: {message}"
+        );
+        assert!(
+            message.contains("Searched:") && message.lines().count() > 1,
+            "the panic message must list the directories actually searched, not a single \
+             guessed path: {message}"
         );
     }
 

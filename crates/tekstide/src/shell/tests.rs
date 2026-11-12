@@ -6503,22 +6503,13 @@ fn granting_trust_through_the_real_route_unblocks_a_real_agent_run_launch() {
 /// way `tekstide-core`'s own `built_in_profile` test helper does).
 /// Deliberately never the real, live product this pathway is modelled
 /// on -- see every other real-process test in this RFC for why.
+/// One shared rule now, not six independently-maintained copies --
+/// `tekstide_core::test_support::spawned_helper_binary_path` (review's
+/// own helper-binary-path brief). Reachable here because this crate's
+/// own `[dev-dependencies]` already enables `tekstide-core`'s
+/// `test-support` feature (RFC-043 PR-043-A).
 fn reference_adapter_binary_path() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_reference_adapter") {
-        return std::path::PathBuf::from(path);
-    }
-    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
-    let profile_dir = test_exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("test binary should live under target/<profile>/deps");
-    let candidate = profile_dir.join("reference_adapter");
-    assert!(
-        candidate.is_file(),
-        "expected the reference_adapter binary at {}; the [[bin]] target may not have built",
-        candidate.display()
-    );
-    candidate
+    tekstide_core::test_support::spawned_helper_binary_path("reference_adapter")
 }
 
 /// Launches the real reference adapter through the real, production

@@ -2629,28 +2629,11 @@ fn cleanup_root(root: PathBuf) {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// `CARGO_BIN_EXE_<name>` is only guaranteed for genuine integration test
-/// targets (`tests/*.rs`), not a lib's own `#[cfg(test)]` unit tests --
-/// duplicated from `approval::tests::reference_adapter`'s own identically-
-/// named, identically-documented helper rather than shared across test
-/// modules, matching this crate's established convention for small test-
-/// only infrastructure.
+/// One shared rule now, not six independently-maintained copies --
+/// `test_support::spawned_helper_binary_path` (review's own helper-
+/// binary-path brief).
 fn reference_adapter_binary_path() -> PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_reference_adapter") {
-        return PathBuf::from(path);
-    }
-    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
-    let profile_dir = test_exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("test binary should live under target/<profile>/deps");
-    let candidate = profile_dir.join("reference_adapter");
-    assert!(
-        candidate.is_file(),
-        "expected the reference_adapter binary at {}; the [[bin]] target may not have built",
-        candidate.display()
-    );
-    candidate
+    crate::test_support::spawned_helper_binary_path("reference_adapter")
 }
 
 /// A real, sqlite-backed `AuditStore` -- duplicated from

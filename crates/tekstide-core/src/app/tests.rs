@@ -1086,30 +1086,11 @@ fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
 // already existed before PR-058-A, and the test below asserts the clobber
 // happens; it does not yet guard against it.
 
-/// `CARGO_BIN_EXE_<name>` is only guaranteed for genuine integration test
-/// targets (`tests/*.rs`), not for a lib's own `#[cfg(test)]` unit tests like
-/// this module -- the same gap `reference_adapter_binary_path`
-/// (`approval::tests::reference_adapter`) already documents and works
-/// around. Same fallback: Cargo places every crate's test binary at
-/// `target/<profile>/deps/<crate>-<hash>` and every `[[bin]]` target
-/// (including `project_process_probe`) as a sibling of `deps/` itself, at
-/// `target/<profile>/<bin-name>`.
+/// One shared rule now, not six independently-maintained copies --
+/// `test_support::spawned_helper_binary_path` (review's own helper-
+/// binary-path brief).
 fn project_process_probe_binary_path() -> PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_project_process_probe") {
-        return PathBuf::from(path);
-    }
-    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
-    let profile_dir = test_exe
-        .parent() // .../target/<profile>/deps
-        .and_then(Path::parent) // .../target/<profile>
-        .expect("test binary should live under target/<profile>/deps");
-    let candidate = profile_dir.join("project_process_probe");
-    assert!(
-        candidate.is_file(),
-        "expected the project_process_probe binary at {}; the [[bin]] target may not have built",
-        candidate.display()
-    );
-    candidate
+    crate::test_support::spawned_helper_binary_path("project_process_probe")
 }
 
 /// The probe's own two-line stdout contract: a project id, always, and a

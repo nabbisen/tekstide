@@ -16,27 +16,11 @@ use std::process::{Command, Stdio};
 use crate::runtime::terminal::tests::CleanupOnDrop;
 use crate::test_support::KillOnDropChild;
 
-/// `CARGO_BIN_EXE_<name>` is only guaranteed for genuine integration test
-/// targets, not a lib's own `#[cfg(test)]` unit tests -- the same fallback
-/// `app::tests::project_process_probe_binary_path` already documents and
-/// uses for the sibling `[[bin]]` RFC-058 built for the identical reason.
+/// One shared rule now, not six independently-maintained copies --
+/// `test_support::spawned_helper_binary_path` (review's own helper-
+/// binary-path brief).
 fn audit_store_create_probe_binary_path() -> PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_audit_store_create_probe") {
-        return PathBuf::from(path);
-    }
-    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
-    let profile_dir = test_exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("test binary should live under target/<profile>/deps");
-    let candidate = profile_dir.join("audit_store_create_probe");
-    assert!(
-        candidate.is_file(),
-        "expected the audit_store_create_probe binary at {}; the [[bin]] target may not have \
-         built",
-        candidate.display()
-    );
-    candidate
+    crate::test_support::spawned_helper_binary_path("audit_store_create_probe")
 }
 
 /// Review 527 Required 2: `_base` is a drop guard (`crate::runtime::terminal::tests::

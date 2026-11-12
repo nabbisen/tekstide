@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::BufRead;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -219,22 +219,11 @@ fn an_unreadable_locks_directory_cannot_decide() {
     cleanup_root(root);
 }
 
+/// One shared rule now, not six independently-maintained copies --
+/// `test_support::spawned_helper_binary_path` (review's own helper-
+/// binary-path brief).
 fn project_process_probe_binary_path() -> PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_project_process_probe") {
-        return PathBuf::from(path);
-    }
-    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
-    let profile_dir = test_exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("test binary should live under target/<profile>/deps");
-    let candidate = profile_dir.join("project_process_probe");
-    assert!(
-        candidate.is_file(),
-        "expected the project_process_probe binary at {}; the [[bin]] target may not have built",
-        candidate.display()
-    );
-    candidate
+    crate::test_support::spawned_helper_binary_path("project_process_probe")
 }
 
 /// D4's real half, proven against a real killed process rather than argued

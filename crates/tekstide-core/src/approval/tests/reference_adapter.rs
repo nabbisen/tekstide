@@ -108,31 +108,11 @@ impl Drop for TestChannel {
     }
 }
 
-/// `CARGO_BIN_EXE_<name>` is only guaranteed for genuine integration test
-/// targets (`tests/*.rs`), not for a lib's own `#[cfg(test)]` unit tests
-/// like this module -- checked directly (it is simply absent here, not a
-/// configuration mistake). Falls back to deriving the path from this test
-/// binary's own location: Cargo places every crate's test binary at
-/// `target/<profile>/deps/<crate>-<hash>` and every `[[bin]]` target
-/// (including `reference_adapter`) as a sibling of `deps/` itself, at
-/// `target/<profile>/<bin-name>` -- so `current_exe()`'s grandparent
-/// directory is exactly where to look.
+/// One shared rule now, not six independently-maintained copies --
+/// `test_support::spawned_helper_binary_path` (review's own helper-
+/// binary-path brief).
 fn reference_adapter_binary_path() -> PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_reference_adapter") {
-        return PathBuf::from(path);
-    }
-    let test_exe = std::env::current_exe().expect("current_exe should resolve for a running test");
-    let profile_dir = test_exe
-        .parent() // .../target/<profile>/deps
-        .and_then(Path::parent) // .../target/<profile>
-        .expect("test binary should live under target/<profile>/deps");
-    let candidate = profile_dir.join("reference_adapter");
-    assert!(
-        candidate.is_file(),
-        "expected the reference_adapter binary at {}; the [[bin]] target may not have built",
-        candidate.display()
-    );
-    candidate
+    crate::test_support::spawned_helper_binary_path("reference_adapter")
 }
 
 /// Spawns the real compiled adapter binary. `token`/`socket_path`:
