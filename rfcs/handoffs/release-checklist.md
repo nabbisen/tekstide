@@ -295,18 +295,27 @@ above already describes, from the other end.
       pass. The bin source *is* in the archive (`src/bin/reference_adapter.rs`, with an explicit
       `[[bin]]` in cargo's generated manifest); nothing is missing from the package.
 
-      **(b) One test cannot pass from a package, by construction.**
-      `real_repository_filesystem_scan_cost_headless_benchmark` asserts it is measuring a real
-      repository and walks up looking for `.git/`. An unpacked package is not a repository, so it
-      fails with *"must be measuring a real repository with a real .git/, found none"*. That is the
-      test doing its job — it refuses to report a benchmark number for something that is not a
-      repository, which is the correct behaviour and the reason it is written that way.
+      **(b) Two tests cannot pass from a package, by construction — corrected 2026-11-12, at
+      `0.39.0`'s candidate cut; this box named only one from `0.18.0` through `0.38.0`.**
+      `real_repository_filesystem_scan_cost_headless_benchmark` and, since review 574 added it,
+      `the_default_scan_cap_has_comfortable_headroom_over_tracked_content` both call the same
+      shared helper, `this_repository_root()` (`crates/tekstide-core/src/project/tests/
+      change_detection.rs`), which asserts it is measuring a real repository and walks up looking
+      for `.git/`. An unpacked package is not a repository, so **both** fail with the identical
+      message, *"must be measuring a real repository with a real .git/, found none"* — not a
+      regression, and not two independent findings, but one shared by-construction limitation
+      that review 574's own new test inherited the moment it reused the helper. That is the pair
+      doing their job — refusing to report a benchmark or a tracked-content count for something
+      that is not a repository, which is the correct behaviour and the reason both are written
+      that way.
 
-      **So the pass condition for this box is: everything passes except (b).** Stated as a shape
-      rather than a count, corrected at `0.18.0`: this line read *"745 passed, 1 failed"*, which was
-      `0.17.0`'s measurement and went stale the moment a slice added a test — `0.18.0` measured
-      **757 passed, 1 failed**. A count here is state-asserting text about a number that changes
-      every release. Any failure other than (b) is a real finding.
+      **So the pass condition for this box is: everything passes except (b)'s two tests.** Stated
+      as a shape rather than a count, corrected at `0.18.0` for the same reason this correction
+      exists now: this line read *"745 passed, 1 failed"*, which was `0.17.0`'s measurement and
+      went stale the moment a slice added a test — `0.18.0` measured **757 passed, 1 failed**,
+      and `0.39.0` measures 1188 passed, 2 failed, both named above. A count here is
+      state-asserting text about a number that changes every release. Any failure other than
+      these two named tests is a real finding.
 - [ ] Confirm package output does not include `.git/`, `.git-exclude/`, local agent config, `target/`, or temporary state.
 - [ ] Confirm crates.io package pages and README badges describe the intended release scope and do not overclaim the full AI CLI workbench.
 - [ ] Any distributed prebuilt binary must ship with `NOTICE` alongside it. Releases assembled as project-structure tarballs satisfy this automatically because `NOTICE` sits at the archive root; a bare binary uploaded on its own does not.

@@ -5,10 +5,20 @@ set -euo pipefail
 # against scratch configuration AND scratch state -- never the maintainer's
 # real ones, and never assembled by hand in a one-off `env` command.
 #
-#   rfcs/handoffs/launch-scratch-gui.sh [--backend=x11|wayland] <scratch-root> [project-dir] [binary]
+#   rfcs/handoffs/launch-scratch-gui.sh [--backend=x11|wayland] [--no-project] <scratch-root> [project-dir] [binary]
 #   rfcs/handoffs/launch-scratch-gui.sh --kill <scratch-root>
 #   rfcs/handoffs/launch-scratch-gui.sh --kill --by-name [binary]
 #
+#   --no-project: pass no path at all, for the release checklist's own
+#                 "launch as a first-time user" Run It gate -- the empty
+#                 Project Board is a *different* first screen than opening
+#                 even an empty directory as a project (the binary's own
+#                 usage text: "With no path, the Project Board opens
+#                 empty"), so <project-dir> must be genuinely absent from
+#                 argv, not merely pointed at nothing. Added 2026-11-12,
+#                 0.39.0's candidate cut: without this, the Run It gate's
+#                 mandatory-script rule and its own "no arguments"
+#                 requirement could not both be honoured at once.
 #   --backend:    x11 (default; xdotool-driven input, forces WAYLAND_DISPLAY
 #                 unset) or wayland (native session, wtype-driven input,
 #                 WAYLAND_DISPLAY left as inherited). Review 670 required-2:
@@ -29,7 +39,9 @@ set -euo pipefail
 #                 and binary name, for `--kill`) and, if project-dir is
 #                 omitted, ./project
 #   project-dir:  real project directory to open; defaults to
-#                 <scratch-root>/project, created if absent
+#                 <scratch-root>/project, created if absent. Ignored (and
+#                 not created) with --no-project; the first positional
+#                 argument after --no-project is <binary> instead.
 #   binary:       defaults to this checkout's own release build
 #   --kill <scratch-root>:
 #                 stop *the instance this script launched against that
@@ -79,7 +91,8 @@ set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 
 usage() {
-    echo "usage: $0 [--backend=x11|wayland] <scratch-root> [project-dir] [binary]" >&2
+    echo "usage: $0 [--backend=x11|wayland] [--no-project] <scratch-root> [project-dir] [binary]" >&2
+    echo "       $0 [--backend=x11|wayland] --no-project <scratch-root> [binary]" >&2
     echo "       $0 --kill <scratch-root>" >&2
     echo "       $0 --kill --by-name [binary]" >&2
     exit 2
@@ -117,20 +130,30 @@ if [ "$#" -ge 1 ] && [ "$1" = "--kill" ]; then
 fi
 
 backend=x11
-case "${1:-}" in
---backend=x11)
-    backend=x11
-    shift
-    ;;
---backend=wayland)
-    backend=wayland
-    shift
-    ;;
---backend=*)
-    echo "REFUSING: unknown --backend value in '$1' -- use --backend=x11 or --backend=wayland" >&2
-    exit 2
-    ;;
-esac
+no_project=0
+while true; do
+    case "${1:-}" in
+    --backend=x11)
+        backend=x11
+        shift
+        ;;
+    --backend=wayland)
+        backend=wayland
+        shift
+        ;;
+    --backend=*)
+        echo "REFUSING: unknown --backend value in '$1' -- use --backend=x11 or --backend=wayland" >&2
+        exit 2
+        ;;
+    --no-project)
+        no_project=1
+        shift
+        ;;
+    *)
+        break
+        ;;
+    esac
+done
 
 # Review 670 round 2, required-4: `--backend=wayland` with no real Wayland
 # session to inherit would otherwise print "backend: Wayland" and proceed
@@ -147,8 +170,20 @@ if [ "$#" -lt 1 ]; then
 fi
 
 scratch_root=$1
-project_dir=${2:-"$scratch_root/project"}
-binary=${3:-"$repo_root/target/release/tekstide"}
+case "$scratch_root" in
+/*) ;;
+*)
+    echo "REFUSING: scratch-root must be an absolute path, got '$scratch_root' -- found live, 0.39.0's own candidate cut: a relative scratch-root makes XDG_CONFIG_HOME relative too, which the app's own path discipline then correctly refuses (ConfigDirNotAbsolute), degrading silently to compiled defaults rather than failing loudly here, where the actual mistake is." >&2
+    exit 2
+    ;;
+esac
+if [ "$no_project" -eq 1 ]; then
+    project_dir=""
+    binary=${2:-"$repo_root/target/release/tekstide"}
+else
+    project_dir=${2:-"$scratch_root/project"}
+    binary=${3:-"$repo_root/target/release/tekstide"}
+fi
 
 if [ ! -x "$binary" ]; then
     echo "REFUSING: binary not found or not executable: $binary" >&2
@@ -167,7 +202,11 @@ fi
 
 state_home="$scratch_root/state"
 config_home="$scratch_root/config"
-mkdir -p "$state_home" "$config_home" "$project_dir"
+if [ "$no_project" -eq 1 ]; then
+    mkdir -p "$state_home" "$config_home"
+else
+    mkdir -p "$state_home" "$config_home" "$project_dir"
+fi
 
 resolved_scratch_root=$(readlink -f "$scratch_root")
 
@@ -207,7 +246,11 @@ echo "$$ $binary_name" > "$scratch_root/launcher.pid"
 
 echo "XDG_STATE_HOME confirmed inside scratch root: $resolved_state_home" >&2
 echo "XDG_CONFIG_HOME confirmed inside scratch root: $resolved_config_home" >&2
-echo "project directory: $project_dir" >&2
+if [ "$no_project" -eq 1 ]; then
+    echo "no project path passed (--no-project): the empty Project Board is the first screen" >&2
+else
+    echo "project directory: $project_dir" >&2
+fi
 if [ "$backend" = wayland ]; then
     echo "backend: Wayland (WAYLAND_DISPLAY left as inherited; wtype-driven input, not xdotool)" >&2
 else
@@ -216,7 +259,13 @@ fi
 echo "HOME is left real: ~/.gitconfig still applies to git inside this session; a git identity kept under XDG_CONFIG_HOME instead will not be seen." >&2
 echo "pid of the launched instance will be $$ (exec replaces this shell without forking), recorded in $scratch_root/launcher.pid -- use this for the focus check before every keystroke, and for '$0 --kill $scratch_root' afterward." >&2
 
-if [ "$backend" = wayland ]; then
+if [ "$no_project" -eq 1 ]; then
+    if [ "$backend" = wayland ]; then
+        exec env XDG_STATE_HOME="$state_home" XDG_CONFIG_HOME="$config_home" "$binary"
+    else
+        exec env -u WAYLAND_DISPLAY XDG_STATE_HOME="$state_home" XDG_CONFIG_HOME="$config_home" "$binary"
+    fi
+elif [ "$backend" = wayland ]; then
     exec env XDG_STATE_HOME="$state_home" XDG_CONFIG_HOME="$config_home" "$binary" "$project_dir"
 else
     exec env -u WAYLAND_DISPLAY XDG_STATE_HOME="$state_home" XDG_CONFIG_HOME="$config_home" "$binary" "$project_dir"
