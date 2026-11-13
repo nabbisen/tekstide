@@ -175,6 +175,19 @@ the working-tree gate no longer fails for this reason, in this tree or any other
 fresh clone remains good practice for the reasons above (no agent state, matches what `ci.yml`
 checks out), just not a requirement this specific failure forces any more.
 
+**When a whole family of tests goes red with one message shape, read `cargo --version` before
+anything else. Added 2026-11-13, reviews 673/674.** Cargo `1.100.0` moved unit-test executables from
+`target/<profile>/deps/<exe>` to `target/<profile>/build/<crate>-<hash>/out/<exe>`, which broke six
+copies of a test helper that located a spawned `[[bin]]` by walking a fixed two levels up from
+`current_exe()`. Thirty-seven tests failed locally, and CI went red on a *correct* commit the
+morning its runner image updated `1.99.1` -> `1.100.0` — **a red with no commit to blame**, which is
+the most expensive kind. The reviewer spent an hour on two wrong diagnoses first (an unbuilt
+`[[bin]]`, then a polluted `target/`) before checking the toolchain; a cold `CARGO_TARGET_DIR`
+reproducing a failure exactly is the signal that it is not local state. The helper is now one shared
+searching implementation (`tekstide_core::test_support::spawned_helper_binary_path`) rather than six
+fixed-depth copies, so the next layout change is one edit — but the diagnostic lesson is the part
+worth keeping: **a failure that arrives without a commit arrives from the environment.**
+
 - [ ] `git status --short` shows no unintended changes.
 - [ ] `git diff --check`
 - [ ] `cargo fmt --check`
