@@ -2,7 +2,6 @@ mod change_detection;
 mod content;
 mod diff;
 mod explorer_tree;
-mod identity;
 mod ignored_directories;
 mod metadata;
 pub mod recent;
@@ -10,6 +9,11 @@ pub mod root;
 mod runtime;
 mod session;
 pub mod watch;
+
+/// RFC-074 D3, Stage 1: `ProjectId` is vocabulary (T0), not an orchestration
+/// type, and now lives in `domain::identity` -- re-exported from here
+/// unchanged so no caller and no published-API consumer has to move with it.
+pub use crate::domain::ProjectId;
 
 pub use change_detection::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
@@ -31,7 +35,6 @@ pub use explorer_tree::{
     ExplorerRootState, ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
     ExplorerTreeRow, ExplorerTreeRowKind, MAX_TREE_ROWS, is_expandable,
 };
-pub use identity::ProjectId;
 pub use ignored_directories::IGNORED_DIRECTORY_NAMES;
 pub use metadata::{
     FileGitStatus, ProjectFileState, ProjectGitDisplayStatus, ProjectGitSummary,

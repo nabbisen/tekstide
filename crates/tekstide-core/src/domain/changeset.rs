@@ -1,5 +1,4 @@
-use super::{AgentRunId, ChangeSetId, DomainTimestamp};
-use crate::project::ProjectId;
+use super::{AgentRunId, ChangeSetId, DomainTimestamp, ProjectId};
 use std::path::PathBuf;
 
 pub const DEFAULT_CHANGESET_PATH_SUMMARY_LIMIT: usize = 32;

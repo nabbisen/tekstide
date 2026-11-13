@@ -1,5 +1,4 @@
-use super::{DomainTimestamp, TerminalId, TranscriptId};
-use crate::project::ProjectId;
+use super::{DomainTimestamp, ProjectId, TerminalId, TranscriptId};
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,9 +1,8 @@
 use super::{
     AgentRun, AgentRunId, ApprovalDecision, ApprovalId, ApprovalRequest, AuditEventId,
-    DomainTimestamp, OwnershipError, TerminalId, TerminalSession,
+    DomainTimestamp, OwnershipError, ProjectId, TerminalId, TerminalSession,
 };
 use crate::domain::ownership::ensure_same_project;
-use crate::project::ProjectId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditEvent {

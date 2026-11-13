@@ -2,6 +2,7 @@ mod agent;
 mod approval;
 mod audit;
 mod changeset;
+mod identity;
 mod ids;
 mod ownership;
 mod terminal;
@@ -22,6 +23,7 @@ pub use changeset::{
     ChangeAssociationConfidence, ChangeDetectionFailureReason, ChangeDetectionSource,
     ChangeDetectionStatus, ChangeSet, ChangeSetSummary, ReviewState, ReviewStateTransitionError,
 };
+pub use identity::ProjectId;
 pub use ids::{
     AgentRunId, ApprovalId, AuditEventId, AuditOperationId, ChangeSetId, TerminalId, TranscriptId,
 };

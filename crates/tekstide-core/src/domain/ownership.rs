@@ -1,4 +1,4 @@
-use crate::project::ProjectId;
+use super::ProjectId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OwnershipError {

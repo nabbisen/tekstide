@@ -1,9 +1,8 @@
 use super::{
     AgentRunId, ApprovalId, AuditEventId, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError,
-    TerminalId, TerminalSession, TranscriptId,
+    ProjectId, TerminalId, TerminalSession, TranscriptId,
 };
 use crate::domain::ownership::ensure_same_project;
-use crate::project::ProjectId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentCompatibilityLevel {

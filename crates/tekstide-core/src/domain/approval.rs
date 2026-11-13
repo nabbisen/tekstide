@@ -1,5 +1,4 @@
-use super::{AgentRunId, ApprovalId, AuditEventId, DomainTimestamp};
-use crate::project::ProjectId;
+use super::{AgentRunId, ApprovalId, AuditEventId, DomainTimestamp, ProjectId};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

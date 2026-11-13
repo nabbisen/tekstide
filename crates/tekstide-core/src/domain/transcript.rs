@@ -1,5 +1,4 @@
-use super::{AgentRunId, DomainTimestamp, TerminalId, TranscriptId};
-use crate::project::ProjectId;
+use super::{AgentRunId, DomainTimestamp, ProjectId, TerminalId, TranscriptId};
 use std::path::PathBuf;
 
 /// RFC-050 D2: where a transcript record came from, as an exhaustive type,

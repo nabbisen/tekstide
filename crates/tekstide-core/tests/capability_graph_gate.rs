@@ -34,11 +34,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The ratcheted bound (RFC-074 D1.1). Starts at today's measured value — a
-/// ceiling, not a goal — and is lowered by the stage that earns it, in the
-/// same commit as the move: PR-074-B's Stage 1 lowers this to 9, Stage 2 to
-/// 8.
-const MAX_LARGEST_SCC_SIZE: usize = 10;
+/// The ratcheted bound (RFC-074 D1.1). Started at 10, PR-074-A's own
+/// measured value — a ceiling, not a goal. **Lowered to 9 by PR-074-B
+/// Stage 1** (`ProjectId` moved to `domain`, the vocabulary tier's seven
+/// outgoing references to `project` gone), in the same commit as the
+/// move that earns it. Stage 2 lowers this to 8.
+const MAX_LARGEST_SCC_SIZE: usize = 9;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -326,11 +327,14 @@ fn the_largest_strongly_connected_component_has_at_most_ten_modules() {
     );
 }
 
+/// **RFC-074 D3, Stage 1: un-ignored by PR-074-B.** `domain` had 7
+/// outgoing references, all `crate::project::ProjectId`, one per domain
+/// submodule (`ownership.rs`, `audit.rs`, `terminal.rs`, `approval.rs`,
+/// `transcript.rs`, `changeset.rs`, `agent.rs`). `ProjectId` now lives
+/// in `domain::identity`, re-exported from `project` unchanged, and
+/// those seven files import it locally (`use super::ProjectId;`) rather
+/// than reaching back across the boundary that no longer exists.
 #[test]
-#[ignore = "RFC-074 D3, Stage 1 (PR-074-B): `domain` has 7 outgoing references today, all \
-            `crate::project::ProjectId`, one per domain submodule (ownership.rs, audit.rs, \
-            terminal.rs, approval.rs, transcript.rs, changeset.rs, agent.rs). PR-074-B moves \
-            `ProjectId` into `domain` itself, re-exported from `project`, and un-ignores this."]
 fn domain_has_zero_outgoing_cross_module_references() {
     let graph = measure_capability_graph();
     let outgoing = graph.outgoing_targets("domain");
