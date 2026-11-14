@@ -160,6 +160,18 @@ Specific findings, each sourced, not an impression that "most things are covered
   mismatch) is achievable here only by setting `onFailure: "block"` explicitly on every hook entry
   this bridge registers — it is not the mechanism's own resting behavior, and a bridge that forgot
   this field would silently satisfy D3's own words ("fails closed") exactly backwards.**
+- **A second, independent way for a bridge to believe it blocked a call and not block it: the
+  conventional Unix failure exit code is the wrong one.** `onFailure: "block"` (above) governs
+  what happens when the hook *fails to run its own logic* — crash, timeout, bad output. It is a
+  separate question from what happens when the hook *runs and decides to deny*, which is governed
+  by exit code alone for a `command` hook that signals its decision that way rather than through
+  `hookSpecificOutput` JSON: *"Exit code 1 without valid JSON output is a non-blocking error unless
+  the hook is one whose failure blocks the action, even though 1 is the conventional Unix failure
+  code. If your hook is meant to enforce a policy, use `exit 2`."* A bridge that gets `onFailure:
+  "block"` exactly right, then signals a denial by exiting `1` — the instinct most engineers would
+  reach for first — lets every denied call through anyway. **Both must be got right at once**: the
+  hook's own failure path (`onFailure: "block"`) and the hook's own decision path (`exit 2`, or
+  `hookSpecificOutput.permissionDecision: "deny"`, never a bare `exit 1`).
 - **A hook's own `"allow"` is not absolute.** It *"skips the permission prompt, except for actions
   no mode auto-approves and reads from network paths,"* and does not suppress the prompt for
   `always_ask` tools, MCP tools marked `requiresUserInteraction`, or, in plan mode, any
@@ -184,6 +196,16 @@ Specific findings, each sourced, not an impression that "most things are covered
   that matters here.** The docs state the reverse case (a user wanting hooks off via `--settings`
   can be overridden by a project turning them back on) but I found no statement about a project
   turning hooks off after `--settings` turned them on. **Unestablished — not assumed safe.**
+- **`onFailure` is not universal even where it does apply.** It *"has no effect on"* `Stop`,
+  `SubagentStop`, `TaskCompleted`, or `TeammateIdle` hooks, or on a background `command` hook
+  running with `async`/`asyncRewake` set. None of those is `PreToolUse`, so it does not weaken
+  this slice's own finding — but "the one setting D3's fail-closed behaviour rests on has
+  documented exceptions elsewhere in the same mechanism" belongs on the record.
+- **A Windows exception exists and is irrelevant today, but not permanently.** Without Git Bash
+  installed, a shell-form `PreToolUse` command hook that fails with `onFailure` unset can still
+  block the call, unlike the Linux/macOS default. Tekstide ships neither a Windows build nor a
+  Windows profile today (RFC-071 is reserved, not written); recorded now so whoever writes that
+  RFC does not have to re-derive it.
 
 **I looked for a case where the honest answer was "found none" and did not get one.** Every item
 above is a real, specific gap or open question, sourced to a quote; this is not a thin pass over a
@@ -210,10 +232,16 @@ and is reachable without modifying the user's installation** (`--settings` as an
 string). It is narrow in the way D5 anticipated (refuses on a harmless patch bump) and has several
 specific, named gaps (item 4) a bridge built on it must disclose rather than paper over, per
 `what-the-dialog-must-not-lie-about.md`'s own standard. **D3's fail-closed behavior is achievable,
-but only through one specific, must-not-be-forgotten configuration field** (`onFailure: "block"`),
-not the mechanism's own default. This is a finding the owner should weigh directly against D1's
-premise, not a settled "yes, build it" — it says a bridge is possible and names exactly what it
-would have to get right.
+but only by getting two independent things right on every registered hook entry — `onFailure:
+"block"` for the hook's own failure path, and `exit 2`/`permissionDecision: "deny"`, never a bare
+`exit 1`, for the hook's own decision path** — neither is the mechanism's own default, and a
+bridge that nailed one while reaching for the conventional-but-wrong exit code on the other would
+still be silently open. This is a finding the owner should weigh directly against D1's premise,
+not a settled "yes, build it": a bridge is possible, but the interception it would offer is
+**opt-in to fail-closed, not fail-closed by nature**; **overridable by a plugin mod on exactly
+the account shape this product's own users have** (no managed settings); and **several named
+categories of action never reach it at all**. What D4 may honestly claim about "Managed" is
+narrower than the word alone would suggest to a reader who has not seen this document.
 
 ## Boundaries honoured
 
