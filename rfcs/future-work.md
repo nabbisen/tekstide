@@ -1550,9 +1550,18 @@ this slice's own instruction not to fix it in passing.
 --no-deps --workspace` from a clean target directory, with both crates actually documented and not
 served from cache, emits **zero** warnings. They were fixed somewhere between 2026-10-14 and
 `0.39.0` without this entry being updated — which is the drift this file exists to catch, found
-while checking whether RFC-074's own `cargo doc -D warnings` verification step was meetable. **The
-unaddressed half of this entry stands**: `cargo doc` is still not in the gate, so nothing stops
-them coming back.
+while checking whether RFC-074's own `cargo doc -D warnings` verification step was meetable.
+
+**Corrected again 2026-11-15, and this one is the reviewer's own error.** The sentence here on
+2026-11-12 read *"the unaddressed half of this entry stands: `cargo doc` is still not in the gate"*.
+**That was false when it was written.** `.github/workflows/ci.yml` has run
+`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` as a blocking gate step since
+`67704ea` (2026-10-14) — the same day this entry was filed, in the same commit that cleared the 37
+and 31 warnings. So the entry was closed in full on the day it was opened, and a later reader was
+told otherwise for three days. The measurement in the paragraph above was real and checked; the
+claim about the gate beside it was asserted from memory and never checked against `ci.yml`, which
+is the exact shape this reviewer has required others to avoid. **This entry is fully discharged**:
+the warnings are gone and the gate holds them at zero.
 
 Found while checking a doc-comment edit, not sought out. Measured directly, not assumed from the
 review that first noticed it:
