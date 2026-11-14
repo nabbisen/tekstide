@@ -2,7 +2,7 @@
 
 ## 0.40.0 - Locales That Survive Installation
 
-Status: **candidate, not yet published.** RFC-073's own fix is this release's only user-visible
+Status: **released 2026-11-14.** RFC-073's own fix is this release's only user-visible
 change: every locale this product ships (today, only `pl`, whose own header calls itself a proof
 of the pluralization machinery rather than a finished translation) now compiles into the binary
 and resolves correctly wherever that binary runs — the GitHub release download on either
