@@ -26,8 +26,7 @@ RFCs open for review.
 | RFC | Title | Status |
 | --- | --- | --- |
 
-*(Empty — nothing is proposed and not yet accepted. RFC-073 was accepted on 2026-11-12, the
-same day it was proposed.)*
+| 069 | [An Adapter For A Real AI CLI](./proposed/069-an-adapter-for-a-real-ai-cli.md) | **Proposed 2026-11-15** for `0.41.0`, reserved 2026-10-12 on RFC-060's acceptance. Command approval is built, gated and reachable — and the only program that has ever spoken the protocol is `reference_adapter`, a test-and-proof artifact. D1 a bridge process this project ships; **D2 the upstream interface is measured and written down before any bridge code exists**; D3 any mismatch fails closed and the run does not start; D4 `Managed` never means "Tekstide verified this"; D5 pin the proven upstream version, refuse an unproven one by default; D6 one CLI, not a framework; D7 the absence of a promise is documented. **Two owner-level questions**: whether to ship a bridge at all, and refuse-vs-warn on an unproven version |
 
 ## Accepted
 
@@ -52,7 +51,6 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 063 | Querying The Live UI (`iced_selector`) | GUI verification |
 | 064 | Does `iced`'s `text_editor` Replace Our Own? | editor, pre-1.0 |
 | 068 | Redacting What A Run Prints | pre-1.0 |
-| 069 | An Adapter For A Real AI CLI | pre-1.0 |
 | 070 | Check For Updates | M14 |
 | 071 | Windows Packaging And The Microsoft Store | M14 |
 | 072 | A Non-Blocking Job For Quarantined Tests | M14 |
