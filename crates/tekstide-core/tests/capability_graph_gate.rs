@@ -397,3 +397,55 @@ fn test_support_reaches_no_production_module() {
          reach back into the production graph it is not part of (RFC-074 D4)"
     );
 }
+
+/// **Added by review 675 Required 1.** The gate's own method excludes
+/// test code *by filename* (`tests.rs`, `*_tests.rs`, anything under a
+/// `tests/` directory) -- which silently does not exclude an inline
+/// `#[cfg(test)] mod tests { ... }` block sitting inside an otherwise
+/// production file. Measured, not assumed: seven of these existed in
+/// `tekstide-core/src` at review 675 (`recovery/instance.rs`,
+/// `recovery/record.rs`, `agent/report.rs`, `runtime/terminal/
+/// security.rs` and three of its own submodules), contributing 5
+/// references across 4 real edges the gate was counting as production.
+/// Harmless by luck that round (the same edges already existed from real
+/// production code, so no bound or membership was wrong) but load-bearing
+/// the moment a test added inside one of them reached `test_support` or
+/// grew the SCC -- the gate would report a structural regression that
+/// never happened, which is how a ratcheted bound gets raised instead of
+/// trusted.
+///
+/// **Fixed at the root rather than gated against recurrence alone**: all
+/// seven were extracted to their own `tests.rs`/`tests/` files in the
+/// same commit that adds this assertion, matching the convention every
+/// other test module in this crate already follows -- so this assertion
+/// passes today because the violation is gone, not because it is merely
+/// now detected. It stays to catch the next one.
+///
+/// Scans the same production file set the rest of this gate reads, for
+/// the literal, trimmed line `mod tests {` -- this codebase's own
+/// universal naming convention for a test submodule, confirmed empirically
+/// (every `#[cfg(test)] mod` in `tekstide-core/src`, inline or not, is
+/// named `tests`) rather than assumed. A module declared `mod tests;`
+/// (a separate file) never produces this exact line and is unaffected.
+#[test]
+fn no_production_file_declares_an_inline_test_module() {
+    let root = src_root();
+    let mut violations = Vec::new();
+    for file in production_files(&root) {
+        let source = fs::read_to_string(&file).unwrap_or_else(|e| panic!("reading {file:?}: {e}"));
+        if source.lines().any(|line| line.trim() == "mod tests {") {
+            violations.push(
+                file.strip_prefix(&root)
+                    .unwrap_or(&file)
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "production file(s) with an inline #[cfg(test)] mod tests {{ ... }} block, which this \
+         gate's own file-based exclusion does not recognise as test code -- extract to a separate \
+         tests.rs/tests/ file: {violations:?}"
+    );
+}
