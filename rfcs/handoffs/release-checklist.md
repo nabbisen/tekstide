@@ -517,6 +517,15 @@ Checked every release, because a watch that depends on someone remembering is no
 
 ## Tagging
 
+**The publish record names who actually ran the commands, not who authorised them. Added
+2026-11-14, review 676, after the same misattribution shipped in two consecutive release records.**
+`release-0.39.0.md` and `release-0.40.0.md` each stated that `cargo publish`, the tag and the
+GitHub release "were the owner's own actions"; in both releases the owner **authorised** and the
+reviewer **executed**. The first was corrected on 2026-11-12 and the correction did not reach the
+second, which is the part worth a checklist line: **before writing a release record, read the
+previous one's own dated corrections.** Authorisation and execution are different facts, and in a
+three-party project the record is the only place that distinction survives.
+
 - [ ] Tag name matches the release version.
 - [ ] Tag points at the reviewed release commit.
 - [ ] Post-publish/post-tag package or artifact verification is recorded.
