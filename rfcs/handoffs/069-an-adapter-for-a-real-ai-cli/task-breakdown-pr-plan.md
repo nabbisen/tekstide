@@ -53,11 +53,93 @@ premise is that a bridge is worth shipping, and this slice is where that premise
   `PATH`. RFC-069's *Out of scope* forbids it permanently, not just in this slice.
 - No bridge code, no profile change, no `ConfiguredAiCliAdapter` work.
 
-## PR-069-B — the bridge, scoped after A lands
+## PR-069-B — the bridge. Scoped 2026-11-15, after A was accepted at review 677
 
-Deliberately not broken down here. D1's shape and D5's refusal threshold may both change on what
-A measures, and scoping a bridge against an interface nobody has looked at yet is what D2 exists
-to prevent. The breakdown is written into this pack when A is accepted.
+A is accepted and the breakdown below is written against what it measured, not against what the
+RFC guessed. **One thing A did not look at turns out to block B entirely, and it is not an
+implementation detail** — see B0.
+
+### B0 — the environment question, and it is the owner's
+
+**Measured while scoping, not by A**: `spawn_adapter`
+(`crates/tekstide-core/src/runtime/terminal/launch.rs`) builds the Managed-path child's
+environment with `env_clear()` and exactly seven entries — `TERM`, `LANG`, `LC_ALL`,
+`PATH=/usr/bin:/bin`, `PS1`, plus the approval token and socket path. Nothing is inherited. The
+built-in `claude-code` profile inherits `AiCliEnvironmentPolicy::Minimal` from `AiCliProfile::new`
+and never overrides it.
+
+Two consequences, both fatal to a bridge as things stand:
+
+1. **`claude` is not on that `PATH`.** The profile's own lookup paths put it at
+   `$HOME/.local/bin/claude`; `/usr/bin:/bin` does not contain it.
+2. **`HOME` is unset.** A real AI CLI needs its own configuration and credentials, which live
+   under the user's home directory. A `claude` launched with no `HOME` is not a supervised
+   session; it is a broken one.
+
+So the Managed path's environment, which is exactly right for `reference_adapter` (a program this
+project wrote, needing nothing), **cannot launch a real AI CLI at all**. Making it work means
+deciding what of the user's environment a third-party CLI reaches — which is RFC-004 §7's subject
+and a security decision, not a packaging one.
+
+**B0 produces a proposal, not code**: the minimum environment a real CLI needs, each entry
+justified, measured by trying rather than reasoned from plausibility, together with what that
+exposes. It goes to the owner. **No bridge code until it is answered**, for the same reason A came
+before B.
+
+### B1 — the bridge, once B0 is answered
+
+**Both fail-closed axes, and A proved they are independent:**
+
+- `onFailure: "block"` on **every** registered hook entry — the hook's own *failure* path, and not
+  the mechanism's default.
+- `exit 2`, or `hookSpecificOutput.permissionDecision: "deny"` — the hook's own *decision* path.
+  **Never a bare `exit 1`**, which is a non-blocking error however conventional it looks.
+
+Getting one right and not the other is silently open, in both directions. A test must exist for
+each, and each must be shown failing.
+
+**Registration without touching the user's installation**: `--settings` as an inline JSON string,
+per A's item 1. Nothing written to `~/.claude/` or a project `.claude/`, ever — D1's *Out of
+scope*, permanently.
+
+**Version pin and refusal (D5)**: the exact string A observed, refused by default when it does not
+match, with the documented override. A's item 3 shows why `major.minor` is unsafe: the one feature
+D3 depends on arrived at `2.1.295`, inside the `2.1` line.
+
+**Never `--bare`, and never inherit it.** A found it disables hook loading entirely, with no error
+— interception silently absent. The bridge controls exactly how the child is launched.
+
+**One shape A's findings imply and the RFC did not anticipate**: the hook is a *command Claude Code
+spawns per tool call*, not a long-lived process like `reference_adapter`. Confirm the approval
+channel accepts repeated short connections carrying the same token before building on it; if it
+does not, that is a finding about the channel, not about the bridge.
+
+### B2 — what the product is allowed to say, given what A found
+
+Not a UI polish slice; the honesty requirement D4 states. A established three things that bound
+what *Managed* may claim:
+
+- the interception is **opt-in to fail-closed on two independent axes**, not fail-closed by nature;
+- on an ordinary personal account — no managed settings, no `managed-mcp.json`, no Team/Enterprise
+  login — **a plugin mod handling `tool.check` can override this bridge's deny**;
+- **several named categories never reach the hook**: `EndConversation`, `@`-mentioned file reads,
+  validation-rejected calls.
+
+The precedent for saying this well already exists:
+`AiCliWorkspaceDiscoveryPolicy::MayDiscoverWorkspaceFiles { summary }` is how this product already
+tells a user in plain language what a CLI may do. B2 decides where the equivalent sentence lives
+for what this bridge does **not** cover. The wording is the owner's; that there must be one is
+D4's.
+
+## What is not in this pass
+
+A general adapter SDK, a plugin runtime, a second CLI, making approval mandatory for the built-in
+profile, or any change to `Supervised` remaining the default. RFC-069's *Out of scope* holds.
+
+**And not the provider-disclosure gap.** The M14 security review's Part 2 (F6) found the product
+has no way to disclose where an AI CLI *sends* what it reads, only what it may read. That is
+adjacent to B2 and is not RFC-069's — it has no owner yet and should not be absorbed here by
+proximity.
 
 ## Order, and what makes a slice finished
 
