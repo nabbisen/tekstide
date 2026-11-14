@@ -1639,6 +1639,54 @@ pub(crate) fn is_gone_or_going(pid: libc::pid_t) -> bool {
     process_stat(pid).is_some_and(|stat| stat.state == 'Z')
 }
 
+/// **RFC-074 D4/D5, Stage 2: relocated from `test_support`.** Test-only
+/// process-liveness check, mirroring `termination::
+/// process_group_exists_by_id`'s own `libc::kill(.., 0)` technique --
+/// sending signal `0` sends nothing; the kernel only validates that the
+/// target exists and is signalable, which is exactly "is this pid still
+/// in the process table" with no side effect. `ESRCH` (no such process)
+/// is the only outcome this needs to distinguish from "still there" --
+/// ambient in tests, so any other error (e.g. `EPERM`, which would mean
+/// the process exists but this test cannot signal it) is treated as
+/// "still alive" rather than modelled separately, unlike the production
+/// runtime code this mirrors.
+///
+/// **Review 640's own required correction: a bare `kill(pid, 0)` also
+/// reads `true` for an unreaped zombie** (the pid table entry still
+/// exists; the kernel simply discards the signal), proved
+/// deterministically in `test_support::tests::
+/// kill_signal_zero_succeeds_against_an_unreaped_zombie`. Reviews
+/// 638/639 each patched one or two call sites that needed to exclude
+/// this case; a real, uncapped grep for every caller found **fourteen**,
+/// most of which had never been examined. "A guard placed at the sites
+/// that call it always misses sites; a guard placed where the process
+/// is *created* cannot" (`RunningTerminal::drop`'s own rule, applied
+/// here to a check instead of a guard): this function is the one place
+/// every caller already goes through, so the exclusion belongs here,
+/// once, not repeated at every call site under a name
+/// (`process_is_alive`) that would otherwise keep lying about a corpse.
+///
+/// **Moved here, not just called from here, because `is_gone_or_going`
+/// is this function's entire reason to exist** -- it was defined in
+/// `test_support` only because that module happened to be the crate's
+/// generic home for small test helpers, not because the logic is
+/// generic: every line past the `kill(.., 0)` fast path is
+/// `runtime::terminal`'s own zombie-detection domain knowledge, and
+/// `test_support` had no legitimate reason to understand macOS
+/// `proc_exit` semantics to call it. Not one of D5's three named
+/// moves in the letter -- both ends of this reference are test-only
+/// code, not a production capability pair D2's tier model governs --
+/// but the same move in spirit: the thing moves to where it structurally
+/// belongs, same as `ProjectId` in Stage 1.
+#[cfg(test)]
+pub(crate) fn process_is_alive(pid: u32) -> bool {
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if result != 0 {
+        return std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    }
+    !is_gone_or_going(pid as libc::pid_t)
+}
+
 /// Bounded enumeration, not sized-to-fit -- see [`processes_in_session`]'s
 /// own macOS doc for why. Chosen to match `launch.rs`'s own
 /// `close_range_upper_bound`'s upper clamp, the closest existing
@@ -2396,8 +2444,10 @@ impl Drop for PtyResponsivenessProbeGuard {
 /// The probe command, marker and timeout are shared with `tekstide`'s own
 /// `shell::tests::wait_for_shell_ready` (a separate copy, since that one
 /// drives `TerminalPane`, not `TerminalRuntime`, and nothing reaches
-/// across the crate boundary here) via `crate::test_support`'s own `pub`
-/// constants, so "what readiness means" has one definition.
+/// across the crate boundary here) via `crate::domain`'s own `pub`
+/// constants (RFC-074 D4/D5: relocated from `test_support`, which this
+/// function no longer needs to reach into), so "what readiness means"
+/// has one definition.
 ///
 /// `#[cfg(test)]`, not `pub(super)`: every call site is in a different
 /// test module across this crate (`agent::tests`, `audit::tests::
@@ -2406,7 +2456,7 @@ impl Drop for PtyResponsivenessProbeGuard {
 /// test-only reach `super::tests` already has, re-exported by `mod.rs`.
 #[cfg(test)]
 pub(crate) fn wait_for_shell_ready(runtime: &mut TerminalRuntime, handle: &TerminalRuntimeHandle) {
-    use crate::test_support::{
+    use crate::domain::{
         SHELL_READINESS_MARKER, SHELL_READINESS_PROBE_COMMAND, SHELL_READINESS_TIMEOUT,
     };
 

@@ -5,7 +5,8 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{ProjectLockOutcome, acquire_project_lock, project_lock_file, project_locks_dir};
-use crate::test_support::{KillOnDropChild, RealProcessLimiter, process_is_alive};
+use crate::runtime::terminal::process_is_alive;
+use crate::test_support::{KillOnDropChild, RealProcessLimiter};
 
 fn test_root(name: &str) -> PathBuf {
     let nonce = SystemTime::now()

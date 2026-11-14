@@ -1,8 +1,12 @@
-//! RFC-074 D1: the capability-boundary gate — PR-074-A.
+//! RFC-074 D1: the capability-boundary gate — PR-074-A, with Stages 1 and
+//! 2 (PR-074-B) now landed.
 //!
 //! Derives `tekstide-core`'s own module graph from its source text and
-//! asserts three structural bounds. **This is the whole deliverable of
-//! PR-074-A**: no module moves and no `use` is rewritten by this file.
+//! asserts four structural bounds (three at PR-074-A; the fourth added by
+//! PR-074-B, review 672's own recommendation). **No module moves and no
+//! `use` is rewritten by this file itself** — PR-074-A's own deliverable
+//! was the gate alone; the stages that move code and lower the bound live
+//! in `domain`, `project` and `runtime::terminal`, not here.
 //!
 //! **The measurement method is fixed by the RFC and is not this test's to
 //! improve quietly** (RFC-074, "Why now, measured today"): production `.rs`
@@ -36,10 +40,13 @@ use std::path::{Path, PathBuf};
 
 /// The ratcheted bound (RFC-074 D1.1). Started at 10, PR-074-A's own
 /// measured value — a ceiling, not a goal. **Lowered to 9 by PR-074-B
-/// Stage 1** (`ProjectId` moved to `domain`, the vocabulary tier's seven
-/// outgoing references to `project` gone), in the same commit as the
-/// move that earns it. Stage 2 lowers this to 8.
-const MAX_LARGEST_SCC_SIZE: usize = 9;
+/// Stage 1** (`ProjectId` moved to `domain`). **Lowered to 8 by Stage 2**
+/// (`test_support`'s two references to/from `runtime` both gone,
+/// dropping it out of the strongly connected component entirely — not
+/// merely shrinking it by one, since `test_support` is no longer reached
+/// by anything in it and reaches nothing in it either). Both moves in
+/// the same commit as the bound change that is their own evidence.
+const MAX_LARGEST_SCC_SIZE: usize = 8;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -309,8 +316,13 @@ fn measure_capability_graph() -> CapabilityGraph {
     }
 }
 
+/// Renamed from `..._has_at_most_ten_modules` when Stage 1 lowered the
+/// bound to 9 and stale again at Stage 2's 8 -- the name embedding the
+/// bound's own value is exactly the state-asserting-text failure this
+/// project's documents are written against, now that the bound is meant
+/// to keep moving.
 #[test]
-fn the_largest_strongly_connected_component_has_at_most_ten_modules() {
+fn the_largest_strongly_connected_component_is_within_its_ratcheted_bound() {
     let graph = measure_capability_graph();
     let components = graph.strongly_connected_components();
     let largest = components
@@ -345,11 +357,17 @@ fn domain_has_zero_outgoing_cross_module_references() {
     );
 }
 
+/// **RFC-074 D4, Stage 2: un-ignored by PR-074-B.** `runtime` had one
+/// reference, `runtime -> test_support` (`launch.rs`'s own
+/// `wait_for_shell_ready` importing the three `SHELL_READINESS_*`
+/// constants) -- those constants are vocabulary, not behaviour, and now
+/// live in `domain` alongside `ProjectId`, keeping the one shared
+/// definition `tekstide`'s own separate `wait_for_shell_ready` copy
+/// still reads from. The reverse reference, `test_support ->
+/// runtime` (`process_is_alive` calling `is_gone_or_going`), is a
+/// separate edge this assertion does not check — see
+/// `test_support_reaches_no_production_module` below for that one.
 #[test]
-#[ignore = "RFC-074 D4, Stage 2 (PR-074-B): `runtime` reaches `test_support` today (one \
-            reference, `runtime -> test_support`; the reverse `test_support -> runtime` is a \
-            separate edge this assertion does not check). PR-074-B removes it by one of D5's \
-            three legal moves and un-ignores this."]
 fn no_production_module_reaches_test_support() {
     let graph = measure_capability_graph();
     let reachers = graph.modules_reaching("test_support");
@@ -357,5 +375,25 @@ fn no_production_module_reaches_test_support() {
         reachers.is_empty(),
         "test_support is reached by {reachers:?}; test scaffolding must not sit inside the \
          production graph (RFC-074 D4)"
+    );
+}
+
+/// **Added by PR-074-B, review 672's own recommendation made a
+/// requirement, not deferred as a note.** Assertion 3 above only checks
+/// one of D4's two references (`production -> test_support`); nothing
+/// checked the reverse (`test_support -> production`), so B2's second
+/// disposition could regress invisibly -- exactly the half-life problem
+/// D1 exists to prevent. Passes today without needing an `#[ignore]`:
+/// both of D4's references are gone, so `test_support` has zero
+/// outgoing edges into production as of this same commit, not merely
+/// zero incoming.
+#[test]
+fn test_support_reaches_no_production_module() {
+    let graph = measure_capability_graph();
+    let outgoing = graph.outgoing_targets("test_support");
+    assert!(
+        outgoing.is_empty(),
+        "test_support has an outgoing reference to {outgoing:?}; test scaffolding must not \
+         reach back into the production graph it is not part of (RFC-074 D4)"
     );
 }

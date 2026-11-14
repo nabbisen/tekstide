@@ -136,11 +136,11 @@ fn marker_filename_to_pid(name: &str) -> Option<u32> {
 }
 
 /// RFC-027 D12: production's own version of
-/// `test_support::process_is_alive`'s `libc::kill(pid, 0)` technique -- signal `0` sends
-/// nothing; the kernel only validates that the target exists and is signalable, which is
-/// exactly "is this pid still in the process table." `test_support` is `#[cfg(test)]`, so
-/// production code could never reach it regardless; this is the real implementation D12
-/// asks for, not a weakened gate around the test one.
+/// `runtime::terminal::process_is_alive`'s `libc::kill(pid, 0)` technique -- signal `0`
+/// sends nothing; the kernel only validates that the target exists and is signalable,
+/// which is exactly "is this pid still in the process table." That function is
+/// `#[cfg(test)]`, so production code could never reach it regardless; this is the real
+/// implementation D12 asks for, not a weakened gate around the test one.
 fn pid_is_alive(pid: u32) -> bool {
     let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
     if result == 0 {

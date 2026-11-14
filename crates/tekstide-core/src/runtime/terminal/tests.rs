@@ -693,7 +693,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     // zombie-reads-alive defect; review 640 fixed it in `process_is_alive`
     // itself instead, so this site needs nothing extra of its own now.
     assert!(
-        crate::test_support::process_is_alive(background_pid),
+        crate::runtime::terminal::process_is_alive(background_pid),
         "test precondition: the real backgrounded job must be alive before the close"
     );
     // Review 635's own required control: fired here, against a pid known
@@ -743,7 +743,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     // gone *or* departing, the property RFC-043 actually asks for -- a
     // corpse satisfies "closing a project kills the backgrounded
     // descendant" exactly as hard reaping does.
-    let background_job_alive = crate::test_support::process_is_alive(background_pid);
+    let background_job_alive = crate::runtime::terminal::process_is_alive(background_pid);
     if background_job_alive {
         // Review 634's own named measurement, fired only in the branch it
         // answers: does `KERN_PROC_SESSION` see this exact pid when the
@@ -1035,7 +1035,7 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
         )
     });
     assert!(
-        crate::test_support::process_is_alive(detached_pid),
+        crate::runtime::terminal::process_is_alive(detached_pid),
         "test precondition: the real detached job must be alive before the close"
     );
 
@@ -1053,7 +1053,7 @@ fn a_job_that_leaves_the_session_via_setsid_survives_a_real_close() {
         .expect("termination request should complete");
 
     assert!(
-        crate::test_support::process_is_alive(detached_pid),
+        crate::runtime::terminal::process_is_alive(detached_pid),
         "a process that left the session via setsid is out of scope by design -- D2's own \
          opt-out -- and a real close must not have touched it"
     );
@@ -1166,7 +1166,7 @@ fn a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member() {
 
     let background_pid = spawn_hup_immune_background_job(&mut runtime, &handle);
     assert!(
-        crate::test_support::process_is_alive(background_pid),
+        crate::runtime::terminal::process_is_alive(background_pid),
         "test precondition: the backgrounded job must be alive before the enumeration check"
     );
 
@@ -1215,7 +1215,7 @@ fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
 
     let background_pid = spawn_hup_immune_background_job(&mut runtime, &handle);
     assert!(
-        crate::test_support::process_is_alive(background_pid),
+        crate::runtime::terminal::process_is_alive(background_pid),
         "test precondition: the backgrounded job must be alive before the close"
     );
 
@@ -1242,7 +1242,7 @@ fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
         "the session must be confirmed empty by a real re-enumeration: {events:?}"
     );
     assert!(
-        !crate::test_support::process_is_alive(background_pid),
+        !crate::runtime::terminal::process_is_alive(background_pid),
         "containment confirmed working on macOS: a live backgrounded job that ignores SIGHUP \
          must still be gone after a real close -- SIGKILL, not SIGHUP or the shell's own \
          possible propagation of it, is what must have reached it"
@@ -1303,7 +1303,7 @@ fn signal_candidates_never_signals_a_pid_outside_the_target_session() {
         "exactly the one real member of the target session must have been signalled"
     );
     assert!(
-        crate::test_support::process_is_alive(stranger_pid as u32),
+        crate::runtime::terminal::process_is_alive(stranger_pid as u32),
         "the stranger, though present in the candidate list, must never have been signalled -- \
          leaving an orphan is a bug, killing a stranger is an incident"
     );
@@ -1535,7 +1535,7 @@ fn dropping_a_running_terminal_kills_the_real_process_group() {
         .child
         .id();
     assert!(
-        crate::test_support::process_is_alive(pid),
+        crate::runtime::terminal::process_is_alive(pid),
         "test precondition: the real shell must be alive before the panic"
     );
 
@@ -1549,7 +1549,7 @@ fn dropping_a_running_terminal_kills_the_real_process_group() {
     );
 
     assert!(
-        !crate::test_support::process_is_alive(pid),
+        !crate::runtime::terminal::process_is_alive(pid),
         "Drop for RunningTerminal must have killed the real process group during unwind, \
          before catch_unwind returned control here"
     );
@@ -1591,7 +1591,7 @@ fn launching_a_second_terminal_does_not_kill_the_first() {
         "test precondition: the two launches must have received distinct ids"
     );
     assert!(
-        crate::test_support::process_is_alive(pid_a),
+        crate::runtime::terminal::process_is_alive(pid_a),
         "launching a second, independently-keyed terminal must not kill the first -- both \
          `sessions.insert` sites key on a freshly minted TerminalId, so neither can ever evict \
          a session actually stored under it"

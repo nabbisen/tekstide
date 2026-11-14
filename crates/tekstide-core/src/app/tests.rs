@@ -1248,7 +1248,7 @@ impl HeldProbe {
     /// extra of its own now -- `process_is_alive` is honest on its own.
     fn assert_still_holding(&self) {
         assert!(
-            crate::test_support::process_is_alive(self.pid),
+            crate::runtime::terminal::process_is_alive(self.pid),
             "the held probe (pid {}) must still be running -- it must not have exited before \
              the second process even started",
             self.pid

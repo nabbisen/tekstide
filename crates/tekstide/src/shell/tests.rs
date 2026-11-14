@@ -1744,7 +1744,7 @@ fn poll_demo_pane_until_parsed<T>(
 /// timeout having learned nothing. `echo` is idempotent; the first send
 /// that survives ends the loop.
 fn wait_for_shell_ready(state: &mut State) {
-    use tekstide_core::test_support::{
+    use tekstide_core::domain::{
         SHELL_READINESS_MARKER, SHELL_READINESS_PROBE_COMMAND, SHELL_READINESS_TIMEOUT,
     };
     let marker =
