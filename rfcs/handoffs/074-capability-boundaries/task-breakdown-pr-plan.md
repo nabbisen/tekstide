@@ -72,6 +72,14 @@ D5's three legal moves — and **say which of the three you used, per reference.
 a disposition here; the RFC's isolation rule is the thing being exercised for the first time, and
 how it is exercised on two trivial references is the precedent for how it is exercised on forty.
 
+**Amended 2026-11-14, review 675, after the stage landed: the question above rests on a premise that
+does not hold here, and the right answer is the one the round gave — "neither of the three, and
+why".** D5 governs what one *capability* may do when it needs something from another; both ends of
+both references are test-only code, which is not a capability pair D2's tier model speaks about at
+all. So the standard here is not "pick one of three labels" but **state the disposition and why it
+is structurally right** — which is what D5's three moves exist to enforce in the cases they do
+cover. A later stage between two real capabilities is back under the original wording, unchanged.
+
 In the same commit: **bound 9 → 8, assertion 3 un-ignored.**
 
 ## Order, and what makes a stage finished
