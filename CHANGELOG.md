@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.40.0 - Locales That Survive Installation
+
+Status: **candidate, not yet published.** RFC-073's own fix is this release's only user-visible
+change: every locale this product ships (today, only `pl`, whose own header calls itself a proof
+of the pluralization machinery rather than a finished translation) now compiles into the binary
+and resolves correctly wherever that binary runs — the GitHub release download on either
+platform, the AUR `tekstide-bin` package, and a plain `cargo install`. Before this release, a
+non-`en` catalog was loaded from a path baked in at the machine that *built* the binary, so every
+one of those channels silently served English regardless of the user's own locale; the one-liner
+`README.md` leads with had never actually worked for a non-English reader. Also in this release:
+RFC-074's first slice, a measured gate over `tekstide-core`'s own module graph with two moves that
+shrink it, and a shared fix for a cargo-toolchain test-helper path that broke six independent
+copies at once — neither is user-visible; this project records internal work anyway.
+**macOS: `0.39.0`'s own disclosure (RFC-028 *Acceptance* option (2), no Apple hardware available
+to this project) covers this release too, unchanged** — the Run It gate and the macOS
+containment-guard watch's own fresh suppress/confirm-red/revert procedure were again not performed
+on real Apple hardware; CI's `macos-measurement` job is accepted as sufficient, the same way and
+for the same reason, not a new or separately-decided gap.
+
+### Fixed — RFC-073: every shipped locale now compiles into the binary; a non-English catalog no longer depends on the machine that built it
+
+A locale's `.ftl` catalog used to load from a path derived at build time
+(`env!("CARGO_MANIFEST_DIR")`), which resolves only on the machine that compiled the binary. On
+every channel this product actually ships through — the GitHub release binaries for both
+platforms, and `tekstide-bin`, which repackages the Linux one — that path does not exist on the
+user's machine, so a non-`en` locale fell back to English with no indication anything had gone
+wrong. Every catalog under `locales/` now compiles in (`include_str!`, the same mechanism `en.ftl`
+already used) and is selected by name at runtime; the disk-loading path and its directory
+parameter are deleted rather than kept as a fallback. The compiled-in list is checked against
+`locales/`'s own real contents by a dedicated test, so a `.ftl` file added to one but not the
+other is caught rather than silently shipping half-registered; a second test parses every
+compiled-in catalog's text directly, so a syntax error in a locale that is listed in both places
+still cannot ship unnoticed. Verified against real, measured conditions rather than assumed: a
+release-shaped build run from `/tmp`, with the source tree it was built from moved out of reach
+entirely, now renders real Polish text under `LANG=pl_PL.UTF-8` where the unfixed binary reported
+`en`. Fallback behaviour for a locale this product does not ship is unchanged — it still reads
+from `en` rather than failing.
+
+### Changed — RFC-074's first slice: a measured gate over `tekstide-core`'s own module graph, and the first two moves that shrink it
+
+No user-visible change. `tekstide-core` was one strongly connected component of ten modules —
+every one of those ten reachable from every other, by real `use` paths, regardless of the
+project's own intended capability boundaries. A new gate (`capability_graph_gate.rs`) measures that
+component from source on every CI run and fails if it grows, so the boundary work this RFC starts
+cannot silently erode later. The first two moves each lower the gate's own bound in the same commit
+that earns it: `ProjectId` relocates to the dependency-free vocabulary tier (re-exported at its old
+path, so no published API moves), and `test_support` — test-only scaffolding, not a production
+capability — leaves the component entirely, taking the bound from 10 to 9 to 8. A fifth gate
+assertion, added after three rounds of review found three different ways an inline test module
+hiding inside an otherwise-production file could evade a narrower version of it, now asserts the
+property directly (no production file may declare a module with a body, under any name, any
+visibility, gated by any attribute or none) rather than one spelling of it.
+
+### Fixed — a cargo-toolchain layout change broke six independent copies of one test-helper lookup at once; replaced with one shared, searching implementation
+
+Not user-visible; recorded because the next person whose own toolchain moves will search this
+changelog for it. Cargo `1.100.0` relocated where a unit test's own binary lives on disk
+(`target/<profile>/deps/<exe>` to `target/<profile>/build/<crate>-<hash>/out/<exe>`), which broke
+six separately-maintained copies of a fixed-depth path-derivation rule across both crates' test
+suites — 37 tests failed, with no commit of this project's own to blame, the morning CI's runner
+image picked up the new cargo. Replaced with one shared, searching implementation
+(`tekstide_core::test_support::spawned_helper_binary_path`) that resolves under either toolchain
+layout rather than counting a fixed number of directory levels, so the next layout change is one
+edit instead of six.
+
 ## 0.39.0 - Readable By Default
 
 Status: **released 2026-11-12.** RFC-076's D1 through D5 are all implemented and closed

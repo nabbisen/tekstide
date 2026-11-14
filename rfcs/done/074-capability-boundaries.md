@@ -1,11 +1,12 @@
 # RFC-074: Capability Boundaries — The Gate, And The First Two Moves
 
-Status: **Accepted by the human owner 2026-11-03** — D1 through D8 as written, with Stages 1
+Status: **Implemented and closed 2026-11-14, moved to `done/` as part of the `0.40.0` candidate
+cut (not yet published).** D1 through D8 as written, with Stages 1
 and 2 as the first slice and the later staging scoped in a handoff after the gate has proven
-itself on two real stages, exactly as *Acceptance* asked. **Two owner-level questions stay
-open and neither blocks that slice**: which release slot this takes, and whether
+itself on two real stages, exactly as *Acceptance* asked. Two owner-level questions stood open
+and neither blocked that slice: which release slot this takes, and whether
 `tekstide-core`'s published API may change shape in that release — Stage 1 is API-compatible
-by construction (D3), so it does not wait on the second.
+by construction (D3), so it did not wait on the second. Accepted by the human owner 2026-11-03.
 
 **Updated 2026-11-09, dated rather than silently edited.** The second question is **answered:
 the owner accepted the `TerminationOutcome` variant proposal**, which was the concrete form that
@@ -24,9 +25,17 @@ capability split proper, whose staging was deliberately unscoped until the gate 
 twice. A released section naming an RFC asserts that RFC shipped in that release
 (`an_rfc_a_release_names_lives_in_done`), so a `0.40.0` carrying only the first slice could not
 have named the RFC it was about — the same reason RFC-026 was split from RFC-065. **D6–D8 moved to
-[RFC-077](./077-the-capability-split.md)**, carried forward as already-accepted decisions.
+[RFC-077](../accepted/077-the-capability-split.md)**, carried forward as already-accepted decisions.
 **The release slot is `0.40.0`**, and **the published API may change shape in it**: Stage 1 is
 API-compatible by construction (D3), Stage 2 takes `test_support` out of the production graph.
+
+**Implemented, 2026-11-14.** D1 through D4 are all implemented: the gate (`dc50c7a`), Stage 1 moving
+`ProjectId` to T0 (`53e47f7`, bound 10 → 9), and Stage 2 taking `test_support` out of the
+production graph (`e573cbc`, bound 9 → 8). D5's isolation rule is exercised, not separately built —
+Stage 2 is the first move this RFC made that D5 governs, and review 675's three rounds hardening
+the gate's own fifth assertion (`43f4e30`, `836577e`, `3abae15`) are what closed it against every
+evasion found rather than the one first observed. D6–D8 remain out of scope, carried forward to
+RFC-077 as already-accepted decisions, exactly as the split above states.
 
 Proposed 2026-11-03. Approved to follow RFC-028 by the human owner (review 595), and drafted
 only after RFC-028 closed and `0.38.0` shipped, as directed. The goal, the tier model and
@@ -187,7 +196,7 @@ The rule that generates the capability list (D6), the `project/` split itself (D
 order derived from measured cut cost (D8) are **not in this RFC any more**. **D5 stays**, above:
 its first real application is this RFC's own Stage 2, and a release should be able to cite the rule
 it applied without naming an RFC that has not shipped. They were accepted on 2026-11-03 as part of it and are carried forward unchanged, as
-accepted decisions, in [RFC-077](./077-the-capability-split.md). Nothing was re-opened, re-decided
+accepted decisions, in [RFC-077](../accepted/077-the-capability-split.md). Nothing was re-opened, re-decided
 or weakened: the split changes which release closes which decision, and nothing else.
 
 What stays here is what `0.40.0` can actually close: the gate, the tier model it enforces, the

@@ -1,9 +1,15 @@
 # RFC-073: Locales That Survive Installation
 
-Status: **Accepted by the human owner 2026-11-12** — D1 through D4 as written, in `0.40.0`, alongside RFC-074's first slice. Proposed the same day; reserved 2026-09-24 as *"The `locales_dir()`/`CARGO_MANIFEST_DIR`
+Status: **Implemented and closed 2026-11-14, moved to `done/` as part of the `0.40.0` candidate
+cut (not yet published).** D1 through D4 as written, in `0.40.0`, alongside RFC-074's first slice.
+Proposed the same day; reserved 2026-09-24 as *"The `locales_dir()`/`CARGO_MANIFEST_DIR`
 Locale-Loading Defect"*; written now because `0.39.0` turned the channels where it bites into this
 product's primary ones. The release slot was decided with `0.40.0`'s scope
-on the same day, and the decisions below were accepted immediately after.
+on the same day, and the decisions below were accepted immediately after. All four decisions are
+implemented (`961a007`, `05a2188`): every shipped catalog compiles in, the runtime path and its
+directory parameter are gone, the compiled-in list is gated against `locales/`'s own contents, and
+a second gate parses every compiled-in catalog's text directly rather than trusting the list alone
+— the sibling gap review 673 found and closed. Accepted by the human owner 2026-11-12.
 
 ## Summary
 

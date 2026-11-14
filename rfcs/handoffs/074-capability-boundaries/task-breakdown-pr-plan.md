@@ -1,8 +1,8 @@
 ---
 title: "RFC-074 — task breakdown and PR plan"
 rfc: "RFC-074"
-rfc_file: "../../accepted/074-capability-boundaries.md"
-source_rfc_status: "Accepted by the human owner 2026-11-03; narrowed to D1–D4 by the 2026-11-12 split and scheduled as 0.40.0 — RFC-074 is in rfcs/accepted/"
+rfc_file: "../../done/074-capability-boundaries.md"
+source_rfc_status: "Implemented and closed 2026-11-14, as part of the 0.40.0 candidate cut (not yet published) — D1 through D4, the first slice; D6–D8 carried forward to RFC-077 — RFC-074 is in rfcs/done/"
 target_milestone: "M14"
 created: "2026-11-03"
 ---

@@ -1,8 +1,8 @@
 ---
 title: "RFC-073 — task breakdown and PR plan"
 rfc: "RFC-073"
-rfc_file: "../../accepted/073-locales-that-survive-installation.md"
-source_rfc_status: "Accepted by the human owner 2026-11-12 — RFC-073 is in rfcs/accepted/"
+rfc_file: "../../done/073-locales-that-survive-installation.md"
+source_rfc_status: "Implemented and closed 2026-11-14, as part of the 0.40.0 candidate cut (not yet published) — RFC-073 is in rfcs/done/"
 target_milestone: "M14"
 created: "2026-11-12"
 ---

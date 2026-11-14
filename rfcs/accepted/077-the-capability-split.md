@@ -7,7 +7,7 @@ a re-opening: it exists because RFC-074 spanned more releases than one, and a re
 naming an RFC asserts that RFC shipped in that release, so the first slice could not close while
 the capability split was still unstarted — the same reason RFC-026 was split from RFC-065.
 
-**Not scheduled, deliberately.** This RFC follows [RFC-074](./074-capability-boundaries.md)'s first
+**Not scheduled, deliberately.** This RFC follows [RFC-074](../done/074-capability-boundaries.md)'s first
 slice (`0.40.0`: the gate, `ProjectId` to T0, `test_support` out of the production graph) and its
 staging is scoped **after** that gate has behaved on two real stages — exactly the condition
 RFC-074's own *Acceptance* set, unchanged by the split. Scoping twelve stages before the first one
@@ -30,7 +30,7 @@ writes a `use`.
 
 ## Decisions
 
-**D5, capability isolation, is not here — it is [RFC-074](./074-capability-boundaries.md)'s.**
+**D5, capability isolation, is not here — it is [RFC-074](../done/074-capability-boundaries.md)'s.**
 It was moved there on 2026-11-12, in the same pass as this split, because its **first real
 application is RFC-074's own Stage 2**: the two `test_support` references are disposed of by D5's
 three legal moves, and how that rule is exercised on two trivial references is the precedent for
