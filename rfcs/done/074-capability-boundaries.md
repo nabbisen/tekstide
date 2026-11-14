@@ -20,9 +20,12 @@ attribution rule that replaces it; the three families that produced reds on code
 the one still open has a greppable signature.
 
 **Split 2026-11-12, at the owner's acceptance, and both open questions are answered with it.**
-This RFC spanned more releases than one — D1–D4 are the gate and Stages 1–2; D5–D7 are the
-capability split proper, whose staging was deliberately unscoped until the gate had proven itself
-twice. A released section naming an RFC asserts that RFC shipped in that release
+This RFC spanned more releases than one — D1–D5 are the gate, the tier model, Stages 1–2 and the
+isolation rule Stage 2 is the first to exercise; D6–D8 are the capability split proper, whose
+staging was deliberately unscoped until the gate had proven itself twice. **Corrected 2026-11-14
+by its own author**: this sentence was written on 2026-11-12 as "D1–D4 … D5–D7", when D5 was still
+going to RFC-077. D5 stayed, the registers and the moved-out heading below were updated, and this
+clause was not — so the paragraph described one split and its own next sentence described another. A released section naming an RFC asserts that RFC shipped in that release
 (`an_rfc_a_release_names_lives_in_done`), so a `0.40.0` carrying only the first slice could not
 have named the RFC it was about — the same reason RFC-026 was split from RFC-065. **D6–D8 moved to
 [RFC-077](../accepted/077-the-capability-split.md)**, carried forward as already-accepted decisions.
