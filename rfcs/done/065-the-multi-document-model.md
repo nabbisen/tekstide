@@ -143,7 +143,7 @@ it carries its own control in the same run, and it took three attempts to get ri
 
 ## Closed (2026-10-08)
 
-**`0.30.0` candidate; not yet published.** `REQ-EDIT-004` met for its own plural — `dirty_file_count`
+**Released as `0.30.0` 2026-10-08.** `REQ-EDIT-004` met for its own plural — `dirty_file_count`
 can finally return more than 0 or 1, and the open set it counts is real. No `REQ-` names
 multi-document itself; disclosed, not minted, at D8 (`rfcs/delivery-plan.md`'s own "Requirements
 gap" entry).
