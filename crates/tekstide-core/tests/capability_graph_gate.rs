@@ -421,19 +421,27 @@ fn test_support_reaches_no_production_module() {
 /// passes today because the violation is gone, not because it is merely
 /// now detected. It stays to catch the next one.
 ///
-/// Scans the same production file set the rest of this gate reads, for
-/// the literal, trimmed line `mod tests {` -- this codebase's own
-/// universal naming convention for a test submodule, confirmed empirically
-/// (every `#[cfg(test)] mod` in `tekstide-core/src`, inline or not, is
-/// named `tests`) rather than assumed. A module declared `mod tests;`
-/// (a separate file) never produces this exact line and is unaffected.
+/// **Round 2 (review 675 response): keyed on the property, not its one
+/// observed spelling.** The first version of this assertion matched the
+/// literal trimmed line `mod tests {`, which only ever catches a module
+/// named exactly `tests` with no visibility modifier. Proven wrong by the
+/// reviewer's own ablation: a `#[cfg(test)] mod unit_checks { ... }` block
+/// -- same defect, different identifier -- passed all five assertions,
+/// including this one, while still counting a reference inside it as
+/// production. "Every `#[cfg(test)] mod` in this crate happens to be named
+/// `tests` today" was true and is exactly the kind of fact a guard against
+/// future drift cannot rest on, since the convention is what the guard
+/// exists to survive. [`declares_inline_test_module`] instead finds any
+/// `#[cfg(test)]` attribute whose next meaningful line opens a module with
+/// a body (`mod <any-name> {`, any visibility), rather than merely
+/// pointing at a separate file (`mod <any-name>;`).
 #[test]
 fn no_production_file_declares_an_inline_test_module() {
     let root = src_root();
     let mut violations = Vec::new();
     for file in production_files(&root) {
         let source = fs::read_to_string(&file).unwrap_or_else(|e| panic!("reading {file:?}: {e}"));
-        if source.lines().any(|line| line.trim() == "mod tests {") {
+        if declares_inline_test_module(&source) {
             violations.push(
                 file.strip_prefix(&root)
                     .unwrap_or(&file)
@@ -444,8 +452,57 @@ fn no_production_file_declares_an_inline_test_module() {
     }
     assert!(
         violations.is_empty(),
-        "production file(s) with an inline #[cfg(test)] mod tests {{ ... }} block, which this \
-         gate's own file-based exclusion does not recognise as test code -- extract to a separate \
-         tests.rs/tests/ file: {violations:?}"
+        "production file(s) with a #[cfg(test)] module declared with a body ({{ ... }}) rather \
+         than pointing at a separate file (;), which this gate's own file-based exclusion does \
+         not recognise as test code -- extract to a separate tests.rs/tests/ file: {violations:?}"
     );
+}
+
+/// Whether `source` contains a `#[cfg(test)]` attribute whose next
+/// meaningful line (skipping blank lines, full-line comments, and any
+/// further attribute lines) declares a module with a body, under any name
+/// and any visibility modifier (`mod x {`, `pub mod x {`, `pub(crate) mod
+/// x {`, ...) -- as opposed to one that merely points at a separate file
+/// (`mod x;`). The property this checks is "does `#[cfg(test)]` gate an
+/// inline module," not "is that module named `tests`."
+fn declares_inline_test_module(source: &str) -> bool {
+    let lines: Vec<&str> = source.lines().collect();
+    (0..lines.len()).any(|i| {
+        lines[i].trim() == "#[cfg(test)]" && module_declaration_after(&lines, i + 1) == Some(true)
+    })
+}
+
+/// Starting at `from`, skips blank lines, full-line comments, and further
+/// attribute lines to find the next substantive line. Returns `Some(true)`
+/// when that line declares a module with a body, `Some(false)` when it
+/// declares one that merely points at a separate file (`mod x;`), and
+/// `None` when it is not a module declaration at all (the `#[cfg(test)]`
+/// that led here gates something else, e.g. a function).
+fn module_declaration_after(lines: &[&str], from: usize) -> Option<bool> {
+    let trimmed = lines[from..]
+        .iter()
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with('#'))?;
+    let after_visibility = strip_visibility_prefix(trimmed);
+    let after_mod = after_visibility.strip_prefix("mod ")?;
+    let name_end = after_mod
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .unwrap_or(after_mod.len());
+    Some(after_mod[name_end..].trim_start().starts_with('{'))
+}
+
+/// `trimmed` with a leading `pub`, `pub(crate)`, `pub(super)`, `pub(self)`
+/// or `pub(in ...)` removed, so a module declaration's visibility does not
+/// hide it from [`module_declaration_after`].
+fn strip_visibility_prefix(trimmed: &str) -> &str {
+    if let Some(after_pub) = trimmed.strip_prefix("pub") {
+        if let Some(after_paren) = after_pub.trim_start().strip_prefix('(') {
+            if let Some(close) = after_paren.find(')') {
+                return after_paren[close + 1..].trim_start();
+            }
+        } else {
+            return after_pub.trim_start();
+        }
+    }
+    trimmed
 }
