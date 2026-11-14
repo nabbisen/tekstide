@@ -66,3 +66,44 @@ the earlier coupling argument no longer binds once D1 lands; do not reopen it he
 quietly implement half of it.
 
 Translation. `pl.ftl` stays what its own header says it is.
+
+## Final Acceptance Decision
+
+**Accepted 2026-11-14 by the reviewer, for release as `0.40.0`.** Written here because
+`.git-exclude/reviewed/` is correspondence and is not tracked; the pack is the record
+(`release-checklist.md`'s Review item, added at review 526 after four shipped releases left this
+section blank).
+
+**The round.** One slice, review **673**, two rounds.
+
+| Round | Required | What it was |
+| --- | --- | --- |
+| 1 | 1 | `load_compiled_locale`'s own doc comment claimed a parse failure was *"covered by `tests::source_locale_catalog_parses`'s sibling for every additional locale"*. **No such sibling existed.** A locale added to both `locales/` and `ADDITIONAL_LOCALES` with broken FTL would compile, pass the new list-vs-directory gate, and silently serve English — *listed but unparseable*, the same silent shape D4 says stops existing, re-entered through the new mechanism. |
+| 2 | — | Both halves fixed: the comment no longer claims what is not there, and `every_additional_locale_actually_parses` iterates the list. Accepted. |
+
+**What the acceptance rests on**, as distinct from what was claimed:
+
+- The runtime path is **deleted, not supplemented** (D1). Verified on the artifact: the release
+  binary built from the candidate carries **zero** references to the repository path, and the two
+  remaining `/locales` string matches are `sys_locale` and `intl_pluralrules` symbol names, read
+  rather than counted. `Tablica projektu` is inside the binary.
+- The list is **gated against the directory** (D2), and the gate was ablated by the reviewer
+  independently (`zq.ftl` → red, removed → green, tree clean).
+- The test that hid the defect is **replaced by one an installed copy could fail** (D3).
+  `Catalog::resolve` no longer has a directory parameter, so "no locales directory involved" is
+  what the call site looks like rather than a condition a test constructs.
+- **Demonstrated on the shipped artifact**, which is the part that makes this closable: the
+  `0.40.0` Run It evidence shows `9 zablokowanych automatyzacji` — the `[many]` CLDR arm, a
+  category English does not have — rendered by the release binary under `LANG=pl_PL.UTF-8` from a
+  directory with no source tree in sight.
+
+**Deferred rather than fixed, recorded so nobody rediscovers them as defects:**
+
+- **The `--locale` flag and the CLI-parsing item.** `future-work.md` argued they must ship as one
+  slice with this RFC, because a flag would let a user select a catalog they structurally cannot
+  have. D1 removes that, so the coupling ends with the defect; the flag is ordinary CLI work now.
+- **Translation.** `pl.ftl` remains what its header says: three keys proving the pluralization
+  machinery, not a translation. This RFC makes it reach the user; it does not make it one.
+
+**What this acceptance does not cover.** Nothing in `packaging/aur/`, and no claim about locales
+beyond the one `pl` catalog that exists.

@@ -108,3 +108,51 @@ nothing in this pack's own two slices: PR-074-A is still the gate and nothing el
 still Stages 1 and 2, and the bound still ratchets in the same commit as the move that earns it.
 The later staging is scoped in RFC-077's own handoff, only after this gate has behaved on two real
 stages.
+
+## Final Acceptance Decision
+
+**Accepted 2026-11-14 by the reviewer, for release as `0.40.0`** — RFC-074 as narrowed by the
+2026-11-12 split (D1–D5; D6–D8 carried forward as already-accepted decisions in RFC-077, which is
+deliberately unscheduled and is **not** named by this release's own section).
+
+**The rounds.** Two slices, reviews **672** and **675**, seven rounds between them.
+
+| Review | Slice | Required changes, and what they were |
+| --- | --- | --- |
+| 672 | PR-074-A, the gate | None required. The reviewer closed one gap himself: assertion 1 passed today and had never been shown capable of failing, so he ablated it (`close -> project` planted, red at 11 modules). Carried forward as a standing requirement: **each bound move re-ablates**. Also raised then: assertion 3 witnesses only one of B2's two references. |
+| 675 r1 | PR-074-B, Stages 1 and 2 | 1 — the round claimed `test_support.rs` held the only inline `mod tests` block; **seven more existed**, and the gate's exclusion is by filename, so each was scanned as production. Measured: 5 references across 4 edges, SCC unchanged — latent, not live. |
+| 675 r2 | — | All seven extracted (the stronger of the two options: it keeps the RFC's stated method rather than re-defining it), plus a fifth assertion. **New required**: that assertion matched the literal line `mod tests {`. The reviewer planted `mod unit_checks` and all five assertions passed. |
+| 675 r3 | — | Rewritten to key on `#[cfg(test)]` + an inline body. **New required**: `#[cfg(any(test, feature = "test-support"))]` still evaded — the attribute form this crate itself uses for `test_support` and `domain::shell_readiness`. Proven by planting it and watching the gate pass. |
+| 675 r4 | — | Attribute match dropped entirely: no production file may declare **any** module with a body. Measured at zero first. **New required**: an intermittent disclosed in that round was filed against flake-register row 35, whose every prior occurrence is macOS, while this one was Linux — evidence bearing on that row's own open macOS-vs-not question. |
+| 675 r5 | — | Appended to row 35, dated, platform named, recorded as a datum and explicitly **not** a disposition. Accepted. |
+
+**What the acceptance rests on**, re-derived by the reviewer from source rather than read:
+
+| | baseline `d868ab2` | Stage 1 `53e47f7` | Stage 2 `e573cbc` | after the guard rounds |
+| --- | --- | --- | --- | --- |
+| edges / references | 66 / 151 | 65 / 145 | 63 / 144 | **63 / 139** |
+| largest SCC | 10 | 9 | **8** | **8** |
+| `domain` outgoing | `[project]` | `[]` | `[]` | `[]` |
+| `test_support` | both directions | both directions | none | **none** |
+
+Each stage lowered the bound by exactly one, in the same commit as the move that earned it, and in
+each the module that left is the one D3 and D4 predicted. The final reference drop (144 → 139) is
+the inline test blocks ceasing to be counted as production — a real change, not a re-definition:
+the reviewer had computed that counterfactual before the fix existed, and the measured result
+matched it.
+
+`ProjectId` still resolves at its old path (D3's API-compatibility claim, checked), and
+`process_is_alive` landed `#[cfg(test)]` — **narrower** than the `any(test, feature = "test-support")`
+it came from.
+
+**Deferred rather than fixed:**
+
+- **D6–D8** are RFC-077's, unscheduled until this gate has behaved on two real stages. It now has.
+- **B2's dispositions are not one of D5's three named moves**, and the pack's question asking which
+  was amended rather than answered: both ends of both references were test-only code, not a
+  capability pair D2's tier model governs. The pack carries that amendment dated 2026-11-14.
+- **A text-scanning gate cannot see a module produced by a macro.** Known limit, not a gap chased.
+
+**The lesson this pack paid four rounds for, recorded for RFC-077's own gate work**: a guard that
+matches a spelling invites exactly as many rounds as there are spellings. The version that ended it
+asserts a property with nothing left to vary.
