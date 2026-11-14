@@ -1,7 +1,7 @@
 # RFC-074: Capability Boundaries — The Gate, And The First Two Moves
 
-Status: **Implemented and closed 2026-11-14, moved to `done/` as part of the `0.40.0` candidate
-cut (not yet published).** D1 through D8 as written, with Stages 1
+Status: **Implemented and closed 2026-11-14, moved to `done/` as part of the `0.40.0` release,
+published 2026-11-14.** D1 through D5 as written, with Stages 1
 and 2 as the first slice and the later staging scoped in a handoff after the gate has proven
 itself on two real stages, exactly as *Acceptance* asked. Two owner-level questions stood open
 and neither blocked that slice: which release slot this takes, and whether

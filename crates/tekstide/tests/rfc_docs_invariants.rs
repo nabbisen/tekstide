@@ -84,8 +84,21 @@ fn front_matter_value<'a>(source: &'a str, field: &str) -> Option<&'a str> {
 /// second, differently-worded one for each site: `doc-invariants-completion.md`'s
 /// own instruction for gap 1, and the reason a fix to what "stale"
 /// means only has to happen once.
+///
+/// **`"not yet published"` added by review 676 round 2.** A `(not yet
+/// published)` clause written during a candidate cut, carried unedited
+/// into the RFC's own closure at the Status-flip commit, said something
+/// false about a `done/` RFC three times running (`076` at `0.39.0`,
+/// `073` and `074` at `0.40.0`) with nothing here to catch it --
+/// `claims_unfinished` checked for *unaccepted*, not *unpublished*, and
+/// the phrase is neither "Proposed" nor "Accepted". Any `done/` RFC
+/// whose lead claim still contains this phrase is the same defect
+/// recurring, not a legitimate use: by the time an RFC is in `done/`,
+/// whatever shipped it has, by definition, published.
 fn claims_unfinished(status: &str) -> bool {
-    status.contains("Proposed") || status.starts_with("Accepted")
+    status.contains("Proposed")
+        || status.starts_with("Accepted")
+        || status.contains("not yet published")
 }
 
 /// A status claim written as prose -- an RFC's own `Status:` line, or

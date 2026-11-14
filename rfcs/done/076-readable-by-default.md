@@ -1,7 +1,7 @@
 # RFC-076: Readable By Default — text scale, and defaults an older reader can use
 
-Status: **Implemented and closed 2026-11-12, moved to `done/` as part of the `0.39.0` candidate
-cut (not yet published).** D1 through D5 as written, with D1 and D2 as the first slice. **The
+Status: **Implemented and closed 2026-11-12, moved to `done/` as part of the `0.39.0` release,
+published 2026-11-12.** D1 through D5 as written, with D1 and D2 as the first slice. **The
 acceptance carries external design §4.2's amendment with it**: that document's authored *"Default
 base font size: 14 px"* is superseded by D2, and this RFC is the record of it.
 `.git-exclude/specs/tekstide-external-design-v0.md` is the owner's own source document and is left

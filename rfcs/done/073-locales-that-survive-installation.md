@@ -1,7 +1,7 @@
 # RFC-073: Locales That Survive Installation
 
-Status: **Implemented and closed 2026-11-14, moved to `done/` as part of the `0.40.0` candidate
-cut (not yet published).** D1 through D4 as written, in `0.40.0`, alongside RFC-074's first slice.
+Status: **Implemented and closed 2026-11-14, moved to `done/` as part of the `0.40.0` release,
+published 2026-11-14.** D1 through D4 as written, in `0.40.0`, alongside RFC-074's first slice.
 Proposed the same day; reserved 2026-09-24 as *"The `locales_dir()`/`CARGO_MANIFEST_DIR`
 Locale-Loading Defect"*; written now because `0.39.0` turned the channels where it bites into this
 product's primary ones. The release slot was decided with `0.40.0`'s scope

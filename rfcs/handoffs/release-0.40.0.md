@@ -91,8 +91,12 @@ than leaving the extension to a reader who has to go find an earlier entry.
 
 ## Boundaries respected writing this record
 
-Did not touch `packaging/aur/*`. Did not `cargo publish`, tag, or create the GitHub release —
-all three were the owner's own actions, verified independently here rather than assumed. This
-record and the five-document Status-flip (`CHANGELOG.md`, `rfcs/README.md`'s two tables,
-`rfcs/delivery-plan.md`, and both RFC-073/RFC-074 handoff packs' own `source_rfc_status` fields)
-are the only things this commit changes.
+Did not touch `packaging/aur/*`. **`cargo publish`, the tag, and the GitHub release were not
+executed by this assistant** — the accepting reviewer ran `cargo publish --workspace --locked`,
+`git tag -m … 0.40.0` at `815cbc8`, and `git push origin 0.40.0` (which is what `release.yml`
+built the assets from), under the owner's own standing authorisation. The owner authorised;
+neither they nor this assistant typed those three commands — corrected here the same way
+`release-0.39.0.md`'s own 2026-11-12 dated correction said it, rather than repeating the
+"owner's own action" framing a second release running. This record and the Status-flip
+(`CHANGELOG.md`, `rfcs/README.md`'s two tables, `rfcs/delivery-plan.md`, and both RFC-073/
+RFC-074 handoff packs' own `source_rfc_status` fields) are the only things this commit changes.
