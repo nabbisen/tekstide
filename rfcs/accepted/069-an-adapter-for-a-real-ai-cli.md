@@ -1,8 +1,15 @@
 # RFC-069: An Adapter For A Real AI CLI
 
-Status: **Proposed 2026-11-15**, for `0.41.0`, after the owner accepted that slot on the same day.
-Reserved 2026-10-12 on RFC-060's acceptance (D9). **D1–D7 below are what is being asked for**, and
-two of them are owner-level by their own nature — see *Acceptance*.
+Status: **Accepted by the human owner 2026-11-15** — D1 through D7 as written, in `0.41.0`,
+proposed the same day. Reserved 2026-10-12 on RFC-060's acceptance (D9).
+
+**The two owner-level questions in *Acceptance* are answered by that acceptance, and are recorded
+here so nobody re-opens them from the question's own wording:** (1) **a bridge is shipped** — this
+project carries the maintenance dependency rather than leaving the approval pathway inert for
+anyone who will not write code; (2) **an unproven upstream version is refused by default**, with
+the documented override D5 requires. If either reading is wrong, say so and it costs a sentence —
+but D2's measurement comes first either way, and both may be revisited on what it finds, which is
+the point of doing it first.
 
 ## Summary
 
