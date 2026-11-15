@@ -1,7 +1,8 @@
 # RFC-069: An Adapter For A Real AI CLI
 
-Status: **Accepted by the human owner 2026-11-15** — D1 through D7 as written, in `0.41.0`,
-proposed the same day. Reserved 2026-10-12 on RFC-060's acceptance (D9).
+Status: **Accepted 2026-11-15, D1 withdrawn the same day at the owner's direction.** D2–D7
+stand; **D1 (ship a bridge) is withdrawn** — see the section below. `0.41.0`'s content is
+consequently open. Reserved 2026-10-12 on RFC-060's acceptance (D9).
 
 **The two owner-level questions in *Acceptance* are answered by that acceptance, and are recorded
 here so nobody re-opens them from the question's own wording:** (1) **a bridge is shipped** — this
@@ -10,6 +11,47 @@ anyone who will not write code; (2) **an unproven upstream version is refused by
 the documented override D5 requires. If either reading is wrong, say so and it costs a sentence —
 but D2's measurement comes first either way, and both may be revisited on what it finds, which is
 the point of doing it first.
+
+## D1 is withdrawn, 2026-11-15, at the owner's direction
+
+**No bridge is shipped.** The RFC's remaining substance is the contract and the honesty rule; the
+part that proposed reaching into another product is gone.
+
+**Why.** The four requirements this RFC was recommended on do not ask for it.
+**`REQ-AGENT-013` is a prohibition, not a mandate** — *"Tekstide must **not claim** command-level
+enforcement for arbitrary AI CLIs unless the AI CLI is launched through a supported adapter or
+wrapper that reports proposed commands before execution."* Its instruction is *do not overclaim*,
+and it is satisfied by declining the claim at no cost. The reviewer read the `unless` clause as a
+goal to achieve rather than as a condition on a claim. `REQ-AGENT-012` and `REQ-SEC-012`/`013` are
+all scoped to **adapter-mediated** commands and were already satisfied by RFC-021/022/060. The
+threat model's own §14 Q4 asks which CLI gets the first Managed adapter **"if any"**.
+
+**And the measurement said so, slice by slice.** PR-069-A found the interception is opt-in
+fail-closed on two independent axes, overridable by a plugin mod on exactly this product's users'
+account shape, and blind to several named categories. B0 found the environment cannot work without
+scoping, which created a credential problem. B1's scoping found every credential route carries a
+cost in a different place. Each was treated as the next problem to solve rather than as the answer
+arriving.
+
+**The owner's objection, which is the governing one**: a wrapper of this shape configures another
+product's internals, depends on its fail-open defaults and precedence rules, and then presents the
+result as this project's supervision — **taking over a security responsibility while holding none
+of the control over it.**
+
+**What replaces it.** Nothing new. RFC-021's protocol and `reference_adapter`'s documented contract
+are published already; anything that chooses to speak them is supervised, which is cooperation
+between peers and inside this project's own boundary. The threat model's Q4 is answered **"none,
+by design."** D4's honesty question becomes trivial: *Managed* means a program **declares** it
+speaks this protocol — exactly what `ConfiguredAiCliAdapter::Managed`'s own doc comment has said
+from the start.
+
+**What survives.** `upstream-interface-measured.md` and `minimum-environment-proposal.md` stay, as
+the evidence for *why* this is not done and as the honest basis for anything this product ever says
+about supervising a CLI it does not control. **D2 did its job**: a measurement-first design is what
+made the premise testable before any bridge code existed.
+
+**Still unanswered and not RFC-069's**: the M14 security review's F6 — the product can disclose
+what an AI CLI may *read* and has no way to disclose where it *sends* it.
 
 ## Summary
 
