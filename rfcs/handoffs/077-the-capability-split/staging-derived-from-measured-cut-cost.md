@@ -156,6 +156,51 @@ So stage 7's commit must also carry, as product code:
 Those three are the condition on which the residual is safe to keep. Without them the decision is
 recorded in prose that the next bound-lowering commit has every incentive to ignore.
 
+### Stage 7 landed (`5e234dc`, review 683) — and the cut-cost column is wrong in a way that matters
+
+Bound 5 → 4, `{agent, approval, project, runtime}`, `transcript` out of the component entirely, 58
+edges exactly as predicted. The three required guards landed with it. One required fix was raised in
+review 683: the signature guard pins the *spelling* `&VerifiedCwd`, not the type's identity, so
+re-pointing the import to an alias cuts the edge, improves the bound, and keeps CI green — a
+compile-time fn-pointer pin replaces it.
+
+**The reference prediction was wrong, and it was this document's error.** Predicted 135, actual 142:
+
+```
+transcript -> project   3 -> 0      project -> transcript   3 -> 8   (+5)
+transcript -> runtime   1 -> 0      project -> runtime      4 -> 5   (+1)
+transcript -> domain    3 -> 4      project outgoing refs: 27 -> 33
+```
+
+**The cut-cost column counts references removed and has never counted the wiring a cut requires.**
+Stage 7 removed 4 and added 7. Stages 8 and 9 will be wrong the same way, so read their Refs column
+as a lower bound on churn, not an estimate of it.
+
+Two consequences, smaller first because it inflates the number:
+
+**The metric is sensitive to import style.** Five of the six added references are
+`crate::transcript::X` written inline; a grouped `use` would have counted **one**. This is the same
+artifact that makes `agent -> approval`'s six symbols count as one reference, seen from the other
+side. Nobody should restructure code to move this number — it is the measurement that is coarse.
+
+**The hub got denser while the bound dropped, and nothing was counting that.** `project` is the
+module D7 exists to split, on the RFC's own reasoning that *"the cost of this split only ever
+rises."* Stage 7 raised it. The placement was correct — D5 as amended puts the supply site in
+orchestration, and `project` already had both edges — so this is not a defect in stage 7. It is a
+cost that the bound cannot see and that stage 8 will incur again by the same technique, for the same
+correct reason.
+
+**`project`'s outgoing fan-out is therefore a candidate for the second measurement** this document
+already says D7 will need (see the section below on declaring victory at stage 9) — and it has just
+moved the wrong way. **Required with stage 8's review request:** report `project`'s outgoing
+reference and edge counts before and after, next to the bound. Not as a target to optimise; as a
+number that stops being invisible.
+
+This is the second consecutive stage where the gate rewarded something working against the goal —
+the first was the `VerifiedCwd` regression `ARCHITECTURE.md`'s seventh invariant now names. The
+pattern is worth more than either instance: **a single scalar ratchet will keep finding the cheapest
+way to be satisfied, and that way is not always progress.**
+
 ## The finding that matters more than the table
 
 **Twenty-two references is small.** Stages 3 through 9 together are about the size of a single
