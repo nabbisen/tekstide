@@ -46,6 +46,45 @@ the point where it matters.
 **This is Part 1's Q10 seen from the other side**, and one RFC closes both. Its dependencies
 (RFC-011, RFC-059) are both done, so nothing blocks it but writing it.
 
+### F5 corrected, 2026-11-15, by its own author — the gap is real but much narrower than stated, and the requirement behind it is already met
+
+F5 above called S5's redaction posture *"the one real gap"* and pointed at RFC-068. **Checked
+properly before acting on it, after RFC-069's D1 was withdrawn for exactly this failure — reading
+a list or a loosely-related requirement as a mandate.** Three things it found:
+
+**1. `REQ-SEC-023` is satisfied, and in the strongest possible way.** Verbatim: *"Environment
+variables with secret-like names must be redacted from logs and audit views."* The product puts
+**no environment content into audit records at all** — searched `domain/audit.rs` and `audit/*`
+and found none — and it operates no logging subsystem that would carry them. Nothing can leak
+there because nothing is written there. The one secret the product does hold, the run capability
+token, already prints as `RunCapabilityToken(<redacted>)`.
+
+So `delivery-plan.md`'s description of RFC-068 as *"`REQ-SEC-023`'s log half"* overstates the
+link. The requirement does not reach the thing RFC-068 is reserved for.
+
+**2. What remains is a third party's output, not this product's.** A transcript holds what the AI
+CLI printed. If a secret appears there, the CLI printed it. **Scanning that for secrets is the
+same shape as RFC-069's withdrawn D1** — taking responsibility for behaviour this product does not
+control — and the reservation's own row already names why it fails: *"a scanner that misses one
+secret is worse than no claim."*
+
+**3. The honest instrument is disclosure, which is what the threat model actually asked for.**
+§14 Q10 asks whether exported transcripts and handoffs *"should include a safety banner warning
+about possible secrets"* — a **question about a disclosure**, not a mandate to redact. And the
+product already has the pattern: `RedactionClaimScope` has exactly one variant,
+`StructuredMetadataOnly`, which states the limit correctly and is never shown to the user at the
+point of export.
+
+**Revised recommendation.** RFC-068 as reserved — *"Redacting What A Run Prints"* — describes a
+scanner this project has already reasoned against and a requirement that does not demand it. The
+narrow version is **a disclosure at the export point: say what the file may contain, and do not
+claim it has been cleaned.** That is one sentence of product behaviour, it closes §14 Q10 honestly,
+and it stays inside this project's own boundary.
+
+**This is a recommendation to the owner, not a scoping decision.** Renaming or re-scoping a
+reserved RFC is theirs, and the reviewer has just been wrong once this week about exactly this
+class of reasoning.
+
 ### F6. S5's "provider disclosure" has no mechanism at all, and the adjacent pattern exists
 
 Nothing in the product discloses **where an AI CLI sends what it reads**. Measured: no production
