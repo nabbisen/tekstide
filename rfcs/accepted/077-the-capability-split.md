@@ -67,7 +67,7 @@ After Stage 1, the cheapest single cuts that each take the component from 9 to 8
 | `approval → audit` | 5 |
 
 Each stage: one cut or one coherent group, the gate's bound lowered in the same commit, the full
-suite and both platforms green, and the six `ARCHITECTURE.md` invariants intact. **A stage that
+suite and both platforms green, and the seven `ARCHITECTURE.md` invariants intact. **A stage that
 cannot lower the bound is not a stage** — it is a move that should be folded into one that can.
 
 The later stages (the `project/` split proper) are not enumerated here. They will be, in a

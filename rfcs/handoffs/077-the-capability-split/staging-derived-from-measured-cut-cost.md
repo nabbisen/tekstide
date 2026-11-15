@@ -20,7 +20,7 @@ comments stripped, one reference per `crate::<module>` occurrence naming another
 Starting point: **largest SCC 8** — `agent`, `approval`, `audit`, `content`, `project`, `runtime`,
 `security`, `transcript` — with 27 edges and 61 references inside it.
 
-## The derived path: seven stages, 22 references, to acyclic
+## The derived path: the original derivation (stages 7-9 superseded 2026-11-16)
 
 Each row is the cheapest cut (or cheapest coherent group, where no single cut shrinks the
 component) that lowers the bound by one, computed by removing the edge and re-deriving the largest
@@ -32,9 +32,9 @@ component:
 | 4 | 7 → 6 | `content -> project` | 4 | `content/{document,open,save,snapshot}.rs` |
 | 5 | 6 → 5 | `approval -> audit` | 5 | `approval/coordinator.rs` |
 | 6 | 5 → 4 | `approval -> project` **and** `approval -> agent` | 2 | **blocked — see "Stage 6 does not happen as scoped" below** |
-| 7 | 4 → 3 | `project -> agent` | 3 | |
-| 8 | 3 → 2 | `transcript -> runtime` **and** `transcript -> project` | 4 | a coherent group |
-| 9 | 2 → 1 | `runtime -> project` | 3 | |
+| ~~7~~ | — | ~~`project -> agent`~~ | ~~3~~ | **superseded — dropped entirely, see the re-derived path below** |
+| ~~8~~ | — | ~~`transcript -> runtime` **and** `transcript -> project`~~ | ~~4~~ | **superseded — became the new stage 7** |
+| ~~9~~ | — | ~~`runtime -> project`~~ | ~~3~~ | **superseded — became half of the new stage 9** |
 
 **Stage 3 is one reference in one file.** Stage 6 is the first place D8's *"one cut or one coherent
 group"* clause is load-bearing: at a component of 5 (`agent`, `approval`, `project`, `runtime`,
@@ -85,41 +85,76 @@ inside X. `approval` must name the type and `agent` must own the minting, so the
 satisfying both is a dependency from `approval` to `agent`. **This edge is not a reference that
 resists D5; it is the structural expression of the guarantee.** No fourth shape exists.
 
-### What each answer actually costs, measured
+### Decided: the residual stays (owner, 2026-11-16)
 
-Both halves of stage 6 are necessary and neither is sufficient — dropping either alone leaves the
-component at 5. Carrying each answer through stages 7–9:
+`approval -> agent` is permanent. It is recorded as the seventh invariant in `ARCHITECTURE.md`
+(*"a privilege-bearing type's dependency is the privilege"*), because the thing a future reader needs
+is not a note that the edge was discussed but a statement that removing it deletes a guarantee.
 
-| | after 6 | +7 | +7,8 | +7,8,9 |
+**Correction to this document's first version of this section, which overstated what the residual
+costs.** It claimed the residual floors the bound at 4 and forfeits acyclicity. Both are wrong, and
+wrong for one methodological reason: the cost was computed by keeping the stage order that had been
+derived on the assumption stage 6 would succeed, instead of re-deriving it — which is what D8
+requires. Re-derived from the graph as it actually stands, **acyclicity is still reachable with the
+residual in place**, because a single directed edge is not a cycle. What blocks acyclicity is the
+*reverse* edge `agent -> approval`, which carries no privilege at all and is an ordinary D5 move-2
+candidate. Measured:
+
+| | now | + stage 7 | + stage 8 | + stage 9 |
 | --- | --- | --- | --- | --- |
-| `pub(crate)` accepted, stage 6 lands | 4 | 3 | 2 | **1 (acyclic)** |
-| `approval -> agent` kept as a residual | 5 | 5 | 4 | **4** |
+| bound | 5 | 4 | 2 | **1 (acyclic)** |
+| edges / refs | 60 / 139 | 58 / 135 | 56 / 133 | 54 / 129 |
 
-The residual floors at `{agent, approval, project, runtime}`, and **stage 7 becomes a complete no-op
-on the bound.** Cutting `agent -> approval` from the other side of the 2-cycle does not help (still
-4), and no 1- or 2-edge cut anywhere in that component reaches acyclic; at least three further cuts
-would be needed, none of them scoped here. Note also that `agent -> approval` counts as one
-reference only because the counter counts `crate::X` occurrences and that one is a grouped `use`
-naming **six** symbols — the reference counts order the stages and were never what judges one
-complete, so the bound derivation is unaffected, but that row is not cheap.
+Option 1 (`pub(crate)`) would have terminated at 55 edges / 128 refs, bound 1. **So the residual
+costs one edge and buys back a documented guarantee** — which is a better trade than the one it was
+accepted on, and the only reason this correction does not reopen the decision.
 
-**What the residual forfeits is smaller than it looks, and it is this document's target, not the
-RFC's.** RFC-077 nowhere decides acyclicity: D6 is the capability rule, D7 the `project/` split, D8
-staging-by-measured-cost. "To acyclic" is this document's heading — and the section below already
-records that the bound **cannot witness D7 anyway**. D7 does not require an acyclic graph to proceed.
+Note on reading the table: `agent -> approval` counts as one reference only because the counter
+counts `crate::X` occurrences and that one is a grouped `use` naming **six** symbols
+(`ApprovalChannelEndpoint`, `ApprovalChannelErrorReason`, `ApprovalChannelPathError`,
+`ApprovalChannelPathRequest`, `ApprovalChannelPathResolver`, `validate_token`). Reference counts
+order the stages; the bound is what judges one complete, so the derivation is unaffected — but that
+row is not the one-line change its count suggests.
 
-**Reviewer's recommendation: keep the edge, record it as a named residual.** A documented,
-threat-model-anchored construction privilege outranks an internal graph metric that is invisible to
-users, is not an accepted decision, and stops being evidence exactly where the remaining work
-begins. If `pub(crate)` is accepted instead, it needs a compile-time witness — a test asserting
-exactly one `from_validated` call site — and `approval/coordinator.rs`'s module doc corrected, since
-its claim that the laundering is *structurally* unreachable becomes false.
+### The re-derived path: three stages, 9 references, to acyclic
 
-**Decision pending with the owner.** Until it is answered, stage 7 should not start: under the
-residual it moves nothing and must be re-derived first. Independent of the answer, the other half of
-stage 6 — `crate::project::ProjectId` → `crate::domain::ProjectId` in `approval/coordinator.rs:71`
-— lands on its own as housekeeping (60 edges / 139 refs, bound unchanged at 5), committed as a
-reference removed and not as a stage.
+| Stage | Bound | Cut | Refs | Where |
+| --- | --- | --- | --- | --- |
+| 7 | 5 → 4 | `transcript -> project` **and** `transcript -> runtime` | 4 | a coherent group — this was the old stage 8 |
+| 8 | 4 → 2 | `agent -> project` **and** `agent -> runtime` | 2 | a coherent group; drops the bound by two at once |
+| 9 | 2 → 1 | `runtime -> project` **and** `agent -> approval` | 4 | **two unrelated moves, one stage** — see below |
+
+The old stage 7 (`project -> agent`, 3 refs) is **gone**: with `approval` still in the component it
+lowers nothing, and once stages 7–8 above have run it is not needed to reach acyclic at all. Three
+references that no longer have to be touched.
+
+**Stage 9 is one stage only because the bound says so, and that is worth noticing rather than
+tidying away.** After stage 8 the graph holds two independent 2-cycles — `{agent, approval}` and
+`{project, runtime}` — so the bound cannot drop below 2 until *both* are broken, by two moves with
+nothing in common. This is the same crudeness the section below describes from the other end: near
+the bottom, the largest-SCC bound stops distinguishing between related work and coincidence. Whoever
+runs stage 9 should expect to justify it as two moves that happen to share a bound, not as one
+coherent group in D5's sense.
+
+### Required with stage 7: the guard the gate cannot provide
+
+The gate measures cycles. It therefore **rewards** the one regression that matters here: changing
+`receive_proposal` to take `&Path`, or widening `VerifiedCwd::from_validated` to `pub(crate)` so the
+type can move, both delete the guarantee *and* improve the bound. The gate would go green on a
+security regression.
+
+So stage 7's commit must also carry, as product code:
+
+1. A test asserting **exactly one** call site of `VerifiedCwd::from_validated` in production sources,
+   failing loudly on a second — the same enumerate-by-name shape `ARCHITECTURE.md`'s single-ingress
+   invariant already uses, and excluding the `#[cfg(test)] for_test` hatch, which is deliberate.
+2. A test asserting `receive_proposal`'s verified-cwd parameter is still `&VerifiedCwd` and not
+   `&Path`, so the signature cannot be widened silently.
+3. A pointer from `approval/coordinator.rs`'s module doc and `agent/launch.rs`'s `VerifiedCwd` doc to
+   the new `ARCHITECTURE.md` invariant, so the reasoning is one hop from both ends of the edge.
+
+Those three are the condition on which the residual is safe to keep. Without them the decision is
+recorded in prose that the next bound-lowering commit has every incentive to ignore.
 
 ## The finding that matters more than the table
 

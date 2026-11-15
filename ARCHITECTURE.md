@@ -52,7 +52,7 @@ from diverging: an adapter that cannot decide anything cannot decide differently
 
 ## The properties that hold the whole thing up
 
-Six invariants recur across RFCs. Breaking one is a security regression, not a
+Seven invariants recur across RFCs. Breaking one is a security regression, not a
 refactor.
 
 **Single ingress.** Every byte from a PTY reaches the emulator through exactly one
@@ -84,6 +84,24 @@ scroll region the content it describes lives in, rather than trusting that files
 short enough for both to fit on screen together. This is the same failure this project
 treats most seriously — a claim that says less than the truth by the time a reader
 actually reaches it — one layer removed from wording into layout.
+
+**A privilege-bearing type's dependency *is* the privilege.** `approval::coordinator`
+imports `agent::VerifiedCwd` so that a verified working directory cannot be confused with
+an adapter's own claim about one — `CommandProposal::cwd()` is untrusted, and both are
+`&Path`, so only a distinct type keeps the compiler able to tell them apart. The guarantee
+is that the type's constructor is private to `agent/launch.rs`, which holds its one call
+site, immediately after the containment check. In a single crate, *"only code under this
+subtree may mint this value"* is expressible **only** when the type is defined inside that
+subtree: `pub(in crate::agent)` on an item defined elsewhere is `E0742`, and a trait moves
+the restriction from who may construct to who may implement, which is no narrower. So
+`approval` naming the type and `agent` owning the minting are satisfiable only by a
+dependency from `approval` to `agent`. **That edge is deliberate and permanent** (RFC-077,
+2026-11-16). Removing it — by taking `&Path` instead, or by widening the constructor to
+`pub(crate)` so the type can move — deletes the guarantee while making the module graph
+look better, which is the one shape of regression the capability gate actively rewards.
+The gate measures cycles and cannot see any of this. Pinning the one call site needs a
+separate test, which RFC-077's stage 7 is required to carry; until it lands, this
+invariant is held by this paragraph alone.
 
 **A control may record an opinion; it may not assert a fact.** RFC-034 offers exactly
 two buttons over a change set's review state — `Accepted` and `Rejected` — and
