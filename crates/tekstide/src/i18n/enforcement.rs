@@ -137,7 +137,12 @@ fn no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate() {
 /// Files this scan actually reads. `shell.rs` is scanned for presence
 /// only (see [`CORE_BLANKET_EXEMPT_FILES`]); the other two are scanned
 /// literal-by-literal against [`CORE_EXEMPT_LITERALS`].
-const CORE_TARGET_FILES: &[&str] = &["shell.rs", "project_board.rs", "project/metadata.rs"];
+const CORE_TARGET_FILES: &[&str] = &[
+    "shell.rs",
+    "project_board.rs",
+    "project/metadata.rs",
+    "domain/trust.rs",
+];
 
 /// `shell.rs` holds `render_text` and its two helpers -- the pre-GUI
 /// text harness RFC-015 PR-015-D investigated and deliberately kept
@@ -171,8 +176,10 @@ const CORE_BLANKET_EXEMPT_FILES: &[&str] = &["shell.rs"];
 /// - **The literal that actually reaches a user is not in
 ///   `project_board.rs` at all.** For an *open* project, `trust_label`
 ///   is `project.trust_state().label()` --
-///   `tekstide_core::project::metadata::WorkspaceTrust::label()`, a file
-///   the four-site table does not name. **RFC-032 PR-032-C**: a *recent,
+///   `tekstide_core::domain::trust::WorkspaceTrust::label()` (RFC-077
+///   Stage 3 moved it from `project::metadata`, where it lived when this
+///   table was first written) — a file the four-site table does not
+///   name. **RFC-032 PR-032-C**: a *recent,
 ///   unopened* project's `recent_project_row` used to hardcode
 ///   `"Restricted"` directly regardless of the project's real cached
 ///   trust state -- fixed to read `RecentProject.trust_state.label()`
@@ -259,13 +266,15 @@ const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     // `RestrictedModeSummary::from_trust` output instead, so neither
     // literal exists in this file to exempt any more -- see the
     // corrected bullet above.
-    // project/metadata.rs -- WorkspaceTrust::label. The literal that
+    // domain/trust.rs -- WorkspaceTrust::label. The literal that
     // actually reaches a user for an *open* project's `trust_label`.
-    // Live, tracked, not fixed here.
-    CoreExemptSite::live("project/metadata.rs", "Unknown"),
-    CoreExemptSite::live("project/metadata.rs", "Restricted"),
-    CoreExemptSite::live("project/metadata.rs", "Trusted"),
-    CoreExemptSite::live("project/metadata.rs", "Revoked"),
+    // Live, tracked, not fixed here. RFC-077 Stage 3 moved the type out
+    // of project/metadata.rs to the vocabulary tier; this scan follows
+    // it rather than trusting a path the move already made stale.
+    CoreExemptSite::live("domain/trust.rs", "Unknown"),
+    CoreExemptSite::live("domain/trust.rs", "Restricted"),
+    CoreExemptSite::live("domain/trust.rs", "Trusted"),
+    CoreExemptSite::live("domain/trust.rs", "Revoked"),
     // project/metadata.rs -- ProjectOpenSurface::label. Dormant: only
     // reachable through the placeholder `ActiveProjectWorkspace` route.
     CoreExemptSite::dormant("project/metadata.rs", "Project Dashboard"),

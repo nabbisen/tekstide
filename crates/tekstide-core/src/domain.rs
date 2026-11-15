@@ -10,6 +10,7 @@ mod shell_readiness;
 mod terminal;
 mod time;
 mod transcript;
+mod trust;
 
 pub use agent::{
     AgentCompatibilityLevel, AgentRun, AgentRunOrigin, AgentRunStatus, AgentRunTransitionError,
@@ -39,6 +40,7 @@ pub use terminal::{
 };
 pub use time::{DomainTimestamp, TimestampParseError};
 pub use transcript::{Transcript, TranscriptLifecycleState, TranscriptOrigin, TruncationState};
+pub use trust::WorkspaceTrust;
 
 #[cfg(test)]
 mod tests;

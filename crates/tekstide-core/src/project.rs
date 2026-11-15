@@ -15,6 +15,12 @@ pub mod watch;
 /// unchanged so no caller and no published-API consumer has to move with it.
 pub use crate::domain::ProjectId;
 
+/// RFC-077 Stage 3: `WorkspaceTrust` is vocabulary (T0), not an
+/// orchestration type, and now lives in `domain::trust` -- re-exported
+/// from here unchanged so no caller and no published-API consumer has to
+/// move with it.
+pub use crate::domain::WorkspaceTrust;
+
 pub use change_detection::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
     DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
@@ -40,7 +46,6 @@ pub use metadata::{
     FileGitStatus, ProjectFileState, ProjectGitDisplayStatus, ProjectGitSummary,
     ProjectMetadataCountStatus, ProjectMode, ProjectOpenSurface, ProjectProviderState,
     ProjectResourceLimits, ProjectWarning, ProjectWarningLevel, ProjectWarningState,
-    WorkspaceTrust,
 };
 pub use runtime::ProjectRuntimeSummary;
 pub use session::{

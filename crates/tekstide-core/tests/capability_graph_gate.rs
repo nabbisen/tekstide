@@ -44,9 +44,14 @@ use std::path::{Path, PathBuf};
 /// (`test_support`'s two references to/from `runtime` both gone,
 /// dropping it out of the strongly connected component entirely — not
 /// merely shrinking it by one, since `test_support` is no longer reached
-/// by anything in it and reaches nothing in it either). Both moves in
-/// the same commit as the bound change that is their own evidence.
-const MAX_LARGEST_SCC_SIZE: usize = 8;
+/// by anything in it and reaches nothing in it either). **Lowered to 7 by
+/// RFC-077 Stage 3** (`security`'s own one reference to `project` —
+/// `WorkspaceTrust`, D5 move 1: vocabulary, moved to `domain::trust` —
+/// gone, dropping `security` out of the component the same way
+/// `test_support` dropped out at Stage 2: it is no longer reached by
+/// anything in it and reaches nothing in it but `domain`). Every move in
+/// the same commit as the bound change that is its own evidence.
+const MAX_LARGEST_SCC_SIZE: usize = 7;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

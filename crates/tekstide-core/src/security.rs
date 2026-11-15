@@ -1,5 +1,4 @@
-use crate::domain::{AgentCompatibilityLevel, TerminalKind};
-use crate::project::WorkspaceTrust;
+use crate::domain::{AgentCompatibilityLevel, TerminalKind, WorkspaceTrust};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RestrictedModeFeature {
