@@ -15896,7 +15896,7 @@ fn agent_run_transcript_window_with_state_root<'a>(
             | tekstide_core::domain::AgentRunStatus::Running
             | tekstide_core::domain::AgentRunStatus::AwaitingApproval
     );
-    let window = tekstide_core::transcript::read_window(
+    let window = tekstide_core::project::read_transcript_window(
         &storage_path,
         tekstide_core::transcript::TranscriptReadPolicy::default(),
         still_being_written,

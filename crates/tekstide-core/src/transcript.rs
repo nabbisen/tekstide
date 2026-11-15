@@ -21,9 +21,15 @@ pub use policy::{
     TranscriptBudgetScope, TranscriptCaptureMode, TranscriptCapturePolicy,
     TranscriptLocalDataSummary, TranscriptRetentionLimits, TranscriptRetentionState,
 };
+/// Crate-visible only (RFC-077 Stage 7): the boundary-scanning function is a
+/// caller-supplied parameter now, not something this module hardcodes, so
+/// the real one (`runtime::terminal::next_token_len`) must be wired in from
+/// somewhere with an edge to both -- `project::read_transcript_window` does
+/// that and is this crate's public entry point for reading a window.
+pub(crate) use reader::read_window;
 pub use reader::{
     DEFAULT_TRANSCRIPT_WINDOW_BYTES, TranscriptReadError, TranscriptReadErrorReason,
-    TranscriptReadPolicy, TranscriptWindow, read_window,
+    TranscriptReadPolicy, TranscriptWindow,
 };
 pub use retention::{
     agent_run_may_still_be_writing, clear_stale_expired_mark, is_transcript_expired,

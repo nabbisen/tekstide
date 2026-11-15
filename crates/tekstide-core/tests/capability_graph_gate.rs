@@ -8,6 +8,16 @@
 //! was the gate alone; the stages that move code and lower the bound live
 //! in `domain`, `project` and `runtime::terminal`, not here.
 //!
+//! **RFC-077 Stage 6 added two more, of a different kind (2026-11-16).**
+//! `approval -> agent` (`VerifiedCwd`) is a permanent residual, not a
+//! stage: cutting it deletes a construction-privilege guarantee while
+//! *improving* every bound above, which this graph-cycle measurement
+//! cannot see either way (see `ARCHITECTURE.md`'s seventh invariant,
+//! "a privilege-bearing type's dependency is the privilege"). The two
+//! assertions below are the compile-time witness that decision requires:
+//! they check the guarantee directly, by name, rather than through a
+//! property the graph happens to track.
+//!
 //! **The measurement method is fixed by the RFC and is not this test's to
 //! improve quietly** (RFC-074, "Why now, measured today"): production `.rs`
 //! files under `crates/tekstide-core/src` only (`tests.rs`, `*_tests.rs` and
@@ -72,7 +82,30 @@ use std::path::{Path, PathBuf};
 /// edge). `audit` leaves the component entirely: nothing else inside it
 /// reached `audit` once `approval`'s own edge was gone. Every move in
 /// the same commit as the bound change that is its own evidence.
-const MAX_LARGEST_SCC_SIZE: usize = 5;
+///
+/// **Stage 6 did not move this bound** (`approval -> project` and
+/// `approval -> agent`, 5 → 4 as originally scoped): `approval -> agent`
+/// is `VerifiedCwd`'s own construction-privilege guarantee and is kept
+/// permanently (see `ARCHITECTURE.md`'s seventh invariant); only the
+/// `approval -> project` half landed, as housekeeping, and alone it does
+/// not shrink the component. **Lowered to 4 by RFC-077 Stage 7**, from
+/// the re-derived path this residual requires: `transcript`'s four
+/// references to `project` (three `ProjectId` imports, D5 move 1: each
+/// already vocabulary in `domain`, just pointed at `project`'s own
+/// backward-compatible re-export) and `runtime` (one grouped import of
+/// `next_token_len`, the D2 token-boundary function `transcript::reader`
+/// resynchronizes with) both gone. The `runtime` reference did not fit
+/// D5's vocabulary move — the function is real escape-sequence-parsing
+/// behaviour, not vocabulary, and duplicating it was rejected on the
+/// documented precedent this crate has already been burned by once — so
+/// `read_window` now takes the boundary function as a parameter instead
+/// of naming `runtime`, and `project::read_transcript_window` (D5 move 3:
+/// `project` already has an edge to both `transcript` and `runtime`, so
+/// it is the one module that can wire them together without creating a
+/// new edge) supplies the real one. `transcript` leaves the component
+/// entirely: nothing else inside it reached `transcript` once both of
+/// its own edges were gone.
+const MAX_LARGEST_SCC_SIZE: usize = 4;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -536,4 +569,77 @@ fn strip_visibility_prefix(trimmed: &str) -> &str {
         }
     }
     trimmed
+}
+
+/// **Required by RFC-077's residual decision (2026-11-16): the gate above
+/// measures cycles, and taking `VerifiedCwd::from_validated` from
+/// `pub(in crate::agent)` (which does not compile, `E0742`) to `pub(crate)`
+/// so the type could move would delete its construction-privilege
+/// guarantee while making every bound above look *better*, not worse.**
+/// This is the compile-time witness the staging document requires in its
+/// place (`rfcs/handoffs/077-the-capability-split/
+/// staging-derived-from-measured-cut-cost.md`): exactly one production
+/// call site, in the one file whose containment check immediately
+/// precedes it. The `#[cfg(test)] for_test` escape hatch (`agent/
+/// launch.rs`) does not call `from_validated` at all — it constructs the
+/// tuple struct directly — so it does not need excluding here; measured,
+/// not assumed.
+#[test]
+fn verified_cwd_from_validated_has_exactly_one_production_call_site() {
+    const NEEDLE: &str = "VerifiedCwd::from_validated(";
+    let root = src_root();
+    let mut call_sites = Vec::new();
+    for file in production_files(&root) {
+        let source = fs::read_to_string(&file).unwrap_or_else(|e| panic!("reading {file:?}: {e}"));
+        let stripped = strip_full_line_comments(&source);
+        let occurrences = stripped.matches(NEEDLE).count();
+        for _ in 0..occurrences {
+            call_sites.push(
+                file.strip_prefix(&root)
+                    .unwrap_or(&file)
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+    assert_eq!(
+        call_sites,
+        vec!["agent/launch.rs".to_string()],
+        "VerifiedCwd::from_validated must have exactly one production call site, in \
+         agent/launch.rs's own validated-containment path — a second one anywhere, in a second \
+         file or a second time in this one, is exactly the laundering \
+         `approval::coordinator`'s own module doc calls structurally unreachable; found \
+         {call_sites:?}"
+    );
+}
+
+/// **Required alongside the assertion above, same commit, same reason.**
+/// Confirms the other half of the guarantee: `receive_proposal`'s own
+/// signature still takes the *verified* type, not the raw `&Path` an
+/// adapter's own `CommandProposal::cwd()` is — both are byte-identical at
+/// runtime, so only the type tells them apart, and this is the one place
+/// that could silently stop telling them apart without touching
+/// `from_validated` at all, which is exactly why the assertion above
+/// cannot catch it alone.
+#[test]
+fn receive_proposal_still_requires_a_verified_cwd_not_a_raw_path() {
+    let root = src_root();
+    let path = root.join("approval/coordinator.rs");
+    let source = fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"));
+    let stripped = strip_full_line_comments(&source);
+    let signature_start = stripped
+        .find("pub fn receive_proposal(")
+        .expect("approval::coordinator::receive_proposal must exist");
+    let signature_end = stripped[signature_start..]
+        .find(") -> ReceiveOutcome")
+        .map(|offset| signature_start + offset)
+        .expect("receive_proposal's signature must still end in `) -> ReceiveOutcome`");
+    let signature = &stripped[signature_start..signature_end];
+    assert!(
+        signature.contains("verified_cwd: &VerifiedCwd"),
+        "receive_proposal's verified-cwd parameter must stay `&VerifiedCwd`, not a raw `&Path` \
+         or anything else — widening it is the other half of the regression \
+         `verified_cwd_from_validated_has_exactly_one_production_call_site` cannot see by \
+         itself; signature was: {signature:?}"
+    );
 }

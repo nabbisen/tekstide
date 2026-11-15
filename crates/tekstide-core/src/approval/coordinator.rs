@@ -28,7 +28,18 @@
 //!    constructor accepting an arbitrary path, so a caller cannot even
 //!    typecheck passing `proposal.cwd()` here by mistake -- the only way
 //!    to obtain one is to have already gone through
-//!    `agent::AgentRunLaunchValidator::validate`.
+//!    `agent::AgentRunLaunchValidator::validate`. **The import this
+//!    requires, `use crate::agent::VerifiedCwd`, is permanent** --
+//!    RFC-077 found no way to cut it without widening `from_validated`'s
+//!    visibility past `agent/launch.rs`, which would let this module mint
+//!    a `VerifiedCwd` itself and defeat the point; see `ARCHITECTURE.md`'s
+//!    seventh invariant, "a privilege-bearing type's dependency is the
+//!    privilege," and `rfcs/handoffs/077-the-capability-split/
+//!    staging-derived-from-measured-cut-cost.md`'s "Stage 6 does not
+//!    happen as scoped." The two capability-gate tests named there --
+//!    `verified_cwd_from_validated_has_exactly_one_production_call_site`
+//!    and `receive_proposal_still_requires_a_verified_cwd_not_a_raw_path`
+//!    -- are what keep that true after this comment is out of date.
 //! 2. **A repeated proposal id is rejected outright, not resolved
 //!    inertly.** Response 114 Required 1: an earlier version of this
 //!    module returned the *original*, possibly-already-decided request on

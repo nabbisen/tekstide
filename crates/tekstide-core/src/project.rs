@@ -61,5 +61,29 @@ pub use watch::{
     WatchNotice, WatchRefusal, WatchScope, WatchState, WatchedDirectory, desired_directories,
 };
 
+/// RFC-077 Stage 7: the crate's one public entry point for reading a
+/// transcript window. `transcript::reader::read_window` takes the
+/// boundary-scanning function as a parameter rather than naming
+/// `runtime` itself (see that module's own doc comment); this is the
+/// one place that supplies the real one, `runtime::terminal::next_token_len`,
+/// because `project` is the module with an edge to both `transcript` and
+/// `runtime` already -- adding this wiring here names neither module for
+/// the first time. Callers outside this crate used to reach
+/// `transcript::read_window` directly; they now come through here instead
+/// (a published-API change, not a behavior change -- the same file, same
+/// bytes, same resynchronization).
+pub fn read_transcript_window(
+    storage_path: &crate::transcript::TranscriptStoragePath,
+    policy: crate::transcript::TranscriptReadPolicy,
+    still_being_written: bool,
+) -> Result<crate::transcript::TranscriptWindow, crate::transcript::TranscriptReadError> {
+    crate::transcript::read_window(
+        storage_path,
+        policy,
+        still_being_written,
+        crate::runtime::terminal::next_token_len,
+    )
+}
+
 #[cfg(test)]
 mod tests;

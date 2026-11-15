@@ -32,10 +32,9 @@ use serde_json::Value;
 
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunOrigin, AgentRunStatus, ApprovalId,
-    AuditEventId, ChangeSetId, DomainTimestamp, RUN_PROMPT_SUMMARY_MAX_CHARS,
+    AuditEventId, ChangeSetId, DomainTimestamp, ProjectId, RUN_PROMPT_SUMMARY_MAX_CHARS,
     RUN_RECORD_MAX_IDS_PER_KIND, RecordBounds, RunClassification, RunEnding,
 };
-use crate::project::ProjectId;
 
 pub const RUN_RECORD_FILE_NAME: &str = "run.json";
 const RUN_RECORD_TEMP_FILE_NAME: &str = "run.json.tmp";

@@ -7,7 +7,7 @@ use crate::domain::AgentRunId;
 use crate::project::{ProjectId, ProjectSession};
 use crate::runtime::terminal::{
     TerminalLaunchSpec, TerminalRuntime, TerminalRuntimeHandle, TerminalSecurityParser,
-    wait_for_shell_ready,
+    next_token_len, wait_for_shell_ready,
 };
 use crate::transcript::{
     BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptPathRequest, TranscriptPathResolver,
@@ -79,8 +79,13 @@ fn a_real_written_transcript_is_read_back_unaltered_and_needs_no_resynchronizati
     let bytes = b"tekstide$ echo hello\nhello\ntekstide$ ".to_vec();
     write_transcript(&storage_path, &bytes);
 
-    let window = read_window(&storage_path, TranscriptReadPolicy::default(), false)
-        .expect("read should succeed");
+    let window = read_window(
+        &storage_path,
+        TranscriptReadPolicy::default(),
+        false,
+        next_token_len,
+    )
+    .expect("read should succeed");
 
     assert_eq!(window.content(), bytes.as_slice());
     assert_eq!(window.total_len(), bytes.len() as u64);
@@ -99,8 +104,20 @@ fn still_being_written_threads_into_the_returned_variant() {
     let (_temp, storage_path) = resolved_storage_path("still-writing");
     write_transcript(&storage_path, b"partial output so far");
 
-    let complete = read_window(&storage_path, TranscriptReadPolicy::default(), false).unwrap();
-    let still_writing = read_window(&storage_path, TranscriptReadPolicy::default(), true).unwrap();
+    let complete = read_window(
+        &storage_path,
+        TranscriptReadPolicy::default(),
+        false,
+        next_token_len,
+    )
+    .unwrap();
+    let still_writing = read_window(
+        &storage_path,
+        TranscriptReadPolicy::default(),
+        true,
+        next_token_len,
+    )
+    .unwrap();
 
     assert!(matches!(complete, TranscriptWindow::Complete { .. }));
     assert!(matches!(
@@ -147,7 +164,7 @@ fn a_window_starting_inside_a_real_control_sequence_classifies_identically_to_th
     let parser = TerminalSecurityParser;
     let whole = parser.parse(&captured);
 
-    let delivered_start = resynchronize(&captured, naive_split);
+    let delivered_start = resynchronize(&captured, naive_split, next_token_len);
     let resynchronized_split = [
         parser.parse(&captured[..delivered_start]),
         parser.parse(&captured[delivered_start..]),
@@ -223,7 +240,7 @@ fn resynchronization_never_splits_a_utf8_scalar() {
     // Target the second byte of the scalar directly -- the raw offset a
     // window boundary could land on if it were not resynchronized.
     let target_start = e_acute_offset + 1;
-    let delivered_start = resynchronize(&bytes, target_start);
+    let delivered_start = resynchronize(&bytes, target_start, next_token_len);
 
     assert!(
         delivered_start <= e_acute_offset || delivered_start > e_acute_offset + 1,
@@ -247,7 +264,13 @@ fn raw_bytes_survive_the_reader_including_bidi_and_format_characters() {
     bytes.extend_from_slice(b" after");
     write_transcript(&storage_path, &bytes);
 
-    let window = read_window(&storage_path, TranscriptReadPolicy::default(), false).unwrap();
+    let window = read_window(
+        &storage_path,
+        TranscriptReadPolicy::default(),
+        false,
+        next_token_len,
+    )
+    .unwrap();
 
     assert_eq!(
         window.content(),
@@ -341,7 +364,12 @@ fn a_transcript_larger_than_the_scan_limit_is_refused_not_silently_windowed() {
     let oversized = vec![b'a'; (MAX_SCAN_BYTES + 1) as usize];
     fs::write(storage_path.transcript_file(), &oversized).unwrap();
 
-    let result = read_window(&storage_path, TranscriptReadPolicy::default(), false);
+    let result = read_window(
+        &storage_path,
+        TranscriptReadPolicy::default(),
+        false,
+        next_token_len,
+    );
 
     assert_eq!(
         result,
@@ -366,7 +394,12 @@ fn an_unsafe_storage_path_is_refused_before_any_read() {
         outside_state_root,
     );
 
-    let result = read_window(&forged, TranscriptReadPolicy::default(), false);
+    let result = read_window(
+        &forged,
+        TranscriptReadPolicy::default(),
+        false,
+        next_token_len,
+    );
 
     assert_eq!(
         result,

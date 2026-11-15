@@ -3,8 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::domain::AgentRunId;
-use crate::project::ProjectId;
+use crate::domain::{AgentRunId, ProjectId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptPathRequest {

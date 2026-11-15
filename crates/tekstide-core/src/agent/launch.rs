@@ -138,6 +138,18 @@ impl AgentRunLaunchRequest {
 /// is already having gone through this validator, the same parse-don't-
 /// validate discipline `approval::protocol::CommandProposal::decode`
 /// already established for untrusted wire data.
+///
+/// **`approval -> agent` is permanent (RFC-077, 2026-11-16).** `approval`
+/// must name this type and this module must own minting it, and in a
+/// single crate those two requirements are jointly satisfiable only by a
+/// dependency from the former to the latter -- see `ARCHITECTURE.md`'s
+/// seventh invariant, "a privilege-bearing type's dependency is the
+/// privilege," and `rfcs/handoffs/077-the-capability-split/
+/// staging-derived-from-measured-cut-cost.md`'s "Stage 6 does not happen
+/// as scoped." `from_validated` below having exactly one production call
+/// site, immediately after the containment check, is a capability-gate
+/// test (`verified_cwd_from_validated_has_exactly_one_production_call_site`),
+/// not only this comment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedCwd(PathBuf);
 
@@ -146,6 +158,12 @@ impl VerifiedCwd {
         &self.0
     }
 
+    /// The crate's one minting path. `pub(self)`-equivalent (private to
+    /// this file, not merely this module) is deliberate: `pub(crate)`
+    /// would let any `tekstide-core` module -- `approval::coordinator`
+    /// included -- construct a `VerifiedCwd` from an unverified `&Path`,
+    /// which is the exact laundering this type exists to make
+    /// unreachable. See this type's own doc comment above.
     fn from_validated(path: PathBuf) -> Self {
         Self(path)
     }

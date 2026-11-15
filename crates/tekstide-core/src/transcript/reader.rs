@@ -12,10 +12,15 @@
 //! chunking where every byte arrives; a tail window drops the prefix,
 //! which is a different operation P4 says nothing about. [`read_window`]
 //! resynchronizes: it scans from the transcript's real start (never from
-//! the raw requested offset), using [`next_token_len`] -- the exact
-//! boundary logic `runtime::terminal::security::parser`'s own `parse`
-//! loop already uses, reused rather than duplicated -- and reports the
-//! delivered start offset, which may differ from the requested one.
+//! the raw requested offset), using a token-boundary function the caller
+//! supplies -- in production, `runtime::terminal::next_token_len`, wired
+//! in by `project::read_transcript_window` (RFC-077 Stage 7: `project`
+//! already has an edge to both `transcript` and `runtime`, so it is the
+//! one module that can name both without creating a new one; this module
+//! takes the function rather than naming `runtime` itself, to keep the
+//! boundary logic reused rather than duplicated without this module
+//! having to know where it lives) -- and reports the delivered start
+//! offset, which may differ from the requested one.
 //!
 //! **D3 -- raw bytes out.** This module never calls
 //! `text_safety::quote_untrusted`. Escaping is `crates/tekstide`'s job,
@@ -34,8 +39,6 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
-
-use crate::runtime::terminal::next_token_len;
 
 use super::TranscriptStoragePath;
 
@@ -247,10 +250,18 @@ impl std::error::Error for TranscriptReadError {}
 /// "optimization" meant to avoid it. The cost this buys is a bounded
 /// (`<= MAX_SCAN_BYTES`) linear scan on every read, not an unbounded
 /// one -- see `MAX_SCAN_BYTES` and the refusal below for what bounds it.
-pub fn read_window(
+///
+/// `token_len` is this module's own D2 boundary function, injected
+/// rather than named directly (RFC-077 Stage 7) -- see this module's
+/// own doc comment. `pub(crate)`, not `pub`: the public entry point is
+/// `project::read_transcript_window`, which supplies the real one and
+/// is the only thing outside this crate that should be able to read a
+/// transcript window at all.
+pub(crate) fn read_window(
     storage_path: &TranscriptStoragePath,
     policy: TranscriptReadPolicy,
     still_being_written: bool,
+    token_len: impl Fn(&[u8]) -> usize,
 ) -> Result<TranscriptWindow, TranscriptReadError> {
     if !storage_path.is_safe_for_read() {
         return Err(TranscriptReadError::new(
@@ -298,7 +309,7 @@ pub fn read_window(
     })?;
 
     let requested_start = (buffer.len() as u64).saturating_sub(policy.window_bytes);
-    let delivered_start = resynchronize(&buffer, requested_start as usize) as u64;
+    let delivered_start = resynchronize(&buffer, requested_start as usize, &token_len) as u64;
     let content = buffer[delivered_start as usize..].to_vec();
 
     Ok(if still_being_written {
@@ -324,13 +335,14 @@ pub fn read_window(
 /// Walks token boundaries from **the buffer's own real start** --
 /// `buffer` is always read from byte 0 of the file, never from a raw
 /// offset into the middle of it, so there is no discarded prefix to be
-/// ambiguous about. Each call to [`next_token_len`] consumes exactly one
+/// ambiguous about. Each call to `token_len` consumes exactly one
 /// complete token (a control sequence, a UTF-8 scalar, or a run of
 /// plain ASCII), the same unit `runtime::terminal::security::parser`'s
-/// own `parse` loop advances by -- so every offset this loop visits is a
-/// position where no sequence is open and no UTF-8 scalar is split,
-/// genuinely, not by heuristic. The first such offset at or past
-/// `target_start` is returned.
+/// own `parse` loop advances by -- in production this is the very same
+/// function, `next_token_len`, passed down from `read_window` -- so
+/// every offset this loop visits is a position where no sequence is
+/// open and no UTF-8 scalar is split, genuinely, not by heuristic. The
+/// first such offset at or past `target_start` is returned.
 ///
 /// This is the "honest fallback" the window-boundary handoff names --
 /// scanning from the real start rather than guessing at a partial
@@ -340,10 +352,10 @@ pub fn read_window(
 /// security-critical property this codebase cannot yet prove correct
 /// for OSC/DCS string-control edge cases is a worse trade than a bounded
 /// (`&lt;= MAX_SCAN_BYTES`) linear scan.
-fn resynchronize(buffer: &[u8], target_start: usize) -> usize {
+fn resynchronize(buffer: &[u8], target_start: usize, token_len: impl Fn(&[u8]) -> usize) -> usize {
     let mut offset = 0;
     while offset < target_start && offset < buffer.len() {
-        offset += next_token_len(&buffer[offset..]);
+        offset += token_len(&buffer[offset..]);
     }
     offset.min(buffer.len())
 }

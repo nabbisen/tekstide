@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use super::run_record::{RUN_RECORD_FILE_NAME, is_run_record_file_name};
-use crate::project::ProjectId;
+use crate::domain::ProjectId;
 
 const TRANSCRIPTS_DIRECTORY: &str = "transcripts";
 const TRANSCRIPT_FILE_NAME: &str = "transcript.log";
