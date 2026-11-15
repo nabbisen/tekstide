@@ -124,6 +124,48 @@ in increasing order of what they ask the product to take on:
 
 **No bridge code until the owner picks one.** (a) and (b) are implementation; (c) is a new RFC.
 
+#### B1-0 reconsidered, 2026-11-15 — route (a) checked against the owner's own philosophy, by the reviewer who recommended it
+
+The owner asked that the chosen option be verified against *"finally clean, safe, robust; and
+users must not be able to misunderstand."* **It does not pass cleanly, and the reason is that the
+recommendation weighed the wrong subject.** Recorded here rather than quietly revised.
+
+**What (a) actually asks of a user.** Put a **one-year OAuth token for their entire Claude
+subscription** into their shell profile (`export CLAUDE_CODE_OAUTH_TOKEN=…`), then name it in a
+Tekstide profile's allowlist.
+
+- **It is the broadest of the three options on the machine, not the narrowest.** A token exported
+  in a shell profile is inherited by **every process that user launches**, forever. (c) — which
+  the original note recommended against — would put it in one file under this product's own state
+  root, reachable by this product alone.
+- **The misunderstanding it invites is exact and inverted**: *"Tekstide doesn't store my token, so
+  this is the safe option."* The opposite is true of the machine as a whole. A user who reads
+  "Tekstide stores nothing" and concludes "therefore less exposure" has been misled by a true
+  sentence, which is the failure mode this project names most often.
+- **Robust: no.** Rotation is manual and invisible. When the token expires or is re-minted, a
+  Tekstide `AgentRun` fails somewhere downstream, and nothing in the product knows why.
+- **Clean: for the product, yes.** It implements a policy the types already declare and adds no
+  secret-handling code. Code that does not exist cannot leak — that is a real property and it is
+  why (a) was recommended. It is a property of the **codebase**, not of the user.
+
+**And a fourth option the original note did not offer.** The credential problem exists *because*
+B0 scoped `HOME` and `CLAUDE_CONFIG_DIR` away from the user's real, already-authenticated install.
+**(d) do not scope the credential directory at all**: the user's existing `claude` login works,
+no token is minted, exported, stored or forwarded, and nothing new holds a secret anywhere. Its
+cost is the other half of the trade — the CLI reads the user's real configuration, which PR-069-A
+found can carry the user's own hook and permission rules, whose interaction with the bridge's own
+registered hook is **documented as merging** but was never observed.
+
+**What this does not change.** (c) remains a new RFC, not a slice: storage, lifetime, revocation
+and purge are each threat-model subjects, and the product has never held a user secret. Note
+only that the pieces it would need — a state root it owns, a purge path, an audit store — already
+exist, so "the product has never done this" is a statement about scope, not about capability.
+
+**Open for the owner**, and not the reviewer's to settle: whether the goal is *the product holds
+no secret* (a), *the secret is held in one narrow place the product controls* (c), or *no new
+secret exists at all* (d). The first is what was recommended; on the owner's own stated philosophy
+it reads as the weakest of the three.
+
 #### B1-1 — the spawn environment, once the route is chosen
 
 `spawn_adapter` currently builds `env_clear()` plus seven fixed entries. It gains the scoped
