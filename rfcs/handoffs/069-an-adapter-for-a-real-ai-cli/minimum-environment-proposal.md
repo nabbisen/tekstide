@@ -197,3 +197,73 @@ written to `~/.local/bin`, `~/.local/share/claude/`, or `PATH`; every write this
 landed under a scoped `/tmp` directory this session created and owns. All work happened in
 `/tmp/t684-cli-env-probe/` and its own subdirectories, never in this repository or any real
 project directory. Nothing under `crates/` changed, and no `.rs` file was touched.
+
+---
+
+## Addendum, 2026-11-15 — the reviewer, from documentation alone. §4's three questions are answered, and the escalation they would have needed is not required
+
+The owner permitted a measurement that operates the CLI past the first-run screen, to settle §4.
+**It is not needed.** All three questions are answered by
+<https://code.claude.com/docs/en/authentication.md>, read rather than operated — no keystroke, no
+session, no quota.
+
+### §4.1 — is an authenticated session reachable from a scoped `HOME`?
+
+**Yes, by two documented routes that need no browser and no interactive login.**
+
+- **`CLAUDE_CODE_OAUTH_TOKEN`** — *"a one-year OAuth token"* from `claude setup-token`, intended
+  for *"CI pipelines, scripts, or other environments where interactive browser login isn't
+  available."* Set as an environment variable; nothing on disk is required.
+- **`ANTHROPIC_API_KEY`** — skips the login prompt, but **not silently**: *"In interactive mode,
+  you are prompted once to approve or decline the key, and your choice is remembered."* A bridge
+  running an interactive session would meet that prompt once per fresh config directory.
+
+For a bridge, `CLAUDE_CODE_OAUTH_TOKEN` is the cleaner route: no approval prompt is documented for
+it. Both rank above a `/login` credential in the stated precedence order.
+
+### §4.2 — would `ANTHROPIC_API_KEY` alone change the picture?
+
+Answered above: it authenticates, with a one-time interactive approval. Note the trap in the same
+page — *"If you have an active Claude subscription but also have `ANTHROPIC_API_KEY` set… Claude
+Code uses the API key once you approve it"* — so a bridge that sets it would silently change which
+account a user's runs bill to. That is a disclosure question for B2, not a blocker.
+
+### §4.3 — what does the on-disk auth artifact look like?
+
+`~/.claude/.credentials.json`, mode `0600` on Linux. **And the fact that matters more than the
+path**:
+
+> *"If you've set the `CLAUDE_CONFIG_DIR` environment variable, Claude Code keeps the
+> `.credentials.json` file under that directory instead… and keys the macOS Keychain entry to that
+> directory too, so a session with a different `CLAUDE_CONFIG_DIR` reads a different entry."*
+
+### What this changes about the proposal
+
+**`CLAUDE_CONFIG_DIR` is a better instrument than a scoped `HOME` alone, and the two are
+complementary rather than alternatives.**
+
+- Scoped `HOME` is still required — §1 established that, and the reviewer's own
+  `env -i node -e 'require("os").homedir()'` check confirmed that leaving it unset grants the real
+  home rather than withholding it.
+- `CLAUDE_CONFIG_DIR` scopes *the CLI's own configuration and credential directory* explicitly, by
+  a documented variable whose stated purpose is exactly this — the page's own worked example is
+  keeping a work account and a personal account apart on one machine.
+
+So the recommendation becomes: **a fresh scoped `HOME`, plus `CLAUDE_CONFIG_DIR` pointing inside
+it, plus `CLAUDE_CODE_OAUTH_TOKEN` for authentication.** Each of the three is documented, none
+requires the real home, and the re-onboarding cost §3 named is the one thing a seeded template
+still has to address.
+
+### One thing this addendum does not establish
+
+Whether a *sign-in that has already happened elsewhere* can be carried into a scoped config
+directory without copying credential material. The documented route is the reverse — mint a token
+deliberately (`claude setup-token`) and pass it in — which is also the route that never copies
+anything out of the user's own home. **Nobody should be copying `.credentials.json`**, and this
+addendum is not a step toward doing so.
+
+### Why this was read rather than run
+
+The permission to operate the CLI was granted and spending it would have produced a worse answer:
+an observation of one machine's behaviour, where the documentation states the contract. The
+escalation stays unspent and available if a later question genuinely needs it.
