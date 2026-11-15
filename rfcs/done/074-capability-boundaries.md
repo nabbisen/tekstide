@@ -193,6 +193,29 @@ a T2 that grows because it becomes the only composer. The second is tolerable pr
 T2 is the one tier where a reviewer expects breadth; the first is bounded by the
 consumer-owned-trait rule, which keeps each trait as small as its single caller needs.
 
+**Amended 2026-11-15, review 681: "orchestration supplies B" names the supply site, not the impl
+site.** RFC-077 Stage 5 raised the question rather than quietly choosing, and the answer is worth
+fixing before a later stage asks it again.
+
+Move 2 constrains two things and not a third:
+
+- **The trait is the consumer's.** Declared in A, with only the methods A calls — never a mirror
+  of B's API. Stage 5's `approval::CommandAuditRecorder` has exactly the five methods
+  `coordinator.rs` called.
+- **The consumer never names B's concrete type.** At Stage 5 the provider is constructed in
+  `crates/tekstide/src/main.rs` and handed down; `approval` takes `&mut impl CommandAuditRecorder`.
+
+**Where the `impl Trait for Type` block is physically written is not constrained by this decision**
+and should not be. Inside one crate the orphan rule does not bind, so the choice is free — and it
+is not neutral to the graph: the module holding the impl acquires a reference to the other. It
+should therefore be placed on an edge that **already exists**.
+
+Stage 5 is the worked example: putting the impl in `project` would have created `project -> audit`
+and pulled `audit` straight back into the component through `project`, undoing the cut. Placing it
+in `audit/integration.rs`, where an `audit -> approval` edge already existed, adds nothing. That
+the *provider* implements the *consumer's* interface is the ordinary shape of dependency
+inversion, and it is what makes the cut real rather than cosmetic.
+
 ### D6–D8 — moved to RFC-077 by the 2026-11-12 split
 
 The rule that generates the capability list (D6), the `project/` split itself (D7) and the staging
