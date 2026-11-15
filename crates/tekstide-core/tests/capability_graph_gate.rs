@@ -48,6 +48,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use tekstide_core::approval::{
+    AcceptedProposal, ApprovalCoordinator, ApprovalQueueLimits, ReceiveOutcome,
+};
+use tekstide_core::audit::AuditCoordinator;
+use tekstide_core::domain::{AgentRunId, ProjectId};
+
 /// The ratcheted bound (RFC-074 D1.1). Started at 10, PR-074-A's own
 /// measured value — a ceiling, not a goal. **Lowered to 9 by PR-074-B
 /// Stage 1** (`ProjectId` moved to `domain`). **Lowered to 8 by Stage 2**
@@ -613,14 +619,22 @@ fn verified_cwd_from_validated_has_exactly_one_production_call_site() {
     );
 }
 
-/// **Required alongside the assertion above, same commit, same reason.**
-/// Confirms the other half of the guarantee: `receive_proposal`'s own
-/// signature still takes the *verified* type, not the raw `&Path` an
-/// adapter's own `CommandProposal::cwd()` is — both are byte-identical at
-/// runtime, so only the type tells them apart, and this is the one place
-/// that could silently stop telling them apart without touching
-/// `from_validated` at all, which is exactly why the assertion above
-/// cannot catch it alone.
+/// **Required alongside the assertion above, same commit, same reason --
+/// kept for its message, not for its coverage (review 683 Required).**
+/// This pins the *spelling* `&VerifiedCwd`, not the type's identity: a
+/// production commit that re-points the import --
+/// `use crate::domain::SomeOtherType as VerifiedCwd;`, or a local `type
+/// VerifiedCwd = PathBuf;` -- leaves this text unchanged, leaves guard 1
+/// unchanged (`from_validated`'s one call site is untouched), cuts
+/// `approval -> agent` for real, and improves the bound. **The compile-time
+/// const below this function is what actually stops that regression** --
+/// confirmed in a scratch crate before relying on it: an `impl Trait`
+/// argument does not block the fn-pointer coercion, because the generic is
+/// inferred from the pointer's own expected type, so this is not a gap
+/// `impl CommandAuditRecorder` happens to leave open, it is a property the
+/// language gives for free once asked by path rather than by name. This
+/// assertion stays because its failure message names the exact substring
+/// that moved, which the compile error below does not.
 #[test]
 fn receive_proposal_still_requires_a_verified_cwd_not_a_raw_path() {
     let root = src_root();
@@ -642,4 +656,56 @@ fn receive_proposal_still_requires_a_verified_cwd_not_a_raw_path() {
          `verified_cwd_from_validated_has_exactly_one_production_call_site` cannot see by \
          itself; signature was: {signature:?}"
     );
+}
+
+/// **Review 683 Required: the actual guard.** This is an integration test,
+/// so `tekstide_core::agent` is outside the graph scan and costs the
+/// measurement nothing — unlike a production file naming it, which would
+/// recreate the edge Stage 7 cut. Naming `VerifiedCwd` **by its full path**
+/// is the point: `approval::coordinator`'s own `use crate::agent::
+/// VerifiedCwd` could be re-pointed to a same-named alias or a local `type`
+/// without changing a single byte of the signature text the assertion
+/// above reads, but it cannot change what this path resolves to. If
+/// `receive_proposal`'s `verified_cwd` parameter is ever anything other
+/// than the real `agent::launch::VerifiedCwd`, this fails to compile
+/// (`E0308`) — not a test that can report a failure and let the build
+/// continue, which is deliberate: the property is type identity, and type
+/// identity is the compiler's to hold, not a string's.
+///
+/// **A bare `fn(...) = ApprovalCoordinator::receive_proposal` const, the
+/// first shape tried, does not compile here** — not because `impl Trait`
+/// blocks it (confirmed separately, in a scratch crate, that it does not
+/// in general) but because `AuditCoordinator<'a>` carries its own lifetime
+/// parameter: rustc's inference for the method's hidden `CommandAuditRecorder`
+/// type parameter cannot resolve against a higher-ranked fn-pointer type
+/// whose own region binds a type that is itself region-parameterized
+/// (`E0308`, "one type is more general than the other" — confirmed by
+/// isolating the exact failure in a second scratch crate before writing
+/// this comment). A plain function that *calls* `receive_proposal` with
+/// named, concrete parameter types sidesteps that inference path entirely:
+/// the call itself still only typechecks if every argument's type is
+/// exactly right, including `verified_cwd`'s, so the property this guard
+/// exists for is unchanged — only the mechanism that enforces it is.
+#[allow(dead_code, clippy::too_many_arguments)]
+fn receive_proposal_verified_cwd_type_pin<'a>(
+    coordinator: &'a mut ApprovalCoordinator,
+    project_id: ProjectId,
+    agent_run_id: AgentRunId,
+    verified_cwd: &'a tekstide_core::agent::VerifiedCwd,
+    project_root: &'a Path,
+    state_root: &'a Path,
+    accepted: AcceptedProposal,
+    limits: ApprovalQueueLimits,
+    audit: &'a mut AuditCoordinator<'a>,
+) -> ReceiveOutcome {
+    coordinator.receive_proposal(
+        project_id,
+        agent_run_id,
+        verified_cwd,
+        project_root,
+        state_root,
+        accepted,
+        limits,
+        audit,
+    )
 }
