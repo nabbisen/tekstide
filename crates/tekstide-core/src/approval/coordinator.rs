@@ -66,9 +66,8 @@ use std::path::Path;
 use crate::agent::VerifiedCwd;
 use crate::domain::{
     AgentRunId, ApprovalDecision, ApprovalId, ApprovalRequest, AuditObservationStatus,
-    AuditOperationId, CommandDecisionActionKind, RiskLevel,
+    AuditOperationId, CommandDecisionActionKind, ProjectId, RiskLevel,
 };
-use crate::project::ProjectId;
 
 use super::channel::{AcceptedProposal, ApprovalChannelError};
 use super::protocol::{CommandDecision, DecisionOutcome, PROTOCOL_VERSION, ProposalId};
