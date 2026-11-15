@@ -1614,9 +1614,18 @@ fn edit_and_approve_audit_block_leaves_the_stored_request_describing_the_origina
     let DecideOutcome::AuditBlocked(error) = outcome else {
         panic!("must be blocked -- got {outcome:?}");
     };
+    // RFC-077 Stage 5: `approval::AuditIntegrationFailure` carries the
+    // real `AuditIntegrationError`'s own `Debug` text rather than the
+    // concrete type (which `approval` no longer names) -- checked here
+    // against the same text that type's own `Debug` would produce, so
+    // this still proves the underlying failure was the one expected,
+    // not merely that *some* failure occurred.
     assert_eq!(
-        error,
-        AuditIntegrationError::RequiredAuditUnavailable(AuditStoreErrorReason::StorageFull)
+        error.reason(),
+        format!(
+            "{:?}",
+            AuditIntegrationError::RequiredAuditUnavailable(AuditStoreErrorReason::StorageFull)
+        )
     );
     // Nothing durable was written for the blocked authorization attempt --
     // only the one successful `command_request` write from receipt.

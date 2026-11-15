@@ -7,6 +7,10 @@ use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, ApprovalId, AuditEventId, AuditOperationId, RiskLevel,
     TerminalId,
 };
+/// RFC-077 Stage 5: these two moved to `domain::audit` -- re-exported
+/// from here unchanged so `tekstide_core::audit::{AuditObservationStatus,
+/// CommandDecisionActionKind}` still resolves for every existing caller.
+pub use crate::domain::{AuditObservationStatus, CommandDecisionActionKind};
 use crate::project::root::{FileAccessBlockedReason, FileAccessError};
 use crate::project::{
     ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
@@ -176,13 +180,6 @@ impl AuditHealth {
     pub fn record_recovery(&mut self, disclosure: AuditRecoveryDisclosure) {
         self.last_recovery = Some(disclosure);
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AuditObservationStatus {
-    NotRequired,
-    Persisted,
-    Degraded,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1210,6 +1207,107 @@ impl<'a> AuditCoordinator<'a> {
     }
 }
 
+/// RFC-077 Stage 5, D5 move 2: `approval` is the one consumer of these
+/// five methods outside `audit` itself, and it no longer names
+/// `AuditCoordinator` directly -- it defines
+/// [`crate::approval::CommandAuditRecorder`] for the five questions it
+/// asks, and this impl is the provider orchestration supplies. Every
+/// other caller of these same inherent methods (the ones below, called
+/// directly as `AuditCoordinator::method(...)` from `tekstide::shell.rs`
+/// and elsewhere) is unaffected -- this impl exists for the one consumer
+/// that was reaching out of the module, not to replace the inherent
+/// API.
+impl crate::approval::CommandAuditRecorder for AuditCoordinator<'_> {
+    fn record_command_request(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus {
+        AuditCoordinator::record_command_request(
+            self,
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+        )
+    }
+
+    fn record_cwd_mismatch_anomaly(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus {
+        AuditCoordinator::record_cwd_mismatch_anomaly(
+            self,
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+        )
+    }
+
+    fn authorize_command_decision(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+        action_kind: CommandDecisionActionKind,
+    ) -> Result<AuditOperationId, crate::approval::AuditIntegrationFailure> {
+        AuditCoordinator::authorize_command_decision(
+            self,
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+            action_kind,
+        )
+        .map_err(|error| crate::approval::AuditIntegrationFailure::new(format!("{error:?}")))
+    }
+
+    fn record_command_decision_outcome(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+        action_kind: CommandDecisionActionKind,
+        operation_id: AuditOperationId,
+        delivered: bool,
+    ) -> AuditObservationStatus {
+        AuditCoordinator::record_command_decision_outcome(
+            self,
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+            action_kind,
+            operation_id,
+            delivered,
+        )
+    }
+
+    fn record_command_reject(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus {
+        AuditCoordinator::record_command_reject(
+            self,
+            project_id,
+            agent_run_id,
+            approval_id,
+            risk_level,
+        )
+    }
+}
+
 fn trust_record(
     project: &ProjectSession,
     outcome: AuditOutcome,
@@ -1475,14 +1573,9 @@ fn managed_process_record(
 
 /// The two decisions that need an `operation_id` (RFC-021's
 /// authorize-then-apply phase). `CommandReject` is deliberately not a
-/// variant here -- it never has an `operation_id`, so
-/// `record_command_reject` does not take this type at all.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CommandDecisionActionKind {
-    Approve,
-    EditAndApprove,
-}
-
+/// variant of `CommandDecisionActionKind` -- it never has an
+/// `operation_id`, so `record_command_reject` does not take this type at
+/// all.
 impl From<CommandDecisionActionKind> for AuditActionKind {
     fn from(kind: CommandDecisionActionKind) -> Self {
         match kind {

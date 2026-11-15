@@ -64,13 +64,90 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::agent::VerifiedCwd;
-use crate::audit::{AuditCoordinator, AuditIntegrationError, CommandDecisionActionKind};
-use crate::domain::{AgentRunId, ApprovalDecision, ApprovalRequest};
+use crate::domain::{
+    AgentRunId, ApprovalDecision, ApprovalId, ApprovalRequest, AuditObservationStatus,
+    AuditOperationId, CommandDecisionActionKind, RiskLevel,
+};
 use crate::project::ProjectId;
 
 use super::channel::{AcceptedProposal, ApprovalChannelError};
 use super::protocol::{CommandDecision, DecisionOutcome, PROTOCOL_VERSION, ProposalId};
 use super::risk;
+
+/// RFC-077 Stage 5, D5 move 2: the five questions this module asks of
+/// whatever records a command's audit trail -- named identically to the
+/// inherent methods they replace, never a mirror of
+/// `audit::AuditCoordinator`'s own wider API. `audit::AuditCoordinator`
+/// is the provider orchestration supplies (its own `impl`, in
+/// `audit/integration.rs`, next to the methods it delegates to).
+pub trait CommandAuditRecorder {
+    fn record_command_request(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus;
+
+    fn record_cwd_mismatch_anomaly(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus;
+
+    fn authorize_command_decision(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+        action_kind: CommandDecisionActionKind,
+    ) -> Result<AuditOperationId, AuditIntegrationFailure>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_command_decision_outcome(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+        action_kind: CommandDecisionActionKind,
+        operation_id: AuditOperationId,
+        delivered: bool,
+    ) -> AuditObservationStatus;
+
+    fn record_command_reject(
+        &mut self,
+        project_id: ProjectId,
+        agent_run_id: Option<AgentRunId>,
+        approval_id: ApprovalId,
+        risk_level: RiskLevel,
+    ) -> AuditObservationStatus;
+}
+
+/// RFC-077 Stage 5: this module's own description of "audit integration
+/// failed," carrying the real `audit::AuditIntegrationError`'s own
+/// `Debug` text rather than the concrete type -- which itself depends on
+/// `project::ProjectAgentRuntimeLaunchError`, a dependency this module
+/// otherwise has none of. Loses no observable behaviour: nothing
+/// downstream of [`DecideOutcome::AuditBlocked`] inspects this value's
+/// structure today (`tekstide::shell.rs`'s own match treats every
+/// non-`Decided` outcome identically), confirmed by reading that call
+/// site before relying on it, not assumed from the type's own obscurity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditIntegrationFailure(String);
+
+impl AuditIntegrationFailure {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self(reason.into())
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.0
+    }
+}
 
 /// The `requested_action_kind` recorded on every `ApprovalRequest` this
 /// coordinator creates. RFC-021 defines exactly one proposal kind (a
@@ -100,7 +177,7 @@ pub enum ReceiveOutcome {
         /// carried here so a caller can still observe degraded audit
         /// health without this module returning an error for a condition
         /// it does not treat as fatal.
-        command_request_audit: crate::audit::AuditObservationStatus,
+        command_request_audit: AuditObservationStatus,
         /// Whether a `command_cwd_mismatch` anomaly was recorded, i.e.
         /// whether `accepted.proposal.cwd()` disagreed with
         /// `verified_cwd` at all (response 116 Required 2). `None` when
@@ -108,7 +185,7 @@ pub enum ReceiveOutcome {
         /// report, not a report this module withheld. `Some` carries
         /// whether the best-effort write itself succeeded, exactly like
         /// `command_request_audit`.
-        cwd_mismatch_audit: Option<crate::audit::AuditObservationStatus>,
+        cwd_mismatch_audit: Option<AuditObservationStatus>,
     },
     /// This proposal id was already seen for this run. **No
     /// `ApprovalRequest` is returned, regardless of whether the repeat's
@@ -170,7 +247,7 @@ impl ReceiveOutcome {
         }
     }
 
-    pub fn command_request_audit(&self) -> Option<crate::audit::AuditObservationStatus> {
+    pub fn command_request_audit(&self) -> Option<AuditObservationStatus> {
         match self {
             ReceiveOutcome::Created {
                 command_request_audit,
@@ -187,7 +264,7 @@ impl ReceiveOutcome {
     /// agreed -- these are not distinguished here because a caller
     /// checking audit health only cares whether a write was attempted
     /// and failed, not why none was attempted.
-    pub fn cwd_mismatch_audit(&self) -> Option<crate::audit::AuditObservationStatus> {
+    pub fn cwd_mismatch_audit(&self) -> Option<AuditObservationStatus> {
         match self {
             ReceiveOutcome::Created {
                 cwd_mismatch_audit, ..
@@ -256,7 +333,7 @@ pub enum DecideOutcome {
     /// `Pending` -- call [`ApprovalCoordinator::find`] to observe it, not
     /// `.request()` here, which would otherwise read as "the request is
     /// gone" rather than "retry once audit is healthy."
-    AuditBlocked(AuditIntegrationError),
+    AuditBlocked(AuditIntegrationFailure),
 }
 
 impl DecideOutcome {
@@ -370,7 +447,7 @@ impl ApprovalCoordinator {
         state_root: &Path,
         accepted: AcceptedProposal,
         limits: ApprovalQueueLimits,
-        audit: &mut AuditCoordinator,
+        audit: &mut impl CommandAuditRecorder,
     ) -> ReceiveOutcome {
         let key = (
             agent_run_id.clone(),
@@ -486,7 +563,7 @@ impl ApprovalCoordinator {
         agent_run_id: &AgentRunId,
         proposal_id: &ProposalId,
         decision: SimpleDecision,
-        audit: &mut AuditCoordinator,
+        audit: &mut impl CommandAuditRecorder,
     ) -> DecideOutcome {
         let key = (agent_run_id.clone(), proposal_id.clone());
         let Some(pending) = self.requests.get_mut(&key) else {
@@ -589,7 +666,7 @@ impl ApprovalCoordinator {
         verified_cwd: &VerifiedCwd,
         project_root: &Path,
         state_root: &Path,
-        audit: &mut AuditCoordinator,
+        audit: &mut impl CommandAuditRecorder,
     ) -> DecideOutcome {
         let key = (agent_run_id.clone(), proposal_id.clone());
         let Some(pending) = self.requests.get_mut(&key) else {

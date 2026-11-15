@@ -29,8 +29,8 @@ pub use channel::{
     inject_token_into_environment,
 };
 pub use coordinator::{
-    ApprovalCoordinator, ApprovalQueueLimitScope, ApprovalQueueLimits, DecideOutcome,
-    ReceiveOutcome, SimpleDecision,
+    ApprovalCoordinator, ApprovalQueueLimitScope, ApprovalQueueLimits, AuditIntegrationFailure,
+    CommandAuditRecorder, DecideOutcome, ReceiveOutcome, SimpleDecision,
 };
 pub use protocol::{
     CommandDecision, CommandProposal, DecisionOutcome, DecisionValidationError,

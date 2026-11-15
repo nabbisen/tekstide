@@ -137,3 +137,27 @@ pub enum AuditEventError {
     ApprovalStillPending,
     Ownership(OwnershipError),
 }
+
+/// RFC-077 Stage 5: whether a best-effort audit write actually landed --
+/// vocabulary `approval` reads back after asking `audit` to record
+/// something, with no behavior of its own. Moved here (not previously in
+/// `domain`) so `approval` can know the outcome shape without naming
+/// `audit`'s own concrete recorder.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuditObservationStatus {
+    NotRequired,
+    Persisted,
+    Degraded,
+}
+
+/// RFC-077 Stage 5: which of the two ways a command decision can be
+/// recorded -- plain vocabulary `approval` passes to whatever records a
+/// decision, with no behavior of its own. `audit::AuditActionKind`'s own
+/// `From` conversion for this type stays in `audit` (it is audit's own
+/// internal vocabulary this type converts into, not the other way
+/// around), so this type itself depends on nothing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandDecisionActionKind {
+    Approve,
+    EditAndApprove,
+}

@@ -58,9 +58,21 @@ use std::path::{Path, PathBuf};
 /// `ProjectRootHandle`) inverted into a trait `content` defines and
 /// `project::root` implements, D5 move 2 — two moves, not four
 /// incoherent ones, because the four references turned out to need
-/// exactly two different things). Every move in the same commit as the
-/// bound change that is its own evidence.
-const MAX_LARGEST_SCC_SIZE: usize = 6;
+/// exactly two different things). **Lowered to 5 by RFC-077 Stage 5**
+/// (`approval`'s five references to `audit`'s command-recording API,
+/// all one coherent need this time: `approval` asks `audit` to record a
+/// command request, decision and outcome, five vocabulary types moved to
+/// `domain::audit` or replaced with `approval`'s own opaque failure
+/// description, D5 move 1; the whole behavioral dependency inverted into
+/// `approval::CommandAuditRecorder`, implemented on `audit::
+/// AuditCoordinator` **in `audit` itself** rather than in `project` --
+/// `project` has no edge to `audit` to place it on without re-coupling
+/// `audit` back into the component through `project`, while `audit`
+/// already has one to `approval`, so implementing there adds no new
+/// edge). `audit` leaves the component entirely: nothing else inside it
+/// reached `audit` once `approval`'s own edge was gone. Every move in
+/// the same commit as the bound change that is its own evidence.
+const MAX_LARGEST_SCC_SIZE: usize = 5;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

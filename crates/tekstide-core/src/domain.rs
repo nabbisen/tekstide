@@ -22,7 +22,9 @@ pub use agent::{
 pub use approval::{
     ApprovalDecision, ApprovalDecisionError, ApprovalRequest, RiskLevel, RiskReason,
 };
-pub use audit::{AuditEvent, AuditEventClass, AuditEventError};
+pub use audit::{
+    AuditEvent, AuditEventClass, AuditEventError, AuditObservationStatus, CommandDecisionActionKind,
+};
 pub use changeset::{
     ChangeAssociationConfidence, ChangeDetectionFailureReason, ChangeDetectionSource,
     ChangeDetectionStatus, ChangeSet, ChangeSetSummary, ReviewState, ReviewStateTransitionError,
