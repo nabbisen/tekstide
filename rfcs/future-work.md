@@ -1250,6 +1250,12 @@ audit store's honesty is a 1.0 promise, and right now nothing checks that it can
 
 ## Two processes creating the audit store for the first time race, and the second loses — found 2026-10-10 (RFC-058 PR-058-B, review 515)
 
+**Closed. Recorded 2026-11-15, by the 2026-11-15 sweep, not by the fix.** Both processes now
+succeed, held by `audit::tests::first_creation_race::two_real_processes_racing_to_create_the_store_both_succeed`
+— a real two-process test, not a simulation. The finding is kept below as written; it was true
+when found.
+
+
 **A second, separate way the same store can silently fail to open — read beside the finding above,
 not folded into it.**
 
@@ -1486,6 +1492,13 @@ a desktop icon, which wants transparency and a 16/32/48/128/256 hicolor set. Wor
 writing the `.desktop` file, not after.
 
 ## Non-`en` locales silently fail to load outside `cargo install` — found 2026-10-14, review 561
+
+**Closed by RFC-073, shipped in `0.40.0` (2026-11-14). Recorded 2026-11-15, by the sweep.** Every
+shipped catalogue is compiled into the binary and the disk path is deleted, not supplemented —
+verified on the published artifacts themselves: `Tablica projektu` and `zablokowanych
+automatyzacji` are present in both the Linux and macOS release binaries, and no embedded path is
+a locales path in either. The finding is kept below as written.
+
 
 Found while re-running `namcap` during the AUR package's `0.37.0` bump: `makepkg`'s own
 packaging-issue check warned `usr/bin/tekstide` "contains reference to `$srcdir`" — a real

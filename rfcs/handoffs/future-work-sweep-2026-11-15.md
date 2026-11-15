@@ -38,13 +38,13 @@ the evidence supported, and this sweep narrows it.
 | 072 non-blocking job for quarantined tests | Open, but its own premise is doubtful: the 26 `#[ignore]`s are mostly measurements and hand-run diagnostics, as its reservation already warned | **Open, premise questionable** |
 | 075 attention knock | `request_attention` still has **no production call site** — only `project_process_probe`, a diagnostic bin | **Open**, exactly as recorded |
 
-## `future-work.md`'s standalone findings — four closed, seven open, one addressed differently
+## `future-work.md`'s standalone findings — three closed and unmarked, one already marked, seven open, three addressed differently
 
 **Closed, and the entry does not say so:**
 
 | Finding | Closed by |
 | --- | --- |
-| Confirming a close with an unsaved file kills terminals and does not close (1132) | **RFC-066**, shipped `0.32.0` |
+| ~~Confirming a close with an unsaved file kills terminals (1132)~~ | **Corrected 2026-11-15, same day: this entry was already marked closed** — *"Fixed by RFC-066, implemented and closed 2026-10-09"* sits in its own second line. The sweep read the heading and missed it. **Not a stale entry; three, not four.** |
 | Two processes racing to create the audit store, second loses (1251) | Fixed; `two_real_processes_racing_to_create_the_store_both_succeed` exists and passes |
 | Non-`en` locales fail outside `cargo install` (1488) | **RFC-073**, shipped `0.40.0` |
 | `cargo doc` not in the gate (1547) | Corrected 2026-11-15: the gate step has existed since `67704ea`, the day the entry was filed |
@@ -76,6 +76,18 @@ the evidence supported, and this sweep narrows it.
   (`every_readme_row_agrees_with_the_changelogs_release_state`,
   `the_newest_release_status_matches_whether_it_was_actually_published`). Whether all seven sites
   are covered was not counted here.
+
+## Correction to this sweep, 2026-11-15, by its own author
+
+**One of the four "closed and not marked" entries was already marked**, in its own second line:
+*"Fixed by RFC-066, implemented and closed 2026-10-09 (`0.32.0` candidate)."* The sweep checked
+the heading and the code and did not read the body, which is the same shortcut it exists to
+catch. **The real count is three**, and the finding the sweep drew from it — that this project
+closes findings silently — is weaker by one case than it was stated.
+
+The remaining two have now been marked, dated, with the fix named
+(`two_real_processes_racing_to_create_the_store_both_succeed`; RFC-073 in `0.40.0`, verified on
+the published artifacts). `cargo doc` was corrected separately on the same day.
 
 ## What this sweep deliberately did not do
 
