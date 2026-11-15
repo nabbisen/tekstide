@@ -35,6 +35,37 @@ decision record closes the question. *Open* means neither.
 | 9 | Whether plugin design stays deferred | **Answered by standing position** | No plugin runtime ships; Appendix A's MVP position holds and RFC-074/RFC-077 restate it as out of scope. **No dated decision record closes the question**; it has been answered by not being reopened. |
 | 10 | A safety banner on exported transcripts and handoffs | **Open** | No banner exists anywhere in the product. The subject belongs to RFC-068 (*Redacting What A Run Prints*), reserved `pre-1.0` and unwritten. |
 
+## Q10 corrected, 2026-11-15, by its own author — answered in the product, in a better form than the question proposed
+
+The table above disposes Q10 (*a safety banner on exported transcripts and handoffs*) as **Open**,
+on the grounds that *"no banner exists anywhere in the product."* That sentence is true and the
+disposition was wrong, because a banner is not the only way to answer the question and the product
+chose the better one.
+
+The export dialog already states, verbatim from `en.ftl`:
+
+> *"The file will contain this run's recorded details, your classification and notes, N changed
+> file paths **and the last {bytes} bytes of its transcript, quoted.** Lines you wrote begin with
+> `| `; lines that came from the run begin with `> `."*
+
+> *"Once written, the file is outside Tekstide: Tekstide cannot change or remove it, and purging
+> this run does not remove it. It is never overwritten if it already exists."*
+
+That names what is in the file, that the transcript is **quoted rather than summarised**, how many
+bytes, which lines came from the run rather than the user, that the file leaves this product's
+control, and that purge will not reach it. **A reader who is told "the last 16384 bytes of its
+transcript, quoted" knows what they are about to hand over.** A generic "may contain secrets"
+banner on top of that adds nothing true that the description does not already carry, and teaches
+users to dismiss banners.
+
+This is the same pattern the 2026-11-15 boundary audit found for Restricted mode, where RFC-004's
+promised *"clear labels"* turned out to exist as an enumerated list of nine blocked capabilities
+rather than a disclaimer: **in this product, precise description has repeatedly been chosen over
+reassurance, and it is the stronger answer.**
+
+**Q10's disposition is therefore: answered, in the product, by `agent-run-report-export-contains`
+and `agent-run-report-export-outside`.** Not by an RFC, and RFC-068 is not needed to close it.
+
 ## Findings
 
 ### F1. Three of ten are not answered, and two of those are the same hole
