@@ -86,33 +86,79 @@ justified, measured by trying rather than reasoned from plausibility, together w
 exposes. It goes to the owner. **No bridge code until it is answered**, for the same reason A came
 before B.
 
-### B1 — the bridge, once B0 is answered
+### B1 — the bridge. Refined 2026-11-15 after B0 and its addendum
 
-**Both fail-closed axes, and A proved they are independent:**
+B0 settled the environment: a **fresh scoped `HOME`**, with **`CLAUDE_CONFIG_DIR` inside it**, and
+**`CLAUDE_CODE_OAUTH_TOKEN`** for authentication — all three documented, none needing the user's
+real home. What B0 did not settle, and what scoping B1 found, is **how the credential reaches the
+CLI**. That is still the owner's, and it is a sharper question than B0's was.
 
-- `onFailure: "block"` on **every** registered hook entry — the hook's own *failure* path, and not
-  the mechanism's default.
+#### B1-0 — the credential route, and the product has never carried a secret
+
+Two facts, both measured while scoping, neither in B0:
+
+1. **This product persists no user credential anywhere.** No keyring, no keychain, no credential
+   store — searched and found nothing. The approval token it already has is minted per run and
+   passed by environment; nothing is written down.
+2. **`AiCliEnvironmentPolicy::ExplicitAllowlist` — the one variant built for forwarding named
+   variables — is not implemented.** `validate_launch_spec` calls
+   `unsupported_environment_policy_summary` and **rejects** both `ExplicitAllowlist` and `Named`
+   with `TerminalLaunchError::UnsupportedEnvironmentPolicy`. `Minimal` is the only policy the
+   runtime implements. (It fails closed, so no user is told an allowlist is in force when it is
+   not — that part is sound.)
+
+So the obvious route is advertised by the type system and refused by the runtime. Three options,
+in increasing order of what they ask the product to take on:
+
+- **(a) Implement `ExplicitAllowlist` for the adapter path.** The user keeps `CLAUDE_CODE_OAUTH_TOKEN`
+  in their own environment; Tekstide forwards only the variables a profile names and stores
+  nothing. **This is the recommendation**: least new exposure, and it finishes a policy the product
+  already carries in its own types and its own UI summary.
+- **(b) A bridge-specific addition to the `Minimal` set.** Narrower in blast radius, but it
+  special-cases one CLI inside shared, security-sensitive code that every terminal launch runs
+  through.
+- **(c) Tekstide obtains and stores the token itself.** This introduces credential persistence into
+  a product that has none, and with it key storage, lifetime, revocation and purge — every one of
+  which is a threat-model subject. **It should not be chosen by default, and this pack does not
+  propose it.**
+
+**No bridge code until the owner picks one.** (a) and (b) are implementation; (c) is a new RFC.
+
+#### B1-1 — the spawn environment, once the route is chosen
+
+`spawn_adapter` currently builds `env_clear()` plus seven fixed entries. It gains the scoped
+`HOME`, `CLAUDE_CONFIG_DIR` beneath it, and whatever the chosen route forwards. **This is
+security-sensitive shared code**: `validate_launch_spec` is the same function every terminal
+launch runs through, and `spawn_adapter`'s own doc comment says it is "a sixth `.env(...)` call on
+top of that existing set, not a redesigned one." Keep it that way.
+
+Scoped directories are created per `AgentRun` and removed with it. B0 named the cost: a fresh
+`HOME` re-onboards every run unless the bridge seeds a template **it writes itself**, never copied
+from the user's real home. Nobody copies `.credentials.json`; B0's addendum says so and it is not
+negotiable.
+
+#### B1-2 — the hook, and both fail-closed axes
+
+A proved they are independent and that missing either is silently open:
+
+- `onFailure: "block"` on **every** registered entry — the hook's own *failure* path, not the
+  mechanism's default.
 - `exit 2`, or `hookSpecificOutput.permissionDecision: "deny"` — the hook's own *decision* path.
-  **Never a bare `exit 1`**, which is a non-blocking error however conventional it looks.
+  **Never a bare `exit 1`.**
 
-Getting one right and not the other is silently open, in both directions. A test must exist for
-each, and each must be shown failing.
+A test for each, and **each shown failing**. Registration through `--settings` as an inline JSON
+string, so nothing is written to the user's installation — D1's *Out of scope*, permanently.
+**Never `--bare`**, and never inherit it: A found it disables hook loading with no error at all.
 
-**Registration without touching the user's installation**: `--settings` as an inline JSON string,
-per A's item 1. Nothing written to `~/.claude/` or a project `.claude/`, ever — D1's *Out of
-scope*, permanently.
+**Confirm before building on it**: the hook is a command Claude Code spawns *per tool call*, not a
+long-lived process like `reference_adapter`. The approval channel must tolerate repeated short
+connections carrying the same token. If it does not, that is a finding about the channel.
 
-**Version pin and refusal (D5)**: the exact string A observed, refused by default when it does not
-match, with the documented override. A's item 3 shows why `major.minor` is unsafe: the one feature
-D3 depends on arrived at `2.1.295`, inside the `2.1` line.
+#### B1-3 — version pin and refusal
 
-**Never `--bare`, and never inherit it.** A found it disables hook loading entirely, with no error
-— interception silently absent. The bridge controls exactly how the child is launched.
-
-**One shape A's findings imply and the RFC did not anticipate**: the hook is a *command Claude Code
-spawns per tool call*, not a long-lived process like `reference_adapter`. Confirm the approval
-channel accepts repeated short connections carrying the same token before building on it; if it
-does not, that is a finding about the channel, not about the bridge.
+The exact string A observed, refused by default on any mismatch, with D5's documented override.
+A's item 3 shows why `major.minor` is unsafe: `onFailure` arrived at `2.1.295`, inside the `2.1`
+line.
 
 ### B2 — what the product is allowed to say, given what A found
 
