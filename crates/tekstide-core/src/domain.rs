@@ -2,6 +2,7 @@ mod agent;
 mod approval;
 mod audit;
 mod changeset;
+mod file_access;
 mod identity;
 mod ids;
 mod ownership;
@@ -25,6 +26,10 @@ pub use audit::{AuditEvent, AuditEventClass, AuditEventError};
 pub use changeset::{
     ChangeAssociationConfidence, ChangeDetectionFailureReason, ChangeDetectionSource,
     ChangeDetectionStatus, ChangeSet, ChangeSetSummary, ReviewState, ReviewStateTransitionError,
+};
+pub use file_access::{
+    FileAccessBlockedReason, FileAccessContainmentStatus, FileAccessError, FileAccessSymlinkStatus,
+    FileAccessTarget,
 };
 pub use identity::ProjectId;
 pub use ids::{

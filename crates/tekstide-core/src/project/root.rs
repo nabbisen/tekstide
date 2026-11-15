@@ -57,67 +57,33 @@ impl ProjectRootHandle {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileAccessSymlinkStatus {
-    NoSymlink,
-    /// Unix symlink handling is covered for the Linux MVP. Windows
-    /// symlink/junction/reparse-point behavior must be reviewed before
-    /// Windows support is claimed.
-    InRootSymlink,
-    UnresolvedSymlink,
-    EscapesRoot,
-}
+/// RFC-077 Stage 4: these five are vocabulary (T0), not orchestration
+/// types -- they describe the shape of a resolved access attempt, with no
+/// behavior of their own -- and now live in `domain::file_access`,
+/// re-exported from here unchanged so no caller and no published-API
+/// consumer has to move with them.
+pub use crate::domain::{
+    FileAccessBlockedReason, FileAccessContainmentStatus, FileAccessError, FileAccessSymlinkStatus,
+    FileAccessTarget,
+};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileAccessContainmentStatus {
-    InsideRoot,
-    OutsideRoot,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileAccessTarget {
-    pub project_id: ProjectId,
-    pub selected_relative_path: PathBuf,
-    pub selected_absolute_path: PathBuf,
-    pub canonical_path: PathBuf,
-    pub root_canonical_path: PathBuf,
-    pub symlink_status: FileAccessSymlinkStatus,
-    pub containment_status: FileAccessContainmentStatus,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileAccessBlockedReason {
-    AbsolutePathNotAllowed,
-    InvalidRelativePath,
-    MissingPath,
-    PermissionDenied,
-    CannotReadPath,
-    RootEscape,
-    SymlinkEscape,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileAccessError {
-    pub project_id: ProjectId,
-    pub selected_relative_path: PathBuf,
-    pub selected_absolute_path: PathBuf,
-    pub root_canonical_path: PathBuf,
-    pub reason: FileAccessBlockedReason,
-}
-
-impl fmt::Display for FileAccessError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "blocked file access for project {} at {}: {:?}",
-            self.project_id,
-            self.selected_relative_path.display(),
-            self.reason
-        )
+/// RFC-077 Stage 4, D5 move 2: `content` is the one consumer of this
+/// policy outside `project` itself, and it no longer names
+/// `ProjectFileAccessPolicy` or `ProjectRootHandle` directly -- it defines
+/// [`crate::content::FileAccessResolver`] for the one question it needs
+/// answered, and this impl is the provider orchestration supplies.
+/// Every in-`project` call site (`diff.rs`, `watch/directory.rs`,
+/// `root/explorer.rs`) keeps calling `ProjectFileAccessPolicy` directly,
+/// unaffected -- this impl exists for the one caller that was reaching
+/// out of the module, not to replace the policy's own API.
+impl crate::content::FileAccessResolver for ProjectRootHandle {
+    fn resolve_existing(
+        &self,
+        selected_relative_path: &Path,
+    ) -> Result<FileAccessTarget, FileAccessError> {
+        ProjectFileAccessPolicy.resolve_existing(self, selected_relative_path)
     }
 }
-
-impl std::error::Error for FileAccessError {}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProjectFileAccessPolicy;

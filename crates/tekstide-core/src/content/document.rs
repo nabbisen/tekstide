@@ -2,10 +2,21 @@ use std::fmt;
 use std::path::Path;
 use std::time::SystemTime;
 
-use crate::project::root::{
+use crate::domain::{
     FileAccessBlockedReason, FileAccessContainmentStatus, FileAccessError, FileAccessSymlinkStatus,
-    FileAccessTarget, ProjectFileAccessPolicy, ProjectRootHandle,
+    FileAccessTarget,
 };
+
+/// RFC-077 Stage 4, D5 move 2: the one thing this module needs from
+/// `project::root` without naming its concrete policy type --
+/// `project::root::ProjectRootHandle` is the provider orchestration
+/// supplies (its own `impl`, next to the policy it delegates to).
+pub trait FileAccessResolver {
+    fn resolve_existing(
+        &self,
+        selected_relative_path: &Path,
+    ) -> Result<FileAccessTarget, FileAccessError>;
+}
 
 use super::edit::TextDocumentEditError;
 use super::open::{
@@ -89,12 +100,12 @@ pub struct TextDocument {
 
 impl TextDocument {
     pub fn open(
-        root: &ProjectRootHandle,
+        root: &impl FileAccessResolver,
         selected_relative_path: impl AsRef<Path>,
         policy: TextDocumentOpenPolicy,
     ) -> Result<Self, TextDocumentOpenError> {
-        let target = ProjectFileAccessPolicy
-            .resolve_existing(root, selected_relative_path)
+        let target = root
+            .resolve_existing(selected_relative_path.as_ref())
             .map_err(TextDocumentOpenError::Access)?;
 
         if !target.canonical_path.is_file() {
@@ -149,7 +160,7 @@ impl TextDocument {
     /// `Conflict` + "does the file still exist" check `refresh_document_by_canonical_path`
     /// already uses for `ExternalDeleted` -- this constructor mints no fourth state.
     pub fn recover(
-        root: &ProjectRootHandle,
+        root: &impl FileAccessResolver,
         selected_relative_path: impl AsRef<Path>,
         policy: TextDocumentOpenPolicy,
         recovered: RecoveredBufferInit,
@@ -163,7 +174,7 @@ impl TextDocument {
         } = recovered;
         let selected_relative_path = selected_relative_path.as_ref();
 
-        let resolved = ProjectFileAccessPolicy.resolve_existing(root, selected_relative_path);
+        let resolved = root.resolve_existing(selected_relative_path);
         let target = match resolved {
             Ok(target) => target,
             Err(error) if is_missing_current_target(&error) => {
@@ -403,7 +414,7 @@ impl TextDocument {
 
     pub fn refresh_external_state(
         &mut self,
-        root: &ProjectRootHandle,
+        root: &impl FileAccessResolver,
         policy: TextDocumentOpenPolicy,
     ) -> Result<ExternalChangeDecision, TextDocumentRefreshError> {
         let current_target = match self.resolve_current_target(root) {
@@ -455,7 +466,7 @@ impl TextDocument {
 
     pub fn save(
         &mut self,
-        root: &ProjectRootHandle,
+        root: &impl FileAccessResolver,
         policy: TextDocumentOpenPolicy,
     ) -> Result<SaveDecision, TextDocumentSaveError> {
         // Review 490's own found defect: a `Conflict` document whose file is over the
@@ -539,9 +550,9 @@ impl TextDocument {
 
     fn resolve_current_target(
         &self,
-        root: &ProjectRootHandle,
+        root: &impl FileAccessResolver,
     ) -> Result<FileAccessTarget, FileAccessError> {
-        ProjectFileAccessPolicy.resolve_existing(root, &self.target.selected_relative_path)
+        root.resolve_existing(&self.target.selected_relative_path)
     }
 
     fn record_external_change(&mut self) -> ExternalChangeDecision {

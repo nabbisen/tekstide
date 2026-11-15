@@ -49,9 +49,18 @@ use std::path::{Path, PathBuf};
 /// `WorkspaceTrust`, D5 move 1: vocabulary, moved to `domain::trust` —
 /// gone, dropping `security` out of the component the same way
 /// `test_support` dropped out at Stage 2: it is no longer reached by
-/// anything in it and reaches nothing in it but `domain`). Every move in
-/// the same commit as the bound change that is its own evidence.
-const MAX_LARGEST_SCC_SIZE: usize = 7;
+/// anything in it and reaches nothing in it but `domain`). **Lowered to 6
+/// by RFC-077 Stage 4** (`content`'s four references to `project::root`'s
+/// file-access types and policy, across `document.rs`/`open.rs`/
+/// `save.rs`/`snapshot.rs`: the five vocabulary types moved to
+/// `domain::file_access`, D5 move 1; the one behavioral dependency
+/// (`document.rs` calling `ProjectFileAccessPolicy` through a concrete
+/// `ProjectRootHandle`) inverted into a trait `content` defines and
+/// `project::root` implements, D5 move 2 — two moves, not four
+/// incoherent ones, because the four references turned out to need
+/// exactly two different things). Every move in the same commit as the
+/// bound change that is its own evidence.
+const MAX_LARGEST_SCC_SIZE: usize = 6;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

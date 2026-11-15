@@ -2,7 +2,7 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
 
-use crate::project::root::{FileAccessError, FileAccessTarget};
+use crate::domain::{FileAccessError, FileAccessTarget};
 
 pub const DEFAULT_MAX_EDITABLE_BYTES: u64 = 4 * 1024 * 1024;
 

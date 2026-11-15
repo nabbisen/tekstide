@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::project::root::{FileAccessError, FileAccessTarget};
+use crate::domain::{FileAccessError, FileAccessTarget};
 
 use super::snapshot::TextDocumentSnapshotError;
 

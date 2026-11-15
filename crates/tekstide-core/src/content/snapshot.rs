@@ -5,7 +5,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::project::root::FileAccessTarget;
+use crate::domain::FileAccessTarget;
 
 use super::open::{TextDocumentOpenError, read_file_bounded};
 

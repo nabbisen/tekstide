@@ -6,7 +6,7 @@ mod snapshot;
 mod undo;
 
 pub use document::{
-    ExternalChangeDecision, RecoveredBufferInit, TextCursor, TextDocument,
+    ExternalChangeDecision, FileAccessResolver, RecoveredBufferInit, TextCursor, TextDocument,
     TextDocumentRefreshError, TextDocumentState, TextViewport,
 };
 pub use edit::TextDocumentEditError;
