@@ -71,6 +71,24 @@ suggests. A grep is not evidence of absence.
 - **§8.16, Plugin security baseline.** Deferred, per Part 1's Q9 and Part 2's F9, and carrying the
   same recommendation: close it deliberately or keep it open honestly.
 
+## One §8.6 finding already in hand, recorded here so Part 3 inherits it
+
+**Found 2026-11-15, during RFC-069 PR-069-B0 (review 678), not by this review.** The Managed
+launch path builds its child with `env_clear()` and no `HOME`. For any child that resolves its
+home directory from the passwd database when `HOME` is absent — which Node does, confirmed by
+`env -i node -e 'require("os").homedir()'` returning the real `/home/<user>` — **unsetting `HOME`
+does not withhold the home directory; it grants the real one.** An empty `HOME` behaves
+differently again, yielding an empty result.
+
+This is **not a defect against RFC-004 §7**, which names environment *policies* and claims nothing
+about what a child can reach. It is a **disclosure-accuracy finding**: the launch summary the
+product shows for that policy is the words *"minimal environment"*, and for such a child the
+phrase describes less isolation than a reader would take from it. Nothing can exploit it today —
+no adapter speaks the approval protocol — which is why it is recorded rather than escalated.
+
+Part 3's §8.6 starts with this one already on the list, and it is a direct input to RFC-069's own
+B2 honesty question.
+
 ## Who does what, and why the split falls where it does
 
 - **The mapping is documentary and is the reviewer's.** It is the same work as Parts 1 and 2 —
