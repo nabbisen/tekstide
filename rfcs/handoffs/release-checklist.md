@@ -495,6 +495,35 @@ logical gap exists either way. What is still open is the product decision named 
 that decision is made and, if it changes anything, reflected in `decide_processes_in_session`'s own
 tests.
 
+**Two corrections to the framing that decision should be made against (review 683 round 5).**
+
+*First, there is no backstop, so "accept the residual as explicit" is not the mild option it looks
+like.* Before weighing the tradeoff, check whether signalling the process **group** would catch a
+member the enumeration missed — the kernel resolves group membership, so it needs no list. It would
+not, and `launch.rs:684-688` already says why in its own words: a backgrounded job started inside the
+shell gets its *own* process group but stays in the same session, *"which is exactly why session id,
+not process group id, is what the kill above ... cannot reach."* For exactly the class of process
+this item is about, **the session enumeration is the only containment mechanism there is**, and a
+member absent from it is never signalled by anything. The residual is therefore not "a confirmation
+that overclaims"; it is "a process survives a close, silently."
+
+*Second, there is a third option, and it is the recommended one.* Review 633's leader fallback works
+because the leader's pid is **known in advance**. Every *previously enumerated* member's pid is
+equally known — from the previous enumeration. So: remember the pids the last enumeration reported
+for a session, and on a later enumeration re-check directly, exactly as the leader is re-checked, any
+previously-seen pid now absent from the bulk list, instead of reading absence as departure. One
+direct check per vanished pid, only on the vanishing path, so emptiness does not become harder to
+confirm in the common case — which is what the "refuse emptiness more often" option costs. The
+information is available in precisely the scenario at issue:
+`a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member` asserts that
+`processes_in_session` *does* report that job as a member, so in the failing run its pid had been
+seen. **Known limit, to be documented rather than claimed closed:** a member never seen in any
+enumeration stays invisible, because nothing can re-check a pid that was never named. Strictly
+smaller residue than today's, not zero.
+
+This changes production containment behaviour and adds per-session state, so it wants a decision
+record rather than a slice.
+
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
