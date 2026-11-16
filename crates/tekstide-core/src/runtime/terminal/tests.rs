@@ -1212,6 +1212,11 @@ fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
         .launch_project_shell(&project, spec)
         .expect("plain shell launch should succeed");
     let handle = TerminalRuntimeHandle::new(terminal.id.clone(), project.id().clone());
+    let session_id = runtime
+        .sessions
+        .get(&terminal.id)
+        .expect("just-launched session must be present")
+        .process_group_id;
 
     let background_pid = spawn_hup_immune_background_job(&mut runtime, &handle);
     assert!(
@@ -1241,12 +1246,133 @@ fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
         }),
         "the session must be confirmed empty by a real re-enumeration: {events:?}"
     );
-    assert!(
-        !crate::runtime::terminal::process_is_alive(background_pid),
-        "containment confirmed working on macOS: a live backgrounded job that ignores SIGHUP \
-         must still be gone after a real close -- SIGKILL, not SIGHUP or the shell's own \
-         possible propagation of it, is what must have reached it"
-    );
+    // Review 683 round 3 (`test-process-leak.md`'s own dated entry): a
+    // bare `assert!` here only ever tells a reader "it happened again."
+    // Diagnose before panicking, not after a rerun loses the chance to.
+    if crate::runtime::terminal::process_is_alive(background_pid) {
+        panic!(
+            "containment confirmed working on macOS: a live backgrounded job that ignores \
+             SIGHUP must still be gone after a real close -- SIGKILL, not SIGHUP or the \
+             shell's own possible propagation of it, is what must have reached it. {}",
+            diagnose_surviving_background_job(background_pid, session_id)
+        );
+    }
+}
+
+/// Review 683 round 3's own required diagnostic
+/// (`rfcs/handoffs/test-process-leak.md`'s dated 2026-11-16 entry): a
+/// passing rerun tells "an exit-path read earlier than `P_WEXIT`"
+/// (harmless, candidate 1) apart from "a session escape" (candidate 2)
+/// or "the enumeration under-reporting a live member" (candidate 3,
+/// review 625's own recurring defect class) **not at all** -- both of
+/// the latter are the dangerous direction, a survivor the close was
+/// supposed to kill. Captured on the test's own failure path, in this
+/// order, so each read happens as close as possible to the moment the
+/// `process_is_alive` check above actually failed:
+///
+/// 1. **What `processes_in_session` itself enumerates, right now, next
+///    to the pid it is being asked about.** This is a *second*
+///    enumeration, not the original one `request_terminate` already ran
+///    internally and that this function has no access to -- ordered
+///    first, before anything else here can spend time, to stay as close
+///    to that original moment as a test-only observer can get. Read with
+///    that gap in mind: still missing here too is evidence *against* a
+///    one-off timing miss in the original enumeration; reported this
+///    time is evidence *for* one, not proof the original enumeration was
+///    correct.
+/// 2. **`getsid(background_pid)` against the session's own id.**
+///    Mismatched is candidate 2, a session escape, and nothing else --
+///    `getsid` answers independently of any enumeration.
+/// 3. **`background_pid`'s own `ppid`**, via the identical
+///    `proc_pidinfo`/`proc_bsdinfo` call production's own
+///    `is_gone_or_going` (`launch.rs`) already trusts on this platform --
+///    reading one more already-declared field (`pbi_ppid`) on a call this
+///    project already relies on, not a new, unmeasured struct offset.
+///    Corroborates (2): a ppid outside the session's own process tree is
+///    the same finding from a second angle.
+/// 4. **A short, bounded re-poll of `process_is_alive`, up to one
+///    second** -- the reviewer's own "a second is plenty." Gone within it
+///    is candidate 1; still alive after it is not. Deliberately last: it
+///    is the one read that spends real wall-clock time, so it must not
+///    delay the three reads above.
+///
+/// Test-only: no production code reads any of this, and nothing here
+/// changes what the test asserts -- only what its own failure explains.
+#[cfg(target_os = "macos")]
+fn diagnose_surviving_background_job(background_pid: u32, session_id: libc::pid_t) -> String {
+    let pid = background_pid as libc::pid_t;
+
+    let enumeration_report = match super::launch::processes_in_session(session_id) {
+        Some(members) => {
+            let reported = members.contains(&pid);
+            format!(
+                "processes_in_session({session_id}) just now enumerated {members:?} -- \
+                 {background_pid} {}",
+                if reported {
+                    "WAS reported this time"
+                } else {
+                    "was NOT reported this time either"
+                }
+            )
+        }
+        None => format!("processes_in_session({session_id}) itself failed to enumerate"),
+    };
+
+    // SAFETY: `getsid` has no preconditions beyond `pid` being a plain
+    // integer; it is safe to call against a pid that no longer exists.
+    let real_sid = unsafe { libc::getsid(pid) };
+    let sid_report = if real_sid == -1 {
+        format!("getsid failed: {:?}", std::io::Error::last_os_error())
+    } else if real_sid == session_id {
+        format!("getsid={real_sid}, matches session {session_id} -- not a session escape")
+    } else {
+        format!(
+            "getsid={real_sid} does NOT match session {session_id} -- candidate 2, a session \
+             escape"
+        )
+    };
+
+    // SAFETY: identical to `describe_pid_three_ways`'s own call above in
+    // this file -- `info` is a plain, fully-zeroed `proc_bsdinfo` the
+    // call writes into, `size` matches its own real size exactly, the
+    // buffer `proc_pidinfo` is documented to require.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let proc_pidinfo_result =
+        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    let ppid_report = if proc_pidinfo_result == size {
+        format!("ppid={}", info.pbi_ppid)
+    } else {
+        format!(
+            "proc_pidinfo failed to answer: {:?}",
+            std::io::Error::last_os_error()
+        )
+    };
+
+    let poll_start = Instant::now();
+    let mut gone_after = None;
+    for _ in 0..20 {
+        if !crate::runtime::terminal::process_is_alive(background_pid) {
+            gone_after = Some(poll_start.elapsed());
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let liveness_report = match gone_after {
+        Some(elapsed) => format!(
+            "gone within {elapsed:?} of this diagnostic's own poll starting -- candidate 1, an \
+             exit-path read earlier than P_WEXIT"
+        ),
+        None => format!(
+            "still alive after {:?} of polling -- not candidate 1",
+            poll_start.elapsed()
+        ),
+    };
+
+    format!(
+        "diagnose_surviving_background_job(pid={background_pid}, session_id={session_id}): \
+         {enumeration_report}; {sid_report}; {ppid_report}; {liveness_report}"
+    )
 }
 
 /// RFC-043 security document §1's own required property: "the session
