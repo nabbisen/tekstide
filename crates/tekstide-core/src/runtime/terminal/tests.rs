@@ -854,6 +854,116 @@ fn project_szomb_matches_the_real_platform_constant() {
     assert_eq!(super::launch::SZOMB, libc::SZOMB);
 }
 
+/// Review 683 round 4 (`rfcs/handoffs/release-checklist.md`'s own
+/// containment-watch entry): `decide_processes_in_session` against a
+/// fixed, constructed reading rather than a live `proc_listallpids`
+/// call, the same shape review 656 earned for `decide_gone_or_going` --
+/// a pure decision is testable on demand; the real kernel race behind
+/// `test-process-leak.md`'s own open row is not.
+///
+/// **This is the confirmation the release checklist asked for, and the
+/// answer is the dangerous one.** A session's bulk pid list (`pids`)
+/// that simply never names a genuinely alive, non-leader member --
+/// exactly "the enumeration under-reporting a live member," candidate 3
+/// -- cannot be recovered by this function: nothing re-checks a pid the
+/// bulk list never produced, because only the session leader's own pid
+/// is known in advance (see [`super::launch::SessionLeaderState`]'s own
+/// doc comment, and the one above
+/// [`super::launch::decide_processes_in_session`], for why that
+/// asymmetry is deliberate for the leader and unavoidable for everyone
+/// else). The scenario below constructs exactly the shape
+/// `test-process-leak.md`'s own attempt-1 log is consistent with --
+/// the bulk list empty, the leader separately confirmed `Gone` -- and
+/// the function returns `Some(vec![])`: a session the enumeration
+/// reports as empty, that contains a live process this function was
+/// never even asked about.
+///
+/// **This is not a bug in this function.** `decide_processes_in_session`
+/// answers correctly given what it was told; the gap is upstream, in
+/// whether `list_all_pids`'s own real `proc_listallpids` call can ever
+/// produce exactly this input against a real, non-`P_WEXIT` process --
+/// an empirical question about a kernel API this test cannot settle (no
+/// live reproduction is available; see the register row's own standing
+/// note on that). What this test settles is narrower and does not need
+/// one: **if** that input shape is ever possible, containment silently
+/// fails, with no test anywhere in this crate catching it before this
+/// one. That `if` is exactly what review 683 round 4 asked to stop
+/// being invisible. It is now a permanent, named assertion of the
+/// system's current behavior under that input -- not a passing test
+/// that proves safety, and not a failing one that blocks every commit
+/// on an unresolved kernel question either. Changing this assertion to
+/// expect anything else requires `decide_processes_in_session` itself
+/// to gain a way to answer "I cannot be sure this list was complete,"
+/// which does not exist today and is an open question for whoever picks
+/// this up next, not a one-line fix.
+#[test]
+fn processes_in_session_cannot_recover_a_live_member_the_bulk_list_never_named() {
+    const SESSION_LEADER_PID: libc::pid_t = 42424;
+    const LIVE_BACKGROUND_PID_NEVER_IN_THE_BULK_LIST: libc::pid_t = 99999;
+
+    let bulk_list_omitting_the_live_member: Vec<libc::pid_t> = Vec::new();
+
+    let result = super::launch::decide_processes_in_session(
+        bulk_list_omitting_the_live_member,
+        SESSION_LEADER_PID,
+        |pid, session_id| {
+            panic!(
+                "live_member_of_session must not be called for pid {pid} against session \
+                 {session_id} -- the constructed bulk list is empty, so there is nothing for \
+                 the real loop to call this with"
+            );
+        },
+        || Some(super::launch::SessionLeaderState::Gone),
+    );
+
+    assert_eq!(
+        result,
+        Some(vec![]),
+        "CONFIRMED, review 683 round 4: a live, non-leader member \
+         ({LIVE_BACKGROUND_PID_NEVER_IN_THE_BULK_LIST}) that the bulk enumeration never named is \
+         not recoverable -- processes_in_session reports a session empty that is not. See this \
+         test's own doc comment for what is, and is not, established by that."
+    );
+}
+
+/// The leader's own fallback, positive case: absent from the bulk list
+/// but its own direct check reads `Alive` -- the one case this
+/// function's loop adds a pid *not* found through `pids` at all. Pins
+/// the happy path the test above's own gap sits next to, so this
+/// function's three `SessionLeaderState` outcomes are each exercised by
+/// at least one test, not only `Gone`.
+#[test]
+fn decide_processes_in_session_adds_the_leader_from_its_own_fallback_when_alive() {
+    let result = super::launch::decide_processes_in_session(
+        Vec::new(),
+        42424,
+        |_pid, _session_id| {
+            panic!("the constructed bulk list is empty; nothing should reach this oracle")
+        },
+        || Some(super::launch::SessionLeaderState::Alive),
+    );
+    assert_eq!(result, Some(vec![42424]));
+}
+
+/// The leader's own fallback, mid-exit case: `Leaving` is **not**
+/// `Alive` and must not be added as a survivor, the same exclusion
+/// [`super::launch::is_gone_or_going`]'s own `P_WEXIT` check already
+/// gives every other member -- the leader is not held to a looser
+/// containment standard than anyone else in the session (see
+/// [`super::launch::SessionLeaderState`]'s own doc comment).
+#[test]
+fn decide_processes_in_session_excludes_a_leader_that_is_only_leaving() {
+    let result = super::launch::decide_processes_in_session(
+        Vec::new(),
+        42424,
+        |_pid, _session_id| {
+            panic!("the constructed bulk list is empty; nothing should reach this oracle")
+        },
+        || Some(super::launch::SessionLeaderState::Leaving),
+    );
+    assert_eq!(result, Some(vec![]));
+}
+
 /// Review 657 round 2: `wait_for_child_outcome`'s own choice at timeout
 /// (`termination::decide_on_timeout`), exercised against fixed inputs
 /// rather than by waiting to catch the real `P_WEXIT` window -- the same

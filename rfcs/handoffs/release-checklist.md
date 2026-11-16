@@ -461,8 +461,39 @@ for the shape observed, and a `true` confirms candidate 3 without waiting for th
 itself. Pure decision against a fixed reading, the same instrument `decide_gone_or_going` was pulled
 out for, and it needs no Apple hardware.
 
-Until one of those two exits is taken, **read a green run here as review 625 taught this project to
-read one: possibly a guard that has lost the ability to fail.**
+**Taken, 2026-11-16: `decide_processes_in_session` pulled out (the same split
+`decide_gone_or_going` got), fed exactly this scenario, and the answer is `Some(vec![])` --
+confirmed, not a refusal.** A bulk list that never names a genuinely alive, non-leader member
+cannot be recovered: nothing re-checks a pid the enumeration never produced, for the structural
+reason stated above (only the leader's own pid is known in advance). This is now a permanent,
+named test
+(`runtime::terminal::tests::processes_in_session_cannot_recover_a_live_member_the_bulk_list_never_named`),
+pinning the system's *current* behavior under that input, with two companion tests
+(`decide_processes_in_session_adds_the_leader_from_its_own_fallback_when_alive`,
+`…excludes_a_leader_that_is_only_leaving`) exercising the other two `SessionLeaderState` outcomes so
+all three are covered, not only the dangerous one.
+
+**What this confirms, and what it does not.** It confirms the logical consequence is real: *if*
+`list_all_pids`'s own real `proc_listallpids` call ever returns a reply that is not a truncation
+failure and still omits a genuinely alive, non-`P_WEXIT` process, containment silently reports that
+session empty. It does **not** confirm that input shape is reachable on a real machine -- that is
+an empirical question about a kernel API this pure-function test cannot settle, and the attempt-1 log
+this item started from is consistent with it but does not prove it either (it is equally consistent
+with the session leader itself being the only thing misread, which review 630's own prior fix already
+covers for the leader specifically). **No production behavior was changed.** There is no fix landed
+here, because there is no general fix available without either (a) a way to ask `proc_listallpids`
+"are you sure this is complete" that this project has not found, or (b) a product decision about what
+to do when that assurance cannot be had -- refuse more often than today (cost: more support, grace
+periods that risk being taken against processes that were never actually missed), or accept the
+residual risk as already-reasoned-through (cost: stated, not merely assumed). That decision belongs
+to the owner, not to whoever happened to write the test that made the question checkable.
+
+**So this item's own exit is partially taken, not closed.** The empirical ambiguity ("was this run's
+own red the kernel race or something else") is resolved: it no longer matters which, because the
+logical gap exists either way. What is still open is the product decision named above. Read a green
+`macos-measurement` run as before -- **possibly a guard that has lost the ability to fail** -- until
+that decision is made and, if it changes anything, reflected in `decide_processes_in_session`'s own
+tests.
 
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".

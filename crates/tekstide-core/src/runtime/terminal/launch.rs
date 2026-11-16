@@ -891,45 +891,90 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
         "processes_in_session: list_all_pids returned {} pids, checking each",
         pids.len()
     ));
+    let members = decide_processes_in_session(
+        pids,
+        session_id,
+        |pid, session_id| {
+            enumeration_progress(&format!("processes_in_session: checking pid {pid}"));
+            live_member_of_session(pid, session_id)
+        },
+        || {
+            enumeration_progress(&format!(
+                "processes_in_session: session leader {session_id} absent from list_all_pids's \
+                 own bulk output -- checking it directly rather than treating absence as \
+                 departure"
+            ));
+            let leader_state = session_leader_state(session_id);
+            if leader_state.is_none() {
+                enumeration_progress(&format!(
+                    "processes_in_session: session_leader_state({session_id}) could not be \
+                     confirmed, failing the whole enumeration rather than silently excluding it"
+                ));
+            }
+            leader_state
+        },
+    )?;
+    enumeration_progress(&format!(
+        "processes_in_session: done, {} member(s) found",
+        members.len()
+    ));
+    Some(members)
+}
+
+/// The pure decision [`processes_in_session`] makes on macOS, pulled out
+/// for the same reason [`decide_gone_or_going`] was: a fixed reading --
+/// a bulk pid list already enumerated, a liveness oracle standing in for
+/// [`live_member_of_session`]'s own real `getsid`/`sysctl` calls, and a
+/// leader-state oracle standing in for [`session_leader_state`]'s own
+/// real `kill`/`sysctl` calls -- is testable against a controlled
+/// scenario; the real `proc_listallpids` reply and a live kernel race
+/// are not. Behavior-preserving: this is exactly the loop
+/// `processes_in_session` ran inline before this split, with its own
+/// diagnostic `eprintln!`s moved into the two closures the caller
+/// supplies, not dropped.
+///
+/// **Review 683 round 4 (`rfcs/handoffs/release-checklist.md`'s own
+/// dated entry): this is also the instrument that answers candidate 3**
+/// -- "the enumeration under-reporting a live member." The function
+/// below has no way to recover a pid that `pids` never named: only the
+/// session leader gets a fallback when absent from that list, because
+/// the leader's own pid is always known in advance (`session_id`, by
+/// construction) and every other member is found, or not, purely
+/// through `pids` plus `live_member_of_session`'s own answer for
+/// whatever *is* in it -- see [`session_leader_state`]'s own doc comment
+/// for why that asymmetry was deliberate. This function makes that
+/// consequence checkable directly: feed it a `pids` list missing a
+/// supposedly-live, non-leader member, and read what comes back. See
+/// `processes_in_session_cannot_recover_a_live_member_the_bulk_list_never_named`
+/// (below) for the actual check and what it found.
+///
+/// `cfg(any(target_os = "macos", test))`, same reasoning as
+/// [`SessionLeaderState`]/[`decide_gone_or_going`]: the scenario this
+/// decides is still Darwin-only, but the pure decision itself now needs
+/// to run and be tested on every platform.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn decide_processes_in_session(
+    pids: Vec<libc::pid_t>,
+    session_id: libc::pid_t,
+    mut live_member_of_session: impl FnMut(libc::pid_t, libc::pid_t) -> Option<bool>,
+    leader_state_when_absent: impl FnOnce() -> Option<SessionLeaderState>,
+) -> Option<Vec<libc::pid_t>> {
     let mut members = Vec::new();
     let mut session_leader_visited = false;
     for pid in pids {
         if pid == session_id {
             session_leader_visited = true;
         }
-        enumeration_progress(&format!("processes_in_session: checking pid {pid}"));
         if live_member_of_session(pid, session_id)? {
             members.push(pid);
         }
     }
     if !session_leader_visited {
-        enumeration_progress(&format!(
-            "processes_in_session: session leader {session_id} absent from list_all_pids's own \
-             bulk output -- checking it directly rather than treating absence as departure"
-        ));
-        // Review 633: one `sysctl` observation, not two independent ones
-        // composed after the fact -- see [`SessionLeaderState`]'s own doc
-        // comment for why the two-boolean version this replaced was
-        // itself a race of the same shape `assert_session_is_empty`'s own
-        // fix (below) was just needed for. Only `Alive` is a survivor to
-        // contain, matching [`is_gone_or_going`]'s own `SZOMB`-or-`P_WEXIT`
-        // exclusion for every other member, so the leader is not held to
-        // a looser containment standard than anyone else in the session.
-        let Some(leader_state) = session_leader_state(session_id) else {
-            enumeration_progress(&format!(
-                "processes_in_session: session_leader_state({session_id}) could not be \
-                 confirmed, failing the whole enumeration rather than silently excluding it"
-            ));
-            return None;
-        };
+        let leader_state = leader_state_when_absent()?;
         if matches!(leader_state, SessionLeaderState::Alive) {
             members.push(session_id);
         }
     }
-    enumeration_progress(&format!(
-        "processes_in_session: done, {} member(s) found",
-        members.len()
-    ));
     Some(members)
 }
 
@@ -946,8 +991,18 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// up in the code that fix produced. One observation, three states,
 /// rather than two booleans whose conjunction every caller must assemble
 /// correctly:
-#[cfg(target_os = "macos")]
-enum SessionLeaderState {
+///
+/// **Review 683 round 4: `cfg(any(target_os = "macos", test))`, not
+/// `cfg(target_os = "macos")` alone** -- same reasoning as
+/// [`P_WEXIT`]/[`decide_gone_or_going`]: the fact this models is still
+/// Darwin-only, but [`decide_processes_in_session`] is now a pure
+/// function this project needs to run and test on every platform, and
+/// it needs this type to do so. `derive`s added for the same reason:
+/// a test comparing against a fixed variant needs `PartialEq`, and a
+/// failed assertion printing it needs `Debug`.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg(any(target_os = "macos", test))]
+pub(super) enum SessionLeaderState {
     /// Confirmed gone: `kill(pid, 0)` failed with `ESRCH`, or the
     /// kernel's own `p_stat` already reads `SZOMB`. Has finished leaving;
     /// not a survivor.
