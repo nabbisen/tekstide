@@ -915,7 +915,7 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
         },
     )?;
     enumeration_progress(&format!(
-        "processes_in_session: done, {} member(s) found",
+        "processes_in_session: done, {} member(s) found: {members:?}",
         members.len()
     ));
     Some(members)

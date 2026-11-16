@@ -12,6 +12,15 @@ begins"). The recommendation and the decision are attributed separately on purpo
 round 6 named this project's own standing confusion between the two (fifth occurrence) and asked
 that it stop here.
 
+**Correction, review 683 round 7: this RFC does not fix, and must not be read as fixing, the
+real red that prompted it.** The full 66-enumeration attempt-1 log (`test-process-leak.md`'s own
+dated entry) refutes bulk omission for that specific run: `list_all_pids` never returned a short
+list, and a bulk-visible member's own `live_member_of_session` answer flipped to `false` instead
+— a different, still-open question (`release-checklist.md`'s own entry). The logic gap D1 closes
+is confirmed reachable in the abstract, by the pure-function test cited below, independent of
+whether it ever explains a real observation; this RFC stands on that confirmation alone, as a
+precautionary closure, not as the explanation for the incident that led here.
+
 Related RFCs:
 
 - [RFC-043](../done/043-terminal-process-containment.md) — owns the session-scoped containment
@@ -48,14 +57,17 @@ absence as departure.
   oversight: the leader's own pid is known in advance (it *is* `session_id`, by construction), so
   it can always be re-checked when absent. No other pid in the scan can stand in for a member
   whose absence it did not itself discover.
-- **The scenario that exercises the gap is realistic, not contrived.** `test-process-leak.md`'s
-  own `a_real_close_kills_a_live_hup_immune_backgrounded_job` red (run `43779370314`, commit
-  `8a9da38`, a push touching none of `runtime::terminal`) showed the session leader absent from
-  the bulk scan and separately confirmed departed, with the backgrounded job — alive by the
-  test's own precondition — unaccounted for either way, ending in `0 member(s) found`. That log
-  is *consistent with* this gap; it does not *prove* it, because the same log is also consistent
-  with the already-fixed leader-specific misread (review 630). The pure-function test above
-  removes that ambiguity for the logic itself, independent of which one explains that one run.
+- **The gap is confirmed by the pure-function test alone, not by a real observation, and that
+  distinction is now settled rather than open.** `test-process-leak.md`'s own
+  `a_real_close_kills_a_live_hup_immune_backgrounded_job` red (run `43779370314`, commit
+  `8a9da38`) was first read from a twelve-line excerpt as *consistent with* this gap. **The full
+  66-enumeration log refutes that reading (review 683 round 7): `list_all_pids` never returned a
+  short list across any of the 66 reads (~137 pids throughout); a member was found within that
+  bulk list for 62 consecutive reads and then stopped, which is a bulk-visible pid failing
+  `live_member_of_session`, not the bulk list omitting one.** That real incident is therefore
+  evidence for a *different*, still-open question (see `release-checklist.md`'s own entry), not
+  for this gap. This gap stands on `decide_processes_in_session`'s own test alone — confirmed
+  reachable by construction, not (yet, or perhaps ever) observed on a real machine.
 - **Whether `proc_listallpids` can actually produce this omission for a live, non-`P_WEXIT`
   process on a real machine is not established.** It is an empirical question about a kernel API
   this project has not measured directly (unlike the leader's own case, measured 13 of 13 firings,
@@ -147,9 +159,11 @@ enumeration, then the confirmation. The real limit is **"never named by an earli
 of this same close,"** a much larger class than "never named over the session's whole life."
 
 **It is still worth doing.** A member visible to an earlier enumeration in a close and missing
-from the signalling one — the one that decides what dies — is exactly what recall catches, and
-that is the scenario `test-process-leak.md`'s own red is shaped like. But if the bulk read omits
-the member from the *first* enumeration of that close, recall never had it, and this RFC's own
+from the signalling one — the one that decides what dies — is exactly what recall catches. (It is
+**not** what `test-process-leak.md`'s own red is shaped like — review 683 round 7's full-log read
+refutes that, see the correction at the top of this document — so this paragraph states what
+recall catches in the abstract, not a claim about that incident.) But if the bulk read omits the
+member from the *first* enumeration of that close, recall never had it, and this RFC's own
 benefit is bounded to one close's own internal window, not a session's whole life. Stated here
 so the Risks section's own "false sense of closure" hazard does not apply to this section itself.
 
