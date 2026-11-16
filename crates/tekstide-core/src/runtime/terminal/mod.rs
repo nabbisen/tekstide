@@ -32,12 +32,17 @@ pub use security::{
     TerminalTextEffect, TerminalTrustedSurfaceKind, TerminalTrustedUiBoundary,
     TerminalTrustedUiEffect, TerminalTrustedUiState, classify_private_mode_number,
 };
-/// RFC-022 PR-022-C: `agent::launch` builds an `AdapterApprovalConfig` to
-/// attach to a `TerminalLaunchSpec` via `set_adapter_approval_config` when
-/// preparing a Managed adapter launch. `pub(crate)`, not `pub` -- the type
-/// itself is already `pub(crate)`; this only makes the path to it
-/// reachable from outside `runtime::terminal`, not from outside the crate.
+/// RFC-077 Stage 8: `project::session` builds an `AdapterApprovalConfig`
+/// to attach to a `TerminalLaunchSpec` via `set_adapter_approval_config`
+/// when assembling a Managed adapter launch from `agent`'s own
+/// runtime-free intent. `pub(crate)`, not `pub` -- the type itself is
+/// already `pub(crate)`; this only makes the path to it reachable from
+/// outside `runtime::terminal`, not from outside the crate.
 pub(crate) use types::AdapterApprovalConfig;
+/// RFC-077 Stage 8: the single mapping from an agent run's compatibility
+/// level to the terminal kind it launches as -- `project::session`'s own
+/// assembly step needs this exact function, not a second copy.
+pub(crate) use types::terminal_kind_from_compatibility;
 pub use types::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
     TerminalOutputSummary, TerminalRuntimeEvent, TerminalRuntimeHandle, TerminalRuntimeSnapshot,

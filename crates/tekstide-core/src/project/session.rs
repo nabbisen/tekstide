@@ -1,10 +1,11 @@
 use crate::agent::AgentAdapterApprovalError;
 use crate::agent::AgentRunLaunchPlan;
 use crate::agent::AgentRunTranscriptCaptureError;
+use crate::agent::AgentTerminalLaunchIntent;
 use crate::approval::ApprovalChannelEndpoint;
 use crate::runtime::terminal::{
-    TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntime, TerminalRuntimeEvent,
-    TerminationOutcome,
+    AdapterApprovalConfig, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalLaunchSpec,
+    TerminalRuntime, TerminalRuntimeEvent, TerminationOutcome, terminal_kind_from_compatibility,
 };
 use crate::transcript::{
     TranscriptLocalDataSummary, TranscriptRetentionLimits, agent_run_may_still_be_writing,
@@ -21,11 +22,11 @@ use crate::content::{
     TextDocumentOpenPolicy, TextViewport,
 };
 use crate::domain::{
-    AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
-    ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
-    ChangeDetectionStatus, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError, ReviewState,
-    TerminalId, TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, Transcript,
-    TranscriptAbsence, TranscriptId, TranscriptOrigin, VisibleSlot,
+    AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError, ApprovalDecision, ApprovalId,
+    ApprovalRequest, AuditEvent, ChangeAssociationConfidence, ChangeDetectionStatus, ChangeSet,
+    ChangeSetId, DomainTimestamp, OwnershipError, ReviewState, TerminalId, TerminalSession,
+    TerminalStatus, TerminalTransitionError, Transcript, TranscriptAbsence, TranscriptId,
+    TranscriptOrigin, VisibleSlot,
 };
 
 use super::change_detection::{
@@ -123,6 +124,25 @@ mod run_records;
 pub use run_records::{
     RunAnnotationError, RunRecordPersistSummary, RunRecordWrite, RunRecordsSetAside,
 };
+
+/// RFC-077 Stage 8, D5 move 2: `agent::AgentRunLaunchProject`'s own
+/// provider, placed here rather than in `agent` because `project`
+/// already has an edge to `agent` (this file's own `use crate::agent::
+/// ...` above) -- the same placement rule Stage 5's `impl
+/// CommandAuditRecorder for AuditCoordinator` established.
+impl crate::agent::AgentRunLaunchProject for ProjectSession {
+    fn id(&self) -> &ProjectId {
+        self.id()
+    }
+
+    fn trust_state(&self) -> WorkspaceTrust {
+        self.trust_state()
+    }
+
+    fn canonical_root_path(&self) -> &Path {
+        self.canonical_root_path()
+    }
+}
 
 impl ProjectSession {
     pub fn new(
@@ -723,7 +743,7 @@ impl ProjectSession {
         mut terminal: TerminalSession,
     ) -> Result<AgentRunId, ProjectAgentLaunchError> {
         self.ensure_project_member(plan.spec().project_id())?;
-        self.ensure_project_member(&plan.terminal_launch_spec().project_id)?;
+        self.ensure_project_member(plan.terminal_launch_intent().project_id())?;
         self.ensure_project_member(&plan.agent_run().project_id)?;
         self.ensure_project_member(&terminal.project_id)?;
 
@@ -754,10 +774,10 @@ impl ProjectSession {
             return Err(ProjectAgentLaunchError::AgentRunLimitExceeded { limit });
         }
 
-        let (_, mut agent_run, terminal_launch_spec) = plan.into_parts();
+        let (_, mut agent_run, terminal_launch_intent) = plan.into_parts();
         agent_run.attach_terminal(&terminal)?;
         terminal.environment_policy_ref =
-            terminal_environment_policy_ref(&terminal_launch_spec.environment_policy);
+            terminal_environment_policy_ref(terminal_launch_intent.environment_policy());
         let agent_run_id = agent_run.id.clone();
 
         self.terminal_sessions.push(terminal);
@@ -817,14 +837,19 @@ impl ProjectSession {
         Ok(plan.prepare_adapter_approval()?)
     }
 
-    /// RFC-022 PR-022-C: branches on `plan.terminal_launch_spec()`'s own
-    /// `adapter_approval_config` -- set only by a preceding
+    /// RFC-022 PR-022-C: branches on `plan.terminal_launch_intent()`'s own
+    /// `adapter_approval` -- set only by a preceding
     /// `prepare_adapter_approval()` call for a `Managed` profile -- to
     /// launch via `runtime.launch_project_adapter` instead of
-    /// `launch_project_shell`. `TerminalLaunchSpec` itself, not
+    /// `launch_project_shell`. The intent itself, not
     /// `compatibility_level` read separately, is the single source of
     /// truth for which spawn path runs, so this can never disagree with
     /// what `prepare_adapter_approval` actually configured.
+    ///
+    /// RFC-077 Stage 8: `assemble_terminal_launch_spec` builds the real
+    /// `runtime::terminal::TerminalLaunchSpec` here, once, from the
+    /// intent `agent` produced -- `project` already has edges to both
+    /// `agent` and `runtime`, so this is the assembly's one home.
     pub(crate) fn launch_prepared_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
@@ -832,16 +857,14 @@ impl ProjectSession {
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         let transcript_storage_path = plan.transcript_storage_path().cloned();
         let transcript_budget_exhausted = plan.transcript_budget_exhausted();
-        let is_adapter_launch = plan
-            .terminal_launch_spec()
-            .adapter_approval_config()
-            .is_some();
+        let is_adapter_launch = plan.terminal_launch_intent().adapter_approval().is_some();
+        let terminal_launch_spec = assemble_terminal_launch_spec(plan.terminal_launch_intent());
 
         plan.transition_agent_run_to(AgentRunStatus::Preparing)?;
         let (terminal, events) = if is_adapter_launch {
-            runtime.launch_project_adapter(self, plan.terminal_launch_spec_for_runtime())?
+            runtime.launch_project_adapter(self, terminal_launch_spec)?
         } else {
-            runtime.launch_project_shell(self, plan.terminal_launch_spec_for_runtime())?
+            runtime.launch_project_shell(self, terminal_launch_spec)?
         };
         let terminal_id = terminal.id.clone();
         plan.transition_agent_run_to(AgentRunStatus::Running)?;
@@ -2112,7 +2135,7 @@ impl ProjectSession {
         plan: &AgentRunLaunchPlan,
     ) -> Result<(), ProjectAgentLaunchError> {
         self.ensure_project_member(plan.spec().project_id())?;
-        self.ensure_project_member(&plan.terminal_launch_spec().project_id)?;
+        self.ensure_project_member(plan.terminal_launch_intent().project_id())?;
         self.ensure_project_member(&plan.agent_run().project_id)?;
         if self
             .agent_runs
@@ -2123,8 +2146,15 @@ impl ProjectSession {
                 OwnershipError::DuplicateAttachment,
             ));
         }
-        if plan.terminal_launch_spec().kind
-            != terminal_kind_from_compatibility(plan.agent_run().compatibility_level)
+        // RFC-077 Stage 8: the intent carries `compatibility_level`
+        // directly rather than a precomputed `TerminalKind`, and the
+        // mapping between the two is injective
+        // (`terminal_kind_from_compatibility`, one `TerminalKind` per
+        // `AgentCompatibilityLevel`), so comparing the pre-image here is
+        // exactly equivalent to the image comparison this check used to
+        // make, without re-deriving a `TerminalKind` on either side.
+        if plan.terminal_launch_intent().compatibility_level()
+            != plan.agent_run().compatibility_level
         {
             return Err(ProjectAgentLaunchError::TerminalDoesNotMatchLaunchSpec);
         }
@@ -2664,13 +2694,13 @@ pub fn agent_run_status_is_active(status: AgentRunStatus) -> bool {
 }
 
 fn terminal_matches_launch_spec(terminal: &TerminalSession, plan: &AgentRunLaunchPlan) -> bool {
-    let spec = plan.terminal_launch_spec();
+    let intent = plan.terminal_launch_intent();
 
-    terminal.project_id == spec.project_id
-        && terminal.kind == spec.kind
-        && terminal.title == spec.title
-        && terminal.cwd == spec.cwd
-        && terminal.command_line_summary == spec.command_line_summary
+    &terminal.project_id == intent.project_id()
+        && terminal.kind == terminal_kind_from_compatibility(intent.compatibility_level())
+        && terminal.title == intent.title()
+        && terminal.cwd.as_path() == intent.cwd()
+        && terminal.command_line_summary == intent.command_line_summary()
 }
 
 fn terminal_environment_policy_ref(policy: &TerminalEnvironmentPolicy) -> Option<String> {
@@ -2683,12 +2713,38 @@ fn terminal_environment_policy_ref(policy: &TerminalEnvironmentPolicy) -> Option
     }
 }
 
-fn terminal_kind_from_compatibility(level: AgentCompatibilityLevel) -> TerminalKind {
-    match level {
-        AgentCompatibilityLevel::Plain => TerminalKind::Plain,
-        AgentCompatibilityLevel::Supervised => TerminalKind::Supervised,
-        AgentCompatibilityLevel::Managed => TerminalKind::Managed,
+/// RFC-077 Stage 8, D5 move 3: the real `runtime::terminal::
+/// TerminalLaunchSpec` a launch needs, assembled here from `agent`'s own
+/// runtime-free `AgentTerminalLaunchIntent` -- `project` already has
+/// edges to both `agent` and `runtime` (this file's own existing `use
+/// crate::agent::...` and `use crate::runtime::terminal::...`), so this
+/// is the one place that can name both without creating a new edge for
+/// either. The approval-channel *binding* that fills
+/// `intent.adapter_approval()` already happened, in
+/// `agent::AgentRunLaunchPlan::prepare_adapter_approval`; this only ever
+/// reads the result, never binds anything itself.
+pub(crate) fn assemble_terminal_launch_spec(
+    intent: &AgentTerminalLaunchIntent,
+) -> TerminalLaunchSpec {
+    let mut spec = TerminalLaunchSpec::plain_shell(
+        intent.project_id().clone(),
+        intent.title(),
+        intent.cwd(),
+        intent.shell(),
+    );
+    spec.command_line_summary = intent.command_line_summary().to_owned();
+    spec.environment_policy = intent.environment_policy().clone();
+    spec.kind = terminal_kind_from_compatibility(intent.compatibility_level());
+    spec.dimensions = intent.dimensions();
+    spec.set_transcript_writer_config(intent.transcript_writer_config().cloned());
+    spec.authorize_validated_agent_run(intent.compatibility_level());
+    if let Some(approval) = intent.adapter_approval() {
+        spec.set_adapter_approval_config(Some(AdapterApprovalConfig {
+            socket_path: approval.socket_path().to_path_buf(),
+            token: approval.token().clone(),
+        }));
     }
+    spec
 }
 
 fn len_as_u32(len: usize) -> u32 {

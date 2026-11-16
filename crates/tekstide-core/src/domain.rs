@@ -43,7 +43,8 @@ pub use shell_readiness::{
     SHELL_READINESS_MARKER, SHELL_READINESS_PROBE_COMMAND, SHELL_READINESS_TIMEOUT,
 };
 pub use terminal::{
-    TerminalKind, TerminalSession, TerminalStatus, TerminalTransitionError, VisibleSlot,
+    TerminalDimensions, TerminalEnvironmentPolicy, TerminalKind, TerminalSession, TerminalStatus,
+    TerminalTransitionError, VisibleSlot,
 };
 pub use time::{DomainTimestamp, TimestampParseError};
 pub use transcript::{Transcript, TranscriptLifecycleState, TranscriptOrigin, TruncationState};

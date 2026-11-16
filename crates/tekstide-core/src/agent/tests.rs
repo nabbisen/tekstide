@@ -404,19 +404,22 @@ fn launch_plan_builds_ready_agent_run_and_matching_terminal_spec() {
     assert_eq!(plan.agent_run().profile_id, "builtin-ai");
     assert_eq!(plan.agent_run().status, AgentRunStatus::Ready);
     assert_eq!(plan.agent_run().terminal_id, None);
-    assert_eq!(plan.terminal_launch_spec().project_id, project.id().clone());
-    assert_eq!(plan.terminal_launch_spec().kind, TerminalKind::Supervised);
+    assert_eq!(plan.terminal_launch_intent().project_id(), project.id());
     assert_eq!(
-        plan.terminal_launch_spec().cwd,
+        plan.terminal_launch_intent().compatibility_level(),
+        AgentCompatibilityLevel::Supervised
+    );
+    assert_eq!(
+        plan.terminal_launch_intent().cwd().to_path_buf(),
         root.canonicalize().unwrap()
     );
     assert_eq!(
-        plan.terminal_launch_spec().shell,
+        plan.terminal_launch_intent().shell().to_path_buf(),
         executable.canonicalize().unwrap()
     );
     assert_eq!(
-        plan.terminal_launch_spec().environment_policy,
-        TerminalEnvironmentPolicy::Named("agent-minimal".to_owned())
+        plan.terminal_launch_intent().environment_policy(),
+        &TerminalEnvironmentPolicy::Named("agent-minimal".to_owned())
     );
 
     cleanup_root(root);
@@ -440,16 +443,16 @@ fn launch_plan_preserves_distinct_explicit_environment_allowlists() {
     let path_home_plan = launch_plan_for(&project, &path_home_profile);
 
     assert_eq!(
-        path_only_plan.terminal_launch_spec().environment_policy,
-        TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()])
+        path_only_plan.terminal_launch_intent().environment_policy(),
+        &TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned()])
     );
     assert_eq!(
-        path_home_plan.terminal_launch_spec().environment_policy,
-        TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned(), "HOME".to_owned()])
+        path_home_plan.terminal_launch_intent().environment_policy(),
+        &TerminalEnvironmentPolicy::ExplicitAllowlist(vec!["PATH".to_owned(), "HOME".to_owned()])
     );
     assert_ne!(
-        path_only_plan.terminal_launch_spec().environment_policy,
-        path_home_plan.terminal_launch_spec().environment_policy
+        path_only_plan.terminal_launch_intent().environment_policy(),
+        path_home_plan.terminal_launch_intent().environment_policy()
     );
 
     cleanup_root(root);
@@ -1665,7 +1668,8 @@ fn authorized_supervised_plan_spec_cannot_be_mutated_to_managed_runtime_launch()
     let project = restricted_project(ProjectId::for_test(1), &root);
     let profile = built_in_profile(Path::new("/bin/sh"));
     let plan = launch_plan_for(&project, &profile);
-    let mut terminal_spec = plan.terminal_launch_spec_for_runtime();
+    let mut terminal_spec =
+        crate::project::assemble_terminal_launch_spec(plan.terminal_launch_intent());
     terminal_spec.kind = TerminalKind::Managed;
 
     let error = TerminalRuntime::new()
@@ -2539,12 +2543,13 @@ fn launch_plan_for(project: &ProjectSession, profile: &AiCliProfile) -> AgentRun
 }
 
 fn terminal_from_plan(plan: &AgentRunLaunchPlan) -> TerminalSession {
+    let intent = plan.terminal_launch_intent();
     TerminalSession::new(
-        plan.terminal_launch_spec().project_id.clone(),
-        plan.terminal_launch_spec().kind,
-        plan.terminal_launch_spec().title.clone(),
-        plan.terminal_launch_spec().cwd.clone(),
-        plan.terminal_launch_spec().command_line_summary.clone(),
+        intent.project_id().clone(),
+        crate::runtime::terminal::terminal_kind_from_compatibility(intent.compatibility_level()),
+        intent.title().to_owned(),
+        intent.cwd().to_path_buf(),
+        intent.command_line_summary().to_owned(),
     )
 }
 

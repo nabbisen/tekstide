@@ -3,9 +3,10 @@ mod profile;
 mod report;
 
 pub use launch::{
-    AgentAdapterApprovalError, AgentLaunchSummary, AgentRunLaunchPlan, AgentRunLaunchRequest,
-    AgentRunLaunchSpec, AgentRunLaunchValidation, AgentRunLaunchValidationError,
-    AgentRunLaunchValidator, AgentRunTranscriptCapture, AgentRunTranscriptCaptureError,
+    AgentAdapterApprovalError, AgentLaunchSummary, AgentRunLaunchPlan, AgentRunLaunchProject,
+    AgentRunLaunchRequest, AgentRunLaunchSpec, AgentRunLaunchValidation,
+    AgentRunLaunchValidationError, AgentRunLaunchValidator, AgentRunTranscriptCapture,
+    AgentRunTranscriptCaptureError, AgentTerminalAdapterApproval, AgentTerminalLaunchIntent,
     VerifiedCwd,
 };
 pub use profile::{

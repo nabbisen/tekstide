@@ -4,15 +4,11 @@ use std::path::{Path, PathBuf};
 
 use crate::approval::{
     ApprovalChannelEndpoint, ApprovalChannelErrorReason, ApprovalChannelPathError,
-    ApprovalChannelPathRequest, ApprovalChannelPathResolver, validate_token,
+    ApprovalChannelPathRequest, ApprovalChannelPathResolver, RunCapabilityToken, validate_token,
 };
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError, ProjectId,
-    WorkspaceTrust,
-};
-use crate::project::ProjectSession;
-use crate::runtime::terminal::{
-    AdapterApprovalConfig, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
+    TerminalDimensions, TerminalEnvironmentPolicy, WorkspaceTrust,
 };
 use crate::security::is_restricted_mode;
 use crate::transcript::{
@@ -302,11 +298,105 @@ impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
     }
 }
 
+/// RFC-077 Stage 8, D5 move 3: `agent`'s own runtime-free terminal-launch
+/// decision, carried to `project` (which already has edges to both
+/// `agent` and `runtime`) for assembly into a real `runtime::terminal::
+/// TerminalLaunchSpec` -- only the *assembly* moves; the approval-channel
+/// *binding* that fills `adapter_approval` stays in `agent`, in
+/// `AgentRunLaunchPlan::prepare_adapter_approval`, unchanged.
+///
+/// **No public constructor taking arbitrary fields** -- the `VerifiedCwd`
+/// lesson applied where it works: the only way to obtain one is through
+/// this module's own validated launch-planning flow
+/// (`AgentRunLaunchPlan::from_validation`, `prepare_transcript_capture`,
+/// `prepare_adapter_approval`), so `project` reads every field through an
+/// accessor but cannot forge one -- in particular, cannot mint a
+/// `compatibility_level` that `AgentRunLaunchValidator::validate` never
+/// actually granted, which is what `authorize_validated_agent_run` reads
+/// when `project` assembles the real spec.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentTerminalLaunchIntent {
+    project_id: ProjectId,
+    title: String,
+    cwd: PathBuf,
+    shell: PathBuf,
+    command_line_summary: String,
+    environment_policy: TerminalEnvironmentPolicy,
+    dimensions: TerminalDimensions,
+    compatibility_level: AgentCompatibilityLevel,
+    transcript_writer_config: Option<TranscriptWriterConfig>,
+    adapter_approval: Option<AgentTerminalAdapterApproval>,
+}
+
+impl AgentTerminalLaunchIntent {
+    pub fn project_id(&self) -> &ProjectId {
+        &self.project_id
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    pub fn shell(&self) -> &Path {
+        &self.shell
+    }
+
+    pub fn command_line_summary(&self) -> &str {
+        &self.command_line_summary
+    }
+
+    pub fn environment_policy(&self) -> &TerminalEnvironmentPolicy {
+        &self.environment_policy
+    }
+
+    pub fn dimensions(&self) -> TerminalDimensions {
+        self.dimensions
+    }
+
+    pub fn compatibility_level(&self) -> AgentCompatibilityLevel {
+        self.compatibility_level
+    }
+
+    pub fn transcript_writer_config(&self) -> Option<&TranscriptWriterConfig> {
+        self.transcript_writer_config.as_ref()
+    }
+
+    pub fn adapter_approval(&self) -> Option<&AgentTerminalAdapterApproval> {
+        self.adapter_approval.as_ref()
+    }
+}
+
+/// RFC-077 Stage 8: the token and socket path a `Managed` adapter launch
+/// delivers, carried on the intent the same way `runtime::terminal::
+/// TerminalLaunchSpec`'s own (now `project`-constructed)
+/// `AdapterApprovalConfig` used to be -- set only through
+/// `AgentRunLaunchPlan::prepare_adapter_approval`, which still does the
+/// real binding, in `agent`, unchanged.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentTerminalAdapterApproval {
+    socket_path: PathBuf,
+    token: RunCapabilityToken,
+}
+
+impl AgentTerminalAdapterApproval {
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
+    }
+
+    pub fn token(&self) -> &RunCapabilityToken {
+        &self.token
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRunLaunchPlan {
     spec: AgentRunLaunchSpec,
     agent_run: AgentRun,
-    terminal_launch_spec: TerminalLaunchSpec,
+    terminal_launch_intent: AgentTerminalLaunchIntent,
     transcript_storage_path: Option<TranscriptStoragePath>,
 }
 
@@ -324,22 +414,23 @@ impl AgentRunLaunchPlan {
         );
         agent_run.transition_to(AgentRunStatus::Ready)?;
 
-        let mut terminal_launch_spec = TerminalLaunchSpec::plain_shell(
-            spec.project_id.clone(),
-            terminal_title,
-            spec.cwd.clone(),
-            spec.executable_path.clone(),
-        );
-        terminal_launch_spec.command_line_summary = spec.executable_path.display().to_string();
-        terminal_launch_spec.environment_policy = spec.terminal_environment_policy.clone();
-        terminal_launch_spec.kind = terminal_kind_from_compatibility(spec.compatibility_level);
-        terminal_launch_spec.dimensions = TerminalDimensions::default();
-        terminal_launch_spec.authorize_validated_agent_run(spec.compatibility_level);
+        let terminal_launch_intent = AgentTerminalLaunchIntent {
+            project_id: spec.project_id.clone(),
+            title: terminal_title.into(),
+            cwd: spec.cwd.clone().into(),
+            shell: spec.executable_path.clone(),
+            command_line_summary: spec.executable_path.display().to_string(),
+            environment_policy: spec.terminal_environment_policy.clone(),
+            dimensions: TerminalDimensions::default(),
+            compatibility_level: spec.compatibility_level,
+            transcript_writer_config: None,
+            adapter_approval: None,
+        };
 
         Ok(Self {
             spec,
             agent_run,
-            terminal_launch_spec,
+            terminal_launch_intent,
             transcript_storage_path: None,
         })
     }
@@ -352,12 +443,8 @@ impl AgentRunLaunchPlan {
         &self.agent_run
     }
 
-    pub(crate) fn terminal_launch_spec(&self) -> &TerminalLaunchSpec {
-        &self.terminal_launch_spec
-    }
-
-    pub(crate) fn terminal_launch_spec_for_runtime(&self) -> TerminalLaunchSpec {
-        self.terminal_launch_spec.clone()
+    pub(crate) fn terminal_launch_intent(&self) -> &AgentTerminalLaunchIntent {
+        &self.terminal_launch_intent
     }
 
     pub(crate) fn prepare_transcript_capture(
@@ -372,7 +459,7 @@ impl AgentRunLaunchPlan {
             {
                 return Err(AgentRunTranscriptCaptureError::StateRootMissing);
             }
-            self.terminal_launch_spec.set_transcript_writer_config(None);
+            self.terminal_launch_intent.transcript_writer_config = None;
             self.transcript_storage_path = None;
             return Ok(());
         };
@@ -391,7 +478,7 @@ impl AgentRunLaunchPlan {
             {
                 return Err(AgentRunTranscriptCaptureError::BudgetExhausted);
             }
-            self.terminal_launch_spec.set_transcript_writer_config(None);
+            self.terminal_launch_intent.transcript_writer_config = None;
             self.transcript_storage_path = None;
             return Ok(());
         }
@@ -406,7 +493,7 @@ impl AgentRunLaunchPlan {
             {
                 return Err(AgentRunTranscriptCaptureError::PolicyDoesNotPermitBytes);
             }
-            self.terminal_launch_spec.set_transcript_writer_config(None);
+            self.terminal_launch_intent.transcript_writer_config = None;
             self.transcript_storage_path = None;
             return Ok(());
         }
@@ -429,18 +516,17 @@ impl AgentRunLaunchPlan {
                 return Err(AgentRunTranscriptCaptureError::Path(error));
             }
             Err(_) => {
-                self.terminal_launch_spec.set_transcript_writer_config(None);
+                self.terminal_launch_intent.transcript_writer_config = None;
                 self.transcript_storage_path = None;
                 return Ok(());
             }
         };
 
-        self.terminal_launch_spec
-            .set_transcript_writer_config(Some(TranscriptWriterConfig::new(
-                storage_path.clone(),
-                self.spec.transcript_capture.retention_limits,
-                self.spec.transcript_capture.mode,
-            )));
+        self.terminal_launch_intent.transcript_writer_config = Some(TranscriptWriterConfig::new(
+            storage_path.clone(),
+            self.spec.transcript_capture.retention_limits,
+            self.spec.transcript_capture.mode,
+        ));
         self.transcript_storage_path = Some(storage_path);
         Ok(())
     }
@@ -459,12 +545,12 @@ impl AgentRunLaunchPlan {
     /// RFC-022 PR-022-C: for a `Managed` profile (the only compatibility
     /// level RFC-022 governs -- `Plain`/`Supervised` return `Ok(None)`
     /// immediately, nothing about them involves an adapter), binds a real
-    /// `ApprovalChannelEndpoint` for this run and attaches its socket
-    /// path plus a validated capability token to `terminal_launch_spec`.
+    /// `ApprovalChannelEndpoint` for this run and records its socket path
+    /// plus a validated capability token on `terminal_launch_intent`.
     /// Mirrors `prepare_transcript_capture`'s own shape: resolve real
     /// infrastructure now, using state already gathered during
-    /// validation, so `launch_project_adapter` only ever needs to read
-    /// what is already on the spec.
+    /// validation, so `project`'s own assembly step only ever needs to
+    /// read what is already on the intent.
     ///
     /// **Response 216 (required change): the state root is
     /// `self.spec.approval_state_root`, independent of
@@ -485,12 +571,13 @@ impl AgentRunLaunchPlan {
     ///
     /// Returns the bound endpoint (not stored on `self`): this plan
     /// object already carries the token and socket path on
-    /// `terminal_launch_spec` for the spawn path to use, and the endpoint
-    /// itself -- the live listener a caller must `accept_proposal`/
-    /// `serve_concurrently` on to actually answer requests -- has a
-    /// different lifetime than the plan does. Handing it back lets the
-    /// caller decide where it lives (a headless test, for now; a longer-
-    /// lived home is PR-022-D/E's question, not this method's).
+    /// `terminal_launch_intent` for `project`'s own assembly step to use,
+    /// and the endpoint itself -- the live listener a caller must
+    /// `accept_proposal`/`serve_concurrently` on to actually answer
+    /// requests -- has a different lifetime than the plan does. Handing
+    /// it back lets the caller decide where it lives (a headless test,
+    /// for now; a longer-lived home is PR-022-D/E's question, not this
+    /// method's).
     pub(crate) fn prepare_adapter_approval(
         &mut self,
     ) -> Result<Option<ApprovalChannelEndpoint>, AgentAdapterApprovalError> {
@@ -517,8 +604,8 @@ impl AgentRunLaunchPlan {
             "bind() already validated this exact raw token internally, so re-validating the \
              identical string here cannot fail",
         );
-        self.terminal_launch_spec
-            .set_adapter_approval_config(Some(AdapterApprovalConfig { socket_path, token }));
+        self.terminal_launch_intent.adapter_approval =
+            Some(AgentTerminalAdapterApproval { socket_path, token });
         Ok(Some(endpoint))
     }
 
@@ -529,8 +616,8 @@ impl AgentRunLaunchPlan {
         self.agent_run.transition_to(status)
     }
 
-    pub(crate) fn into_parts(self) -> (AgentRunLaunchSpec, AgentRun, TerminalLaunchSpec) {
-        (self.spec, self.agent_run, self.terminal_launch_spec)
+    pub(crate) fn into_parts(self) -> (AgentRunLaunchSpec, AgentRun, AgentTerminalLaunchIntent) {
+        (self.spec, self.agent_run, self.terminal_launch_intent)
     }
 }
 
@@ -716,13 +803,27 @@ impl AgentLaunchSummary {
     }
 }
 
+/// RFC-077 Stage 8, D5 move 2: the exact surface `AgentRunLaunchValidator::
+/// validate` needs from a project -- its id, its trust state, and its
+/// canonical root -- as a trait this module defines rather than naming
+/// `project::ProjectSession` directly. Implemented on `ProjectSession`
+/// itself, inside `project/session.rs`: `project` already has an edge to
+/// `agent` (that file's own existing `use crate::agent::...`), so placing
+/// the impl there adds no new edge, the same placement rule Stage 5's
+/// `CommandAuditRecorder` established for `audit::AuditCoordinator`.
+pub trait AgentRunLaunchProject {
+    fn id(&self) -> &ProjectId;
+    fn trust_state(&self) -> WorkspaceTrust;
+    fn canonical_root_path(&self) -> &Path;
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AgentRunLaunchValidator;
 
 impl AgentRunLaunchValidator {
     pub fn validate(
         self,
-        project: &ProjectSession,
+        project: &impl AgentRunLaunchProject,
         profile: &AiCliProfile,
         request: &AgentRunLaunchRequest,
     ) -> Result<AgentRunLaunchValidation, AgentRunLaunchValidationError> {
@@ -1070,15 +1171,5 @@ fn terminal_environment_policy(
         AiCliEnvironmentPolicy::WorkspaceLocalEnvFile(_) => {
             TerminalEnvironmentPolicy::Named("workspace-local environment file".to_owned())
         }
-    }
-}
-
-fn terminal_kind_from_compatibility(
-    compatibility_level: AgentCompatibilityLevel,
-) -> crate::domain::TerminalKind {
-    match compatibility_level {
-        AgentCompatibilityLevel::Plain => crate::domain::TerminalKind::Plain,
-        AgentCompatibilityLevel::Supervised => crate::domain::TerminalKind::Supervised,
-        AgentCompatibilityLevel::Managed => crate::domain::TerminalKind::Managed,
     }
 }

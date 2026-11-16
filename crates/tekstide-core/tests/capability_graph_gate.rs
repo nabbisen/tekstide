@@ -111,7 +111,26 @@ use tekstide_core::domain::{AgentRunId, ProjectId};
 /// new edge) supplies the real one. `transcript` leaves the component
 /// entirely: nothing else inside it reached `transcript` once both of
 /// its own edges were gone.
-const MAX_LARGEST_SCC_SIZE: usize = 4;
+///
+/// **Lowered to 2 by RFC-077 Stage 8** (review 684, directed rather than
+/// escalated once the question was reframed: not "relocate the
+/// approval-channel-binding step" but "move only the assembly of the
+/// runtime-typed value, leave the binding where it already is"):
+/// `agent`'s one reference to `project` (`ProjectSession`'s `id`,
+/// `trust_state`, `canonical_root_path` -- a genuine behavioral need,
+/// D5 move 2, inverted into `agent::AgentRunLaunchProject`, implemented
+/// on `ProjectSession` **in `project/session.rs` itself**, since
+/// `project` already has an edge to `agent` there) and `agent`'s four
+/// references to `runtime` (`TerminalDimensions`/`TerminalEnvironmentPolicy`,
+/// D5 move 1: dependency-free vocabulary, moved to `domain::terminal`;
+/// `TerminalLaunchSpec`/`AdapterApprovalConfig`, D5 move 3: `agent` now
+/// produces a runtime-free `AgentTerminalLaunchIntent` instead of
+/// constructing the real spec itself, and `project::session`'s own
+/// `assemble_terminal_launch_spec` -- the one module with edges to both
+/// `agent` and `runtime` -- builds it from the intent) all gone. `agent`
+/// leaves the component entirely, and so does `approval` (nothing else
+/// inside it reached either once these four references were gone).
+const MAX_LARGEST_SCC_SIZE: usize = 2;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

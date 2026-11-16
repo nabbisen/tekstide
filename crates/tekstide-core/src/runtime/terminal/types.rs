@@ -4,6 +4,12 @@ use crate::approval::RunCapabilityToken;
 use crate::domain::{
     AgentCompatibilityLevel, ProjectId, TerminalId, TerminalKind, TerminalStatus, VisibleSlot,
 };
+/// RFC-077 Stage 8: both moved to `domain::terminal` -- re-exported from
+/// here unchanged (`pub use`, not `use`) so `tekstide_core::runtime::
+/// terminal::{TerminalDimensions, TerminalEnvironmentPolicy}` still
+/// resolves for every existing caller via this module's own `pub use
+/// types::{...}` in `mod.rs`.
+pub use crate::domain::{TerminalDimensions, TerminalEnvironmentPolicy};
 use crate::transcript::TranscriptWriterConfig;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,30 +108,17 @@ enum TerminalLaunchAuthority {
     },
 }
 
-fn terminal_kind_from_compatibility(level: AgentCompatibilityLevel) -> TerminalKind {
+/// RFC-077 Stage 8: `pub(crate)`, not private -- `project::session`'s own
+/// assembly of a `TerminalLaunchSpec` from `agent`'s runtime-free intent
+/// needs this exact mapping, and duplicating it there would risk the
+/// kind of drift this project has already been burned by once
+/// elsewhere. The single definition stays here; `project` calls it
+/// rather than re-deriving it.
+pub(crate) fn terminal_kind_from_compatibility(level: AgentCompatibilityLevel) -> TerminalKind {
     match level {
         AgentCompatibilityLevel::Plain => TerminalKind::Plain,
         AgentCompatibilityLevel::Supervised => TerminalKind::Supervised,
         AgentCompatibilityLevel::Managed => TerminalKind::Managed,
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TerminalEnvironmentPolicy {
-    Minimal,
-    Named(String),
-    ExplicitAllowlist(Vec<String>),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TerminalDimensions {
-    pub rows: u16,
-    pub cols: u16,
-}
-
-impl Default for TerminalDimensions {
-    fn default() -> Self {
-        Self { rows: 24, cols: 80 }
     }
 }
 

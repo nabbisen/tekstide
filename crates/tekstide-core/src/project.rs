@@ -48,6 +48,13 @@ pub use metadata::{
     ProjectResourceLimits, ProjectWarning, ProjectWarningLevel, ProjectWarningState,
 };
 pub use runtime::ProjectRuntimeSummary;
+/// RFC-077 Stage 8: `#[cfg(test)]`, not merely `pub(crate)` -- this is
+/// the one place that can name both `agent` and `runtime`, and its only
+/// caller outside this module is `agent::tests`'s own end-to-end
+/// authority-mutation test, not production code or an API this crate
+/// ships.
+#[cfg(test)]
+pub(crate) use session::assemble_terminal_launch_spec;
 pub use session::{
     ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
     ProjectApprovalError, ProjectChangeSetError, ProjectSession, ProjectTerminalError,

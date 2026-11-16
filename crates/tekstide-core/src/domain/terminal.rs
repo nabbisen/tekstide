@@ -25,6 +25,31 @@ pub enum VisibleSlot {
     Secondary,
 }
 
+/// RFC-077 Stage 8: vocabulary (T0), moved from `runtime::terminal::types`
+/// -- dependency-free, re-exported from there unchanged so no caller has
+/// to move with it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TerminalEnvironmentPolicy {
+    Minimal,
+    Named(String),
+    ExplicitAllowlist(Vec<String>),
+}
+
+/// RFC-077 Stage 8: vocabulary (T0), moved from `runtime::terminal::types`
+/// -- dependency-free, re-exported from there unchanged so no caller has
+/// to move with it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerminalDimensions {
+    pub rows: u16,
+    pub cols: u16,
+}
+
+impl Default for TerminalDimensions {
+    fn default() -> Self {
+        Self { rows: 24, cols: 80 }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalSession {
     // Persistent/reference metadata.
