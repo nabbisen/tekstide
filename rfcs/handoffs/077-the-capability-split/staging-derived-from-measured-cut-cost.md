@@ -201,6 +201,50 @@ the first was the `VerifiedCwd` regression `ARCHITECTURE.md`'s seventh invariant
 pattern is worth more than either instance: **a single scalar ratchet will keep finding the cheapest
 way to be satisfied, and that way is not always progress.**
 
+### Stage 8's brief, measured at `4bac19c` (review 683 round 9)
+
+Both references are in **one file**, `agent/launch.rs` lines 10-11, and they are a **necessary**
+group, not merely a coherent one — measured:
+
+```
+drop agent->project only : bound 4   (unchanged)
+drop agent->runtime only : bound 4   (unchanged)
+drop both                : bound 2   -- {agent, approval} and {project, runtime}, 56 edges / 140 refs
+```
+
+`agent -> project` is three names but **one real need**: `ProjectId` is already canonical in
+`domain::identity` and `WorkspaceTrust` in `domain::trust` (moved by stage 3 itself), so both are
+stale re-export references and pure housekeeping. Only `ProjectSession` requires a D5 move.
+`agent -> runtime` is four terminal launch types — `AdapterApprovalConfig`, `TerminalDimensions`,
+`TerminalEnvironmentPolicy`, `TerminalLaunchSpec` — none of which is in `domain`, so that half is a
+real design question.
+
+**Required with the request:** `project`'s outgoing reference and edge counts before and after,
+alongside the bound (currently **33 refs across 7 edges**). Gate bound 4 → 2 in the same commit.
+
+### A D5 move 1 that leaves its in-crate callers on the re-export converts its own cut into a later stage's work
+
+Sixteen in-crate references outside `project/` still reach `domain` types through `project`'s
+backward-compatible re-export:
+
+| Type | Stale in-crate refs | Where |
+| --- | --- | --- |
+| `ProjectId` | 11 | `runtime/terminal/{types,launch}.rs`, `audit/{purge,record,store,integration}.rs`, `agent/launch.rs` |
+| `WorkspaceTrust` | 2 | `app.rs`, `agent/launch.rs` |
+| `FileAccessError`, `FileAccessBlockedReason` | 2 | `audit/integration.rs` |
+
+Stage 3 moved `WorkspaceTrust` to `domain::trust` and left `agent/launch.rs` pointing at `project`;
+stage 4 moved the five file-access types and left `audit/integration.rs` pointing at `project::root`.
+Those references are now part of stages 8 and 9's measured cost. **The re-export exists for external
+consumers, not internal ones** — so from here, a move 1 repoints every in-crate reference to the
+canonical path in the same commit.
+
+**Recommended before stage 8:** one mechanical commit repointing all sixteen, same shape as
+`3390333`, labelled housekeeping. It does not move the bound — every affected edge survives on a
+genuinely-needed name (`ProjectSession` for `agent`, `ProjectSession` for `runtime`) — but it reduces
+`agent -> project` and `runtime -> project` to their real dependencies, which is what stages 8 and 9
+then have to reason about.
+
 ## The finding that matters more than the table
 
 **Twenty-two references is small.** Stages 3 through 9 together are about the size of a single
