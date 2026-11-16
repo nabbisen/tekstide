@@ -245,6 +245,37 @@ genuinely-needed name (`ProjectSession` for `agent`, `ProjectSession` for `runti
 `agent -> project` and `runtime -> project` to their real dependencies, which is what stages 8 and 9
 then have to reason about.
 
+**Housekeeping landed, `9b10535` (also fixed two references beyond the sixteen named above, found
+by direct grep rather than trusting the count as exhaustive: `project_board.rs`'s own `ProjectId`
+import and a fully-qualified `WorkspaceTrust` path at `project_board.rs:320` — `project_board` is
+its own top-level module, distinct from `project`).**
+
+### Stage 8 does not happen as scoped (2026-11-16, review 684)
+
+`agent -> project` fits D5 move 2 cleanly: `AgentRunLaunchValidator::validate` needs exactly three
+facts from a `ProjectSession` (`id`, `trust_state`, `canonical_root_path`), not the type itself.
+Implemented, verified (zero external call-site changes, full gate clean), measured (bound stays at
+4 alone, exactly as predicted) — then reverted, since alone it does not land the stage.
+
+**`agent -> runtime` is not four types to move; it is one entangled question D5's three moves do
+not answer.** `TerminalDimensions`/`TerminalEnvironmentPolicy` are clean move-1 vocabulary in
+isolation, but moving only those two leaves the edge alive on `TerminalLaunchSpec`/
+`AdapterApprovalConfig`. `TerminalLaunchSpec` itself cannot move (it depends on `transcript` and,
+through `AdapterApprovalConfig`, `approval` — `domain` would gain two new outgoing edges, which
+`domain_has_zero_outgoing_cross_module_references` holds absolutely). No single method call exists
+to invert into a trait (move 2): `agent` constructs the value once
+(`AgentRunLaunchPlan::from_validation`) and mutates it again later, from a *different* method
+(`prepare_adapter_approval`), which binds a real `ApprovalChannelEndpoint` against the filesystem
+and validates a token *before* the mutation that sets `AdapterApprovalConfig` — not a data
+assignment, a security-relevant approval-binding step. Move 3 (orchestration constructs it,
+`project::session.rs` already has edges to both `agent` and `runtime`) is the only shape that
+fits, but it means relocating where agent-run launch's own approval-channel-binding step lives
+relative to the value it mutates — a design decision in the shape of Stage 6's `VerifiedCwd`
+finding, not an engineering pick like Stages 4/5's own D5 moves. Not attempted unilaterally.
+Options recorded in review 684: accept the Move 3 restructuring (its own follow-up round, not
+this one), or leave `agent -> runtime` as a residual, same disposition as `approval -> agent`.
+Stage 9 is not re-derived until this is answered.
+
 ## The finding that matters more than the table
 
 **Twenty-two references is small.** Stages 3 through 9 together are about the size of a single
