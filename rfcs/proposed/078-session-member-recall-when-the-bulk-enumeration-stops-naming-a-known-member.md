@@ -1,13 +1,16 @@
 # RFC-078: Session-Member Recall When The Bulk Enumeration Stops Naming A Known Member
 
 Status: **Proposed 2026-11-16.** Written at the owner's own direction (`rfcs/handoffs/
-release-checklist.md`'s dated 2026-11-16 entries, review 683 rounds 4-5) after a confirmed,
-measured logical gap in macOS session-enumeration containment: "this changes production
-containment behaviour and adds per-session state, so it wants a decision record rather than a
-slice." D1 below is a formalization of the owner's own recommendation in that document, not a
-proposal I originated — written up for acceptance before any implementation slice begins, per
-RFC-043's own precedent (D1-D4 "decided by the architect on acceptance and recorded in this file
-before implementation begins").
+release-checklist.md`'s dated 2026-11-16 entries) after a confirmed, measured logical gap in
+macOS session-enumeration containment: "this changes production containment behaviour and adds
+per-session state, so it wants a decision record rather than a slice." **D1 below formalizes
+review 683 round 5's own recommendation** — the reviewer's analysis, relayed through the owner's
+own written entry but authored by the reviewer, not the owner, and not a proposal I originated —
+written up for acceptance before any implementation slice begins, per RFC-043's own precedent
+(D1-D4 "decided by the architect on acceptance and recorded in this file before implementation
+begins"). The recommendation and the decision are attributed separately on purpose: review 683
+round 6 named this project's own standing confusion between the two (fifth occurrence) and asked
+that it stop here.
 
 Related RFCs:
 
@@ -79,10 +82,12 @@ absence as departure.
    the ones that needed it.
 3. **Recommended — session-member recall.** Remember the pids a session's enumeration has
    previously reported as members. When a later enumeration's bulk scan no longer names a
-   previously-seen pid, re-check it directly — the identical `kill`/`sysctl` primitives
-   `session_leader_state` already uses for the leader — instead of reading its absence as
-   departure. Costs one direct check per *vanished, previously-seen* pid, only on that path, so
-   the common case (nothing vanished since the last look) pays nothing extra.
+   previously-seen pid, re-check it directly — via `live_member_of_session`, the same predicate
+   every non-leader member in the bulk scan is already checked with (review 683 round 6; see D1's
+   own required correction below for why this, and not `session_leader_state`'s membership-blind
+   check, is the one that must be used) — instead of reading its absence as departure. Costs one
+   direct check per *vanished, previously-seen* pid, only on that path, so the common case
+   (nothing vanished since the last look) pays nothing extra.
 
 ## D1 — adopt option 3 (session-member recall)
 
@@ -97,26 +102,62 @@ accepted:
   membership changes over its own lifetime (a job started after launch, finished before close).
 - **`decide_processes_in_session`'s own shape extends, not replaces**: alongside the bulk `pids`
   and the leader-state oracle it already takes, a third input — the previously-seen pids absent
-  from `pids` this time — each re-checked through the same style of oracle the leader already
-  uses (`FnMut(pid) -> Option<SessionLeaderState>`-shaped, or equivalent; the exact signature is
-  implementation, not decision). Included in `members` only if the re-check reads `Alive`,
-  excluded otherwise — the leader is not held to a looser standard than this, and this must not
-  be held to a looser one than the leader.
+  from `pids` this time.
+- **Required, as decision text, not left to implementation (review 683 round 6): the recall
+  re-check is `live_member_of_session(pid, session_id)` — not `session_leader_state`, and not any
+  oracle shaped like it.** `session_leader_state` is membership-blind by construction and
+  correctly so for the leader: the leader's own pid *is* `session_id`, so its membership needs no
+  check, only its liveness. A recalled pid has no such guarantee, and under pid reuse — the
+  recalled pid exits, the kernel hands the number to an unrelated process — a membership-blind
+  liveness check reads `Alive` and the recall path pushes that unrelated pid into `members`,
+  which `signal_candidates(..., SIGKILL)` then kills. **This machine is shared; other agents run
+  real sessions on it concurrently.** `live_member_of_session` already exists, is already what
+  every non-leader member in the bulk scan is checked with, and already rejects a reused pid by
+  construction (`getsid(pid) == session_id` **and** `!is_gone_or_going(pid)` — `Some(false)` for
+  a pid that has wandered into another session). The RFC's own stated principle — "the leader is
+  not held to a looser standard than this, and this must not be held to a looser one than the
+  leader" — is correct and requires the *stricter* check here: the leader is handed membership
+  for free; a recalled pid must earn it. Included in `members` only when `live_member_of_session`
+  returns `Some(true)`.
 - **The information is available in exactly the scenario at issue.**
   `a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member` (`runtime/terminal/
   tests.rs`) already asserts `processes_in_session` reports the backgrounded job as a member on
   the enumeration that sees it — so in a run shaped like the real red, that pid *was* seen by an
   earlier call and would be in the recalled set, not absent from it by construction.
 
-### Known limit, to be documented rather than claimed closed
+### Known limit, corrected (review 683 round 6) rather than claimed closed
 
-**A member never seen in *any* enumeration over the session's life stays invisible** — nothing
-can re-check a pid that was never named once. This is a strictly smaller residual than today's
-(“any member absent from *this* enumeration”), not zero. A job started and never observed by an
-intervening enumeration before the bulk scan that misses it both exist is still a gap. Whether
-that residual is acceptable, or whether it motivates a periodic background enumeration
-independent of close (out of this RFC's own scope — see Non-goals), is a question for whoever
-reviews this design's own implementation, not settled here.
+**There is no enumeration outside the termination path at all** — every production caller of
+`processes_in_session`/`session_confirmed_empty` runs inside a close or a drop:
+
+```
+launch.rs:509        wait_briefly_for_session_empty   (grace polling, from Drop)
+launch.rs:656        Drop's own SIGKILL enumeration
+termination.rs:287   request_terminate's confirmation
+termination.rs:445   grace polling
+termination.rs:567   signal_session_survivors
+```
+
+(`launch.rs:747`, `assert_session_is_empty`, is test-support only — no production call site.)
+The first version of this section said the limit was "a member never seen in *any* enumeration
+*over the session's life*," which reads like a corner case. It understated itself: with no
+steady-state observation of session membership, the recalled set can only ever be populated by
+**an earlier enumeration within the same close sequence** — grace poll, then the signalling
+enumeration, then the confirmation. The real limit is **"never named by an earlier enumeration
+of this same close,"** a much larger class than "never named over the session's whole life."
+
+**It is still worth doing.** A member visible to an earlier enumeration in a close and missing
+from the signalling one — the one that decides what dies — is exactly what recall catches, and
+that is the scenario `test-process-leak.md`'s own red is shaped like. But if the bulk read omits
+the member from the *first* enumeration of that close, recall never had it, and this RFC's own
+benefit is bounded to one close's own internal window, not a session's whole life. Stated here
+so the Risks section's own "false sense of closure" hazard does not apply to this section itself.
+
+**Not a condition of accepting D1, but worth recording where the residual actually comes from**:
+the non-goal "not a periodic background enumeration independent of close" (below) is what would
+populate recall *before* a close ever starts, which is the difference between recall covering one
+close's internal window and covering a session's whole life. Kept out of scope here; recorded so
+a future reader does not have to re-derive why the limit is this wide.
 
 ## Scope
 
