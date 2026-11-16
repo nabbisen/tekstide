@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 use crate::approval::{APPROVAL_SOCKET_PATH_ENV_VAR, inject_token_into_environment};
 use crate::domain::{ProjectId, TerminalId, TerminalSession, TerminalStatus};
-use crate::project::ProjectSession;
 use crate::transcript::{
     BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptWriteError, TranscriptWriteSummary,
 };
@@ -28,6 +27,18 @@ use super::{
 #[cfg(test)]
 use super::TerminationOutcome;
 
+/// RFC-077 Stage 9, D5 move 2: the exact surface `validate_launch_spec`
+/// needs from a project -- its id and its canonical root -- as a trait
+/// this module defines rather than naming `project::ProjectSession`
+/// directly. Implemented on `ProjectSession` itself, inside
+/// `project/session.rs`: `project` already has an edge to `runtime`
+/// there, so placing the impl there adds no new edge, the same
+/// placement rule Stage 5/8 established.
+pub trait TerminalLaunchProject {
+    fn id(&self) -> &ProjectId;
+    fn canonical_root_path(&self) -> &Path;
+}
+
 pub struct TerminalRuntime {
     pub(super) sessions: HashMap<TerminalId, RunningTerminal>,
 }
@@ -41,7 +52,7 @@ impl TerminalRuntime {
 
     pub fn launch_project_shell(
         &mut self,
-        project: &ProjectSession,
+        project: &impl TerminalLaunchProject,
         spec: TerminalLaunchSpec,
     ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
         validate_launch_spec(project, &spec)?;
@@ -114,7 +125,7 @@ impl TerminalRuntime {
     /// `launch_project_shell`'s, for free, by construction.
     pub fn launch_project_adapter(
         &mut self,
-        project: &ProjectSession,
+        project: &impl TerminalLaunchProject,
         spec: TerminalLaunchSpec,
     ) -> Result<(TerminalSession, Vec<TerminalRuntimeEvent>), TerminalLaunchError> {
         validate_launch_spec(project, &spec)?;
@@ -2822,7 +2833,7 @@ fn transcript_write_error_summary(error: &TranscriptWriteError) -> BoundedRuntim
 }
 
 fn validate_launch_spec(
-    project: &ProjectSession,
+    project: &impl TerminalLaunchProject,
     spec: &TerminalLaunchSpec,
 ) -> Result<(), TerminalLaunchError> {
     if project.id() != &spec.project_id {

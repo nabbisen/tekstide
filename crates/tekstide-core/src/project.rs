@@ -21,6 +21,13 @@ pub use crate::domain::ProjectId;
 /// move with it.
 pub use crate::domain::WorkspaceTrust;
 
+/// RFC-077 Stage 9: `FileGitStatus`, `ProjectGitSummary` and
+/// `ProjectProviderState` are vocabulary (T0), not orchestration types,
+/// and now live in `domain::git_status` -- re-exported from here
+/// unchanged so no caller and no published-API consumer has to move
+/// with them.
+pub use crate::domain::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
+
 pub use change_detection::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
     DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
@@ -43,9 +50,9 @@ pub use explorer_tree::{
 };
 pub use ignored_directories::IGNORED_DIRECTORY_NAMES;
 pub use metadata::{
-    FileGitStatus, ProjectFileState, ProjectGitDisplayStatus, ProjectGitSummary,
-    ProjectMetadataCountStatus, ProjectMode, ProjectOpenSurface, ProjectProviderState,
-    ProjectResourceLimits, ProjectWarning, ProjectWarningLevel, ProjectWarningState,
+    ProjectFileState, ProjectGitDisplayStatus, ProjectMetadataCountStatus, ProjectMode,
+    ProjectOpenSurface, ProjectResourceLimits, ProjectWarning, ProjectWarningLevel,
+    ProjectWarningState,
 };
 pub use runtime::ProjectRuntimeSummary;
 /// RFC-077 Stage 8: `#[cfg(test)]`, not merely `pub(crate)` -- this is

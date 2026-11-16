@@ -3,6 +3,7 @@ mod approval;
 mod audit;
 mod changeset;
 mod file_access;
+mod git_status;
 mod identity;
 mod ids;
 mod ownership;
@@ -33,6 +34,7 @@ pub use file_access::{
     FileAccessBlockedReason, FileAccessContainmentStatus, FileAccessError, FileAccessSymlinkStatus,
     FileAccessTarget,
 };
+pub use git_status::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 pub use identity::ProjectId;
 pub use ids::{
     AgentRunId, ApprovalId, AuditEventId, AuditOperationId, ChangeSetId, TerminalId, TranscriptId,

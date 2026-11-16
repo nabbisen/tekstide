@@ -24,9 +24,10 @@ use crate::content::{
 use crate::domain::{
     AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError, ApprovalDecision, ApprovalId,
     ApprovalRequest, AuditEvent, ChangeAssociationConfidence, ChangeDetectionStatus, ChangeSet,
-    ChangeSetId, DomainTimestamp, OwnershipError, ReviewState, TerminalId, TerminalSession,
-    TerminalStatus, TerminalTransitionError, Transcript, TranscriptAbsence, TranscriptId,
-    TranscriptOrigin, VisibleSlot,
+    ChangeSetId, DomainTimestamp, OwnershipError, ProjectGitSummary, ProjectId,
+    ProjectProviderState, ReviewState, TerminalId, TerminalSession, TerminalStatus,
+    TerminalTransitionError, Transcript, TranscriptAbsence, TranscriptId, TranscriptOrigin,
+    VisibleSlot,
 };
 
 use super::change_detection::{
@@ -35,9 +36,8 @@ use super::change_detection::{
 use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
 use super::{
     ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
-    ProjectFileState, ProjectGitSummary, ProjectId, ProjectMode, ProjectOpenSurface,
-    ProjectProviderState, ProjectResourceLimits, ProjectRuntimeSummary, ProjectWarningState,
-    SaveAllOutcome, WorkspaceTrust,
+    ProjectFileState, ProjectMode, ProjectOpenSurface, ProjectResourceLimits,
+    ProjectRuntimeSummary, ProjectWarningState, SaveAllOutcome, WorkspaceTrust,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -137,6 +137,21 @@ impl crate::agent::AgentRunLaunchProject for ProjectSession {
 
     fn trust_state(&self) -> WorkspaceTrust {
         self.trust_state()
+    }
+
+    fn canonical_root_path(&self) -> &Path {
+        self.canonical_root_path()
+    }
+}
+
+/// RFC-077 Stage 9, D5 move 2: `runtime::terminal::TerminalLaunchProject`'s
+/// own provider, placed here for the same reason the trait above is --
+/// `project` already has an edge to `runtime` (this file's own `use
+/// crate::runtime::terminal::...` elsewhere), so the impl adds no new
+/// edge.
+impl crate::runtime::terminal::TerminalLaunchProject for ProjectSession {
+    fn id(&self) -> &ProjectId {
+        self.id()
     }
 
     fn canonical_root_path(&self) -> &Path {

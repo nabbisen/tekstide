@@ -7,7 +7,9 @@ mod termination;
 pub(crate) mod tests;
 mod types;
 
-pub use launch::{TerminalLaunchError, TerminalRuntime, TerminalRuntimeError};
+pub use launch::{
+    TerminalLaunchError, TerminalLaunchProject, TerminalRuntime, TerminalRuntimeError,
+};
 #[cfg(test)]
 pub(crate) use launch::{
     arm_pty_responsiveness_probe_for_test, process_is_alive, wait_for_exit_draining,

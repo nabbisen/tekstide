@@ -143,7 +143,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::project::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
+use crate::domain::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
