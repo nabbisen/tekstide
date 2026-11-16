@@ -620,21 +620,20 @@ fn verified_cwd_from_validated_has_exactly_one_production_call_site() {
 }
 
 /// **Required alongside the assertion above, same commit, same reason --
-/// kept for its message, not for its coverage (review 683 Required).**
-/// This pins the *spelling* `&VerifiedCwd`, not the type's identity: a
-/// production commit that re-points the import --
+/// kept for its message, not for its coverage (review 683 Required,
+/// round 2 correction).** This pins the *spelling* `&VerifiedCwd`, not the
+/// type's identity: a production commit that re-points the import --
 /// `use crate::domain::SomeOtherType as VerifiedCwd;`, or a local `type
 /// VerifiedCwd = PathBuf;` -- leaves this text unchanged, leaves guard 1
 /// unchanged (`from_validated`'s one call site is untouched), cuts
-/// `approval -> agent` for real, and improves the bound. **The compile-time
-/// const below this function is what actually stops that regression** --
-/// confirmed in a scratch crate before relying on it: an `impl Trait`
-/// argument does not block the fn-pointer coercion, because the generic is
-/// inferred from the pointer's own expected type, so this is not a gap
-/// `impl CommandAuditRecorder` happens to leave open, it is a property the
-/// language gives for free once asked by path rather than by name. This
-/// assertion stays because its failure message names the exact substring
-/// that moved, which the compile error below does not.
+/// `approval -> agent` for real, and improves the bound.
+/// **`receive_proposal_verified_cwd_type_pin`, below, is what actually
+/// stops that regression** -- see its own doc comment for the mechanism
+/// and why a bare `const _: fn(...) = ...` does not compile here; this
+/// comment does not restate it; a reader fixing a mismatch between this
+/// assertion and that one should trust that one's doc, not this one's.
+/// This assertion stays because its failure message names the exact
+/// substring that moved, which a compile error does not.
 #[test]
 fn receive_proposal_still_requires_a_verified_cwd_not_a_raw_path() {
     let root = src_root();
