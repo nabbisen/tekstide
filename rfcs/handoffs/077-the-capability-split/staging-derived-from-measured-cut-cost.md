@@ -312,6 +312,50 @@ guarantee; here nothing does. Both halves land together (neither moves the bound
 in the same commit, and `project`'s fan-out is reported before and after — this is the third
 consecutive stage to lower the bound by making the hub denser.
 
+### Stage 8 landed (`880c01b`) and Stage 9 re-derived (review 684 round 2, 2026-11-17)
+
+Bound 4 → 2. `agent -> project` and `agent -> runtime` are both gone; `agent` and `approval` left the
+component entirely. 57 edges / 130 refs. `project`'s fan-out 33 → 35 refs across the same 7 edges.
+
+**Stage 9 was scoped against a four-member component that no longer exists.** Re-derived: the graph
+now holds **two independent 2-cycles**, and the bound cannot drop below 2 until both break.
+
+| Cycle | Edges in it | Refs | Where |
+| --- | --- | --- | --- |
+| `{agent, approval}` | `agent -> approval` | **1** (6 symbols) | `agent/launch.rs` |
+| | `approval -> agent` | 1 | `approval/coordinator.rs` — **permanent residual, 7th invariant** |
+| `{project, runtime}` | `runtime -> project` | **2** | `runtime/git.rs`, `runtime/terminal/launch.rs` |
+| | `project -> runtime` | 5 | `project.rs`, `project/{explorer_tree,session}.rs`, `project/root/explorer.rs` |
+
+Since `approval -> agent` can never be cut, `{agent, approval}` breaks only via `agent -> approval`.
+Measured, no single cut moves the bound; the cheapest pair that reaches **bound 1, acyclic** is:
+
+```
+agent -> approval  +  runtime -> project   = 3 refs  => bound 1, zero cycles
+(the alternative, agent -> approval + project -> runtime, costs 6 refs for the same result)
+```
+
+**Two unrelated moves sharing one stage, again** — the same crudeness noted below for the old stage 9,
+and for the same reason: at the bottom the bound stops distinguishing related work from coincidence.
+
+**The thing to know before scoping it.** `agent -> approval`'s single reference is a grouped import of
+six symbols — `ApprovalChannelEndpoint`, `ApprovalChannelErrorReason`, `ApprovalChannelPathError`,
+`ApprovalChannelPathRequest`, `ApprovalChannelPathResolver`, `validate_token` — i.e. the whole
+approval-channel binding cluster, flagged as "not the one-line change its count suggests" back in
+review 682. And Stage 8's directed shape deliberately **kept** that binding in `agent`, to avoid
+touching a boundary RFC-021/022 already reviewed. That was right, and it has a consequence: Stage 9
+must now address the edge Stage 8 chose to preserve.
+
+A D5 move 2 looks available and would not relocate the binding — `agent` declares the channel
+operations it needs, `approval` implements them, and the impl can sit on `approval -> agent`, the
+residual edge that must be kept anyway. The ordering (bind, validate, then record) would stay in
+`agent`. **The likely sticking point is not the trait but the signature**:
+`AgentRunLaunchPlan::prepare_adapter_approval` returns
+`Result<Option<ApprovalChannelEndpoint>, AgentAdapterApprovalError>` (`agent/launch.rs:496`), so
+`agent` names an `approval` type in its own public API. Cutting the edge means that return type
+changes, and `ApprovalChannelEndpoint` is not vocabulary — it holds a bound socket. Settle that
+before writing anything.
+
 ## The finding that matters more than the table
 
 **Twenty-two references is small.** Stages 3 through 9 together are about the size of a single
