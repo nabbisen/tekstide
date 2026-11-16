@@ -356,6 +356,34 @@ residual edge that must be kept anyway. The ordering (bind, validate, then recor
 changes, and `ApprovalChannelEndpoint` is not vocabulary — it holds a bound socket. Settle that
 before writing anything.
 
+### Stage 9 does not happen as scoped (2026-11-17, review 685)
+
+`runtime -> project` fits D5 cleanly (move 2 for `TerminalLaunchProject`, mirroring Stage 8's
+`AgentRunLaunchProject`; move 1 for `FileGitStatus`/`ProjectGitSummary`/`ProjectProviderState` to
+new `domain::git_status`). Measured, then landed as housekeeping rather than a stage (`c97d4ef`):
+cutting it breaks the `{project, runtime}` cycle entirely but the bound stays at 2, since
+`{agent, approval}` was already there.
+
+**`agent -> approval` does not fit any of D5's three moves, and the reason is deeper than the
+returned endpoint type this document already flagged.** Three further points, found by measuring
+past that one line: `AgentAdapterApprovalError` is *defined* in `agent/launch.rs`, naming
+`ApprovalChannelPathError`/`ApprovalChannelErrorReason` directly in its own variants, independent
+of what `prepare_adapter_approval` returns; `ApprovalChannelErrorReason::SocketPathTooLong` is
+pattern-matched by name in already-reviewed `tekstide` UI code (RFC-060 PR-060-D), which rules out
+Stage 5's own opaque-wrapper move for the analogous audit case; and Stage 8's own
+`AgentTerminalAdapterApproval` holds a `RunCapabilityToken` field, a fourth direct naming, itself
+privilege-bearing the way `VerifiedCwd` is (`pub(crate)` accessor, by design). Move 2 (the trait
+this document already suggested) fixes the *behavior* and leaves all three of these untouched,
+because they are not calls `agent` makes, they are types `agent` *defines its own structs and
+enums in terms of* — closing them means genericizing `AgentAdapterApprovalError`,
+`AgentTerminalAdapterApproval`, `AgentTerminalLaunchIntent`, and `AgentRunLaunchPlan` itself, a
+cascade through the type Stage 8 built one stage ago, not a trait-and-impl.
+
+**Owner's decision, per review 685**: accept that cascade (a follow-up round, not this one), or
+accept `agent -> approval` as a second residual alongside `approval -> agent` — RFC-077's own
+bound would then floor at 2, which the section below already shows does not block D7 at a bound
+of 1, let alone 2.
+
 ## The finding that matters more than the table
 
 **Twenty-two references is small.** Stages 3 through 9 together are about the size of a single
