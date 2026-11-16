@@ -438,9 +438,31 @@ alive by a check that already excludes zombies and `P_WEXIT`, and the log shows 
 absent from `list_all_pids`'s bulk output with the enumeration returning `0 member(s) found`. Three
 explanations remain open -- an exit-path read earlier than `P_WEXIT` (harmless), the job escaping the
 session before the sweep, or the enumeration under-reporting a live member (review 625's own defect
-class) -- and a passing rerun distinguishes none of them. Until the test's failure path captures
-`getsid`/PPID, a bounded re-poll, and what the enumeration actually saw, **read a green run here as
-review 625 taught this project to read one: possibly a guard that has lost the ability to fail.**
+class) -- and a passing rerun distinguishes none of them. The test's failure path now captures
+`getsid`/PPID, a bounded re-poll and what the enumeration saw (`85103df`), so the next natural
+occurrence answers which candidate it was.
+
+**This item has a second exit that does not require waiting for a recurrence, and that exit is the
+one to take (added 2026-11-16, review 683 round 4).** Candidate 3 is readable in the code now:
+macOS `processes_in_session` (`launch.rs`) iterates `list_all_pids()`'s bulk snapshot and checks each
+pid, then re-checks **the session leader, and only the session leader**, when it was absent from that
+snapshot -- review 633's own "absent from the bulk output is not departure" fix. A non-leader member
+absent from the snapshot gets no such re-check, because there is no way to re-check a pid the
+enumeration never named; the code therefore depends on `proc_listallpids` being
+complete-or-`None`. That dependence is real (`list_all_pids` does return `None` on truncation,
+`written_bytes >= capacity_bytes`), so the gap is narrow -- but it is an assumption about a kernel
+API, not something the code verifies, and it is exactly the assumption the attempt-1 log would
+falsify. The existing `TEST_FORCE_ENUMERATION_FAILURE` hook forces the `None` path only; nothing can
+currently inject a reply that looks complete and omits a live member, which is the one state that
+produces that log. **So: add that injection and assert `processes_in_session` does not answer
+`Some([])` -- i.e. that `session_confirmed_empty` cannot claim emptiness -- when a known-live member
+is missing from the snapshot.** Either outcome closes this item: a refusal shows the guard is sound
+for the shape observed, and a `true` confirms candidate 3 without waiting for the kernel to repeat
+itself. Pure decision against a fixed reading, the same instrument `decide_gone_or_going` was pulled
+out for, and it needs no Apple hardware.
+
+Until one of those two exits is taken, **read a green run here as review 625 taught this project to
+read one: possibly a guard that has lost the ability to fail.**
 
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
