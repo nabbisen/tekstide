@@ -131,11 +131,14 @@ accepted:
   leader" — is correct and requires the *stricter* check here: the leader is handed membership
   for free; a recalled pid must earn it. Included in `members` only when `live_member_of_session`
   returns `Some(true)`.
-- **The information is available in exactly the scenario at issue.**
-  `a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member` (`runtime/terminal/
-  tests.rs`) already asserts `processes_in_session` reports the backgrounded job as a member on
-  the enumeration that sees it — so in a run shaped like the real red, that pid *was* seen by an
-  earlier call and would be in the recalled set, not absent from it by construction.
+- **Removed, review 683 round 8: this bullet claimed "in a run shaped like the real red, that
+  pid *was* seen by an earlier call and would be in the recalled set" — the exact claim round 7's
+  own correction refutes, surviving here after being fixed everywhere else in this document. It
+  also did not support D1 even on its own terms: the cited test makes an explicit, out-of-band
+  `processes_in_session` call the product's actual close path does not make. D1 needs no claim
+  about run `43779370314` to stand — it stands on `decide_processes_in_session`'s own
+  pure-function test alone, stated once, at the top of this document and in the Summary, not
+  here.**
 
 ### Known limit, corrected (review 683 round 6) rather than claimed closed
 
