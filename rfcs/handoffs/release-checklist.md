@@ -524,6 +524,37 @@ smaller residue than today's, not zero.
 This changes production containment behaviour and adds per-session state, so it wants a decision
 record rather than a slice.
 
+**Correction, 2026-11-16 (review 683 round 7): the recall design above does not address the red that
+prompted this item, and shipping it must not be read as discharging this watch.** The two framings
+above were written from a twelve-line window around the panic. Reading run `43779370314`'s full
+attempt-1 log — **66 enumerations, not one** — refutes the bulk-omission hypothesis:
+
+```
+reads:        1      2 .. 63            64, 65, 66
+members:      3      2  (x62)            0, 0, 0
+bulk pids:  137     136/137 throughout   137     <- never short, never empty
+leader 6712: present  absent (re-checked directly on 65 of 66 reads)
+```
+
+`list_all_pids` never returned a short list, including on the three reads that found nobody; members
+were found *within* the bulk list for 62 consecutive reads and then stopped. So the final zero came
+from members ceasing to satisfy `live_member_of_session` — not from the bulk list ceasing to name
+them. **Session-member recall triggers on absence from the bulk list, which never happened here**, and
+after the round-6 safety fix it re-checks with `live_member_of_session`, the very predicate that
+returned false. RFC-078 remains worth accepting as a *precautionary* closure of a confirmed-reachable
+logic gap; it is not the fix for this observation.
+
+**So this watch stays open on a different question than the one above:** what makes a member stop
+matching its own session while still alive. `live_member_of_session` answers `Some(false)` only on
+`ESRCH`, `getsid != session_id`, or `is_gone_or_going` — and the assertion four milliseconds later
+established the tracked pid was alive and not `is_gone_or_going`. The round-4 diagnostic captures
+`getsid` against the session id, which is the discriminator, so the next occurrence answers it.
+
+**Cheapest thing that would have avoided six rounds of this, and the one to do first:** the
+enumeration log prints `members.len()` and discards `members`. Print the pids —
+`done, {} member(s) found: {members:?}` — so a future red says *which* member vanished instead of
+only how many.
+
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
