@@ -276,6 +276,42 @@ Options recorded in review 684: accept the Move 3 restructuring (its own follow-
 this one), or leave `agent -> runtime` as a residual, same disposition as `approval -> agent`.
 Stage 9 is not re-derived until this is answered.
 
+### Stage 8's third shape, directed (review 684 response, 2026-11-16)
+
+Review 684's finding is correct: `agent -> project` fits move 2, and `agent -> runtime` does not fit
+any of the three *as the question was framed*. The framing is what gives way. Its Move 3 was read as
+"relocate agent-run launch's approval-channel-binding step"; only the **assembly of the runtime-typed
+value** has to move, and the binding stays in `agent` untouched.
+
+1. `TerminalDimensions` and `TerminalEnvironmentPolicy` → `domain::terminal` (move 1; both
+   dependency-free, and `domain::terminal` already holds `TerminalKind`, `TerminalStatus`,
+   `VisibleSlot`, `TerminalSession`, `TerminalTransitionError` — these two are what was left behind).
+2. `AgentRunLaunchPlan` holds a runtime-free **intent** of `agent`'s own instead of a
+   `TerminalLaunchSpec`: the four fields it already sets, plus `compatibility_level`, plus the
+   `socket_path`/`token` pair from `prepare_adapter_approval`. The token is
+   `approval::RunCapabilityToken` and `agent -> approval` is already the permanent residual, so no
+   new edge.
+3. **`prepare_adapter_approval` is unchanged** — bind, validate, then record, in that order, in
+   `agent`. It records into `agent`'s own struct rather than mutating a `runtime` type.
+4. `project/session.rs` assembles the real `TerminalLaunchSpec` where it already handles one
+   (`:757` `into_parts()`, `:760` reads `environment_policy`, `:842` passes it to
+   `launch_project_adapter`): `plain_shell`, the four fields,
+   `authorize_validated_agent_run(compatibility_level)`, and `set_adapter_approval_config` when the
+   intent carries one. Both are `pub(crate)`; no visibility widens.
+   (`authorize_validated_agent_run` is an inherent method on the spec, `types.rs:62` — it is not an
+   independent `runtime` reference to cut.)
+
+**Required property, not an implementation detail:** `project` calls the method that grants
+`ValidatedAgentRun` authority, so the intent type must not be mintable outside `agent`'s own
+validator — it lives in `agent`, has no public constructor taking arbitrary fields, and `project`
+consumes without being able to forge. This is the `VerifiedCwd` lesson applied where it *works*: the
+type stays in the module owning the privilege and the consumer only reads.
+
+**Directed, not escalated.** Stage 6 went to the owner because every answer traded away a documented
+guarantee; here nothing does. Both halves land together (neither moves the bound alone), gate 4 → 2
+in the same commit, and `project`'s fan-out is reported before and after — this is the third
+consecutive stage to lower the bound by making the hub denser.
+
 ## The finding that matters more than the table
 
 **Twenty-two references is small.** Stages 3 through 9 together are about the size of a single
