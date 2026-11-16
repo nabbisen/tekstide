@@ -15,9 +15,8 @@ use super::record::{
     DurableAuditRecordV1,
 };
 use crate::domain::{
-    AgentRunId, ApprovalId, AuditEventId, AuditOperationId, DomainTimestamp, TerminalId,
+    AgentRunId, ApprovalId, AuditEventId, AuditOperationId, DomainTimestamp, ProjectId, TerminalId,
 };
-use crate::project::ProjectId;
 
 pub const MAX_AUDIT_QUERY_LIMIT: u32 = 200;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);

@@ -6,8 +6,11 @@ use crate::approval::{
     ApprovalChannelEndpoint, ApprovalChannelErrorReason, ApprovalChannelPathError,
     ApprovalChannelPathRequest, ApprovalChannelPathResolver, validate_token,
 };
-use crate::domain::{AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError};
-use crate::project::{ProjectId, ProjectSession, WorkspaceTrust};
+use crate::domain::{
+    AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError, ProjectId,
+    WorkspaceTrust,
+};
+use crate::project::ProjectSession;
 use crate::runtime::terminal::{
     AdapterApprovalConfig, TerminalDimensions, TerminalEnvironmentPolicy, TerminalLaunchSpec,
 };

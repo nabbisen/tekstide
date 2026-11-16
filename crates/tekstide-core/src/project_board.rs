@@ -1,6 +1,7 @@
 use crate::app::AppState;
+use crate::domain::{ProjectId, WorkspaceTrust};
 use crate::project::recent::{RecentProjectAvailability, RestoredRecentProject};
-use crate::project::{ProjectGitDisplayStatus, ProjectId, ProjectRuntimeSummary, ProjectSession};
+use crate::project::{ProjectGitDisplayStatus, ProjectRuntimeSummary, ProjectSession};
 use crate::security::RestrictedModeSummary;
 
 /// `NotImplemented` and `Unknown` answer different questions and must not
@@ -317,7 +318,7 @@ fn recent_project_row(restored: &RestoredRecentProject) -> ProjectBoardRow {
     // field here already is (`branch_status`, the `Unknown` counts
     // below), not a live, audit-verified fact.
     let trust_state = match restored.availability {
-        RecentProjectAvailability::PathChanged => crate::project::WorkspaceTrust::Restricted,
+        RecentProjectAvailability::PathChanged => WorkspaceTrust::Restricted,
         _ => recent_project.trust_state,
     };
     let security_summary = RestrictedModeSummary::from_trust(trust_state);

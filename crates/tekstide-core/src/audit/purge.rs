@@ -5,7 +5,7 @@ use std::path::Path;
 use rusqlite::TransactionBehavior;
 
 use super::store::{AuditStore, AuditStoreError, AuditStoreErrorReason};
-use crate::project::ProjectId;
+use crate::domain::ProjectId;
 
 pub const MAX_AUDIT_RECOVERY_SUMMARY_ENTRIES: usize = 4_096;
 const MAX_AUDIT_RECOVERY_SUMMARY_DEPTH: usize = 1;

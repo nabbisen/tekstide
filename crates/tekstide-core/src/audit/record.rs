@@ -1,7 +1,7 @@
 use crate::domain::{
-    AgentRunId, ApprovalId, AuditEventId, AuditOperationId, DomainTimestamp, RiskLevel, TerminalId,
+    AgentRunId, ApprovalId, AuditEventId, AuditOperationId, DomainTimestamp, ProjectId, RiskLevel,
+    TerminalId,
 };
-use crate::project::ProjectId;
 
 pub const AUDIT_RECORD_SCHEMA_VERSION: u32 = 1;
 const MAX_REFERENCE_LEN: usize = 128;

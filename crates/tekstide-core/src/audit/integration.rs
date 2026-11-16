@@ -4,17 +4,16 @@ use crate::agent::AgentRunLaunchPlan;
 use crate::approval::ApprovalChannelEndpoint;
 use crate::content::{SaveDecision, TextDocumentOpenError, TextDocumentSaveError};
 use crate::domain::{
-    AgentCompatibilityLevel, AgentRunId, ApprovalId, AuditEventId, AuditOperationId, RiskLevel,
-    TerminalId,
+    AgentCompatibilityLevel, AgentRunId, ApprovalId, AuditEventId, AuditOperationId,
+    FileAccessBlockedReason, FileAccessError, ProjectId, RiskLevel, TerminalId,
 };
 /// RFC-077 Stage 5: these two moved to `domain::audit` -- re-exported
 /// from here unchanged so `tekstide_core::audit::{AuditObservationStatus,
 /// CommandDecisionActionKind}` still resolves for every existing caller.
 pub use crate::domain::{AuditObservationStatus, CommandDecisionActionKind};
-use crate::project::root::{FileAccessBlockedReason, FileAccessError};
 use crate::project::{
-    ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
-    ProjectTranscriptError, ProjectTranscriptPurgeSummary, TranscriptRetentionCleanup,
+    ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectSession, ProjectTranscriptError,
+    ProjectTranscriptPurgeSummary, TranscriptRetentionCleanup,
 };
 use crate::runtime::terminal::{TerminalRuntime, TerminalRuntimeEvent, TerminationOutcome};
 
@@ -1409,7 +1408,7 @@ fn safe_close_decision_record(
 /// `Failed` still has no caller (see `record_plain_terminal_started`'s
 /// own doc for why it structurally cannot).
 fn plain_terminal_record(
-    project_id: crate::project::ProjectId,
+    project_id: ProjectId,
     terminal_id: TerminalId,
     outcome: AuditOutcome,
     reason_code: Option<AuditReasonCode>,
@@ -1432,10 +1431,7 @@ fn plain_terminal_record(
 /// unlike `plain_terminal_record`, there is nothing here for a caller
 /// to choose, so this function takes no outcome/reason parameters at
 /// all.
-fn paste_blocked_record(
-    project_id: crate::project::ProjectId,
-    terminal_id: TerminalId,
-) -> DurableAuditRecordV1 {
+fn paste_blocked_record(project_id: ProjectId, terminal_id: TerminalId) -> DurableAuditRecordV1 {
     let mut record = DurableAuditRecordV1::new(
         AuditEventFamily::PasteBlocked,
         AuditOutcome::Blocked,
@@ -1453,7 +1449,7 @@ fn paste_blocked_record(
 /// same shape as `paste_blocked_record`, one fewer domain link (no
 /// `terminal_id`: a refused agent-run launch never reaches a terminal
 /// at all).
-fn restricted_mode_blocked_record(project_id: crate::project::ProjectId) -> DurableAuditRecordV1 {
+fn restricted_mode_blocked_record(project_id: ProjectId) -> DurableAuditRecordV1 {
     let mut record = DurableAuditRecordV1::new(
         AuditEventFamily::RestrictedModeBlocked,
         AuditOutcome::Blocked,
@@ -1475,7 +1471,7 @@ fn restricted_mode_blocked_record(project_id: crate::project::ProjectId) -> Dura
 /// than an interactive click, and `AppCommand` is the schema's other
 /// allowed source for a `User` actor (the same pairing
 /// `ManagedAgentLaunch`'s own `Authorized` outcome accepts).
-fn project_added_record(project_id: crate::project::ProjectId) -> DurableAuditRecordV1 {
+fn project_added_record(project_id: ProjectId) -> DurableAuditRecordV1 {
     let mut record = DurableAuditRecordV1::new(
         AuditEventFamily::ProjectAdded,
         AuditOutcome::Applied,
@@ -1546,7 +1542,7 @@ pub fn plan_is_auditable(plan: &AgentRunLaunchPlan) -> bool {
 }
 
 fn managed_process_record(
-    project_id: crate::project::ProjectId,
+    project_id: ProjectId,
     agent_run_id: AgentRunId,
     operation_id: AuditOperationId,
     adapter_profile_ref: AuditReference,

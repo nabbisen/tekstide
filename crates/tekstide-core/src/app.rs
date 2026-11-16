@@ -826,7 +826,7 @@ impl AppState {
     fn recent_trust_by_canonical_root(
         &self,
         canonical_root_path: &std::path::Path,
-    ) -> Option<crate::project::WorkspaceTrust> {
+    ) -> Option<crate::domain::WorkspaceTrust> {
         self.recent_projects
             .iter()
             .find(|restored| restored.recent_project.canonical_root_path == canonical_root_path)

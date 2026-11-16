@@ -2,9 +2,8 @@ use std::path::PathBuf;
 
 use crate::approval::RunCapabilityToken;
 use crate::domain::{
-    AgentCompatibilityLevel, TerminalId, TerminalKind, TerminalStatus, VisibleSlot,
+    AgentCompatibilityLevel, ProjectId, TerminalId, TerminalKind, TerminalStatus, VisibleSlot,
 };
-use crate::project::ProjectId;
 use crate::transcript::TranscriptWriterConfig;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

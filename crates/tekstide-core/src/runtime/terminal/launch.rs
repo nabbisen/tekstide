@@ -9,8 +9,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::approval::{APPROVAL_SOCKET_PATH_ENV_VAR, inject_token_into_environment};
-use crate::domain::{TerminalId, TerminalSession, TerminalStatus};
-use crate::project::{ProjectId, ProjectSession};
+use crate::domain::{ProjectId, TerminalId, TerminalSession, TerminalStatus};
+use crate::project::ProjectSession;
 use crate::transcript::{
     BoundedTranscriptWriter, TranscriptCaptureMode, TranscriptWriteError, TranscriptWriteSummary,
 };
