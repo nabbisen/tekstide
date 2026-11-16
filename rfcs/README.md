@@ -25,9 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
-
-*(Empty — nothing is proposed and not yet accepted. RFC-069 was accepted on 2026-11-15, the
-same day it was proposed.)*
+| 078 | [Session-Member Recall When The Bulk Enumeration Stops Naming A Known Member](./proposed/078-session-member-recall-when-the-bulk-enumeration-stops-naming-a-known-member.md) | Proposed 2026-11-16, at the owner's own direction (`release-checklist.md`'s dated entry, review 683 round 5), after `decide_processes_in_session` confirmed a macOS-only containment gap by measurement. D1 (adopt the recall design) awaits the owner's decision on acceptance, per RFC-043's own D1-D4 precedent. |
 
 ## Accepted
 
