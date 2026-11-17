@@ -442,6 +442,28 @@ class) -- and a passing rerun distinguishes none of them. The test's failure pat
 `getsid`/PPID, a bounded re-poll and what the enumeration saw (`85103df`), so the next natural
 occurrence answers which candidate it was.
 
+  **Correction, 2026-11-17 (review 688): the next natural occurrence cannot answer it, and three
+have now passed without doing so.** That instrumentation is
+`diagnose_surviving_background_job`, which is `#[cfg(target_os = "macos")]` and is called from
+exactly one place — `a_real_close_kills_a_live_hup_immune_backgrounded_job` itself
+(`runtime/terminal/tests.rs:1367`). Every capture this subject has ever had came from a *different*
+test tripping the same guard inside `RunningTerminal::drop` — `activating_accept_writes_the_real_
+pasted_content_and_closes_the_dialog` (review 650), `ablation_polling_only_visible_panes_would_
+miss_the_hidden_ones_output` (review 657), and `terminal_session_limit_headless_n_pane_wake_
+throughput_benchmark` (macOS 2026-11-08, Linux 2026-11-17) — so three of the four verbatim
+captures, plus review 649 round 2's own two uncaptured firings, were on Linux, where that function
+does not compile at all. The drop-time guard's own per-survivor hook is
+`report_pid_p_stat_via_sysctl`, whose non-macOS body is `{}` (`launch.rs:1429`) — so a Linux
+capture yields the one-line assertion message and nothing else, which is exactly what the
+2026-11-17 capture yielded, identical in information to the first one from 2026-10-29 (review
+650).
+**Required to make the plan work: fill that empty Linux body** with the same three reads the macOS
+diagnostic takes — `getsid(pid)` (portable, and already what production's own
+`live_member_of_session` trusts), `/proc/<pid>/stat`'s state and ppid fields (this platform's
+enumeration already reads `/proc`), and the bounded re-poll — since it is already the hook called
+per survivor on the branch about to panic, and needs no new call site. Until then, "the next
+natural occurrence answers it" is true only of a test and a platform that have never produced one.
+
 **This item has a second exit that does not require waiting for a recurrence, and that exit is the
 one to take (added 2026-11-16, review 683 round 4).** Candidate 3 is readable in the code now:
 macOS `processes_in_session` (`launch.rs`) iterates `list_all_pids()`'s bulk snapshot and checks each

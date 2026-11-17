@@ -5045,3 +5045,64 @@ outcome`'s one true give-up site is. Review 668 reserved this explicitly rather 
 the same honesty gap as the thread-level `proc_exit` question above, with nothing currently waiting
 on it. Recorded here so it is a known, named reservation for whoever next touches that function,
 not something rediscovered later and mistaken for a defect no one noticed.
+
+## 2026-11-17 (review 688) -- the hundred-thousand-entry ratio row stops being "unexplained": its own two numbers measure the asymmetry, and the bound has 1.62x headroom on this machine
+
+The 2026-11-17 capture's own report reads it as *"new evidence against the 'severely degraded
+runner' hypothesis as the only explanation"* because the load average was mild. That reading is
+right and understates what the capture contains. The capture and its own clean rerun are the first
+**paired** measurement this row has ever had -- same machine, same code, minutes apart -- where
+every earlier data point compared *different platforms in the same CI run*, which conflates
+platform with load. Paired, the numbers decide the open question review 662 round 2 left ("why
+would degradation hit the big side harder -- plausible and **unmeasured**"):
+
+| | 300 entries | 100 000 entries | ratio |
+|---|---|---|---|
+| red | 1.599957 ms | 12.874951 ms | **8.047** (bound 8.0) |
+| clean rerun | 1.133770 ms | 5.598113 ms | 4.938 |
+| inflation | **1.41x** | **2.30x** | 1.63x |
+
+**The degradation is non-uniform, now measured rather than conjectured**: the big side inflated
+2.30x while the small side inflated 1.41x. Under uniform degradation a ratio is preserved -- the
+entire reason this assertion is written as a ratio -- so the red is produced by the asymmetry, not
+by the load level. That is also why the 1-minute load average is the wrong instrument here: `35.45`
+on 32 cores is mild by that metric while the big side was still 2.3x slow.
+
+**And the bound's headroom on this machine is 1.62x, against an inflation of 1.63x.** The clean
+ratio here is 4.94 against a bound of 8.0. On the 4-core CI Linux runner the same assertion's clean
+ratio was **1.9** (2026-11-08's forced-failure measurement, above) -- a 4.2x headroom. So the
+baseline ratio is **machine-dependent by about 2.6x**, which contradicts this assertion's own
+premise in its own comment (*"a small and a huge directory are scanned in the same run, and it is
+the ratio between them that is asserted... that ratio stays flat regardless of which machine runs
+it"*). It does not stay flat: a faster machine shrinks the 300-entry denominator far more than the
+100 000-entry numerator (1.13 ms vs 5.07 ms on CI, a 4.5x difference, against 5.60 ms vs 9.46 ms on
+the big side, 1.7x), so the ratio *rises* with machine speed. The 1 ms floor exists to stop exactly
+that (*"near-zero on a very fast machine would make the ratio meaningless"*) but is set below where
+it would engage: the uncontended small side on this machine is 1.13 ms, just above it.
+
+**Why best-of-5 does not defend against this.** The comment's reasoning -- *"one scheduler spike on
+the big side trips the assertion on its own... Best-of-N discards both"* -- is sound for *spikes*
+and inapplicable to *sustained* pressure. A full `cargo test --workspace` beside other work on a
+shared 32-core machine is sustained page-cache and memory-bandwidth contention, so all five
+big-side iterations are slow and the minimum is slow too, while the 300-entry scan stays largely in
+cache. Best-of-N removes transients; it cannot remove a floor that has moved.
+
+**So this row's verdict can change from "unexplained" to explained, without a load attribution**:
+the assertion's baseline is machine-dependent, the thinnest-headroom machine is the one that keeps
+reddening, and ordinary concurrent load supplies the ~1.6x asymmetry needed. Two dispositions
+follow, and the choice is the dev team's with the owner's:
+
+1. **Raise the floor so the denominator is not sitting on it** -- the floor's own stated purpose,
+   applied with a number measured on the machines that run this, rather than the one it has.
+2. **Assert the property without dividing by a near-floor denominator** -- the property is "a
+   capped scan reads at most 256 entries, so its cost should not scale with the directory," and the
+   residual scaling being measured is page-cache behaviour on a huge directory, not the cap failing.
+
+**Not an option: raising the `8.0` bound.** That is the only signal this assertion has, and the
+headroom numbers above are the reason it has been firing, not a reason to widen it.
+
+**One counting correction to the row itself**: the new entry is labelled *"2026-11-17, second Linux
+capture"* while its own next clause says *"the same shape as the two earlier Linux captures above"*
+and the review request calls it the third. Third is right -- `activating_accept_…` (review 650),
+`ablation_polling_…` (review 657), then this one -- with review 649 round 2's own two uncaptured
+firings before all three.
