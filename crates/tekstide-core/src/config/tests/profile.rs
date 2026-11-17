@@ -336,13 +336,13 @@ fn a_configured_managed_profile_reaches_prepare_adapter_approval_and_gets_a_real
     let mut plan = AgentRunLaunchPlan::from_validation(validation, "Configured Adapter")
         .expect("a validated Managed launch should produce a launch plan");
 
-    let endpoint = project
+    let (_terminal_launch_spec, endpoint) = project
         .prepare_agent_run_launch(&mut plan)
-        .expect("preparing a configured Managed launch must succeed")
-        .expect(
-            "a configuration file that declares an adapter must reach a real, bound \
-             approval channel -- this is RFC-060's whole point",
-        );
+        .expect("preparing a configured Managed launch must succeed");
+    let endpoint = endpoint.expect(
+        "a configuration file that declares an adapter must reach a real, bound \
+         approval channel -- this is RFC-060's whole point",
+    );
     drop(endpoint);
 
     cleanup_root(root);

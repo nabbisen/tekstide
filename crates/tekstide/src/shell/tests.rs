@@ -6735,7 +6735,7 @@ fn a_managed_launch_whose_state_root_is_too_deep_for_the_approval_socket_names_t
             refusal,
             AgentRunLaunchRefusal::Runtime(
                 tekstide_core::project::ProjectAgentRuntimeLaunchError::AdapterApproval(
-                    tekstide_core::agent::AgentAdapterApprovalError::Bind(
+                    tekstide_core::project::AgentAdapterApprovalError::Bind(
                         tekstide_core::approval::ApprovalChannelErrorReason::SocketPathTooLong
                     )
                 )

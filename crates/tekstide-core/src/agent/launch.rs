@@ -2,10 +2,6 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::approval::{
-    ApprovalChannelEndpoint, ApprovalChannelErrorReason, ApprovalChannelPathError,
-    ApprovalChannelPathRequest, ApprovalChannelPathResolver, RunCapabilityToken, validate_token,
-};
 use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunStatus, AgentRunTransitionError, ProjectId,
     TerminalDimensions, TerminalEnvironmentPolicy, WorkspaceTrust,
@@ -87,7 +83,10 @@ impl AgentRunLaunchRequest {
     /// profile that also wants `without_transcript_capture()` must call
     /// this too -- without it, a `Managed` launch with no transcript
     /// state root configured has nowhere to bind its approval channel
-    /// either, and fails closed with `AgentAdapterApprovalError::StateRootMissing`.
+    /// either, and fails closed with
+    /// `project::AgentAdapterApprovalError::StateRootMissing` (RFC-077,
+    /// review 685 response: the bind, and this error type, moved to
+    /// `project`).
     pub fn with_approval_channel(mut self, state_root: impl Into<PathBuf>) -> Self {
         self.approval_state_root = Some(state_root.into());
         self
@@ -301,19 +300,24 @@ impl From<AgentRunLaunchValidation> for AgentRunLaunchSpec {
 /// RFC-077 Stage 8, D5 move 3: `agent`'s own runtime-free terminal-launch
 /// decision, carried to `project` (which already has edges to both
 /// `agent` and `runtime`) for assembly into a real `runtime::terminal::
-/// TerminalLaunchSpec` -- only the *assembly* moves; the approval-channel
-/// *binding* that fills `adapter_approval` stays in `agent`, in
-/// `AgentRunLaunchPlan::prepare_adapter_approval`, unchanged.
+/// TerminalLaunchSpec`.
+///
+/// **RFC-077, review 685 response ("move the binding cluster to
+/// project")**: the approval-channel *binding* no longer happens here at
+/// all -- it moved to `project`, alongside the *assembly* it already
+/// owned, so this struct carries no `approval` type and has no
+/// `adapter_approval` field any more. `agent` no longer names `approval`
+/// in any of its own type definitions.
 ///
 /// **No public constructor taking arbitrary fields** -- the `VerifiedCwd`
 /// lesson applied where it works: the only way to obtain one is through
 /// this module's own validated launch-planning flow
-/// (`AgentRunLaunchPlan::from_validation`, `prepare_transcript_capture`,
-/// `prepare_adapter_approval`), so `project` reads every field through an
-/// accessor but cannot forge one -- in particular, cannot mint a
-/// `compatibility_level` that `AgentRunLaunchValidator::validate` never
-/// actually granted, which is what `authorize_validated_agent_run` reads
-/// when `project` assembles the real spec.
+/// (`AgentRunLaunchPlan::from_validation`, `prepare_transcript_capture`),
+/// so `project` reads every field through an accessor but cannot forge
+/// one -- in particular, cannot mint a `compatibility_level` that
+/// `AgentRunLaunchValidator::validate` never actually granted, which is
+/// what `authorize_validated_agent_run` reads when `project` assembles
+/// the real spec.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentTerminalLaunchIntent {
     project_id: ProjectId,
@@ -325,7 +329,6 @@ pub struct AgentTerminalLaunchIntent {
     dimensions: TerminalDimensions,
     compatibility_level: AgentCompatibilityLevel,
     transcript_writer_config: Option<TranscriptWriterConfig>,
-    adapter_approval: Option<AgentTerminalAdapterApproval>,
 }
 
 impl AgentTerminalLaunchIntent {
@@ -364,32 +367,6 @@ impl AgentTerminalLaunchIntent {
     pub fn transcript_writer_config(&self) -> Option<&TranscriptWriterConfig> {
         self.transcript_writer_config.as_ref()
     }
-
-    pub fn adapter_approval(&self) -> Option<&AgentTerminalAdapterApproval> {
-        self.adapter_approval.as_ref()
-    }
-}
-
-/// RFC-077 Stage 8: the token and socket path a `Managed` adapter launch
-/// delivers, carried on the intent the same way `runtime::terminal::
-/// TerminalLaunchSpec`'s own (now `project`-constructed)
-/// `AdapterApprovalConfig` used to be -- set only through
-/// `AgentRunLaunchPlan::prepare_adapter_approval`, which still does the
-/// real binding, in `agent`, unchanged.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentTerminalAdapterApproval {
-    socket_path: PathBuf,
-    token: RunCapabilityToken,
-}
-
-impl AgentTerminalAdapterApproval {
-    pub fn socket_path(&self) -> &Path {
-        &self.socket_path
-    }
-
-    pub fn token(&self) -> &RunCapabilityToken {
-        &self.token
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -424,7 +401,6 @@ impl AgentRunLaunchPlan {
             dimensions: TerminalDimensions::default(),
             compatibility_level: spec.compatibility_level,
             transcript_writer_config: None,
-            adapter_approval: None,
         };
 
         Ok(Self {
@@ -542,73 +518,6 @@ impl AgentRunLaunchPlan {
         self.transcript_storage_path.as_ref()
     }
 
-    /// RFC-022 PR-022-C: for a `Managed` profile (the only compatibility
-    /// level RFC-022 governs -- `Plain`/`Supervised` return `Ok(None)`
-    /// immediately, nothing about them involves an adapter), binds a real
-    /// `ApprovalChannelEndpoint` for this run and records its socket path
-    /// plus a validated capability token on `terminal_launch_intent`.
-    /// Mirrors `prepare_transcript_capture`'s own shape: resolve real
-    /// infrastructure now, using state already gathered during
-    /// validation, so `project`'s own assembly step only ever needs to
-    /// read what is already on the intent.
-    ///
-    /// **Response 216 (required change): the state root is
-    /// `self.spec.approval_state_root`, independent of
-    /// `transcript_capture.state_root`, falling back to the latter only
-    /// when the former is unset.** The first version of this method
-    /// reused `transcript_capture.state_root` outright, which meant
-    /// `AgentRunLaunchRequest::without_transcript_capture()` silently made
-    /// a `Managed` launch impossible -- RFC-011's documented per-run
-    /// transcript opt-out and RFC-022's command approval had become
-    /// accidentally coupled, a policy nobody decided. The fallback exists
-    /// only for the common case where a caller wants both artifacts in
-    /// the same place; a caller who sets `approval_state_root` explicitly
-    /// (`AgentRunLaunchRequest::with_approval_channel`) gets a `Managed`
-    /// launch regardless of transcript capture. `StateRootMissing` now
-    /// means "no approval-channel location was ever configured, by
-    /// either route" -- a real, complete absence, not a side effect of
-    /// an unrelated opt-out.
-    ///
-    /// Returns the bound endpoint (not stored on `self`): this plan
-    /// object already carries the token and socket path on
-    /// `terminal_launch_intent` for `project`'s own assembly step to use,
-    /// and the endpoint itself -- the live listener a caller must
-    /// `accept_proposal`/`serve_concurrently` on to actually answer
-    /// requests -- has a different lifetime than the plan does. Handing
-    /// it back lets the caller decide where it lives (a headless test,
-    /// for now; a longer-lived home is PR-022-D/E's question, not this
-    /// method's).
-    pub(crate) fn prepare_adapter_approval(
-        &mut self,
-    ) -> Result<Option<ApprovalChannelEndpoint>, AgentAdapterApprovalError> {
-        if self.spec.compatibility_level != AgentCompatibilityLevel::Managed {
-            return Ok(None);
-        }
-        let state_root = self
-            .spec
-            .approval_state_root
-            .as_ref()
-            .or(self.spec.transcript_capture.state_root.as_ref())
-            .ok_or(AgentAdapterApprovalError::StateRootMissing)?;
-        let directory = ApprovalChannelPathResolver
-            .resolve(ApprovalChannelPathRequest::new(
-                state_root.clone(),
-                vec![self.spec.project_root.clone()],
-            ))
-            .map_err(AgentAdapterApprovalError::Path)?;
-        let (endpoint, raw_token) =
-            ApprovalChannelEndpoint::bind(&directory, &self.agent_run.id)
-                .map_err(|error| AgentAdapterApprovalError::Bind(error.reason))?;
-        let socket_path = directory.socket_path(&self.agent_run.id);
-        let token = validate_token(raw_token).expect(
-            "bind() already validated this exact raw token internally, so re-validating the \
-             identical string here cannot fail",
-        );
-        self.terminal_launch_intent.adapter_approval =
-            Some(AgentTerminalAdapterApproval { socket_path, token });
-        Ok(Some(endpoint))
-    }
-
     pub(crate) fn transition_agent_run_to(
         &mut self,
         status: AgentRunStatus,
@@ -713,19 +622,6 @@ pub enum AgentRunTranscriptCaptureError {
     /// `prepare_transcript_capture`.
     BudgetExhausted,
     Path(TranscriptPathError),
-}
-
-/// RFC-022 PR-022-C. `Bind` carries only `ApprovalChannelErrorReason`
-/// (`Copy`, content-free), not the full `ApprovalChannelError` -- that
-/// type holds an `Option<io::Error>` and does not derive `Clone`/`Eq`,
-/// matching `runtime::terminal::launch::TerminalLaunchError`'s own
-/// established pattern of carrying a bounded reason rather than a raw OS
-/// error in a domain-level error type.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AgentAdapterApprovalError {
-    StateRootMissing,
-    Path(ApprovalChannelPathError),
-    Bind(ApprovalChannelErrorReason),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

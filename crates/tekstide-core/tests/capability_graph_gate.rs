@@ -130,7 +130,60 @@ use tekstide_core::domain::{AgentRunId, ProjectId};
 /// `agent` and `runtime` -- builds it from the intent) all gone. `agent`
 /// leaves the component entirely, and so does `approval` (nothing else
 /// inside it reached either once these four references were gone).
-const MAX_LARGEST_SCC_SIZE: usize = 2;
+///
+/// **Lowered to 0 by RFC-077 Stage 9** (review 685's finding, directed
+/// by review 685's response, "move the binding cluster to project"):
+/// `runtime -> project`'s own two references (`runtime/terminal/launch.rs`'s
+/// `ProjectSession`, D5 move 2: new `runtime::terminal::TerminalLaunchProject`,
+/// implemented on `ProjectSession` in `project/session.rs`, the same
+/// placement rule Stage 8 already used; `runtime/git.rs`'s three
+/// dependency-free git-summary types, D5 move 1: moved to new
+/// `domain::git_status`, re-exported from `project` unchanged, with the
+/// two behavioral methods staying physically in `project/metadata.rs`
+/// per Rust's own inherent-impl rule) landed first, as housekeeping
+/// (`c97d4ef`) -- alone it left `{agent, approval}` at 2, since neither
+/// bound on it.
+///
+/// `agent -> approval` -- three independently-naming points review 685
+/// found past the one return type first suspected (`ApprovalChannelEndpoint`
+/// itself, `AgentAdapterApprovalError`'s own definition, and
+/// `AgentTerminalAdapterApproval`'s `token` field one level down inside
+/// `AgentTerminalLaunchIntent`) -- does not fit D5 while the binding
+/// stays in `agent`: `RunCapabilityToken`'s own privilege is *crate*-
+/// scoped, not `agent`-scoped, so it constrains which downstream crate
+/// can extract it, not which module in this crate names the type.
+/// Directed resolution: move the whole binding cluster (the grouped
+/// `approval` import, `AgentTerminalAdapterApproval`, `prepare_adapter_approval`'s
+/// body, `AgentAdapterApprovalError`) from `agent::launch` into
+/// `project::session`, alongside the spec assembly Stage 8 already put
+/// there -- `project` is already the sole caller, already imports
+/// `ApprovalChannelEndpoint`, already branches adapter-versus-shell, and
+/// already assembles the spec carrying the result. `AgentTerminalAdapterApproval`
+/// is deleted outright rather than genericized: `bind_adapter_approval`
+/// (`project/session.rs`) now writes the socket path and token straight
+/// onto the `TerminalLaunchSpec` `prepare_agent_run_launch` is already
+/// assembling, so there is no gap left between "bind" and "attach to the
+/// spec" for an intermediate `agent`-owned carrier to live in.
+/// `AgentAdapterApprovalError` keeps its exact name and shape, moved
+/// rather than rewritten, so `shell.rs`'s own refusal-symbol match still
+/// names `AgentAdapterApprovalError::Bind(ApprovalChannelErrorReason::
+/// SocketPathTooLong)` concretely (RFC-060 PR-060-D, response 113
+/// Required 1) -- the reviewed UX distinction review 685 flagged as
+/// load-bearing is kept, not traded.
+///
+/// **Measured, not the directing response's own anticipated value**:
+/// the response's own text called this "bound 2 → 1, zero cycles,
+/// acyclic" — but this gate's own `strongly_connected_components` (see
+/// its doc comment below) filters out every singleton component before
+/// taking "largest," so a genuinely acyclic graph measures 0, not 1, by
+/// this file's own definition. Confirmed directly (`MAX_LARGEST_SCC_SIZE`
+/// set to 0 and the gate test run before committing to it) rather than
+/// taken on the response's word: zero components of size greater than
+/// one remain anywhere in the 22-module graph. `agent -> approval` is
+/// now `tekstide-core`'s only residual cross-module edge between these
+/// two modules in either direction remaining from the original SCC —
+/// one directed edge is not a cycle.
+const MAX_LARGEST_SCC_SIZE: usize = 0;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -414,8 +467,13 @@ fn the_largest_strongly_connected_component_is_within_its_ratcheted_bound() {
         .max_by_key(|component| component.len())
         .cloned()
         .unwrap_or_default();
+    // RFC-077 Stage 9: `MAX_LARGEST_SCC_SIZE` reached 0, `usize`'s own
+    // minimum, once the graph went fully acyclic -- `<=` against it is
+    // clippy's `absurd_extreme_comparisons` (always true), and the
+    // ratchet never raises this bound anyway, so `==` says the same
+    // thing the comparison always meant, without tripping it.
     assert!(
-        largest.len() <= MAX_LARGEST_SCC_SIZE,
+        largest.len() == MAX_LARGEST_SCC_SIZE,
         "the largest strongly connected component has {} modules ({largest:?}); the ratcheted \
          bound is {MAX_LARGEST_SCC_SIZE} (RFC-074 D1.1) — if this grew, a stage was undone; if it \
          shrank without the bound moving with it in the same commit, the bound is now a lie",

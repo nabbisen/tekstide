@@ -10,8 +10,9 @@ use crate::domain::{
     TerminalSession, TerminalStatus, TranscriptAbsence,
 };
 use crate::project::{
-    ProjectActiveFileLaunchBlockReason, ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError,
-    ProjectAgentRuntimeLaunchError, ProjectContentError, ProjectId, ProjectSession,
+    AgentAdapterApprovalError, ProjectActiveFileLaunchBlockReason,
+    ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
+    ProjectContentError, ProjectId, ProjectSession,
 };
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalRuntime,
@@ -23,11 +24,10 @@ use crate::transcript::{
 };
 
 use super::{
-    AgentAdapterApprovalError, AgentRunLaunchPlan, AgentRunLaunchRequest,
-    AgentRunLaunchValidationError, AgentRunLaunchValidator, AgentRunTranscriptCaptureError,
-    AiCliAdapterCapabilities, AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance,
-    AiCliProfile, AiCliProfileSource, AiCliPromptPolicy, AiCliWorkspaceDiscoveryPolicy,
-    ExecutableLookupPath,
+    AgentRunLaunchPlan, AgentRunLaunchRequest, AgentRunLaunchValidationError,
+    AgentRunLaunchValidator, AgentRunTranscriptCaptureError, AiCliAdapterCapabilities,
+    AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance, AiCliProfile,
+    AiCliProfileSource, AiCliPromptPolicy, AiCliWorkspaceDiscoveryPolicy, ExecutableLookupPath,
 };
 
 #[test]
@@ -1384,16 +1384,16 @@ fn a_real_adapter_completes_a_real_approval_round_trip_through_the_production_sp
     let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
         .expect("validated Managed launch should produce a launch plan");
 
-    let endpoint = project
+    let (terminal_launch_spec, endpoint) = project
         .prepare_agent_run_launch(&mut plan)
-        .expect("prepare should succeed for a Managed profile with a real state root")
-        .expect("a Managed launch must bind a real approval channel endpoint");
+        .expect("prepare should succeed for a Managed profile with a real state root");
+    let endpoint = endpoint.expect("a Managed launch must bind a real approval channel endpoint");
     let verified_cwd = plan.spec().verified_cwd().clone();
     let project_root = plan.spec().project_root().to_path_buf();
 
     let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events) = project
-        .launch_prepared_agent_run_with_runtime(plan, &mut runtime)
+        .launch_prepared_agent_run_with_runtime(plan, terminal_launch_spec, &mut runtime)
         .expect("prepared Managed launch should spawn the real adapter binary");
     let terminal_id = project.agent_runs()[0]
         .terminal_id
@@ -1541,14 +1541,12 @@ fn a_managed_launch_can_bind_its_approval_channel_without_transcript_capture() {
     let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
         .expect("validated Managed launch should produce a launch plan");
 
-    let endpoint = project
-        .prepare_agent_run_launch(&mut plan)
-        .expect(
-            "a Managed launch with no transcript capture but an explicit approval channel \
-             must still prepare successfully -- this is the exact combination response 216 \
-             found impossible",
-        )
-        .expect("a Managed launch must bind a real approval channel endpoint");
+    let (terminal_launch_spec, endpoint) = project.prepare_agent_run_launch(&mut plan).expect(
+        "a Managed launch with no transcript capture but an explicit approval channel \
+         must still prepare successfully -- this is the exact combination response 216 \
+         found impossible",
+    );
+    let endpoint = endpoint.expect("a Managed launch must bind a real approval channel endpoint");
     let verified_cwd = plan.spec().verified_cwd().clone();
     let project_root = plan.spec().project_root().to_path_buf();
     assert!(
@@ -1558,7 +1556,7 @@ fn a_managed_launch_can_bind_its_approval_channel_without_transcript_capture() {
 
     let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events) = project
-        .launch_prepared_agent_run_with_runtime(plan, &mut runtime)
+        .launch_prepared_agent_run_with_runtime(plan, terminal_launch_spec, &mut runtime)
         .expect("prepared Managed launch should spawn the real adapter binary");
     let terminal_id = project.agent_runs()[0]
         .terminal_id

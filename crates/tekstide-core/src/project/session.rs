@@ -1,8 +1,10 @@
-use crate::agent::AgentAdapterApprovalError;
 use crate::agent::AgentRunLaunchPlan;
 use crate::agent::AgentRunTranscriptCaptureError;
 use crate::agent::AgentTerminalLaunchIntent;
-use crate::approval::ApprovalChannelEndpoint;
+use crate::approval::{
+    ApprovalChannelEndpoint, ApprovalChannelErrorReason, ApprovalChannelPathError,
+    ApprovalChannelPathRequest, ApprovalChannelPathResolver, validate_token,
+};
 use crate::runtime::terminal::{
     AdapterApprovalConfig, TerminalEnvironmentPolicy, TerminalLaunchError, TerminalLaunchSpec,
     TerminalRuntime, TerminalRuntimeEvent, TerminationOutcome, terminal_kind_from_compatibility,
@@ -22,12 +24,12 @@ use crate::content::{
     TextDocumentOpenPolicy, TextViewport,
 };
 use crate::domain::{
-    AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError, ApprovalDecision, ApprovalId,
-    ApprovalRequest, AuditEvent, ChangeAssociationConfidence, ChangeDetectionStatus, ChangeSet,
-    ChangeSetId, DomainTimestamp, OwnershipError, ProjectGitSummary, ProjectId,
-    ProjectProviderState, ReviewState, TerminalId, TerminalSession, TerminalStatus,
-    TerminalTransitionError, Transcript, TranscriptAbsence, TranscriptId, TranscriptOrigin,
-    VisibleSlot,
+    AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
+    ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
+    ChangeDetectionStatus, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError,
+    ProjectGitSummary, ProjectId, ProjectProviderState, ReviewState, TerminalId, TerminalSession,
+    TerminalStatus, TerminalTransitionError, Transcript, TranscriptAbsence, TranscriptId,
+    TranscriptOrigin, VisibleSlot,
 };
 
 use super::change_detection::{
@@ -832,48 +834,54 @@ impl ProjectSession {
         ),
         ProjectAgentRuntimeLaunchError,
     > {
-        let endpoint = self.prepare_agent_run_launch(&mut plan)?;
-        let (agent_run_id, events) = self.launch_prepared_agent_run_with_runtime(plan, runtime)?;
+        let (terminal_launch_spec, endpoint) = self.prepare_agent_run_launch(&mut plan)?;
+        let (agent_run_id, events) =
+            self.launch_prepared_agent_run_with_runtime(plan, terminal_launch_spec, runtime)?;
         Ok((agent_run_id, events, endpoint))
     }
 
-    /// Returns the bound `ApprovalChannelEndpoint` when `plan`'s profile
-    /// is `Managed` (RFC-022 PR-022-C), `None` for `Plain`/`Supervised` --
-    /// see `AgentRunLaunchPlan::prepare_adapter_approval`'s own doc
-    /// comment for why the endpoint is handed back rather than stored:
-    /// this method's own callers decide where it lives from here.
+    /// Validates, then assembles the real `runtime::terminal::
+    /// TerminalLaunchSpec` and binds the approval channel, in that order
+    /// -- both steps this project already owns (RFC-077 Stage 8's
+    /// assembly, and now, per review 685's "move the binding cluster to
+    /// project," the bind too). Returns the assembled spec alongside the
+    /// bound `ApprovalChannelEndpoint` when `plan`'s profile is `Managed`
+    /// (RFC-022 PR-022-C), `None` for `Plain`/`Supervised` -- the caller
+    /// threads both into `launch_prepared_agent_run_with_runtime`, the
+    /// same two-step shape `launch_agent_run_with_runtime`'s own doc
+    /// comment (response 227) already explains: a caller that needs the
+    /// endpoint to stay alive keeps these two calls apart rather than
+    /// going through the combined wrapper.
     pub(crate) fn prepare_agent_run_launch(
         &mut self,
         plan: &mut AgentRunLaunchPlan,
-    ) -> Result<Option<ApprovalChannelEndpoint>, ProjectAgentRuntimeLaunchError> {
+    ) -> Result<(TerminalLaunchSpec, Option<ApprovalChannelEndpoint>), ProjectAgentRuntimeLaunchError>
+    {
         self.validate_agent_launch_plan_before_runtime(plan)?;
         self.ensure_agent_launch_active_file_safety()?;
         plan.prepare_transcript_capture()?;
-        Ok(plan.prepare_adapter_approval()?)
+        let mut terminal_launch_spec = assemble_terminal_launch_spec(plan.terminal_launch_intent());
+        let endpoint = bind_adapter_approval(plan, &mut terminal_launch_spec)?;
+        Ok((terminal_launch_spec, endpoint))
     }
 
-    /// RFC-022 PR-022-C: branches on `plan.terminal_launch_intent()`'s own
-    /// `adapter_approval` -- set only by a preceding
-    /// `prepare_adapter_approval()` call for a `Managed` profile -- to
-    /// launch via `runtime.launch_project_adapter` instead of
-    /// `launch_project_shell`. The intent itself, not
-    /// `compatibility_level` read separately, is the single source of
-    /// truth for which spawn path runs, so this can never disagree with
-    /// what `prepare_adapter_approval` actually configured.
-    ///
     /// RFC-077 Stage 8: `assemble_terminal_launch_spec` builds the real
-    /// `runtime::terminal::TerminalLaunchSpec` here, once, from the
-    /// intent `agent` produced -- `project` already has edges to both
-    /// `agent` and `runtime`, so this is the assembly's one home.
+    /// `runtime::terminal::TerminalLaunchSpec`, and (review 685 response)
+    /// `bind_adapter_approval` attaches the approval channel to it when
+    /// one applies -- both already done, in `prepare_agent_run_launch`,
+    /// by the time this runs. `terminal_launch_spec.adapter_approval_config()`
+    /// is the single source of truth for which spawn path runs below, so
+    /// this can never disagree with what `prepare_agent_run_launch`
+    /// actually configured.
     pub(crate) fn launch_prepared_agent_run_with_runtime(
         &mut self,
         mut plan: AgentRunLaunchPlan,
+        terminal_launch_spec: TerminalLaunchSpec,
         runtime: &mut TerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
         let transcript_storage_path = plan.transcript_storage_path().cloned();
         let transcript_budget_exhausted = plan.transcript_budget_exhausted();
-        let is_adapter_launch = plan.terminal_launch_intent().adapter_approval().is_some();
-        let terminal_launch_spec = assemble_terminal_launch_spec(plan.terminal_launch_intent());
+        let is_adapter_launch = terminal_launch_spec.adapter_approval_config().is_some();
 
         plan.transition_agent_run_to(AgentRunStatus::Preparing)?;
         let (terminal, events) = if is_adapter_launch {
@@ -2343,6 +2351,27 @@ pub enum ProjectAgentLaunchError {
     },
 }
 
+/// RFC-077 (review 685 response, "move the binding cluster to project"):
+/// moved here, unchanged in shape, from `agent::AgentAdapterApprovalError`.
+/// This enum's own *definition* was one of three independent reasons
+/// `agent -> approval` could not be cut while it lived in `agent` (review
+/// 685, point 2) -- moving `bind_adapter_approval` here with it removes
+/// that reason, alongside the other two (see the staging document's own
+/// "Stage 9's third shape, directed" entry). `Bind` still carries only
+/// `ApprovalChannelErrorReason` (`Copy`, content-free), not the full
+/// `ApprovalChannelError` -- unchanged from the original reasoning.
+/// `shell.rs`'s own refusal-symbol match still names
+/// `AgentAdapterApprovalError::Bind(ApprovalChannelErrorReason::
+/// SocketPathTooLong)` concretely (RFC-060 PR-060-D, response 113
+/// Required 1): this type staying a plain, non-generic enum here is what
+/// keeps that UX distinction intact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AgentAdapterApprovalError {
+    StateRootMissing,
+    Path(ApprovalChannelPathError),
+    Bind(ApprovalChannelErrorReason),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectAgentRuntimeLaunchError {
     Launch(ProjectAgentLaunchError),
@@ -2734,10 +2763,10 @@ fn terminal_environment_policy_ref(policy: &TerminalEnvironmentPolicy) -> Option
 /// edges to both `agent` and `runtime` (this file's own existing `use
 /// crate::agent::...` and `use crate::runtime::terminal::...`), so this
 /// is the one place that can name both without creating a new edge for
-/// either. The approval-channel *binding* that fills
-/// `intent.adapter_approval()` already happened, in
-/// `agent::AgentRunLaunchPlan::prepare_adapter_approval`; this only ever
-/// reads the result, never binds anything itself.
+/// either. Review 685 response: the approval-channel *binding* is no
+/// longer carried on the intent at all -- `bind_adapter_approval`, below,
+/// attaches it to the spec this function returns directly, as a second
+/// step `prepare_agent_run_launch` runs immediately after this one.
 pub(crate) fn assemble_terminal_launch_spec(
     intent: &AgentTerminalLaunchIntent,
 ) -> TerminalLaunchSpec {
@@ -2753,13 +2782,60 @@ pub(crate) fn assemble_terminal_launch_spec(
     spec.dimensions = intent.dimensions();
     spec.set_transcript_writer_config(intent.transcript_writer_config().cloned());
     spec.authorize_validated_agent_run(intent.compatibility_level());
-    if let Some(approval) = intent.adapter_approval() {
-        spec.set_adapter_approval_config(Some(AdapterApprovalConfig {
-            socket_path: approval.socket_path().to_path_buf(),
-            token: approval.token().clone(),
-        }));
-    }
     spec
+}
+
+/// RFC-077 (review 685 response, "move the binding cluster to project"):
+/// the real approval-channel bind, moved here verbatim in logic from
+/// `agent::AgentRunLaunchPlan::prepare_adapter_approval` (deleted there).
+/// Mirrors that method's own original shape -- resolve real
+/// infrastructure now, using state already gathered during validation --
+/// reading everything through `plan`'s existing public accessors rather
+/// than private fields, since this is no longer a method on
+/// `AgentRunLaunchPlan` itself.
+///
+/// Response 216's own requirement still holds: the state root is
+/// `plan.spec().approval_state_root()`, independent of
+/// `transcript_capture().state_root`, falling back to the latter only
+/// when the former is unset -- `StateRootMissing` means "no
+/// approval-channel location was ever configured, by either route."
+///
+/// Writes the socket path and token straight onto `terminal_launch_spec`
+/// -- the spec `prepare_agent_run_launch` is already assembling -- rather
+/// than through an intermediate `agent`-owned carrier: binding and
+/// assembly now happen one step apart in the same function, so there is
+/// no gap left for one to live in. Returns the bound endpoint itself (not
+/// stored anywhere): the live listener a caller must
+/// `accept_proposal`/`serve_concurrently` on to actually answer requests
+/// has a different lifetime than either the plan or the spec do.
+fn bind_adapter_approval(
+    plan: &AgentRunLaunchPlan,
+    terminal_launch_spec: &mut TerminalLaunchSpec,
+) -> Result<Option<ApprovalChannelEndpoint>, AgentAdapterApprovalError> {
+    if plan.spec().compatibility_level() != AgentCompatibilityLevel::Managed {
+        return Ok(None);
+    }
+    let state_root = plan
+        .spec()
+        .approval_state_root()
+        .or_else(|| plan.spec().transcript_capture().state_root.as_deref())
+        .ok_or(AgentAdapterApprovalError::StateRootMissing)?;
+    let directory = ApprovalChannelPathResolver
+        .resolve(ApprovalChannelPathRequest::new(
+            state_root.to_path_buf(),
+            vec![plan.spec().project_root().to_path_buf()],
+        ))
+        .map_err(AgentAdapterApprovalError::Path)?;
+    let (endpoint, raw_token) = ApprovalChannelEndpoint::bind(&directory, &plan.agent_run().id)
+        .map_err(|error| AgentAdapterApprovalError::Bind(error.reason))?;
+    let socket_path = directory.socket_path(&plan.agent_run().id);
+    let token = validate_token(raw_token).expect(
+        "bind() already validated this exact raw token internally, so re-validating the \
+         identical string here cannot fail",
+    );
+    terminal_launch_spec
+        .set_adapter_approval_config(Some(AdapterApprovalConfig { socket_path, token }));
+    Ok(Some(endpoint))
 }
 
 fn len_as_u32(len: usize) -> u32 {

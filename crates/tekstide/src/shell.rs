@@ -4014,9 +4014,9 @@ enum AgentRunLaunchRefusal {
 /// same division of labour `terminal_launch_refusal_symbol` already
 /// uses.
 fn agent_run_launch_refusal_symbol(refusal: &AgentRunLaunchRefusal) -> &'static str {
-    use tekstide_core::agent::{AgentAdapterApprovalError, AgentRunLaunchValidationError};
+    use tekstide_core::agent::AgentRunLaunchValidationError;
     use tekstide_core::approval::ApprovalChannelErrorReason;
-    use tekstide_core::project::ProjectAgentRuntimeLaunchError;
+    use tekstide_core::project::{AgentAdapterApprovalError, ProjectAgentRuntimeLaunchError};
     match refusal {
         AgentRunLaunchRefusal::RunLimitExceeded { .. } => "limit",
         AgentRunLaunchRefusal::Validation(

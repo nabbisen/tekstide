@@ -63,11 +63,12 @@ pub use runtime::ProjectRuntimeSummary;
 #[cfg(test)]
 pub(crate) use session::assemble_terminal_launch_spec;
 pub use session::{
-    ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
-    ProjectApprovalError, ProjectChangeSetError, ProjectSession, ProjectTerminalError,
-    ProjectTranscriptError, ProjectTranscriptPurgeSummary, RunAnnotationError,
-    RunRecordPersistSummary, RunRecordWrite, RunRecordsSetAside, TranscriptLoadSummary,
-    TranscriptRetentionCleanup, agent_run_status_is_active, terminal_status_is_active,
+    AgentAdapterApprovalError, ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError,
+    ProjectAgentRuntimeLaunchError, ProjectApprovalError, ProjectChangeSetError, ProjectSession,
+    ProjectTerminalError, ProjectTranscriptError, ProjectTranscriptPurgeSummary,
+    RunAnnotationError, RunRecordPersistSummary, RunRecordWrite, RunRecordsSetAside,
+    TranscriptLoadSummary, TranscriptRetentionCleanup, agent_run_status_is_active,
+    terminal_status_is_active,
 };
 pub use watch::{
     GIT_SUBPROCESSES_PER_SCAN, NotifyBackend, ProjectWatcher, SCAN_WINDOW, ScanBatcher,

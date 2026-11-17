@@ -3,11 +3,10 @@ mod profile;
 mod report;
 
 pub use launch::{
-    AgentAdapterApprovalError, AgentLaunchSummary, AgentRunLaunchPlan, AgentRunLaunchProject,
-    AgentRunLaunchRequest, AgentRunLaunchSpec, AgentRunLaunchValidation,
-    AgentRunLaunchValidationError, AgentRunLaunchValidator, AgentRunTranscriptCapture,
-    AgentRunTranscriptCaptureError, AgentTerminalAdapterApproval, AgentTerminalLaunchIntent,
-    VerifiedCwd,
+    AgentLaunchSummary, AgentRunLaunchPlan, AgentRunLaunchProject, AgentRunLaunchRequest,
+    AgentRunLaunchSpec, AgentRunLaunchValidation, AgentRunLaunchValidationError,
+    AgentRunLaunchValidator, AgentRunTranscriptCapture, AgentRunTranscriptCaptureError,
+    AgentTerminalLaunchIntent, VerifiedCwd,
 };
 pub use profile::{
     AiCliAdapterCapabilities, AiCliEnvironmentPolicy, AiCliExecutable, AiCliExecutableProvenance,
