@@ -386,3 +386,47 @@ fmt, clippy `-D warnings`, `mdbook build docs`, `git diff --cached --check`, thr
 **B2.** The blocked-automation names show on the highlighted card only; the count stays on every card, so what is blocked is one key press away and never absent. `the_blocked_automation_names_show_only_on_the_highlighted_card`; ablated (`|| true`) → fails, alone.
 
 **A rename this needed:** four existing "exactly N production call sites" tests named `update` as the enclosing function; the body is now `update_message`, so they say that. Nothing about what they pin changed.
+
+## 2026-11-17 (review 690) -- a known, named, un-guarded property: per-pull cost inside the bounded drain
+
+`a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it` now compares two
+directories that **both** exceed `OMITTED_COUNT_LIMIT` (20 000 against 100 000) rather than a
+sub-limit directory against a supra-limit one. Reviews 688-690 have the full derivation; the short
+version is that `.take(policy.omitted_count_limit + 1)` makes a scan's cost constant above the
+limit, so the old 300-vs-100 000 comparison measured a fixed ~33x work difference whose ratio
+depends on each machine's own balance of per-scan overhead against per-pull cost -- 1.9 on a 4-core
+CI runner against 4.94 on a 32-core dev machine -- and it reddened on the thin-headroom machine
+rather than on a regression.
+
+**Confirmed in absolute terms, which the old form could never show**: 1.939249 ms at 20 000 entries
+against 1.974247 ms at 100 000 (ratio 1.018, independent measurement, review 690) -- a 5x
+difference in directory size costing 1.8% more time. That is this document's own
+"worst case ~2.5 ms, independent of how large the real directory is" claim for
+`OMITTED_COUNT_LIMIT = 10_000`, measured directly rather than inferred.
+
+**What the new comparison cannot see, recorded so it is not later mistaken for a defect nobody
+noticed.** A **per-pull cost** regression inside the bounded drain -- stat-ing drained entries, say,
+instead of pulling them bare, the property `ExplorerDirectoryScan::omitted_entries`' own doc states
+("counted by draining the rest of the directory *without* stat-ing anything") -- inflates both
+supra-limit sides together, so the ratio stays ≈ 1.0. The old comparison could see it, because its
+denominator did 300 pulls against the other side's 10 001; that sensitivity was incidental to a
+comparison that was structurally machine-dependent, not a property it was designed for.
+
+Where the class stands today, checked rather than assumed:
+
+- `hostile_tests.rs` has exactly two `elapsed()` sites -- this test's own best-of-5 and the
+  depth-timing test, a different property.
+- This document's "~2.5 ms, measured at ~0.24 µs/entry" is recorded evidence, not an assertion.
+- What actually caught review 612 was the **measurement crate's D8 composition check**
+  (`scan+model+set_tree`, 1.02 ms → 24.44 ms against the 16.67 ms frame) -- not in the workspace,
+  not run by CI, and it let that regression live from PR-052-B until a `Cargo.lock` refresh
+  surfaced it a month later. The class therefore has a guard, and that guard is manual and
+  demonstrably lagging.
+
+**Not to be closed with a timing bound on the supra-limit side**: an absolute number reintroduces
+exactly the machine dependence the new comparison removed (the 4-core runner's supra-limit side
+will be several times the 32-core machine's 1.94 ms, so any bound is either loose there or tight
+here -- the 1 ms floor's own failure mode). The only honest automated instrument is a counting seam
+on the scanner, rejected as too much new surface on security-relevant code, and nothing about that
+trade has changed. The change that would close it properly is bringing the D8 composition check
+into the automated gate -- a process decision, not a test change, and the owner's to make.
