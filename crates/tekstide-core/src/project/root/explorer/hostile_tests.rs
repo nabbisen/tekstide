@@ -26,6 +26,15 @@ use crate::text_safety::quote_untrusted;
 /// files: over the 256 cap, so truncation is still exercised.
 const SMALL_BREADTH: usize = 300;
 
+/// RFC-052 review 689: a second breadth for
+/// `a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it`'s
+/// own ratio -- see that test's own comment for why comparing a
+/// sub-limit directory (`SMALL_BREADTH`) against a supra-limit one
+/// (`BREADTH_ENTRIES`) could never be machine-independent. Derived from
+/// `OMITTED_COUNT_LIMIT` itself, not a literal, so it cannot silently
+/// fall below the limit if that constant moves.
+const SUPRA_LIMIT_BREADTH: usize = super::OMITTED_COUNT_LIMIT * 2;
+
 fn handle(fixture: &HostileFixture) -> ProjectRootHandle {
     let root = ProjectRootValidator
         .validate(&fixture.project, SymlinkPolicy::FailClosed)
@@ -272,11 +281,34 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
     // (`OMITTED_COUNT_LIMIT` bounded the stats, not the walk -- counting
     // every one of a huge directory's omitted entries cost ~24 ms against a
     // small directory's ~0.5 ms, and a 2 s budget could not see either
-    // side). Machine-independent instead: a small and a huge directory are
-    // scanned in the *same run*, and it is the ratio between them that is
-    // asserted. "Bounded by the cap, not by the directory" means that ratio
-    // stays flat regardless of which machine runs it.
-    let small_fixture = HostileFixture::build("breadth-small-ratio", SMALL_BREADTH);
+    // side).
+    //
+    // Review 689: the original comparison here (`SMALL_BREADTH` -- 300,
+    // under `OMITTED_COUNT_LIMIT` -- against `BREADTH_ENTRIES` -- 100 000,
+    // far over it) could never be machine-independent, structurally, not
+    // just unluckily. `.take(policy.omitted_count_limit + 1)` means a
+    // scan's cost is *constant* for every directory above
+    // `OMITTED_COUNT_LIMIT` entries: 256 stat'd rows plus
+    // `OMITTED_COUNT_LIMIT + 1` bare pulls, no matter how much bigger the
+    // real directory gets past that. Comparing a sub-limit directory
+    // (300 pulls) against a supra-limit one (`OMITTED_COUNT_LIMIT + 1`
+    // pulls) measured a fixed ~33x work difference, not directory-size
+    // scaling, and the ratio between fixed-but-different work depends
+    // entirely on a given machine's own balance of per-scan overhead
+    // against per-pull cost -- measured directly: 1.9 on a 4-core CI
+    // runner, 4.94 on a 32-core dev machine, neither matching this
+    // comment's own former "stays flat regardless of which machine runs
+    // it" claim.
+    //
+    // Comparing two directories that **both** exceed `OMITTED_COUNT_LIMIT`
+    // instead makes both sides do byte-identical work (256 stats,
+    // `OMITTED_COUNT_LIMIT + 1` pulls, each), so machine speed cancels and
+    // so does contention that affects both sides alike. `SUPRA_LIMIT_BREADTH`
+    // (`OMITTED_COUNT_LIMIT * 2`) replaces `SMALL_BREADTH` here; the 1ms
+    // floor the old comparison needed (to stop a near-zero small side from
+    // making the ratio meaningless) is gone, since there is no near-zero
+    // side left to protect against.
+    let small_fixture = HostileFixture::build("breadth-small-ratio", SUPRA_LIMIT_BREADTH);
     let big_fixture = HostileFixture::build("breadth-big-ratio", BREADTH_ENTRIES);
 
     // Best-of-5, not worst-of-5: a ratio is a *scaling* assertion, not a
@@ -300,25 +332,38 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
 
     let small_best = best_of_5(&small_fixture);
     let big_best = best_of_5(&big_fixture);
+    let ratio = big_best.as_secs_f64() / small_best.as_secs_f64();
     eprintln!(
-        "PR-052-A/review 612 measurement: best of 5, {SMALL_BREADTH} entries = {small_best:?}; \
-         {BREADTH_ENTRIES} entries = {big_best:?}"
+        "PR-052-A/review 689 measurement: best of 5, {SUPRA_LIMIT_BREADTH} entries = \
+         {small_best:?}; {BREADTH_ENTRIES} entries = {big_best:?}; ratio = {ratio:.3}"
     );
 
-    // A floor under the small side: near-zero on a very fast machine would
-    // make the ratio meaningless. A capped scan's real floor is a few
-    // hundred microseconds; 1 ms is a generous margin above that. This
-    // loosens the ratio on a fast machine (a larger denominator shrinks it),
-    // which is the safe direction for a floor to err in.
-    let small_best = small_best.max(Duration::from_millis(1));
-    let ratio = big_best.as_secs_f64() / small_best.as_secs_f64();
+    // Review 689's own pre-registered bound: measured directly before
+    // writing this (not derived from the `.take` cost model alone, per
+    // that review's own requirement), well under the ~1.5 threshold that
+    // would have meant the cost model was wrong. On this dev machine (32
+    // cores): clean, 0.96-0.99 across five isolated runs; under real
+    // concurrent load (a second full `cargo test --workspace` running at
+    // the same time), 0.77-0.99 across five more -- the comparison stays
+    // *below* 1.0 even contended, confirming machine speed and shared
+    // contention both cancel between two directories doing identical
+    // work, which a sub-limit-vs-supra-limit comparison could never do
+    // (see this test's own comment above). This replaces the comment's
+    // former "stays flat regardless of which machine runs it" claim with
+    // a real figure rather than restating it unchanged. 2.0 carries over
+    // 2x margin above everything observed here, including under load;
+    // review 612's own regression (a walk that unbounds past the cap)
+    // would read ~5x against this bound, a 2.5x margin. The CI runner's
+    // own number is whatever this assertion's first run there measures --
+    // not assumed equal to this machine's.
     assert!(
-        ratio < 8.0,
-        "a capped scan's cost must not scale with the real directory's size: \
-         {BREADTH_ENTRIES} entries took {ratio:.1}x as long as {SMALL_BREADTH} entries \
+        ratio < 2.0,
+        "two directories that both exceed OMITTED_COUNT_LIMIT should cost the same -- both do \
+         256 stats and OMITTED_COUNT_LIMIT + 1 bare pulls by construction -- but \
+         {BREADTH_ENTRIES} entries took {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries \
          ({big_best:?} vs {small_best:?}). This is a scaling assertion, not a load-sensitive \
-         one (best-of-5 on both sides, a same-run ratio) -- but a red here was once \
-         dispositioned against load with no measurement to back it \
+         one (best-of-5 on both sides, a same-run ratio comparing equal work) -- but a red here \
+         was once dispositioned against load with no measurement to back it \
          (rfcs/handoffs/test-process-leak.md, 2026-11-07), so the reading is included rather \
          than assumed either way: {}",
         crate::test_support::load_average_report()
