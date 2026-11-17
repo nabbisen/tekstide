@@ -771,7 +771,7 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
     // this reading; it was simply never called from this path.
     if !session_is_empty {
         for &pid in survivors.as_deref().unwrap_or_default() {
-            report_pid_p_stat_via_sysctl(pid);
+            report_pid_p_stat_via_sysctl(pid, session_id);
         }
     }
     assert!(
@@ -1396,7 +1396,7 @@ fn p_stat_and_flag_via_sysctl(pid: libc::pid_t) -> Option<(u8, u32)> {
 /// crate's own `cfg(test)`. A diagnostic reachable only from a path that
 /// is reachable in both builds has to compile in both.
 #[cfg(all(any(test, feature = "test-support"), target_os = "macos"))]
-pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t) {
+pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t, _session_id: libc::pid_t) {
     match p_stat_and_flag_via_sysctl(pid) {
         Some((p_stat, p_flag)) => {
             let meaning = match u32::from(p_stat) {
@@ -1425,8 +1425,78 @@ pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t) {
     }
 }
 
+/// Review 688: this used to be a no-op, which meant every one of this
+/// subject's captures that came from a Linux run (three of the four
+/// verbatim captures to date) produced the one-line assertion message
+/// and nothing else -- the "next natural occurrence answers which
+/// candidate it was" plan in `release-checklist.md`'s Standing Watch
+/// cannot be true of a platform whose own diagnostic never ran.
+///
+/// The same three reads `diagnose_surviving_background_job`
+/// (`tests.rs`, macOS-only, reachable from exactly one test) takes,
+/// generalized to every survivor through this already-called hook
+/// instead of a new, narrower call site:
+///
+/// 1. `getsid(pid)` (POSIX, not macOS-specific -- the same call
+///    `live_member_of_session` above already trusts on this platform's
+///    own sibling), compared against `session_id`: a mismatch is
+///    candidate 2, a session escape.
+/// 2. `/proc/<pid>/stat`'s `state` and `ppid` fields, via
+///    `process_stat` -- the identical parse `is_live_member_of_session`
+///    already relies on for real containment decisions, not a second,
+///    unmeasured reading of the same file.
+/// 3. A short, bounded re-poll, up to one second (20 x 50ms), of the
+///    same zombie-aware liveness `process_stat` already lets this read
+///    (`state != 'Z'`, `is_live_member_of_session`'s own exclusion) --
+///    not `process_is_alive`/`is_gone_or_going`, both `cfg(test)`-only
+///    and unreachable from the `feature = "test-support"` build this
+///    function must also compile under (review 657's own reason, cited
+///    above). Gone within it is candidate 1, an exit-path read earlier
+///    than this enumeration; still alive after it is not. Deliberately
+///    last: the one read that spends real wall-clock time, so it must
+///    not delay the two reads above.
 #[cfg(all(any(test, feature = "test-support"), not(target_os = "macos")))]
-pub(super) fn report_pid_p_stat_via_sysctl(_pid: libc::pid_t) {}
+pub(super) fn report_pid_p_stat_via_sysctl(pid: libc::pid_t, session_id: libc::pid_t) {
+    // SAFETY: `getsid` has no preconditions beyond `pid` being a plain
+    // integer; it is safe to call against a pid that no longer exists.
+    let real_sid = unsafe { libc::getsid(pid) };
+    let sid_report = if real_sid == -1 {
+        format!("getsid failed: {:?}", io::Error::last_os_error())
+    } else if real_sid == session_id {
+        format!("getsid={real_sid}, matches session {session_id} -- not a session escape")
+    } else {
+        format!(
+            "getsid={real_sid} does NOT match session {session_id} -- candidate: a session \
+             escape"
+        )
+    };
+
+    let initial_stat = process_stat(pid);
+    let stat_report = match &initial_stat {
+        Some(stat) => format!("state={:?}, ppid={}", stat.state, stat.ppid),
+        None => "/proc/<pid>/stat could not be read -- no record".to_owned(),
+    };
+
+    let is_alive = |pid| process_stat(pid).is_some_and(|stat| stat.state != 'Z');
+    let poll_start = Instant::now();
+    let mut gone_after = None;
+    for _ in 0..20 {
+        if !is_alive(pid) {
+            gone_after = Some(poll_start.elapsed());
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let liveness_report = match gone_after {
+        Some(elapsed) => format!(
+            "gone within {elapsed:?} of this diagnostic's own poll starting -- candidate 1, an \
+             exit-path read earlier than this enumeration"
+        ),
+        None => format!("still alive after {:?} of polling", poll_start.elapsed()),
+    };
+
+    eprintln!("[p-stat-at-assertion] pid {pid}: {sid_report}; {stat_report}; {liveness_report}");
+}
 
 /// Review 657: a different question than [`is_gone_or_going`] asks about
 /// the same bit. That function answers "exclude this pid from the
@@ -2730,9 +2800,22 @@ impl Drop for ForcedEnumerationFailureGuard {
 /// `)` in the line rather than the first space, the standard way to
 /// parse this file safely. `state` is field 0 of what remains; `ppid`,
 /// `pgrp`, `session` are 1-3.
+///
+/// `ppid` is read and kept (review 688), even though
+/// `is_live_member_of_session`/`session_id_of` below only ever read
+/// `state`/`session_id` -- the diagnostic `report_pid_p_stat_via_sysctl`
+/// reuses this same parse for its own Linux reads rather than
+/// duplicating `/proc/<pid>/stat`'s parsing a second time. Adding a
+/// field nothing but that diagnostic reads changes no existing caller's
+/// behaviour. `#[allow(dead_code)]`: that diagnostic is gated
+/// `cfg(any(test, feature = "test-support"))`, which a plain library
+/// build (no tests, no `test-support`) does not see, so `ppid` reads as
+/// genuinely unused from that build's own point of view.
 #[cfg(target_os = "linux")]
 struct ProcessStat {
     state: char,
+    #[allow(dead_code)]
+    ppid: libc::pid_t,
     session_id: libc::pid_t,
 }
 
@@ -2742,10 +2825,15 @@ fn process_stat(pid: libc::pid_t) -> Option<ProcessStat> {
     let after_comm = stat.rsplit_once(')')?.1;
     let mut fields = after_comm.split_whitespace();
     let state = fields.next()?.chars().next()?;
-    // `ppid` and `pgrp` are consumed (`nth(2)` skips them) to reach
-    // `session`, the third field after `state`.
-    let session_id = fields.nth(2)?.parse().ok()?;
-    Some(ProcessStat { state, session_id })
+    let ppid = fields.next()?.parse().ok()?;
+    // `pgrp` is consumed (`nth(1)` skips it) to reach `session`, the
+    // second field after `ppid`.
+    let session_id = fields.nth(1)?.parse().ok()?;
+    Some(ProcessStat {
+        state,
+        ppid,
+        session_id,
+    })
 }
 
 /// RFC-043 PR-043-B: `termination.rs`'s own §1 re-verification ("the

@@ -733,7 +733,7 @@ fn a_real_backgrounded_job_is_dead_after_a_real_close() {
     // failure-branch-only diagnostic never produces the passing-run
     // control ("no record") that makes a `SZOMB` reading on a failing run
     // trustworthy rather than merely assumed.
-    super::launch::report_pid_p_stat_via_sysctl(background_pid as libc::pid_t);
+    super::launch::report_pid_p_stat_via_sysctl(background_pid as libc::pid_t, session_id);
     // Review 638 corrected this assertion directly, against the defect
     // `kill(pid, 0)` alone has -- it succeeds against an unreaped zombie
     // too (proved deterministically, no runner needed, in
