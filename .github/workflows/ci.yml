@@ -193,6 +193,21 @@ jobs:
             project::root::explorer::hostile_tests::a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it \
             -- --exact --nocapture
 
+      - name: explorer breadth-ratio ablation measurement (--nocapture)
+        # Review 691: the signal side of the same bound, same reasoning
+        # as the step above -- `an_unbounded_policy_makes_the_breadth_
+        # ratio_cross_its_bound`'s own `ratio > 2.0` assertion is covered
+        # by the suite-wide run, but its own `eprintln!` (the real
+        # per-platform regression ratio review 612's class produces,
+        # which is what justifies the 2.0 bound not being raised) is not
+        # covered by anything until this step.
+        if: always()
+        run: |
+          set -euo pipefail
+          TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
+            project::root::explorer::hostile_tests::an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound \
+            -- --exact --nocapture
+
       - name: Assert 0 fixture entries left
         run: |
           set -euo pipefail
@@ -306,6 +321,19 @@ jobs:
           set -euo pipefail
           TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
             project::root::explorer::hostile_tests::a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it \
+            -- --exact --nocapture
+
+      - name: explorer breadth-ratio ablation measurement (--nocapture)
+        # Review 691: the signal side of the same bound, same reasoning
+        # as the step above. macOS's own cost model has a size-dependent
+        # term even in the bounded case (see `qa-evidence.md`), so its
+        # own regression ratio under this ablation is worth its own time
+        # series, not assumed equal to Linux's.
+        if: always()
+        run: |
+          set -euo pipefail
+          TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
+            project::root::explorer::hostile_tests::an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound \
             -- --exact --nocapture
 
       - name: macOS approval-socket headroom assertion against the real ambient $TMPDIR (review 651 B1, --nocapture)

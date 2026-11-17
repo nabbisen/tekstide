@@ -350,12 +350,34 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
     // work, which a sub-limit-vs-supra-limit comparison could never do
     // (see this test's own comment above). This replaces the comment's
     // former "stays flat regardless of which machine runs it" claim with
-    // a real figure rather than restating it unchanged. 2.0 carries over
-    // 2x margin above everything observed here, including under load;
-    // review 612's own regression (a walk that unbounds past the cap)
-    // would read ~5x against this bound, a 2.5x margin. The CI runner's
-    // own number is whatever this assertion's first run there measures --
-    // not assumed equal to this machine's.
+    // a real figure rather than restating it unchanged.
+    //
+    // Review 691: this bound is now measured on three machines (dev
+    // Linux 1.018, CI Linux `gate` 1.001, macOS `macos-measurement`
+    // 1.283 -- full table in `052-file-explorer/qa-evidence.md`), via
+    // the dedicated `--nocapture` CI steps this review required. macOS
+    // carries its own size-dependent cost term even in the bounded case
+    // (~0.043 µs per directory entry present, fitted from its two
+    // points, `qa-evidence.md` again) -- the "both sides do identical
+    // work, so the ratio is 1.0" argument holds at the syscall-count
+    // level on every platform and at the cost level only on Linux, which
+    // is why macOS's own ratio is the highest of the three and the
+    // margin to watch, not a defect.
+    //
+    // **Corrected, not merely re-quoted**: an earlier version of this
+    // comment said review 612's own regression "would read ~5x against
+    // this bound, a 2.5x margin" -- true only on the fastest machine's
+    // own arithmetic. Separated into fixed and per-pull cost using each
+    // machine's own sub-limit point (`qa-evidence.md`'s table), the real
+    // signal is ~3.2-4.3x and the signal-side margin is ~1.6-2.2x, the
+    // same band as the noise-side margin above -- which is why 2.0 is
+    // well chosen and must not be raised: raising it would eat the
+    // thinner side. Measured, not assumed, by
+    // `an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound`
+    // below, the ablation RFC-074's own standing rule requires of this
+    // bound's 8.0 -> 2.0 move ("lowering a bound makes the assertion
+    // stricter; it does not re-prove the measurement underneath still
+    // discriminates").
     assert!(
         ratio < 2.0,
         "two directories that both exceed OMITTED_COUNT_LIMIT should cost the same -- both do \
@@ -366,6 +388,80 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
          was once dispositioned against load with no measurement to back it \
          (rfcs/handoffs/test-process-leak.md, 2026-11-07), so the reading is included rather \
          than assumed either way: {}",
+        crate::test_support::load_average_report()
+    );
+}
+
+/// Review 691's required ablation: the bound just above moved 8.0 -> 2.0
+/// (review 689), and RFC-074's own standing rule ("each bound move
+/// re-ablates... lowering a bound makes the assertion stricter; it does
+/// not re-prove the measurement underneath still discriminates") applies
+/// to that move. The noise side is now calibrated on three machines
+/// (this test's own comment, `qa-evidence.md`); the signal side -- can a
+/// real review-612-class regression still make the ratio cross the
+/// bound -- had never been measured directly, only extrapolated.
+///
+/// `FileExplorerScanPolicy::omitted_count_limit` is a `pub` field on a
+/// `pub` struct, so review 612's exact regression (the drain walking
+/// every omitted entry instead of stopping at the cap) reproduces with
+/// no production change and nothing to restore: a policy whose
+/// `omitted_count_limit` is far past either fixture's own entry count
+/// makes the drain walk all of it, so the two supra-limit fixtures stop
+/// doing identical work (`SUPRA_LIMIT_BREADTH - 256` pulls against
+/// `BREADTH_ENTRIES - 256`, a real 5x difference, not the bounded
+/// comparison's `OMITTED_COUNT_LIMIT + 1` on both sides) -- the same
+/// shape a per-pull-cost regression inside the bounded drain would also
+/// produce, which the bounded comparison above cannot see by
+/// construction (see its own comment).
+///
+/// A permanent test, not a one-off capture, per the response's own
+/// preference: it keeps discriminating after the next change to the
+/// scanner, where a one-off measurement would not.
+#[test]
+fn an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound() {
+    let unbounded = FileExplorerScanPolicy {
+        omitted_count_limit: 1_000_000,
+        ..FileExplorerScanPolicy::linux_mvp()
+    };
+    let small_fixture = HostileFixture::build("breadth-small-unbounded", SUPRA_LIMIT_BREADTH);
+    let big_fixture = HostileFixture::build("breadth-big-unbounded", BREADTH_ENTRIES);
+
+    let best_of_5 = |fixture: &HostileFixture| -> Duration {
+        let mut best = Duration::MAX;
+        for _ in 0..5 {
+            let start = Instant::now();
+            let result = FileExplorerScanner
+                .scan_directory(&handle(fixture), "breadth", &unbounded)
+                .expect("scans");
+            best = best.min(start.elapsed());
+            assert_eq!(
+                result.nodes.len(),
+                256,
+                "the per-level cap still bounds the rows"
+            );
+            assert!(
+                result.truncated,
+                "max_children_per_directory still caps the rows regardless of omitted_count_limit"
+            );
+        }
+        best
+    };
+
+    let small_best = best_of_5(&small_fixture);
+    let big_best = best_of_5(&big_fixture);
+    let ratio = big_best.as_secs_f64() / small_best.as_secs_f64();
+    eprintln!(
+        "PR-052-A/review 691 ablation (omitted_count_limit=1_000_000): best of 5, \
+         {SUPRA_LIMIT_BREADTH} entries = {small_best:?}; {BREADTH_ENTRIES} entries = \
+         {big_best:?}; ratio = {ratio:.3}"
+    );
+
+    assert!(
+        ratio > 2.0,
+        "an unbounded omitted_count_limit must reproduce review 612's own regression and cross \
+         the bounded comparison's 2.0 bound -- but {BREADTH_ENTRIES} entries took only \
+         {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries ({big_best:?} vs {small_best:?}), \
+         which would mean that bound cannot see the regression it exists for on this machine: {}",
         crate::test_support::load_average_report()
     );
 }
