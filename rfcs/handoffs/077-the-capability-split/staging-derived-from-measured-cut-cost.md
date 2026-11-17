@@ -431,14 +431,44 @@ stages 3–9 land in one release, RFC-077 closes in that release and never has t
 section it did not ship in.** That should be checked against real effort before being relied on,
 but plan for one release and split only if the work argues for it.
 
+## Stage 9 landed (3cc595e, 2026-11-17)
+
+Both halves of review 685's own response landed. `runtime -> project` (housekeeping, `c97d4ef`)
+already had. `agent -> approval` landed as directed: the binding cluster (the six-symbol import,
+`AgentTerminalAdapterApproval`, `prepare_adapter_approval`'s body, `AgentAdapterApprovalError`)
+moved from `agent/launch.rs` into `project/session.rs`, where `project` was already the sole
+caller. `AgentTerminalAdapterApproval` is deleted, not genericized — `bind_adapter_approval` writes
+`socket_path`/`token` straight onto the `TerminalLaunchSpec` `prepare_agent_run_launch` already
+assembles. `AgentAdapterApprovalError` kept its exact name and shape; `shell.rs`'s
+`SocketPathTooLong` match stays concrete, proven by running
+`a_managed_launch_whose_state_root_is_too_deep_for_the_approval_socket_names_the_reason`, not by
+reading it. Every one of response 685's "Required" properties held: the resolve/bind/validate/
+record ordering moved as one verbatim block; `agent/tests.rs:1509`'s fallback test was repointed,
+not rewritten; the re-validation `expect` kept its comment; the gate moved in the same commit;
+ablated on the committed tree (reintroducing `agent`'s old grouped `approval` import turned the gate
+red, naming `{agent, approval}`) and restored byte-identical.
+
+**Measured, correcting the directing response's own anticipated number**: the response called this
+"bound 2 → 1, acyclic." The gate's own `strongly_connected_components` filters out every singleton
+component before taking "largest" (it always has — see that function's own doc comment), so a graph
+that is genuinely acyclic measures **0**, not 1, by this file's own definition — confirmed by
+setting `MAX_LARGEST_SCC_SIZE` to 0 and running the gate before committing to it, not taken on the
+response's word. `MAX_LARGEST_SCC_SIZE` is `0`. Total edges 56 → 55, refs 132 → 130. `project`'s own
+fan-out: 7 edges before and after (no new edge, confirming the response's own claim), refs 38 → 37
+(one fewer separate `use crate::agent::AgentAdapterApprovalError;` line, now that the type moved
+out of `agent`). `agent -> approval` is gone entirely. `approval -> agent` (`VerifiedCwd`) is the
+crate's one remaining residual edge, and one directed edge between two modules is not a cycle, so
+no second residual exists to accept or decline.
+
 ## And the finding that should stop someone declaring victory at stage 9
 
-**After stage 9 the graph is acyclic, the bound is 1, and D7 has not started.**
+**After stage 9 the graph is acyclic, the bound is 0 (not 1 — see "Stage 9 landed" above, which
+measured past this section's own anticipated number), and D7 has not started.**
 
 D7 is *"`project/` splits: orchestration plus its capabilities."* `project/` is **9,077 production
 lines** across 17 entries today, `session.rs` alone 2,696. Cutting 22 references makes the module
 graph acyclic; it does not split `project/` into anything. **Splitting an already-acyclic module
-into siblings does not lower the largest-SCC bound** — it cannot, because the bound is already 1.
+into siblings does not lower the largest-SCC bound** — it cannot, because the bound is already 0.
 
 So RFC-074's ratchet, which has been the whole evidence mechanism since D1, **stops being evidence
 exactly where D7's work begins.** Whoever scopes D7 must bring a second measurement with it — a
