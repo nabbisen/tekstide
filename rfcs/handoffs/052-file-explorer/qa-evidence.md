@@ -483,3 +483,63 @@ review 612's exact regression with no production change and nothing to restore. 
 it on both runners, confirm it crosses 2.0, and record the per-platform number -- which turns every
 figure in the table above into a measurement. A permanent test asserting the crossing is better
 still, since it keeps discriminating after the next change to the scanner.
+
+## 2026-11-18 (review 692) -- the signal side measured, review 691's extrapolations corrected, and the bound re-derived to 2.5
+
+`an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound` landed (a test-only
+`FileExplorerScanPolicy { omitted_count_limit: 1_000_000, ..linux_mvp() }`, no production change),
+so the 8.0 → 2.0 move now satisfies RFC-074's own re-ablation rule. **The signal side is measured**,
+and it supersedes review 691's table in the section above:
+
+| machine | review 691 estimate | measured | estimate error |
+|---|---|---|---|
+| CI Linux (`gate`) | ~3.2x | **3.774** (8.512283 ms → 32.125399 ms) | low by 1.18x |
+| dev Linux, 32 cores | ~3.4x | **6.664** (4.4463 ms → 29.62811 ms), range 3.96-9.47 | low by ~2x |
+| macOS runner | ~4.3x, flagged least reliable | **13.664** (14.327541 ms → 195.7785 ms) | **low by 3.2x** |
+
+The estimates were derived by separating fixed from per-pull cost using each machine's own
+sub-limit point; the macOS row used a loaded run's numbers and was the furthest off, as flagged.
+Use the measured column. macOS's per-entry drain cost is ~2.27 µs (from the ablation's own two
+points), roughly 7.6x `gate`'s ~0.299 µs.
+
+**The bounded comparison's macOS baseline moved in the same run, and that is the number that
+matters.** From run 44108575432, the bounded step:
+
+| | run `39b5678` | run `055b022` | change |
+|---|---|---|---|
+| `gate` | 1.001 | 1.010 | stable |
+| `macos-measurement` | 1.283 | **1.739** | ×1.36 |
+
+macOS's absolute sides: 12.193542 → 18.089125 ms on the 20 000 side (×1.48) against 15.646125 →
+31.451709 ms on the 100 000 side (×2.01). **Asymmetric inflation inside the bounded comparison** --
+which the disposition's own argument says cannot happen, since both sides pull
+`OMITTED_COUNT_LIMIT + 1` entries, and which happens on macOS for the reason review 691 measured:
+APFS charges ~0.043 µs per directory entry *present*, so the two sides are not cost-identical there.
+
+**Re-derived bound: 2.5.** The window between worst measured noise and worst measured signal is
+[1.739, 3.774] -- macOS loaded at one end, `gate`'s ablation at the other. Geometric mean 2.56;
+2.5 gives 1.44x noise margin and 1.51x signal margin. The current 2.0 gives **1.15x noise against
+1.89x signal**: lopsided, with the thin side the one that produces a false red, on the platform
+this register has had to disposition against load more than any other.
+
+**This reverses review 691's own retraction, on data rather than preference.** That review recorded
+"2.5 would cost more margin than it buys" as an instinct not to act on, and that was right against
+what existed then: an extrapolated signal (~3.2x) and a single clean macOS noise point (1.283).
+Both are now measured and both move the optimum up. Re-deriving a bound when the measurements
+arrive is what the pre-registration was for -- and doing it before a red, with the derivation
+written down, is the difference between calibration and conceding to a flake. It is not review
+688's forbidden move: raising 8.0 was wrong because *that* baseline was machine-dependent and its
+red was information about the instrument.
+
+**Next decision point, named rather than discovered.** If macOS's bounded ratio climbs past roughly
+1.9 -- inside 1.3x of even the raised bound -- the honest conclusion is that a ratio between two
+supra-limit directories does not work on APFS, and macOS needs a different assertion rather than a
+third bound. Two points do not establish a trend; the standing `--nocapture` step will.
+
+**The per-pull class is still un-guarded, by either test.** An unbounded policy makes the two sides
+do *unequal* work; a per-pull-cost regression inside the bounded drain leaves both sides pulling
+`OMITTED_COUNT_LIMIT + 1` entries and makes each pull dearer -- *equal* work, more costly, ratio
+unchanged. Different regressions. The ablation sees only the size-scaling one (under a per-pull
+regression its own ratio rises toward 5x and it passes more strongly, having no upper bound), so
+the section above stands unchanged: the class has one guard, the measurement crate's D8 composition
+check, and that guard is manual.
