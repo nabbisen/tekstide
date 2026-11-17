@@ -529,6 +529,33 @@ would point D7 at the wrong module.
   premise does not hold, says so rather than picking a label that misdescribes it, as PR-074-B's
   own B2 did for a test-only pair.
 
+## Added standing requirement: at bound 0, the report is the witness (review 687, 2026-11-17)
+
+**Every commit that touches `crates/tekstide-core/src/` reports total edges and total references,
+before and after, not only the bound.**
+
+The bound is 0 and cannot move again, so the gate can no longer *witness* anything — it can only
+fail. Edges and references are the only numbers left that can drift, and nothing in the suite
+asserts either of them.
+
+Found the first time this mattered. Review 686's own Required items landed in `ae5f26b` with
+edges unchanged at 55 and the graph still acyclic, but references moved 130 → 131 and `project`'s
+own fan-out 37 → 38, unreported. One line accounts for it: a `#[cfg(test)]`-gated accessor in
+`project/session.rs` whose return type names `crate::transcript::TranscriptStoragePath` inline. The
+gate excludes test code **by filename**, so a test-only path inside a production file counts as a
+production reference — **the same class review 675 Required 1 eliminated**, recurring in the commit
+whose subject was instrument integrity, and invisible to all three tests that might plausibly have
+caught it (both of review 686's new controls pass, and `no_production_file_declares_a_module_with_a_body`
+matches `mod <name> {` only, never a `#[cfg(test)]` *item*).
+
+Not gateable cheaply, which is why this is a reporting requirement rather than a test: a "every
+`crate::` occurrence must sit in a `use` item" rule would catch it, but 35 of the 142 occurrences
+are legitimate inline paths (`impl crate::agent::AgentRunLaunchProject for ProjectSession`,
+`From<crate::domain::ReviewStateTransitionError>`, …), so that rule is false; and `#[cfg(test)]`
+items in production files are legitimate in general. What caught it was independent
+re-measurement, so the requirement is that the measurement be *reported* every time, where a
+reviewer can disagree with it.
+
 ## What is not in this document
 
 Which release these take, how many slices they become, and D7's own scoping. The first two are the
