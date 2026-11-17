@@ -543,3 +543,37 @@ unchanged. Different regressions. The ablation sees only the size-scaling one (u
 regression its own ratio rises toward 5x and it passes more strongly, having no upper bound), so
 the section above stands unchanged: the class has one guard, the measurement crate's D8 composition
 check, and that guard is manual.
+
+## 2026-11-18 (review 693, same day, second one) -- macOS's third point: 1.739 was a degraded run, and the size-dependent term is itself load-sensitive
+
+The 2.5 bound landed (both the bounded assertion and the ablation's own threshold, so the ablation
+keeps testing against the real bound). All four of that run's measurements verified from the job
+logs: `gate` bounded 1.006 / ablation 3.869; `macos-measurement` bounded 1.303 / ablation 9.291.
+
+**Three macOS points now exist, and the third settles the trend question review 692 left open:**
+
+| run | 20 000 side | 100 000 side | ratio | fitted `s` (µs per entry present) |
+|---|---|---|---|---|
+| `39b5678` | 12.193542 ms | 15.646125 ms | 1.283 | 0.0432 |
+| `055b022` | 18.089125 ms | 31.451709 ms | **1.739** | **0.167** |
+| `66af604` | 10.160083 ms | 13.238375 ms | 1.303 | 0.0385 |
+
+The ~1.9 watch threshold is **not** being approached: two of three sit at 1.28-1.30, and the
+outlier was slow on *both* sides. So the ratio form has not been shown to fail on APFS, and no
+macOS-specific assertion is needed on this evidence.
+
+**The mechanism is sharper than "a degraded run," and it is the part worth keeping.** APFS's
+size-dependent term is itself load-sensitive -- ~0.039-0.043 µs per directory entry present when
+clean against 0.167 under degradation, a 4x move -- which is exactly why macOS's ratio wanders
+while `gate`'s sits at 1.001-1.010 across the same runs. The term is not a platform constant; it is
+a platform constant *times* whatever pressure the volume is under.
+
+**And that shows the re-derivation bought protection, not margin for its own sake.** With
+`ratio = 1 + s·80000/small`, pairing the fastest observed small side (10.16 ms, run 3) with the
+worst observed `s` (0.167, run 2) -- two halves each already measured, never yet together -- gives
+**2.31**: a red against the old 2.0 bound, comfortably inside 2.5. Reaching 2.5 from run 2's own
+small side would need `s ≈ 0.34 µs`, another 2x beyond anything observed.
+
+Note for whoever next touches the bounded test's comment: it still describes the term as "fitted
+from its two points." It is three, and the spread between them (the load-sensitivity above) carries
+more information than the single figure quoted there.
