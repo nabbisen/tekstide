@@ -430,3 +430,56 @@ here -- the 1 ms floor's own failure mode). The only honest automated instrument
 on the scanner, rejected as too much new surface on security-relevant code, and nothing about that
 trade has changed. The change that would close it properly is bringing the D8 composition check
 into the automated gate -- a process decision, not a test change, and the owner's to make.
+
+## 2026-11-17 (review 691) -- the breadth ratio's three measured baselines, macOS's own size-dependent term, and the ablation the bound move still owes
+
+The dedicated `--nocapture` CI steps landed (`gate` and `macos-measurement`), so this measurement
+is now a standing time series rather than a local capture. All three baselines, verified from the
+job logs rather than quoted:
+
+| machine | 20 000 entries | 100 000 entries | ratio |
+|---|---|---|---|
+| dev Linux, 32 cores | 1.939249 ms | 1.974247 ms | **1.018** |
+| CI Linux, 4 cores (`gate`) | 7.966868 ms | 7.972688 ms | **1.001** |
+| macOS runner (`macos-measurement`) | 12.193542 ms | 15.646125 ms | **1.283** |
+
+**The disposition is vindicated on Linux**: the baseline spread between a 4-core runner and a
+32-core dev machine collapsed from 4.9x under the old sub-limit-vs-supra-limit comparison (1.9
+against 4.94) to **1.7%**.
+
+**macOS carries a size-dependent term even in the bounded case, and it is measured, not assumed.**
+Fitting the two macOS points to `cost = F + (OMITTED_COUNT_LIMIT + 1)·pull + size·s` gives
+`s ≈ 0.043 µs` per directory entry *present, whether or not it is drained*, with `F ≈ 11.3 ms`. So
+on APFS a capped scan's cost is not constant above `OMITTED_COUNT_LIMIT` the way it is on ext4: 5x
+the entries costs 28% more time though both sides pull exactly `OMITTED_COUNT_LIMIT + 1` of them.
+The "both sides do byte-identical work, so the ratio is 1.0" argument holds at the **syscall-count**
+level everywhere and at the **cost** level only on Linux. 1.283 against a 2.0 bound is fine; macOS
+is simply the margin to watch.
+
+**What is still owed: the signal side has never been measured.** RFC-074's standing requirement --
+*"Each bound move re-ablates... Lowering a bound makes the assertion stricter; it does not re-prove
+the measurement underneath still discriminates"* -- applies to this bound's 8.0 → 2.0 move. The
+noise side now has three machines and an under-load run (0.77-0.99 on the dev machine while a
+second full workspace test ran, confirming contention cancels between equal work). The signal side
+is an extrapolation from review 612's `~0.24 µs/entry`, taken in 2026-10 on unidentified hardware.
+
+Separating fixed from per-pull cost using each machine's own sub-limit point (the old form's
+300-entry side) puts the real signal below the figure the comment claims:
+
+| machine | 300 entries | 10 001 pulls | derived µs/pull | a 612-class regression would read |
+|---|---|---|---|---|
+| dev Linux | 1.13 ms | 1.94 ms | 0.084 | ~3.4x |
+| CI Linux | 5.07 ms | 7.97 ms | 0.299 | ~3.2x |
+| macOS | 6.15 ms | 20.11 ms (loaded) | ~1.44 (inflated) | ~4.3x, least reliable |
+
+So the test comment's *"would read ~5x against this bound, a 2.5x margin"* holds only on the
+fastest machine's arithmetic; the real signal margin is ~1.6-2.2x. Both margins then sit in the
+same 1.56-2.2x band, which is why **2.0 is well chosen and should not be raised** -- raising it
+eats the thinner side.
+
+**The ablation is free**: `FileExplorerScanPolicy::omitted_count_limit` is a `pub` field, so a
+test-only `FileExplorerScanPolicy { omitted_count_limit: 1_000_000, ..linux_mvp() }` reproduces
+review 612's exact regression with no production change and nothing to restore. Run the ratio under
+it on both runners, confirm it crosses 2.0, and record the per-platform number -- which turns every
+figure in the table above into a measurement. A permanent test asserting the crossing is better
+still, since it keeps discriminating after the next change to the scanner.
