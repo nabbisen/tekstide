@@ -35,8 +35,10 @@ pub struct AgentRunLaunchRequest {
     /// `Managed` launch impossible -- RFC-011's documented per-run
     /// transcript opt-out and RFC-022's command approval had become
     /// accidentally coupled, a policy nobody decided. `None` here falls
-    /// back to `transcript_state_root` (`prepare_adapter_approval`'s own
-    /// doc comment states this explicitly) purely for the common case
+    /// back to `transcript_state_root` (`project::session::
+    /// bind_adapter_approval`'s own doc comment states this explicitly --
+    /// RFC-077 review 685/686 moved the bind, and this decoupling with
+    /// it, out of this module) purely for the common case
     /// where a caller wants both artifacts in the same place -- it does
     /// not reintroduce the coupling, since `Some` here always takes
     /// priority and a caller can set this without transcript capture at

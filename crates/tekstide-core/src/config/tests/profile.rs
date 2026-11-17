@@ -295,20 +295,29 @@ fn every_declared_adapter_value_produces_an_internally_consistent_profile() {
 }
 
 /// RFC-060 PR-060-A's own first checklist item: "a configuration file
-/// can produce a `Managed` profile that reaches `prepare_adapter_
-/// approval` and gets a real channel back -- demonstrated, not inferred
-/// from types." Goes through the real production entry point,
+/// can produce a `Managed` profile that reaches the real approval bind
+/// and gets a real channel back -- demonstrated, not inferred from
+/// types." Goes through the real production entry point,
 /// `ProjectSession::prepare_agent_run_launch`, not
-/// `AgentRunLaunchPlan::prepare_adapter_approval` called directly --
-/// the same "config text, through real code, reaches real validation"
+/// `project::session::bind_adapter_approval` (RFC-077 review 685/686:
+/// the bind's own home, since the relocation from `agent::
+/// AgentRunLaunchPlan::prepare_adapter_approval`) called directly -- the
+/// same "config text, through real code, reaches real validation"
 /// standard this whole file holds to, one hop further: through real
 /// *launch preparation* this time, not only real *validation*. Stops
 /// short of actually spawning the adapter process or completing a
 /// proposal/decision round trip -- that whole path, once, for real, is
 /// PR-060-C's own job; this slice has no UI and is not where the
 /// reference adapter needs to run.
+///
+/// Renamed from `..._reaches_prepare_adapter_approval_and_gets_a_real_channel`
+/// (review 686 Required 3) when that method stopped existing -- a test
+/// name embedding a since-removed identifier is stale text the same way
+/// `capability_graph_gate.rs`'s own
+/// `the_largest_strongly_connected_component_is_within_its_ratcheted_bound`
+/// was, by that rename's own stated reasoning.
 #[test]
-fn a_configured_managed_profile_reaches_prepare_adapter_approval_and_gets_a_real_channel() {
+fn a_configured_managed_profile_reaches_bind_adapter_approval_and_gets_a_real_channel() {
     let root = test_root("rfc060-way-in-root");
     let bin = test_root("rfc060-way-in-bin");
     let executable = executable_file(&bin, "ai-cli");
@@ -333,11 +342,11 @@ fn a_configured_managed_profile_reaches_prepare_adapter_approval_and_gets_a_real
     let validation = AgentRunLaunchValidator
         .validate(&project, &profile, &request)
         .expect("a real configuration-defined Managed profile should validate for launch");
-    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Configured Adapter")
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Configured Adapter")
         .expect("a validated Managed launch should produce a launch plan");
 
-    let (_terminal_launch_spec, endpoint) = project
-        .prepare_agent_run_launch(&mut plan)
+    let (_prepared, endpoint) = project
+        .prepare_agent_run_launch(plan)
         .expect("preparing a configured Managed launch must succeed");
     let endpoint = endpoint.expect(
         "a configuration file that declares an adapter must reach a real, bound \

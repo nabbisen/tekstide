@@ -1381,19 +1381,19 @@ fn a_real_adapter_completes_a_real_approval_round_trip_through_the_production_sp
     let validation = AgentRunLaunchValidator
         .validate(&project, &profile, &request)
         .expect("Managed reference-adapter profile should validate");
-    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
         .expect("validated Managed launch should produce a launch plan");
-
-    let (terminal_launch_spec, endpoint) = project
-        .prepare_agent_run_launch(&mut plan)
-        .expect("prepare should succeed for a Managed profile with a real state root");
-    let endpoint = endpoint.expect("a Managed launch must bind a real approval channel endpoint");
     let verified_cwd = plan.spec().verified_cwd().clone();
     let project_root = plan.spec().project_root().to_path_buf();
 
+    let (prepared, endpoint) = project
+        .prepare_agent_run_launch(plan)
+        .expect("prepare should succeed for a Managed profile with a real state root");
+    let endpoint = endpoint.expect("a Managed launch must bind a real approval channel endpoint");
+
     let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events) = project
-        .launch_prepared_agent_run_with_runtime(plan, terminal_launch_spec, &mut runtime)
+        .launch_prepared_agent_run_with_runtime(prepared, &mut runtime)
         .expect("prepared Managed launch should spawn the real adapter binary");
     let terminal_id = project.agent_runs()[0]
         .terminal_id
@@ -1538,25 +1538,25 @@ fn a_managed_launch_can_bind_its_approval_channel_without_transcript_capture() {
     let validation = AgentRunLaunchValidator
         .validate(&project, &profile, &request)
         .expect("Managed profile with an explicit approval channel should validate");
-    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
         .expect("validated Managed launch should produce a launch plan");
+    let verified_cwd = plan.spec().verified_cwd().clone();
+    let project_root = plan.spec().project_root().to_path_buf();
 
-    let (terminal_launch_spec, endpoint) = project.prepare_agent_run_launch(&mut plan).expect(
+    let (prepared, endpoint) = project.prepare_agent_run_launch(plan).expect(
         "a Managed launch with no transcript capture but an explicit approval channel \
          must still prepare successfully -- this is the exact combination response 216 \
          found impossible",
     );
     let endpoint = endpoint.expect("a Managed launch must bind a real approval channel endpoint");
-    let verified_cwd = plan.spec().verified_cwd().clone();
-    let project_root = plan.spec().project_root().to_path_buf();
     assert!(
-        plan.transcript_storage_path().is_none(),
+        prepared.transcript_storage_path().is_none(),
         "no transcript capture was configured, so no transcript storage path should exist"
     );
 
     let mut runtime = TerminalRuntime::new();
     let (agent_run_id, _events) = project
-        .launch_prepared_agent_run_with_runtime(plan, terminal_launch_spec, &mut runtime)
+        .launch_prepared_agent_run_with_runtime(prepared, &mut runtime)
         .expect("prepared Managed launch should spawn the real adapter binary");
     let terminal_id = project.agent_runs()[0]
         .terminal_id
@@ -1638,10 +1638,10 @@ fn a_managed_launch_still_fails_closed_with_no_state_root_configured_at_all() {
     let validation = AgentRunLaunchValidator
         .validate(&project, &profile, &request)
         .expect("Managed profile should validate independent of state-root availability");
-    let mut plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
+    let plan = AgentRunLaunchPlan::from_validation(validation, "Reference Adapter")
         .expect("validated Managed launch should produce a launch plan");
 
-    let result = project.prepare_agent_run_launch(&mut plan);
+    let result = project.prepare_agent_run_launch(plan);
     let Err(error) = result else {
         panic!(
             "a Managed launch with no state root configured by either route must still fail \

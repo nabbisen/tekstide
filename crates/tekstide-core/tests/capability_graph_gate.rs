@@ -293,10 +293,17 @@ fn strip_full_line_comments(source: &str) -> String {
         .join("\n")
 }
 
-/// Every occurrence of `crate::<module>` in `source` where `<module>` is one
-/// of `known_modules`, as that module's name — one entry per occurrence, not
-/// deduplicated (the RFC's own "references" count, as opposed to "edges").
-fn crate_path_references(source: &str, known_modules: &BTreeSet<String>) -> Vec<String> {
+/// Every `crate::` occurrence in `source`, paired with the byte offset and
+/// whatever identifier — possibly empty — immediately follows it.
+/// `crate_path_references`, below, keeps only the occurrences whose
+/// identifier is a known module; this keeps every one, including the
+/// occurrences that identifier check would otherwise make disappear with no
+/// record at all. Required by review 686 Required 1(b): `crate::{`,
+/// `crate ::`, a line break after `crate::`, and an unknown re-export all
+/// produce an empty or unrecognized identifier here, where
+/// `every_crate_path_occurrence_names_a_known_top_level_module` can see and
+/// reject them, instead of silently vanishing inside `crate_path_references`.
+fn crate_path_occurrences(source: &str) -> Vec<(usize, String)> {
     const PREFIX: &str = "crate::";
     let mut found = Vec::new();
     let mut search_from = 0usize;
@@ -306,12 +313,21 @@ fn crate_path_references(source: &str, known_modules: &BTreeSet<String>) -> Vec<
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-        if known_modules.contains(&ident) {
-            found.push(ident);
-        }
+        found.push((ident_start, ident));
         search_from = ident_start;
     }
     found
+}
+
+/// Every occurrence of `crate::<module>` in `source` where `<module>` is one
+/// of `known_modules`, as that module's name — one entry per occurrence, not
+/// deduplicated (the RFC's own "references" count, as opposed to "edges").
+fn crate_path_references(source: &str, known_modules: &BTreeSet<String>) -> Vec<String> {
+    crate_path_occurrences(source)
+        .into_iter()
+        .map(|(_, ident)| ident)
+        .filter(|ident| known_modules.contains(ident))
+        .collect()
 }
 
 /// The measured graph: every cross-module reference, `(from, to)`, counted
@@ -478,6 +494,75 @@ fn the_largest_strongly_connected_component_is_within_its_ratcheted_bound() {
          bound is {MAX_LARGEST_SCC_SIZE} (RFC-074 D1.1) — if this grew, a stage was undone; if it \
          shrank without the bound moving with it in the same commit, the bound is now a lie",
         largest.len()
+    );
+}
+
+/// RFC-077 review 686 Required 1(a): a positive control over the whole
+/// measurement pipeline (module enumeration, `production_files`,
+/// `owning_module`, `crate_path_references`) — not a guarantee about
+/// `VerifiedCwd` itself, which `ARCHITECTURE.md`'s seventh invariant's own
+/// three guards already hold (`verified_cwd_from_validated_has_exactly_one_production_call_site`,
+/// `receive_proposal_still_requires_a_verified_cwd_not_a_raw_path`,
+/// `receive_proposal_verified_cwd_type_pin`). At `MAX_LARGEST_SCC_SIZE ==
+/// 0`, every other graph assertion in this file is "this set is empty" —
+/// the SCC bound above, `domain_has_zero_outgoing_cross_module_references`,
+/// and both `test_support` assertions below — and an instrument that saw
+/// nothing would pass every one of them exactly as a genuinely acyclic
+/// graph does. `approval -> agent` is the one edge this crate keeps
+/// permanently; if the measured edge set ever stops containing it, the
+/// pipeline went blind, which this assertion exists to catch instead of
+/// reading as a cleaner graph. Demonstrated, not hypothetical: rewriting
+/// `agent/launch.rs`'s single `use crate::approval::{...}` into the
+/// equally idiomatic `use crate::{approval::{...}}` removes the edge from
+/// what `crate_path_references` sees without moving any code — see
+/// `every_crate_path_occurrence_names_a_known_top_level_module`, below,
+/// for the assertion that closes that class rather than this one instance.
+#[test]
+fn the_measured_graph_still_sees_the_permanent_residual_edge() {
+    let graph = measure_capability_graph();
+    let edges = graph.edges();
+    assert!(
+        edges.contains(&("approval".to_owned(), "agent".to_owned())),
+        "the measured graph no longer contains approval -> agent — this crate's one permanent \
+         residual edge (VerifiedCwd's construction privilege, ARCHITECTURE.md's seventh \
+         invariant). At bound 0 every other assertion in this file is \"this set is empty,\" so \
+         losing this edge from the measurement reads as a cleaner graph instead of a broken \
+         instrument unless this positive control catches it first"
+    );
+}
+
+/// RFC-077 review 686 Required 1(b): closes the *class* review 686 found,
+/// not only the one instance named above — `crate::{`, `crate ::`, a line
+/// break immediately after `crate::`, and `crate::SomeRootReexport` would
+/// all silently vanish from `crate_path_references` the same way, each
+/// producing an identifier that is empty or not a known module, which that
+/// function drops with no record at all. Measured across the whole tree
+/// before being written, matching review 686's own count: 114 production
+/// files, 141 `crate::` occurrences, zero exceptions.
+#[test]
+fn every_crate_path_occurrence_names_a_known_top_level_module() {
+    let root = src_root();
+    let modules = all_top_level_modules(&root);
+    let mut unmatched = Vec::new();
+    for file in production_files(&root) {
+        let relative = file.strip_prefix(&root).expect("under src/").to_owned();
+        let source =
+            fs::read_to_string(&file).unwrap_or_else(|e| panic!("reading {}: {e}", file.display()));
+        let stripped = strip_full_line_comments(&source);
+        for (offset, ident) in crate_path_occurrences(&stripped) {
+            if !modules.contains(&ident) {
+                unmatched.push(format!(
+                    "{}: byte {offset}, found {ident:?} immediately after `crate::`",
+                    relative.display()
+                ));
+            }
+        }
+    }
+    assert!(
+        unmatched.is_empty(),
+        "every `crate::` occurrence in a production file must name a known top-level module \
+         immediately — these did not, and crate_path_references would have silently dropped each \
+         one instead of counting it as a reference: {unmatched:?}"
     );
 }
 

@@ -588,7 +588,7 @@ impl<'a> AuditCoordinator<'a> {
     pub fn launch_audited_agent_run(
         &mut self,
         project: &mut ProjectSession,
-        mut plan: AgentRunLaunchPlan,
+        plan: AgentRunLaunchPlan,
         runtime: &mut TerminalRuntime,
     ) -> Result<AuditActionResult<AuditedAgentLaunch>, AuditIntegrationError> {
         if !plan_is_auditable(&plan) {
@@ -603,8 +603,8 @@ impl<'a> AuditCoordinator<'a> {
             return Err(AuditIntegrationError::InvalidTypedContext);
         }
 
-        let (terminal_launch_spec, approval_endpoint) = project
-            .prepare_agent_run_launch(&mut plan)
+        let (prepared, approval_endpoint) = project
+            .prepare_agent_run_launch(plan)
             .map_err(AuditIntegrationError::AgentLaunch)?;
 
         let operation_id = AuditOperationId::new_uuid();
@@ -618,8 +618,7 @@ impl<'a> AuditCoordinator<'a> {
         let authorization_persisted =
             self.append_observation(&authorization) == AuditObservationStatus::Persisted;
 
-        let launch =
-            project.launch_prepared_agent_run_with_runtime(plan, terminal_launch_spec, runtime);
+        let launch = project.launch_prepared_agent_run_with_runtime(prepared, runtime);
         let (launched_agent_run_id, runtime_events) = match launch {
             Ok(launch) => launch,
             Err(error) => {

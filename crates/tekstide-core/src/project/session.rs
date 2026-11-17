@@ -824,7 +824,7 @@ impl ProjectSession {
     /// `ApprovalCoordinator`/`serve_concurrently` machinery) can keep it.
     pub fn launch_agent_run_with_runtime(
         &mut self,
-        mut plan: AgentRunLaunchPlan,
+        plan: AgentRunLaunchPlan,
         runtime: &mut TerminalRuntime,
     ) -> Result<
         (
@@ -834,9 +834,9 @@ impl ProjectSession {
         ),
         ProjectAgentRuntimeLaunchError,
     > {
-        let (terminal_launch_spec, endpoint) = self.prepare_agent_run_launch(&mut plan)?;
+        let (prepared, endpoint) = self.prepare_agent_run_launch(plan)?;
         let (agent_run_id, events) =
-            self.launch_prepared_agent_run_with_runtime(plan, terminal_launch_spec, runtime)?;
+            self.launch_prepared_agent_run_with_runtime(prepared, runtime)?;
         Ok((agent_run_id, events, endpoint))
     }
 
@@ -844,41 +844,62 @@ impl ProjectSession {
     /// TerminalLaunchSpec` and binds the approval channel, in that order
     /// -- both steps this project already owns (RFC-077 Stage 8's
     /// assembly, and now, per review 685's "move the binding cluster to
-    /// project," the bind too). Returns the assembled spec alongside the
-    /// bound `ApprovalChannelEndpoint` when `plan`'s profile is `Managed`
-    /// (RFC-022 PR-022-C), `None` for `Plain`/`Supervised` -- the caller
-    /// threads both into `launch_prepared_agent_run_with_runtime`, the
-    /// same two-step shape `launch_agent_run_with_runtime`'s own doc
+    /// project," the bind too). Returns a [`PreparedAgentRunLaunch`]
+    /// alongside the bound `ApprovalChannelEndpoint` when `plan`'s profile
+    /// is `Managed` (RFC-022 PR-022-C), `None` for `Plain`/`Supervised` --
+    /// the caller threads both into `launch_prepared_agent_run_with_runtime`,
+    /// the same two-step shape `launch_agent_run_with_runtime`'s own doc
     /// comment (response 227) already explains: a caller that needs the
     /// endpoint to stay alive keeps these two calls apart rather than
     /// going through the combined wrapper.
+    ///
+    /// **Takes `plan` by value (review 686 Required 2).** The plan and its
+    /// assembled spec used to travel as two separate parameters between
+    /// this method and `launch_prepared_agent_run_with_runtime`, which a
+    /// caller could mismatch or mutate apart -- see [`PreparedAgentRunLaunch`]'s
+    /// own doc comment for why that is now impossible rather than merely
+    /// unobserved in practice.
     pub(crate) fn prepare_agent_run_launch(
         &mut self,
-        plan: &mut AgentRunLaunchPlan,
-    ) -> Result<(TerminalLaunchSpec, Option<ApprovalChannelEndpoint>), ProjectAgentRuntimeLaunchError>
-    {
-        self.validate_agent_launch_plan_before_runtime(plan)?;
+        mut plan: AgentRunLaunchPlan,
+    ) -> Result<
+        (PreparedAgentRunLaunch, Option<ApprovalChannelEndpoint>),
+        ProjectAgentRuntimeLaunchError,
+    > {
+        self.validate_agent_launch_plan_before_runtime(&plan)?;
         self.ensure_agent_launch_active_file_safety()?;
         plan.prepare_transcript_capture()?;
         let mut terminal_launch_spec = assemble_terminal_launch_spec(plan.terminal_launch_intent());
-        let endpoint = bind_adapter_approval(plan, &mut terminal_launch_spec)?;
-        Ok((terminal_launch_spec, endpoint))
+        let endpoint = bind_adapter_approval(&plan, &mut terminal_launch_spec)?;
+        Ok((
+            PreparedAgentRunLaunch {
+                plan,
+                terminal_launch_spec,
+            },
+            endpoint,
+        ))
     }
 
     /// RFC-077 Stage 8: `assemble_terminal_launch_spec` builds the real
     /// `runtime::terminal::TerminalLaunchSpec`, and (review 685 response)
     /// `bind_adapter_approval` attaches the approval channel to it when
     /// one applies -- both already done, in `prepare_agent_run_launch`,
-    /// by the time this runs. `terminal_launch_spec.adapter_approval_config()`
-    /// is the single source of truth for which spawn path runs below, so
-    /// this can never disagree with what `prepare_agent_run_launch`
-    /// actually configured.
+    /// by the time this runs, and carried here as one
+    /// [`PreparedAgentRunLaunch`] (review 686 Required 2) rather than two
+    /// parameters a caller could pass out of sync.
+    /// `terminal_launch_spec.adapter_approval_config()` is the single
+    /// source of truth for which spawn path runs below, and now cannot
+    /// disagree with what `prepare_agent_run_launch` actually configured,
+    /// by construction rather than by caller discipline.
     pub(crate) fn launch_prepared_agent_run_with_runtime(
         &mut self,
-        mut plan: AgentRunLaunchPlan,
-        terminal_launch_spec: TerminalLaunchSpec,
+        prepared: PreparedAgentRunLaunch,
         runtime: &mut TerminalRuntime,
     ) -> Result<(AgentRunId, Vec<TerminalRuntimeEvent>), ProjectAgentRuntimeLaunchError> {
+        let PreparedAgentRunLaunch {
+            mut plan,
+            terminal_launch_spec,
+        } = prepared;
         let transcript_storage_path = plan.transcript_storage_path().cloned();
         let transcript_budget_exhausted = plan.transcript_budget_exhausted();
         let is_adapter_launch = terminal_launch_spec.adapter_approval_config().is_some();
@@ -2754,6 +2775,40 @@ fn terminal_environment_policy_ref(policy: &TerminalEnvironmentPolicy) -> Option
         TerminalEnvironmentPolicy::ExplicitAllowlist(names) => {
             Some(format!("explicit allowlist: {}", names.join(", ")))
         }
+    }
+}
+
+/// RFC-077 review 686 Required 2: the single carrier `prepare_agent_run_launch`
+/// mints and `launch_prepared_agent_run_with_runtime` consumes. Before
+/// this, the plan and its already-assembled `TerminalLaunchSpec` travelled
+/// between those two methods as two separate parameters -- which a caller
+/// could pass out of sync (a hand-assembled or stale spec alongside a
+/// different plan) or mutate apart (changing `plan` between the two calls
+/// without that being reflected in the spec), with nothing to catch
+/// either. Both fields are private, and the only way to produce a value
+/// of this type is `prepare_agent_run_launch` itself, so plan and spec
+/// cannot be mismatched, and launching without ever calling
+/// `prepare_agent_run_launch` no longer compiles -- closing an older gap
+/// (a caller could always construct and launch a plan without going
+/// through preparation at all) alongside the one this stage's own
+/// refactor opened.
+pub(crate) struct PreparedAgentRunLaunch {
+    plan: AgentRunLaunchPlan,
+    terminal_launch_spec: TerminalLaunchSpec,
+}
+
+impl PreparedAgentRunLaunch {
+    /// A read-only pass-through to the prepared plan's own
+    /// `transcript_storage_path` -- the one piece of post-preparation
+    /// state a caller (today, only test code) needs to inspect between
+    /// the two steps. Read-only and no-op for the guarantee above: it
+    /// cannot be used to construct a mismatched value, only to look at
+    /// one that is already internally consistent.
+    #[cfg(test)]
+    pub(crate) fn transcript_storage_path(
+        &self,
+    ) -> Option<&crate::transcript::TranscriptStoragePath> {
+        self.plan.transcript_storage_path()
     }
 }
 
