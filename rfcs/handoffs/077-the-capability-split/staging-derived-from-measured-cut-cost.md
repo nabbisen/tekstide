@@ -476,6 +476,45 @@ property the gate can hold that a `project/` split actually moves — or D7 land
 which is the condition D1 was written to make impossible. This is not a reason to defer D7; it is
 the thing to settle before starting it.
 
+## At bound 0 the gate loses its positive control (review 686, 2026-11-17)
+
+Stage 9's landing is accepted and its numbers reproduced independently from both trees (56 → 55
+edges, 132 → 130 refs, `{agent, approval}` → none, `project` 7 edges both sides and 38 → 37 refs).
+The reviewer's own anticipated "bound 1" was loose prose; this gate has always measured an acyclic
+graph as 0, and `==` in place of `<=` additionally enforces the second half of the assertion's own
+message (*"if it shrank without the bound moving with it in the same commit, the bound is now a
+lie"*), which `<=` never did.
+
+**What the bound reaching 0 costs, measured:** every graph assertion in
+`crates/tekstide-core/tests/capability_graph_gate.rs` is now *"this set is empty"* — the SCC bound,
+`domain_has_zero_outgoing_cross_module_references`, and both `test_support` assertions. Nothing in
+the suite distinguishes *acyclic* from *the instrument saw nothing*. Demonstrated on the
+pre-stage-9 tree (`69a5c7a`), where the whole `agent -> approval` edge rested on **one** production
+occurrence, `agent/launch.rs:5`: rewriting that single `use crate::approval::{...}` into the
+equally idiomatic `use crate::{approval::{...}}` — same dependency, same code, a spelling
+`cargo fmt` accepts — makes the measurement report `NONE (acyclic)` and `edges=55`. That is stage
+9's entire result with nothing moved, because `crate_path_references` reads the identifier
+immediately after `crate::` and a nested group puts `{` there.
+
+Two assertions are therefore required before D7 is measured with this instrument, both green on
+today's tree:
+
+1. **The measured edge set must contain `("approval", "agent")`** — the permanent residual, as a
+   positive control over the whole pipeline (module enumeration, `production_files`,
+   `owning_module`, `crate_path_references`). It holds the *instrument*, not the invariant;
+   `ARCHITECTURE.md`'s seventh already names the three guards that hold the invariant.
+2. **Every `crate::` occurrence in a production file must be immediately followed by a known
+   top-level module name** — measured across all 114 production files: 141 occurrences, zero
+   exceptions. This closes the class (`crate::{`, `crate ::`, a line break, `crate::SomeReexport`)
+   rather than the instance, the same way review 675 Required 1 closed the inline-`mod tests` blind
+   spot at the root.
+
+**And D7's second measurement should be reference weight, not edge count.** Measured this round:
+`project` 7 edges / **37 refs** / in-degree 5; `app` 8 / 17 / 2; `audit` 6 / 14 / 1; `runtime`
+4 / 12 / 3; `shell` 8 / 11 / 0. By distinct targets `project` is third and `app` and `shell` lead;
+by references `project` carries 2.2× the next module and the crate's highest in-degree. Edge count
+would point D7 at the wrong module.
+
 ## Standing requirements carried from RFC-074
 
 - **Each bound move re-ablates** (review 672's requirement, applied at every stage of PR-074-B):

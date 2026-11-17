@@ -99,9 +99,17 @@ dependency from `approval` to `agent`. **That edge is deliberate and permanent**
 2026-11-16). Removing it — by taking `&Path` instead, or by widening the constructor to
 `pub(crate)` so the type can move — deletes the guarantee while making the module graph
 look better, which is the one shape of regression the capability gate actively rewards.
-The gate measures cycles and cannot see any of this. Pinning the one call site needs a
-separate test, which RFC-077's stage 7 is required to carry; until it lands, this
-invariant is held by this paragraph alone.
+The gate measures cycles and cannot see any of this. Three guards in
+`crates/tekstide-core/tests/capability_graph_gate.rs` do, all landed by RFC-077's stage 7
+(2026-11-16, after the paragraph above was first written):
+`verified_cwd_from_validated_has_exactly_one_production_call_site` holds the minting
+privilege, `receive_proposal_still_requires_a_verified_cwd_not_a_raw_path` holds the
+parameter's spelling (kept for its failure message, not its coverage), and
+`receive_proposal_verified_cwd_type_pin` holds its *type identity*, enforced by the
+compiler rather than by a string — an integration test, so naming `agent` there costs the
+measurement nothing. What no test holds is the edge itself: the gate's own measurement has
+no positive assertion that `approval -> agent` is still *seen*, so an instrument that went
+blind would read as a cleaner graph (RFC-077 review 686).
 
 **A control may record an opinion; it may not assert a fact.** RFC-034 offers exactly
 two buttons over a change set's review state — `Accepted` and `Rejected` — and
