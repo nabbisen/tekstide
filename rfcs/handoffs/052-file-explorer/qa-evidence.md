@@ -577,3 +577,50 @@ small side would need `s ≈ 0.34 µs`, another 2x beyond anything observed.
 Note for whoever next touches the bounded test's comment: it still describes the term as "fitted
 from its two points." It is three, and the spread between them (the load-sensitivity above) carries
 more information than the single figure quoted there.
+
+## 2026-11-18 (review 694) -- the watch condition corrected: watch the window, not macOS alone
+
+`BREADTH_RATIO_BOUND` landed (one constant for both assertions and both failure messages). Four
+runs of both tests now exist on both runners, all read from the job logs:
+
+| run | `gate` bounded | `gate` ablation | macOS bounded | macOS ablation |
+|---|---|---|---|---|
+| `39b5678` | 1.001 | -- (test not yet landed) | 1.283 | -- |
+| `055b022` | 1.010 | 3.774 | **1.739** | 13.664 |
+| `66af604` | 1.006 | 3.869 | 1.303 | 9.291 |
+| `12e52d7` | 1.010 | **3.390** | 1.418 | 6.478 |
+
+**Review 693's watch condition ("macOS's bounded ratio past ~1.9") is the wrong shape and is
+superseded here.** The signal side moves too: `gate`'s ablation fell 3.869 → 3.390, tightening the
+derivation window to `[1.739, 3.390]` -- width 1.95, optimal bound 2.43 against the 2.5 in place.
+Margins remain balanced (1.44x noise, 1.36x signal), so the bound does not move; but a one-sided
+threshold would not have seen the squeeze at all.
+
+**The two margins are threatened by two different, uncorrelated conditions.** Separating fixed from
+per-entry cost across the runs:
+
+| | per-entry drain cost | small-side (fixed-dominated) cost | what varies |
+|---|---|---|---|
+| `gate` | 0.295, 0.306, 0.311 µs -- **±3%** | 5.66-10.41 ms -- **±41%** | the fixed cost |
+| `macos-measurement` | 2.268, 1.481, 0.954 µs -- **2.4x** | 13.94-14.33 ms -- ±3% | the per-entry cost |
+
+- A **loaded APFS volume** raises macOS's *noise* ratio: its size-dependent term is load-sensitive
+  (0.039-0.167 µs/entry present, review 693) and the two bounded sides are not cost-identical there.
+- A **slow-startup Linux runner** lowers `gate`'s *signal* ratio: the ablation's denominator is
+  fixed-cost-dominated, so a larger fixed cost shrinks a ratio between unequal work. Fixed-cost
+  variance **cancels** in the bounded comparison by construction -- which is why `gate`'s bounded
+  ratio held at 1.001-1.010 while its own small side moved 41% -- and does **not** cancel in the
+  ablation.
+
+**Corrected watch condition: act when (worst observed signal) / (worst observed noise) falls below
+~1.6**, i.e. when balanced margins would drop under 1.27x. It is 1.95 today. The bound in place is
+already sized for both conditions occurring together, since 1.739 and 3.390 come from different
+runs and the window uses both at once.
+
+**One apparent trend checked and ruled out.** macOS's per-entry cost falling 2.268 → 1.481 → 0.954
+across three consecutive runs is not a runner-image difference: all three ran on `macos-26-arm64`
+(each job's own "Runner Image" group; only the provisioner version differs, and the newest
+provisioner was the *slowest* run). With n=3, one image and no mechanism for a monotone change, the
+reading is host variance within one pool -- so macOS is a 2.4x-variance population whose worst case
+is what the window takes. For any future disposition on this platform: `gate` is a stable
+instrument and `macos-measurement` is not.
