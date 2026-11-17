@@ -1550,7 +1550,7 @@ fn a_managed_launch_can_bind_its_approval_channel_without_transcript_capture() {
     );
     let endpoint = endpoint.expect("a Managed launch must bind a real approval channel endpoint");
     assert!(
-        prepared.transcript_storage_path().is_none(),
+        !prepared.has_transcript_storage_path(),
         "no transcript capture was configured, so no transcript storage path should exist"
     );
 

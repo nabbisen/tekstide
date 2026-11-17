@@ -2798,17 +2798,23 @@ pub(crate) struct PreparedAgentRunLaunch {
 }
 
 impl PreparedAgentRunLaunch {
-    /// A read-only pass-through to the prepared plan's own
-    /// `transcript_storage_path` -- the one piece of post-preparation
-    /// state a caller (today, only test code) needs to inspect between
-    /// the two steps. Read-only and no-op for the guarantee above: it
-    /// cannot be used to construct a mismatched value, only to look at
-    /// one that is already internally consistent.
+    /// A read-only pass-through to whether the prepared plan's own
+    /// `transcript_storage_path` is set -- the one piece of
+    /// post-preparation state a caller (today, only test code) needs to
+    /// inspect between the two steps. Read-only and no-op for the
+    /// guarantee above: it cannot be used to construct a mismatched
+    /// value, only to look at one that is already internally consistent.
+    ///
+    /// Review 687: returns `bool`, not `Option<&TranscriptStoragePath>`
+    /// as the first version did -- its one consumer only ever checked
+    /// `.is_none()`, never read the value, and naming
+    /// `crate::transcript::TranscriptStoragePath` in this signature
+    /// counted as a production reference the capability graph gate
+    /// measures, inflating `project`'s own reported fan-out with a
+    /// reference that exists only in test builds.
     #[cfg(test)]
-    pub(crate) fn transcript_storage_path(
-        &self,
-    ) -> Option<&crate::transcript::TranscriptStoragePath> {
-        self.plan.transcript_storage_path()
+    pub(crate) fn has_transcript_storage_path(&self) -> bool {
+        self.plan.transcript_storage_path().is_some()
     }
 }
 
