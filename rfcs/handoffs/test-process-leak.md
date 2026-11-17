@@ -5106,3 +5106,50 @@ capture"* while its own next clause says *"the same shape as the two earlier Lin
 and the review request calls it the third. Third is right -- `activating_accept_…` (review 650),
 `ablation_polling_…` (review 657), then this one -- with review 649 round 2's own two uncaptured
 firings before all three.
+
+## 2026-11-17 (review 689, same day, second one) -- the ratio row's disposition, decided: the floor is the wrong lever and the current comparison cannot be machine-independent
+
+Review 688's own response offered two dispositions and called the choice the dev team's with the
+owner's. Working the numbers for review 689 shows **both are wrong**, so this supersedes that
+framing. Two facts neither the row nor the response had:
+
+**1. The assertion cannot be machine-independent, in principle.** `OMITTED_COUNT_LIMIT` is 10 000
+and the drain is `.take(policy.omitted_count_limit + 1)` (`explorer.rs:351`), so a scan's cost is
+**constant for every directory above ~10 257 entries** -- 256 stat'd entries plus 10 001 bare
+`DirEntry` pulls -- by construction. The test compares a directory *below* that limit (300 entries →
+300 pulls) with one far above it (100 000 → 10 001 pulls), so it does not measure directory-size
+scaling at all: it measures a fixed 33x work difference, and the ratio between those two depends
+entirely on how a machine's fixed per-scan overhead compares with its per-pull cost. That is why the
+baseline is 1.9 on the 4-core runner and 4.94 on the 32-core one. The assertion's own comment -- *"a
+small and a huge directory are scanned in the same run... that ratio stays flat regardless of which
+machine runs it"* -- is structurally false, not merely unlucky.
+
+**2. The floor cannot be tuned, because the noise and the signal are both ratios against the same
+denominator.** Raising it buys headroom and sells sensitivity one-for-one, against this test's own
+motivating regression (review 612: big ~24 ms, small ~0.5 ms, 48x):
+
+| floor | the 2026-11-17 red reads | review 612's regression reads | verdict |
+|---|---|---|---|
+| 1 ms (today) | 8.047 -- **fires** | 24x | noise headroom 1.62x |
+| 2 ms | 6.44 | 12x | both margins thin |
+| 4 ms | 3.22 | **6x -- missed** | signal gone |
+
+The floor is already above the regressed small side (1 ms > 0.5 ms), so it already costs
+sensitivity. No value has comfortable margin on both sides.
+
+**The disposition: compare two directories that both exceed `OMITTED_COUNT_LIMIT`.** Keep
+`BREADTH_ENTRIES` (100 000) and replace the 300-entry side with a second large fixture sized from
+the constant itself (`OMITTED_COUNT_LIMIT * 2` = 20 000), so it cannot silently fall below the limit
+if that constant moves. Both sides then do byte-identical work, so machine speed cancels and so does
+contention that affects both alike -- the property best-of-5 was reaching for and could not supply,
+since sustained pressure moves a floor rather than adding a spike. Expected clean ratio ≈ 1.0, a
+bound of ≈ 2.0 instead of 8.0-with-1.6x-headroom, and a walk-unbounding regression (the 612 class)
+reads 5x, caught with 2.5x margin. No instrumentation, no new counting seam on the scanner, and the
+1 ms floor becomes unnecessary. `a_directory_of_many_entries_is_capped_and_says_it_was_truncated`
+is untouched: it is what proves the cap, and this test never was.
+
+**Pre-registered, because ≈ 1.0 is derived from reading `.take(limit + 1)` and not yet measured**:
+print both clean timings and the ratio before setting any bound. At or below ~1.5, set the bound
+from the measurement with the margin stated. **Above ~1.5, stop and report the number** -- the cost
+model is then wrong and the disposition changes, rather than the bound being chosen to fit. Either
+way the measured figures replace the "stays flat regardless of which machine" claim in the comment.
