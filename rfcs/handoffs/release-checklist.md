@@ -464,6 +464,15 @@ enumeration already reads `/proc`), and the bounded re-poll — since it is alre
 per survivor on the branch about to panic, and needs no new call site. Until then, "the next
 natural occurrence answers it" is true only of a test and a platform that have never produced one.
 
+  **Landed, 2026-11-17 (`be8381c`): the Linux body is filled.** The same three reads, through
+`process_stat` (extended with a `ppid` field rather than duplicated) for the `/proc/<pid>/stat`
+read and a bounded liveness re-poll that does not depend on the `cfg(test)`-only
+`process_is_alive`/`is_gone_or_going` (unreachable from the `feature = "test-support"` build this
+diagnostic must also compile under). Verified against a real spawned-then-killed child, not only
+read: a live match, a deliberate session mismatch, and a gone-within-microseconds exit each
+produced the expected line. "The next natural occurrence answers it" is now true of this platform
+too — it was not, for three captures, until this landed.
+
 **This item has a second exit that does not require waiting for a recurrence, and that exit is the
 one to take (added 2026-11-16, review 683 round 4).** Candidate 3 is readable in the code now:
 macOS `processes_in_session` (`launch.rs`) iterates `list_all_pids()`'s bulk snapshot and checks each
