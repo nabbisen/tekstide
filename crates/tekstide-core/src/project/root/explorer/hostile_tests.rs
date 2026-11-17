@@ -35,6 +35,21 @@ const SMALL_BREADTH: usize = 300;
 /// fall below the limit if that constant moves.
 const SUPRA_LIMIT_BREADTH: usize = super::OMITTED_COUNT_LIMIT * 2;
 
+/// RFC-052 review 693: the breadth ratio's own bound, used by both
+/// `a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it`
+/// (`ratio < BREADTH_RATIO_BOUND`) and its signal-side ablation,
+/// `an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound`
+/// (`ratio > BREADTH_RATIO_BOUND`) -- one derived constant rather than
+/// `2.5` written by hand in three places, two of them opposite
+/// assertions. A future re-derivation that updates one bound but misses
+/// the ablation would have the ablation assert a crossing of a number
+/// that is no longer the real bound, which is exactly the failure this
+/// constant exists to make impossible: change it once, and both
+/// assertions and both failure messages move together. Derivation and
+/// measured history: this test's own comment, `052-file-explorer/
+/// qa-evidence.md`.
+const BREADTH_RATIO_BOUND: f64 = 2.5;
+
 fn handle(fixture: &HostileFixture) -> ProjectRootHandle {
     let root = ProjectRootValidator
         .validate(&fixture.project, SymlinkPolicy::FailClosed)
@@ -357,12 +372,11 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
     // full table in `052-file-explorer/qa-evidence.md`), via the
     // dedicated `--nocapture` CI steps that review required. macOS
     // carries its own size-dependent cost term even in the bounded case
-    // (~0.043 µs per directory entry present, fitted from its two
-    // points, `qa-evidence.md` again) -- the "both sides do identical
-    // work, so the ratio is 1.0" argument holds at the syscall-count
-    // level on every platform and at the cost level only on Linux, which
-    // is why macOS's own ratio is the highest of the three and the
-    // margin to watch, not a defect.
+    // -- the "both sides do identical work, so the ratio is 1.0"
+    // argument holds at the syscall-count level on every platform and
+    // at the cost level only on Linux, which is why macOS's own ratio
+    // is the highest of the three and the margin to watch, not a
+    // defect.
     //
     // Review 692: a second run moved macOS's own noise from 1.283 to
     // 1.739 (×1.36, asymmetric inflation between the two sides -- APFS's
@@ -371,31 +385,43 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
     // review 691 at "~3.2-4.3x", is now directly measured by
     // `an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound`
     // below: `gate` 3.774, this dev machine 6.664, macOS 13.664 -- the
-    // macOS estimate was 3.2x low. **Re-derived bound: 2.5**, from the
-    // window between worst measured noise and worst measured signal,
-    // [1.739, 3.774] (geometric mean 2.56) -- 1.44x noise margin, 1.51x
-    // signal margin, both in the same band, against 2.0's lopsided
-    // 1.15x/1.89x. Raised before a red, not after: the derivation above
-    // is what justifies it, the same discipline review 688 required
-    // when 8.0 was wrong to keep (there, the baseline itself was
-    // machine-dependent; here, both sides of the bound are now measured
-    // on three machines and the optimum simply moved once real numbers
-    // replaced estimates). If macOS's own bounded ratio keeps climbing
-    // past ~1.9 -- inside 1.3x of this bound -- the honest conclusion
-    // will be that a ratio of two supra-limit directories does not work
-    // on APFS, and macOS will need a different assertion, not a third
-    // bound; two points do not establish a trend, and the standing step
-    // keeps watching.
+    // macOS estimate was 3.2x low. **Re-derived bound: `BREADTH_RATIO_BOUND`
+    // = 2.5**, from the window between worst measured noise and worst
+    // measured signal, [1.739, 3.774] (geometric mean 2.56) -- 1.44x
+    // noise margin, 1.51x signal margin, both in the same band, against
+    // 2.0's lopsided 1.15x/1.89x. Raised before a red, not after: the
+    // derivation above is what justifies it, the same discipline review
+    // 688 required when 8.0 was wrong to keep (there, the baseline
+    // itself was machine-dependent; here, both sides of the bound are
+    // now measured on three machines and the optimum simply moved once
+    // real numbers replaced estimates).
+    //
+    // Review 693: a third macOS point (1.303, fitted `s` 0.0385
+    // µs/entry) settled the question above -- not a climb toward ~1.9;
+    // 1.739 was one run slow on *both* sides (fitted `s` 0.167, a 4x
+    // move from the other two points' 0.039-0.043). **The size-dependent
+    // term is itself load-sensitive**, a platform constant times
+    // whatever pressure the volume is under, which is why macOS's ratio
+    // wanders while `gate`'s sits at 1.001-1.010 across the same runs.
+    // Three points now, not two; full table and the arithmetic showing
+    // this re-derivation bought real protection (pairing the fastest
+    // observed small side with the worst observed `s` gives 2.31 --
+    // would have reddened at the old 2.0, clears 2.5) in
+    // `qa-evidence.md`. If a real climb past ~1.9 is ever observed, the
+    // honest conclusion will be that a ratio of two supra-limit
+    // directories does not work on APFS, and macOS will need a
+    // different assertion, not a third bound; the standing step keeps
+    // watching.
     assert!(
-        ratio < 2.5,
+        ratio < BREADTH_RATIO_BOUND,
         "two directories that both exceed OMITTED_COUNT_LIMIT should cost the same -- both do \
          256 stats and OMITTED_COUNT_LIMIT + 1 bare pulls by construction -- but \
          {BREADTH_ENTRIES} entries took {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries \
-         ({big_best:?} vs {small_best:?}). This is a scaling assertion, not a load-sensitive \
-         one (best-of-5 on both sides, a same-run ratio comparing equal work) -- but a red here \
-         was once dispositioned against load with no measurement to back it \
-         (rfcs/handoffs/test-process-leak.md, 2026-11-07), so the reading is included rather \
-         than assumed either way: {}",
+         ({big_best:?} vs {small_best:?}), against a bound of {BREADTH_RATIO_BOUND}. This is a \
+         scaling assertion, not a load-sensitive one (best-of-5 on both sides, a same-run ratio \
+         comparing equal work) -- but a red here was once dispositioned against load with no \
+         measurement to back it (rfcs/handoffs/test-process-leak.md, 2026-11-07), so the \
+         reading is included rather than assumed either way: {}",
         crate::test_support::load_average_report()
     );
 }
@@ -477,12 +503,12 @@ fn an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound() {
     );
 
     assert!(
-        ratio > 2.5,
+        ratio > BREADTH_RATIO_BOUND,
         "an unbounded omitted_count_limit must reproduce review 612's own regression and cross \
-         the bounded comparison's 2.5 bound (review 692) -- but {BREADTH_ENTRIES} entries took \
-         only {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries ({big_best:?} vs \
-         {small_best:?}), which would mean that bound cannot see the regression it exists for on \
-         this machine: {}",
+         the bounded comparison's own bound ({BREADTH_RATIO_BOUND}) -- but {BREADTH_ENTRIES} \
+         entries took only {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries ({big_best:?} \
+         vs {small_best:?}), which would mean that bound cannot see the regression it exists \
+         for on this machine: {}",
         crate::test_support::load_average_report()
     );
 }
