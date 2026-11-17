@@ -169,6 +169,30 @@ jobs:
           mkdir -p "$CI_TMPDIR"
           TMPDIR="$CI_TMPDIR" cargo test --workspace --all-targets --no-fail-fast
 
+      - name: explorer breadth-ratio measurement (--nocapture)
+        # Review 690: this crate's own test harness only prints a test's
+        # captured stdout/stderr when that test fails, so a *passing* run
+        # of `a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_
+        # walk_of_all_of_it` (covered by the suite-wide step above)
+        # produces its own `eprintln!` measurement -- the ratio whose
+        # cross-machine stability is the entire justification for review
+        # 689's disposition -- and discards it into a buffer nobody
+        # reads. Same rule `libproc-visibility measurement`
+        # (`macos-measurement`, below) states: a measurement that is only
+        # visible when some other test fails is not a measurement. This
+        # test is both an assertion (covered above, `ratio < 2.0`) and a
+        # measurement (the ratio itself, not covered by anything until
+        # this step) -- a dedicated step, `if: always()`, turns a one-off
+        # capture into a time series this job's own log keeps across
+        # every run, which is what watching for drift against a 2.0 bound
+        # actually needs.
+        if: always()
+        run: |
+          set -euo pipefail
+          TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
+            project::root::explorer::hostile_tests::a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it \
+            -- --exact --nocapture
+
       - name: Assert 0 fixture entries left
         run: |
           set -euo pipefail
@@ -262,6 +286,26 @@ jobs:
           set -euo pipefail
           TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
             runtime::terminal::tests::a_real_backgrounded_job_is_dead_after_a_real_close \
+            -- --exact --nocapture
+
+      - name: explorer breadth-ratio measurement (--nocapture)
+        # Review 690: same rule as libproc-visibility/kern-proc-session
+        # above -- a measurement that is only visible when some other
+        # test fails is not a measurement, and a passing run of
+        # `a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_
+        # walk_of_all_of_it` discards its own `eprintln!` ratio into a
+        # buffer nobody reads. The claim review 689's disposition rests
+        # on is cross-platform (machine speed cancels because both
+        # fixtures do identical work), and this runner is a third machine
+        # class besides the two already measured by hand (a 4-core Linux
+        # CI runner, a 32-core Linux dev machine) -- a dedicated step
+        # here, `if: always()`, gives that claim its own time series on
+        # macOS too, not just on `gate`.
+        if: always()
+        run: |
+          set -euo pipefail
+          TMPDIR="$CI_TMPDIR" cargo test -p tekstide-core --lib \
+            project::root::explorer::hostile_tests::a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it \
             -- --exact --nocapture
 
       - name: macOS approval-socket headroom assertion against the real ambient $TMPDIR (review 651 B1, --nocapture)
