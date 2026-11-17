@@ -384,6 +384,44 @@ accept `agent -> approval` as a second residual alongside `approval -> agent` �
 bound would then floor at 2, which the section below already shows does not block D7 at a bound
 of 1, let alone 2.
 
+### Stage 9's third shape, directed (review 685 response, 2026-11-17)
+
+`runtime -> project` is cut (`c97d4ef`, housekeeping — correctly not claimed as a stage, since alone
+it leaves `{agent, approval}` at 2). Review 685's finding on `agent -> approval` is accurate on every
+fact, and its conclusion — a generic-parameter cascade through `AgentRunLaunchPlan` — follows only
+if the binding stays in `agent`. It does not have to.
+
+**Correction the cascade rests on:** `RunCapabilityToken`'s privilege is **crate**-scoped — its
+accessor is `pub(crate)` so no *downstream crate* can extract the secret. That blocks move 1
+(relocating the type to `domain`); it does not constrain which in-crate module names it.
+
+**Directed: move the binding cluster to `project`.** `agent`'s entire approval surface is that
+cluster (the six-symbol import, `AgentTerminalAdapterApproval`'s token field and accessor,
+`prepare_adapter_approval`'s body, and `AgentAdapterApprovalError`'s two variants — nothing else in
+`agent` names an approval type). Its body needs only `compatibility_level`, the state root with its
+documented fallback, `project_root` and `agent_run.id`, all reachable from `project` via
+`into_parts()` and existing accessors. And `project` is already the sole caller (`session.rs:852`),
+already imports `ApprovalChannelEndpoint` (`session.rs:5`), already branches adapter-versus-shell
+(`:836-842`), and already assembles the spec carrying `AdapterApprovalConfig`.
+
+So all four naming points resolve with no generics: the endpoint never crosses a boundary;
+`AgentAdapterApprovalError` becomes `project`'s, where `shell.rs`'s arm already traverses
+`ProjectAgentRuntimeLaunchError::AdapterApproval(...)` so `SocketPathTooLong` **stays concrete** and
+the reviewed UX distinction is kept rather than traded; and `AgentTerminalAdapterApproval` is
+**deleted** rather than genericized, since `project` writes the socket path and token straight into
+the spec it already builds. Stage 8's `AgentRunLaunchPlan` stays concrete.
+
+**Measured: bound 2 → 1, zero cycles, acyclic. 55 edges / 131 refs, no new edge.** `approval ->
+agent` remains the single permanent residual, and one directed edge is not a cycle — so no second
+residual is needed.
+
+**Required**, because this relocates reviewed code: the ordering (resolve, bind, validate, record)
+moves as one verbatim block, not re-derived; fail-closed on a missing state root is preserved
+including the fallback `agent/tests.rs:1509` documents a past defect in (repoint that test, do not
+rewrite it); the `expect` keeps its comment; `shell.rs`'s arm is proven by running its own test.
+Gate 2 → 1 in the same commit, and report `project`'s fan-out — this is the fourth consecutive stage
+to lower the bound by making the hub denser.
+
 ## The finding that matters more than the table
 
 **Twenty-two references is small.** Stages 3 through 9 together are about the size of a single
