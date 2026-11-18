@@ -4,11 +4,19 @@ mod diff;
 mod explorer_tree;
 mod ignored_directories;
 mod metadata;
-pub mod recent;
 pub mod root;
 mod runtime;
 mod session;
 pub mod watch;
+
+/// RFC-077 D7.2: `recent` is already detached from `project` in both
+/// directions (zero internal references, measured before this move) --
+/// the cheapest possible first capability departure. Re-exported from
+/// here unchanged so no caller and no published-API consumer has to
+/// move with it: `project::recent::X` still resolves, exactly as it did
+/// when this was `pub mod recent;` rather than a re-export of the new
+/// top-level `crate::recent`.
+pub use crate::recent;
 
 /// RFC-074 D3, Stage 1: `ProjectId` is vocabulary (T0), not an orchestration
 /// type, and now lives in `domain::identity` -- re-exported from here

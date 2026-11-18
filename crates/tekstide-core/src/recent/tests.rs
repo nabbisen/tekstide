@@ -3,7 +3,7 @@ use super::{
     RecentProjectSave, RecentProjectState, RecentProjectStore, Timestamp,
     assess_recent_project_availability,
 };
-use crate::project::{ProjectId, WorkspaceTrust};
+use crate::domain::{ProjectId, WorkspaceTrust};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::project::{ProjectId, WorkspaceTrust};
+use crate::domain::{ProjectId, WorkspaceTrust};
 
 use super::Timestamp;
 

@@ -38,7 +38,7 @@ use crate::domain::{
 
 pub const RUN_RECORD_FILE_NAME: &str = "run.json";
 const RUN_RECORD_TEMP_FILE_NAME: &str = "run.json.tmp";
-/// The precedent is `recent-projects.json.corrupt` (`project/recent/store.rs`).
+/// The precedent is `recent-projects.json.corrupt` (`recent/store.rs`).
 const RUN_RECORD_ASIDE_PREFIX: &str = "run.json.corrupt";
 /// The one version this build writes and reads. **A record with any other
 /// version is set aside**, so a future format change bumps this and an older

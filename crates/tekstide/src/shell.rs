@@ -6652,7 +6652,7 @@ fn open_help(state: &mut State) {
 /// readable directory -- the same `std::env::var_os("HOME")` convention
 /// `tekstide-core`'s own config/profile/recent-project-store code
 /// already uses (`config/path.rs`, `agent/profile.rs`,
-/// `project/recent/store.rs`), read directly here since this crate has
+/// `recent/store.rs`), read directly here since this crate has
 /// no shared home-directory helper of its own yet to reuse.
 fn starting_browse_directory() -> std::path::PathBuf {
     std::env::var_os("HOME")

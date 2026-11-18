@@ -778,8 +778,10 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// (this module, PR-024-C's own read) and `content/open.rs`
 /// (`TextDocument`'s pre-existing editor read, a different feature) both
 /// read generated-change/project-file content and are the two paths this
-/// RFC's Decision 1 gates. `project/recent/store.rs` and
-/// `audit/recovery.rs` also read a whole file's bytes, but neither reads
+/// RFC's Decision 1 gates. `recent/store.rs` (RFC-077 D7.2: moved out of
+/// `project/recent/` to the new top-level `recent`, same file, same
+/// read) and `audit/recovery.rs` also read a whole file's bytes, but
+/// neither reads
 /// project or generated-change content -- the former is this
 /// application's own small recent-projects state file, the latter an
 /// audit-store recovery manifest. Both pre-date this RFC and are
@@ -833,7 +835,7 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
     "project/diff.rs",
     "content/open.rs",
-    "project/recent/store.rs",
+    "recent/store.rs",
     "audit/recovery.rs",
     "transcript/reader.rs",
     "transcript/run_record.rs",
