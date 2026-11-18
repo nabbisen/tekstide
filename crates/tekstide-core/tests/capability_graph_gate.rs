@@ -527,6 +527,16 @@ fn is_facade_reexport_line(line: &str) -> bool {
 /// already does, attributed to the source module instead of built into
 /// the cross-module edge list, with every façade line
 /// (`is_facade_reexport_line`) excluded first.
+///
+/// **Sound only because `crate::` never wraps across a line break in this
+/// crate (review 697 round 2 finding).** This scans `crate_path_references`
+/// **per line**, unlike `measure_capability_graph`'s whole-file scan --
+/// equivalent only because a `crate::` whose identifier wrapped to the next
+/// line would read as an empty identifier either way, and
+/// `every_crate_path_occurrence_names_a_known_top_level_module` already
+/// reds on exactly that shape, so that case cannot exist uncaught. If that
+/// guard is ever weakened or removed, this function's own soundness goes
+/// with it, silently.
 fn own_code_reference_weight_by_module() -> BTreeMap<String, usize> {
     let root = src_root();
     let modules = all_top_level_modules(&root);
@@ -649,6 +659,16 @@ fn project_capability_submodule_count_is_within_its_ratcheted_bound() {
 /// stages 6 through 9 already showed this gate will reward lowering one
 /// bound by densifying a hub unless something else refuses to let the
 /// hub get denser.
+///
+/// **This assertion alone is vacuous against a blind instrument (review
+/// 697 round 2 finding), the same shape review 686 required a positive
+/// control for at the SCC bound.** `max_by_key(...).unwrap_or_default()`
+/// reads an empty weight map as `0 <= 33` and passes -- so if
+/// `own_code_reference_weight_by_module` ever stopped measuring anything,
+/// this test would too, silently. `projects_three_reference_numbers_are_
+/// pinned_before_the_facade_exclusion`'s own `own == 33` is what actually
+/// catches that case, by pinning a nonzero value directly; its doc says so
+/// too, so the dependency is written down at both ends.
 #[test]
 fn no_module_exceeds_the_own_code_reference_weight_ceiling() {
     let weight = own_code_reference_weight_by_module();
@@ -671,6 +691,18 @@ fn no_module_exceeds_the_own_code_reference_weight_ceiling() {
 /// façade exclusion rests on, pinned separately so the subtraction
 /// (total minus façade equals own-code) is measured rather than
 /// trusted.
+///
+/// **These three numbers are ratcheted, the same as `MAX_LARGEST_SCC_SIZE`
+/// and `MAX_PROJECT_CAPABILITY_SUBMODULES` above (review 697 Required).**
+/// Every D7 stage that moves a capability out of `project` moves all
+/// three -- D7.2 (`recent`) alone takes total 37 → 36, own 33 → 32, façade
+/// 4 → 5 (one re-export line gained to keep the published API). **A red
+/// here is this test working, not a regression**: update the three
+/// literals in the same commit as the stage that earns the new values,
+/// exactly as a stage must move `MAX_PROJECT_CAPABILITY_SUBMODULES` and
+/// may not raise `MAX_OWN_CODE_REFERENCE_WEIGHT`. This pin also doubles as
+/// `no_module_exceeds_the_own_code_reference_weight_ceiling`'s own
+/// positive control -- see that test's doc.
 #[test]
 fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let graph = measure_capability_graph();
