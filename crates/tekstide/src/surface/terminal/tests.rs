@@ -15,7 +15,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
-use tekstide_core::project::root::ValidProjectRoot;
+use tekstide_core::project::root::{SymlinkPolicy, ValidProjectRoot};
 use tekstide_core::project::{ProjectId, ProjectSession};
 
 use super::{
@@ -165,6 +165,7 @@ impl ScratchPane {
             "test pane",
             root.clone(),
             PathBuf::from("/bin/sh"),
+            SymlinkPolicy::AllowCanonicalTarget,
         )
         .expect("launch a plain shell for a real-PTY test");
         Self { root, pane }

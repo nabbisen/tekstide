@@ -287,26 +287,36 @@ impl TerminalPane {
     /// state this slice adds has something real to describe. `project_id`
     /// should be that real project's id, not a throwaway one, or
     /// registration will fail closed (`OwnershipError::CrossProject`).
+    /// `symlink_policy` (review 700's required fix): this function has
+    /// two real callers with different root provenance, not one --
+    /// `shell.rs`'s `launch_terminal` (itself called from both the
+    /// real, user-facing `attempt_terminal_launch`, whose root is a
+    /// project `app.rs` already validated under `FailClosed`, *and*
+    /// `launch_terminal_demo_panes`, whose root is a fresh `$TMPDIR`
+    /// scratch directory) and `launch_measurement_terminal_pane`
+    /// (always a fresh `$TMPDIR` scratch directory). `FailClosed` stays
+    /// the default policy a caller reaches for; `AllowCanonicalTarget`
+    /// is scoped to the two callers whose root is a scratch directory
+    /// under `$TMPDIR`, which is reached through a symlink on macOS --
+    /// never applied to the real, user-facing launch as a side effect
+    /// of sharing this function.
     pub fn launch(
         project_id: ProjectId,
         title: impl Into<String>,
         root: PathBuf,
         shell: PathBuf,
+        symlink_policy: SymlinkPolicy,
     ) -> Result<(Self, TerminalSession), TerminalLaunchError> {
         // RFC-077 D7.1 (review 699's required fix): `ProjectSession::new`
         // takes a `ValidProjectRoot` now, not three loose values, so this
         // doc comment's own long-standing claim ("root... already
         // validated to exist") becomes a real check here instead of an
-        // assumption. `AllowCanonicalTarget`, not `FailClosed`: `root` can
-        // be a fresh scratch directory under `$TMPDIR` (the demo-seed
-        // caller), which is reached through a symlink on macOS and would
-        // otherwise fail closed on a path this function's own contract
-        // already treats as trusted. `validate_launch_spec` below
-        // re-checks the same root for real at launch time regardless --
-        // this is this function's own contract made honest, not the
-        // crate's only guard against a bad root.
+        // assumption. `validate_launch_spec` below re-checks the same
+        // root for real at launch time regardless -- this is this
+        // function's own contract made honest, not the crate's only
+        // guard against a bad root.
         let valid_root = ProjectRootValidator
-            .validate(&root, SymlinkPolicy::AllowCanonicalTarget)
+            .validate(&root, symlink_policy)
             .map_err(|error| TerminalLaunchError::MissingProjectRoot {
                 summary: BoundedRuntimeSummary::new(error.to_string()),
             })?;

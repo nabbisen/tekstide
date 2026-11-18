@@ -1662,6 +1662,7 @@ fn state_with_a_real_terminal_focused(label: &str) -> State {
         "shell-test pane",
         fresh_project_dir(&format!("{label}-pane")),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for a live-terminal input test");
     let terminal_id = session.id.clone();
@@ -2022,6 +2023,7 @@ fn state_with_two_visible_and_one_hidden_pane(label: &str) -> State {
             format!("{label} pane {index}"),
             fresh_project_dir(&format!("{label}-pane-{index}")),
             PathBuf::from("/bin/sh"),
+            tekstide_core::project::root::SymlinkPolicy::FailClosed,
         )
         .expect("launch a real shell for a multi-pane test");
         let terminal_id = session.id.clone();
@@ -2252,6 +2254,7 @@ fn record_plain_terminal_started_persists_against_a_real_store() {
         "audit producer test pane",
         fresh_project_dir("audit-producer-pane"),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for the audit producer test");
     let terminal_id = session.id.clone();
@@ -3033,6 +3036,7 @@ fn sentinel_terminal_derived_text_never_reaches_the_durable_audit_store() {
         SENTINEL_TITLE,
         root.clone(),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for the sentinel test");
     let terminal_id = session.id.clone();
@@ -3199,6 +3203,7 @@ fn terminal_poll_handler_cost_under_a_real_wake_driven_flood_headless_benchmark(
         "headless flood benchmark",
         fresh_project_dir("headless-wake-flood-benchmark"),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for the headless benchmark");
     let notifier = pane
@@ -3303,6 +3308,7 @@ fn request_terminate_on_a_busy_terminal_succeeds_without_falling_back_to_sigkill
         "busy-terminal request_terminate regression",
         fresh_project_dir("request-terminate-busy-terminal"),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for the busy-terminal regression");
 
@@ -3378,6 +3384,7 @@ fn terminal_session_limit_headless_n_pane_wake_throughput_benchmark() {
                 format!("session-limit benchmark pane {index}"),
                 fresh_project_dir(&format!("session-limit-benchmark-{pane_count}-{index}")),
                 PathBuf::from("/bin/sh"),
+                tekstide_core::project::root::SymlinkPolicy::FailClosed,
             )
             .expect("launch a real shell for the session-limit benchmark");
             let notifier = pane
@@ -9828,6 +9835,7 @@ fn ablation_a_seventh_real_process_would_spawn_without_the_limit_check() {
         "ablation 7th",
         root,
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect(
         "a 7th real shell can always be spawned -- nothing in the OS stops it, which is \
@@ -11761,6 +11769,7 @@ fn terminal_bridge_thread_count_is_stable_across_many_view_rebuilds() {
         "wake-stability pane",
         root,
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("a real shell must launch to prove wake-subscription dedup against a real pane");
     let terminal_id = pane.terminal_id().clone();
@@ -14639,6 +14648,7 @@ fn state_with_a_real_terminal_on_its_own_project(
         "close-test pane",
         fresh_project_dir(&format!("{label}-pane")),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for a project-close test");
     let terminal_id = session.id.clone();
@@ -14690,6 +14700,7 @@ fn state_with_a_real_terminal_and_a_dirty_document(
         "close-test pane",
         fresh_project_dir(&format!("{label}-pane")),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for a project-close test");
     let terminal_id = session.id.clone();
@@ -18697,6 +18708,7 @@ fn state_for_mode_switch_measurement(label: &str) -> (State, tekstide_core::proj
         "mode-switch-measurement pane",
         fresh_project_dir(&format!("{label}-pane")),
         PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
     )
     .expect("launch a real shell for the mode-switch measurement");
     app_shell

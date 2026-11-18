@@ -3960,11 +3960,13 @@ fn path_field_error_text(catalog: &Catalog, raw_path: &str, error: PathFieldErro
 /// `plain_terminal_observation` (best-effort, matching every other
 /// producer call in this crate: an audit write failing must never fail
 /// the terminal launch it observes).
+#[allow(clippy::too_many_arguments)]
 fn launch_terminal(
     app_shell: &mut ApplicationShell,
     project_id: tekstide_core::project::ProjectId,
     title: impl Into<String>,
     root: std::path::PathBuf,
+    symlink_policy: tekstide_core::project::root::SymlinkPolicy,
     target_slot: tekstide_core::domain::VisibleSlot,
     audit_store: Option<&mut tekstide_core::audit::AuditStore>,
     audit_health: &mut tekstide_core::audit::AuditHealth,
@@ -3981,6 +3983,7 @@ fn launch_terminal(
         title,
         root,
         std::path::PathBuf::from("/bin/sh"),
+        symlink_policy,
     )
     .map_err(TerminalLaunchRefusal::Launch)?;
     let terminal_id = session.id.clone();
@@ -7078,11 +7081,18 @@ fn attempt_terminal_launch(state: &mut State) -> Result<(), TerminalLaunchRefusa
 
     let mut audit_store =
         open_audit_store_recording_failure(&state.app_shell, &mut state.audit_health);
+    // Review 700's required fix: the real, user-facing launch always
+    // uses `FailClosed` -- `root` is a project's own canonical path,
+    // already validated by `app.rs` under that same policy, so this is
+    // the right default rather than an accident of sharing
+    // `launch_terminal` with the demo-seed caller below, which does not
+    // have that guarantee.
     let mut pane = launch_terminal(
         &mut state.app_shell,
         project_id,
         "terminal",
         root,
+        tekstide_core::project::root::SymlinkPolicy::FailClosed,
         tekstide_core::domain::VisibleSlot::Primary,
         audit_store.as_mut(),
         &mut state.audit_health,
@@ -7397,11 +7407,15 @@ fn launch_terminal_demo_panes(
         if std::fs::create_dir_all(&root).is_err() {
             continue;
         }
+        // Review 700's required fix: `root` here is a fresh `$TMPDIR`
+        // scratch directory, reached through a symlink on macOS --
+        // `AllowCanonicalTarget`, not the real launch's `FailClosed`.
         let Ok(pane) = launch_terminal(
             app_shell,
             project_id.clone(),
             format!("terminal demo {}", index + 1),
             root,
+            tekstide_core::project::root::SymlinkPolicy::AllowCanonicalTarget,
             slot,
             audit_store.as_mut(),
             audit_health,
@@ -7582,11 +7596,15 @@ fn launch_measurement_terminal_pane(
     ));
     std::fs::create_dir_all(&root)
         .expect("must be able to create a scratch directory for the measurement terminal");
+    // Review 700's required fix: `root` is a fresh `$TMPDIR` scratch
+    // directory, reached through a symlink on macOS -- the one caller
+    // this policy exists for.
     let (mut pane, session) = crate::surface::terminal::TerminalPane::launch(
         project_id,
         "terminal flood measurement",
         root,
         std::path::PathBuf::from("/bin/sh"),
+        tekstide_core::project::root::SymlinkPolicy::AllowCanonicalTarget,
     )
     .expect("must be able to launch a real shell for the measurement terminal");
     let terminal_id = session.id.clone();
