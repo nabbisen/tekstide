@@ -586,6 +586,41 @@ enumeration log prints `members.len()` and discards `members`. Print the pids �
 `done, {} member(s) found: {members:?}` — so a future red says *which* member vanished instead of
 only how many.
 
+  **The product decision above was made 2026-11-18, and the option list it was made against was
+incomplete.** All three options concern the *predicate*; none concerned what the user is told.
+Traced: `confirmed` is read at `shell.rs:6084` and reaches exactly one destination, the audit
+record `SafeCloseDecision::Closed { terminal_session_confirmed_empty }`, which
+`audit/integration.rs:1379` turns into `AuditOutcome::Applied`/`Failed`. Nothing else consumes it
+and **nothing branches on it**. Meanwhile `locales/en.ftl:1432`, shown before the click whenever a
+running process is a reason to confirm (`project_close_dialog_names_running_processes`, under
+RFC-034 D4's "say it before the click" rule), promises *"Anything started from these terminals ends
+too, including a backgrounded job."* So the dialog makes an unconditional promise naming the exact
+class this gap concerns, and the close then says nothing when it could not be verified. **Option
+(a)'s own cost line — "cost: stated, not merely assumed" — is therefore false as written:** stated
+in this handoff, contradicted at the surface.
+
+  **Decision taken (owner, 2026-11-18), three parts in order.** (1) Make the claim honest where the
+claim is made: split `SessionConfirmedEmpty`'s single `confirmed: bool` into the reasons
+`termination.rs`'s three push sites already distinguish, and surface exactly one — *a session we
+tried to empty had survivors or could not be ruled empty* — never the bare bool, which also means
+"no live pane", "enumeration could not run" and "the user detached deliberately". (2) Accept
+RFC-078 as a precautionary closure with its known limit documented. (3) RFC-078 does **not**
+discharge this watch: recall triggers on absence from the bulk list, which run `43779370314` shows
+never happened. Part 1 is what gates 0.41.0; parts 2 and 3 do not.
+
+  **Part 1 is safe to do — it has no actuator — but it must fix one defect first.**
+`terminate_project_live_work` initialises `let mut terminal_session_confirmed_empty = true;`
+(`shell.rs:6133`). Every assignment below it follows this project's "never a hopeful default" rule
+(the `(false, false)` branch at D11/review 501, both `= false` continues, the `&=`); the
+**initialiser** does not, and the empty-loop case bypasses all of them. `running_processes` counts
+active agent runs with no active terminal of their own (`project/session.rs:2264-2277`), so a
+project whose only live work is such a run opens the modal, takes the terminate branch, finds
+`live_terminal_ids` empty, never executes the loop, and returns `true` — audit `Applied`,
+"confirmed empty", with no enumeration ever run, and `&& closed` does not mask it. Vacuously true
+in the overclaim direction. Fix the initialiser, or give the vacuous case its own reason, before
+anything surfaces this flag. Constraints on the notice itself, and its shape as an eighth typed
+`*_notice` on `State`: `.git-exclude/reviewed/tekstide-containment-watch-product-decision-review.md`.
+
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
