@@ -621,6 +621,35 @@ in the overclaim direction. Fix the initialiser, or give the vacuous case its ow
 anything surfaces this flag. Constraints on the notice itself, and its shape as an eighth typed
 `*_notice` on `State`: `.git-exclude/reviewed/tekstide-containment-watch-product-decision-review.md`.
 
+  **Part 1 landed 2026-11-18 (`676d32d`), reviewed at 695, with two required follow-ups and one
+residual that must stay written down.** The defect is fixed: `terminate_project_live_work` returns
+`TerminalSessionConfirmation` (`NothingToCheck`/`Confirmed`/`NotConfirmed`) instead of a `bool`
+initialised at `true`, and the audit record's written values are byte-identical in every reachable
+case (verified case by case — `any_checked = true` sits at the top of the loop body, so a
+pane-less terminal still reads `NotConfirmed`, as the old `= false` did). The notice itself
+(`ContainmentNotice`, zero fields, no pids or command names) renders in `status_bar` — accepted:
+`project_board_notifications` is route-scoped and `active_project_status_fields` project-scoped,
+and by the time this is known the project that raised it is gone.
+
+  Required follow-ups: **(i)** the notice is **set-only** — `if closed && should_notify() { … =
+Some(…) }` with no `else`, and nothing writes `None` — so in an always-rendered status bar it
+persists for the session and is actively false after the next clean close. Clear it at the top of
+`apply_project_close_confirmation`. (`save_all_notice`'s "never cleared" precedent does not
+transfer: that one renders inside `surface::editor::view`, which disappears with the project and
+the route.) **(ii)** `NothingToCheck::for_audit_record()` must be `false`. As landed it is `true`,
+correct in the record only because `&& closed` masks it on the blocked branch — which is exactly
+what D11 (review 501) required not be relied on, in a comment this change deleted ("a value that is
+wrong but currently masked is exactly the shape that produced review 490's own data-loss defect").
+The same change also stops the durable record claiming `terminal_session_confirmed_empty: true` for
+the vacuous case, which part 1 otherwise leaves overclaiming one surface over from the one it fixed.
+
+  **Named residual, not to be rediscovered:** even with (ii), the audit record has no honest arm for
+"there was nothing to confirm" — `AuditOutcome` offers `Applied`/`Failed`/`Cancelled`/`Blocked`, and
+`Failed` implies an attempt (the RFC-066 D10 reasoning already in `safe_close_decision_record`).
+Expressing it needs a new outcome, or an outcome no longer derived from this single bool, and both
+touch records already on disk, where the deserializer is the writer nobody lists. Out of scope for
+part 1.
+
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
