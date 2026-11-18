@@ -1,6 +1,7 @@
 # RFC-078: Session-Member Recall When The Bulk Enumeration Stops Naming A Known Member
 
-Status: **Proposed 2026-11-16.** Written at the owner's own direction (`rfcs/handoffs/
+Status: **Accepted 2026-11-18 by the owner; D1 adopted as written.** No implementation slice has
+begun. Proposed 2026-11-16, written at the owner's own direction (`rfcs/handoffs/
 release-checklist.md`'s dated 2026-11-16 entries) after a confirmed, measured logical gap in
 macOS session-enumeration containment: "this changes production containment behaviour and adds
 per-session state, so it wants a decision record rather than a slice." **D1 below formalizes
@@ -103,8 +104,8 @@ absence as departure.
 
 ## D1 — adopt option 3 (session-member recall)
 
-Proposed; **left for the owner to decide on acceptance**, per RFC-043's own D1-D4 precedent. If
-accepted:
+**Accepted 2026-11-18**, per RFC-043's own D1-D4 precedent — see *Decided on acceptance* at the
+end of this document for what the acceptance does and does not settle. As accepted:
 
 ### Design sketch, not yet implemented
 
@@ -221,4 +222,40 @@ implementation slice begins, per that precedent.
 
 ## Decided on acceptance
 
-*(Not yet decided.)*
+**D1 is accepted as written, by the owner, 2026-11-18** — option 3, session-member recall, with the
+design sketch above as the shape to build and its two *Required* decision bullets binding on the
+implementation rather than open to it:
+
+1. **The recall re-check is `live_member_of_session(pid, session_id)`**, never `session_leader_state`
+   or anything shaped like it. This is the safety half of the decision, not a style preference: a
+   membership-blind liveness check reads `Alive` for a reused pid that now belongs to an unrelated
+   process, and `signal_candidates(..., SIGKILL)` would then kill it. This machine is shared and
+   other sessions run on it concurrently. A recalled pid must earn membership; the leader is handed
+   it for free because its own pid *is* the session id.
+2. **The per-session state is updated after every call that returns `Some(members)`**, not only at
+   construction and not only on the close-time enumeration — the Risks section's first entry names
+   the inconsistently-updated cache as the failure mode that still compiles and still passes a test
+   written against the easy case, and the implementation slice's own review is required to check it
+   specifically.
+
+**What this acceptance does not do, stated here so it is not read off the status line alone:**
+
+- **It does not discharge `release-checklist.md`'s containment Standing Watch.** Recall triggers on
+  absence from the bulk list, and the full 66-enumeration log of run `43779370314` shows the list
+  was never short — see the correction at the top of this document. That watch stays open on its own
+  question (what makes a bulk-visible member stop matching its own session while alive), and this
+  RFC is accepted as a *precautionary* closure of a separately confirmed logic gap.
+- **It does not narrow the Known Limit**, which is wider than it first reads and must be quoted as
+  this document states it: *"never named by an earlier enumeration of **this same close**"* — not
+  "never seen in any enumeration over the session's life." With no steady-state observation of
+  session membership, the recalled set can only ever be populated inside one close's own sequence.
+  The Risks section requires that limit to appear in the implementing commit message and the release
+  note, not only here.
+- **It schedules nothing.** The slot is the owner's. Part 1 of the containment decision
+  (`release-checklist.md`, 2026-11-18) was the only piece gating `0.41.0`, and it is discharged.
+
+Reviewer's note on the acceptance itself: the document accepted here is the corrected one. D1's
+`live_member_of_session` requirement was a review finding before implementation, not after (the
+first draft's predicate would have let a reused pid be signalled), and round 8 removed the one
+bullet that still rested on the refuted motivating evidence. D1 stands on
+`decide_processes_in_session`'s own pure-function test alone.

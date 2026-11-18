@@ -666,6 +666,29 @@ and records `Failed` where it used to record `Applied`, for a close where nothin
 right value for the *field*, the wrong word for the *outcome*: the named residual above, not a new
 defect, and a reason to close that residual eventually rather than to restore the masked `true`.
 
+  **Parts 2 and 3 taken, 2026-11-18: RFC-078 is accepted** (`rfcs/accepted/078-session-member-recall-when-the-bulk-enumeration-stops-naming-a-known-member.md`,
+D1 as written, no slice begun, delivery-plan row added, `rfcs/README.md` updated). Accepted as a
+**precautionary** closure of a separately confirmed logic gap, and part 3 is recorded in the RFC's
+own *Decided on acceptance* section rather than only here: **it does not discharge this watch.**
+Recall triggers on absence from the bulk list, and run `43779370314`'s full 66-enumeration log
+shows the list was never short — so this watch stays open on its own question, what makes a
+bulk-visible member stop matching its own session while alive, which the round-4 diagnostic's
+`getsid` capture is the discriminator for.
+
+  Two things the acceptance binds rather than leaves to the implementation slice, both carried into
+the RFC's acceptance section: the recall re-check is `live_member_of_session`, never a
+membership-blind oracle (a reused pid would otherwise reach `signal_candidates(..., SIGKILL)` on
+this shared machine — a review finding made before implementation, not after); and the recalled set
+is updated after *every* enumeration that returns `Some(members)`, which the RFC's own Risks
+section names as the cache-consistency failure that still compiles and still passes a test written
+against the easy case. **Known limit, to be quoted as the RFC states it** — "never named by an
+earlier enumeration of *this same close*", not "never seen over the session's life", because no
+enumeration runs outside a close — and the Risks section requires it in the implementing commit
+message and the release note, not only in the document.
+
+  **Still open on this watch after parts 1-3:** the unexplained question above, and the cheapest
+step toward it remains untaken — the enumeration log prints `members.len()` and discards the pids.
+
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
