@@ -249,3 +249,65 @@ still inside `project` — never half-out.
 - Every commit touching `crates/tekstide-core/src/` reports total edges and total references,
   before and after (review 687) — **and, from D7.0, both of §5a's bounds**, since those are what
   now move.
+
+## 9. D7.0's brief, directed 2026-11-18 — the instrument, and nothing else
+
+The dev team's first read of this document was of `3ccde61`, before §5a and §6's correction landed in
+`8337778`. Three things changed, and all three change what to build first: the façade-versus-API
+question **is decided** (refine the instrument, keep compatibility — the owner, 2026-11-18); the
+primary bound is **not** reference weight; and **D7.0 exists**, before D7.1.
+
+**Scope: `crates/tekstide-core/tests/capability_graph_gate.rs` only. No production change.** Two new
+bounds, with opposite polarities, plus their controls.
+
+### Bound 1 — capability submodules, the one every stage must lower
+
+`project.rs` declares **11** production submodules (lines 1–11: `change_detection`, `content`,
+`diff`, `explorer_tree`, `ignored_directories`, `metadata`, `recent`, `root`, `runtime`, `session`,
+`watch`). **Off-by-one to avoid: a naive count returns 12** — `#[cfg(test)] mod tests;` at line 104
+is the twelfth, and must be excluded, the same `#[cfg(test)]`-in-a-production-file class that has
+now bitten this gate twice (review 675's inline test modules, review 687's accessor). Exclude it by
+the `#[cfg(test)]` attribute on the preceding line, not by the module's name.
+
+`MAX_PROJECT_CAPABILITY_SUBMODULES = 11`, asserted `==`, with the same reasoning the SCC bound's own
+`==` carries: a shrink without the bound moving in the same commit is as much a lie as a growth.
+Falls to 3 when D7 is done (`session`, `runtime`, `ignored_directories`).
+
+### Bound 2 — own-code reference weight, the one no stage may raise
+
+Measured today, and these three numbers are the control, not just the input: `project` carries **37**
+`crate::<module>` references, **4** of them on `pub use` lines, **33** in its own code. The
+next-densest module is `app` at **17**, all own-code.
+
+- Façade rule: a reference on a line whose trimmed start is `pub use ` or `pub(crate) use ` is
+  excluded. A pure re-export names a module without reaching into it.
+- Assert the **maximum over all modules** of own-code references is `<= 33`. It must not fall as a
+  condition of anything — D7.3 (`watch`) correctly moves it by zero — but no stage may raise it,
+  which is the guard against stages 6–9's recurring failure of lowering one bound by densifying the
+  hub.
+
+### Controls, required, in review 686's shape
+
+The exclusion must not be able to widen silently into "nothing counts":
+
+1. Pin all three of `project`'s numbers separately — 37 total, 4 façade, 33 own-code — so the
+   subtraction itself is measured rather than trusted.
+2. Assert a known façade line **is** excluded and a known own-code reference **is** still counted.
+   `project.rs` has both on hand: its three `pub use crate::domain::…` lines, and
+   `read_transcript_window`'s body, which names `crate::transcript` and `crate::runtime` in real
+   code.
+3. Re-ablate both bounds on the committed tree via `rfcs/handoffs/ablate.sh` (it refuses a dirty
+   tree; never hand-restore): for bound 1, plant a twelfth production submodule declaration and
+   confirm red naming it; for bound 2, plant an own-code `crate::` reference in `project` and
+   confirm red. Restore and confirm byte-identical.
+
+### What D7.0 is not
+
+Not a move, and it lowers nothing — that is the point. RFC-074's own precedent, from its
+delivery-plan row: *"the gate was built before any move and its bound ratcheted with the stage that
+earned it."* D7.1 follows and is a **prerequisite, not a stage**: it cuts two `super::` back-edges
+the gate cannot see and moves no submodule, so it lowers neither bound, and must be reported that
+way rather than dressed as a stage.
+
+Report both bounds' values before and after, per the standing requirement — from here that means
+four numbers, not two.
