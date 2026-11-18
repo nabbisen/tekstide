@@ -311,3 +311,41 @@ way rather than dressed as a stage.
 
 Report both bounds' values before and after, per the standing requirement — from here that means
 four numbers, not two.
+
+## 10. §3 corrected before implementation (review 696, 2026-11-18)
+
+§3 directed "one new `domain` type carrying id, display name, selected path and canonical path,
+cutting both back-edges at once." **Three measurements taken while answering review 696's minting
+question overturn it**, and the corrected shape is smaller:
+
+1. **No new type needs inventing.** `ValidProjectRoot` (`project/root.rs:27`) already carries three
+   of the four values; `ProjectId` is the fourth.
+2. **`ValidProjectRoot` already names a validation it does not enforce.** Its fields are `pub`, and
+   `ProjectRootHandle::from_project_session` (`root.rs:40-48`) builds one **literally from the
+   session's accessors**, bypassing `ProjectRootValidator`'s own sanctioned mint at `root.rs:311`.
+   Pre-existing, in ARCHITECTURE.md's seventh-invariant family — and §3's move would have spread it
+   into `domain`. Cost to close: **two production construction sites, both inside `root.rs`**; none
+   in `crates/tekstide` (the GUI only obtains one from the validator); tests go through the validator
+   or take a `#[cfg(test)]` constructor, as `VerifiedCwd::for_test` already does. The bypass is the
+   same line D7.1 must touch anyway.
+3. **Relocating it to `domain` and giving it a minting restriction are mutually exclusive** — Stage
+   6's own finding: `pub(in crate::project::root)` on an item defined under `crate::domain` is
+   **E0742**, the error that made `approval -> agent` permanent and became the seventh invariant.
+
+**Corrected D7.1.** The four values are not all one thing, which §3 flattened:
+
+- **`change_detection` reads exactly two** — `canonical_root_path()` (11 sites), `id()` (7) — and
+  validates nothing. Give it a T0 vocabulary type in `domain` carrying **those two only**, public
+  fields, a name claiming no validation (**not** one containing "Valid"). Move 1, no privilege, no
+  E0742 exposure.
+- **`root`'s back-edge needs no type — invert the constructor.** `session` calls a
+  `ProjectRootHandle` constructor taking what `from_project_session` already reads, so `root` never
+  names `ProjectSession`; if that constructor takes a `ValidProjectRoot` only the validator can
+  mint, the bypass closes in the same edit. **`ValidProjectRoot` stays defined in `project::root`**,
+  the only place it can carry its own guarantee.
+
+Net: one small vocabulary type, one inverted constructor, one bypass closed, both back-edges cut, no
+privileged type relocated — less movement than §3 proposed, and it keeps a guarantee §3 would have
+lost. Published-API note for D7.1's own request: privatizing `ValidProjectRoot`'s fields is a change
+for any downstream constructor (none in this workspace), and the owner's compatibility decision
+covers re-exports, not field privacy.
