@@ -43,6 +43,20 @@
 //! reaching. The RFC's own "21 top-level modules" counts the always-compiled
 //! set; `test_support` is graphed as the 22nd because it must be, not because
 //! the count is wrong.
+//!
+//! **RFC-077 D7.0 (review 696) added two more bounds, because
+//! `MAX_LARGEST_SCC_SIZE` reaching 0 at Stage 9 left D7 with no witness:
+//! an already-acyclic module does not become more acyclic by splitting.**
+//! Bound 1, `MAX_PROJECT_CAPABILITY_SUBMODULES`, is the one every D7 stage
+//! must lower — the count of capability submodules `project.rs` itself
+//! declares, which falls by construction only when a capability actually
+//! leaves (a compatibility `pub use` façade line is not a `mod`
+//! declaration, so API compatibility costs this bound nothing). Bound 2,
+//! `MAX_OWN_CODE_REFERENCE_WEIGHT`, is the opposite polarity — no stage
+//! may *raise* it, though not every stage need lower it — and excludes
+//! façade (`pub use`/`pub(crate) use`) lines from the count, since a pure
+//! re-export names a module without reaching into it and every departing
+//! capability gains one to keep the published API unchanged.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -184,6 +198,31 @@ use tekstide_core::domain::{AgentRunId, ProjectId};
 /// two modules in either direction remaining from the original SCC —
 /// one directed edge is not a cycle.
 const MAX_LARGEST_SCC_SIZE: usize = 0;
+
+/// RFC-077 D7.0 (review 696): the ratcheted bound every D7 stage must
+/// lower from here -- `MAX_LARGEST_SCC_SIZE` reached 0 at Stage 9 and
+/// cannot witness D7 at all, since an acyclic module does not become
+/// more acyclic by splitting. `project.rs` declares 11 production
+/// capability submodules today (`change_detection`, `content`, `diff`,
+/// `explorer_tree`, `ignored_directories`, `metadata`, `recent`, `root`,
+/// `runtime`, `session`, `watch`); falls to 3 when D7 is done (`session`,
+/// `runtime`, `ignored_directories` stay with orchestration). Asserted
+/// `==`, the same reasoning `MAX_LARGEST_SCC_SIZE` already carries: a
+/// shrink without the bound moving in the same commit is as much a lie
+/// as a growth.
+const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 11;
+
+/// RFC-077 D7.0 (review 696): the secondary guard, opposite polarity --
+/// no stage may *raise* this, though not every stage is required to
+/// lower it (the staging document's own §5a arithmetic: D7.3 `watch`
+/// correctly moves the submodule bound above by one while moving this
+/// one by exactly zero). `project` carries 33 own-code references today
+/// (37 total, 4 on `pub use`/`pub(crate) use` façade lines -- excluded
+/// per §5's own recommendation, since a pure re-export names a module
+/// without reaching into it, and every departing capability gains one
+/// such line to keep the published API unchanged). `app` is next
+/// densest at 17, all own-code.
+const MAX_OWN_CODE_REFERENCE_WEIGHT: usize = 33;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -469,6 +508,94 @@ fn measure_capability_graph() -> CapabilityGraph {
     }
 }
 
+/// RFC-077 D7.0 (review 696): whether `line`'s trimmed text is a pure
+/// re-export (`pub use ...` or `pub(crate) use ...`) -- the façade rule
+/// §5 of the scoping document recommends and the owner authorized: a
+/// line that only re-exports a name does not reach into the module it
+/// names, so it is excluded from the own-code reference weight bound.
+/// Whole-line classification, matching every other measurement in this
+/// file (`is_excluded_from_scan`, `declares_a_module_with_a_body`):
+/// no production line in this crate mixes a façade re-export with a
+/// real, behavioral use of `crate::` on the same line.
+fn is_facade_reexport_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("pub use ") || trimmed.starts_with("pub(crate) use ")
+}
+
+/// RFC-077 D7.0 (review 696), bound 2: own-code reference weight per
+/// module -- the same per-occurrence counting `measure_capability_graph`
+/// already does, attributed to the source module instead of built into
+/// the cross-module edge list, with every façade line
+/// (`is_facade_reexport_line`) excluded first.
+fn own_code_reference_weight_by_module() -> BTreeMap<String, usize> {
+    let root = src_root();
+    let modules = all_top_level_modules(&root);
+    let mut weight: BTreeMap<String, usize> = BTreeMap::new();
+    for file in production_files(&root) {
+        let relative = file.strip_prefix(&root).expect("under src/");
+        let from = owning_module(relative);
+        let source =
+            fs::read_to_string(&file).unwrap_or_else(|e| panic!("reading {}: {e}", file.display()));
+        let stripped = strip_full_line_comments(&source);
+        for line in stripped.lines() {
+            if is_facade_reexport_line(line) {
+                continue;
+            }
+            for to in crate_path_references(line, &modules) {
+                if to != from {
+                    *weight.entry(from.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    weight
+}
+
+/// RFC-077 D7.0 (review 696), control 1: `module`'s total reference
+/// count exactly as `measure_capability_graph` counts it -- façade lines
+/// included -- so the own-code weight's own subtraction (total minus
+/// façade) is a number this gate measures separately, rather than one
+/// trusted because the own-code figure alone looks right.
+fn total_reference_weight(graph: &CapabilityGraph, module: &str) -> usize {
+    graph
+        .references
+        .iter()
+        .filter(|(from, _to)| from == module)
+        .count()
+}
+
+/// RFC-077 D7.0 (review 696), bound 1: the count of production
+/// capability-submodule declarations `project.rs` itself makes --
+/// `mod <name>;` / `pub mod <name>;`, never a body
+/// (`no_production_file_declares_a_module_with_a_body` already holds
+/// there are none in this file) -- excluding one gated by `#[cfg(test)]`
+/// on its own immediately preceding non-blank line. **Off-by-one this
+/// closes deliberately**: a naive count of every `mod` line returns 12,
+/// since `#[cfg(test)] mod tests;` is the twelfth -- excluded by the
+/// attribute, not by the module's name, the same class review 687's own
+/// correction closed for a different file.
+fn project_capability_submodule_count() -> usize {
+    let root = src_root();
+    let path = root.join("project.rs");
+    let source = fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"));
+    let mut count = 0;
+    let mut previous_non_blank: Option<&str> = None;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if module_declaration(trimmed).is_some() {
+            let gated_by_cfg_test = previous_non_blank == Some("#[cfg(test)]");
+            if !gated_by_cfg_test {
+                count += 1;
+            }
+        }
+        previous_non_blank = Some(trimmed);
+    }
+    count
+}
+
 /// Renamed from `..._has_at_most_ten_modules` when Stage 1 lowered the
 /// bound to 9 and stale again at Stage 2's 8 -- the name embedding the
 /// bound's own value is exactly the state-asserting-text failure this
@@ -494,6 +621,111 @@ fn the_largest_strongly_connected_component_is_within_its_ratcheted_bound() {
          bound is {MAX_LARGEST_SCC_SIZE} (RFC-074 D1.1) — if this grew, a stage was undone; if it \
          shrank without the bound moving with it in the same commit, the bound is now a lie",
         largest.len()
+    );
+}
+
+/// RFC-077 D7.0 (review 696), bound 1: `project.rs`'s own capability-
+/// submodule count, the witness `MAX_LARGEST_SCC_SIZE` cannot provide
+/// once it reaches 0 -- splitting an already-acyclic module does not
+/// change its cycle structure, so D7 needs a bound that falls by
+/// construction with every capability that actually leaves. Falls to 3
+/// when D7 is done.
+#[test]
+fn project_capability_submodule_count_is_within_its_ratcheted_bound() {
+    let count = project_capability_submodule_count();
+    assert!(
+        count == MAX_PROJECT_CAPABILITY_SUBMODULES,
+        "project.rs declares {count} production capability submodules; the ratcheted bound is \
+         {MAX_PROJECT_CAPABILITY_SUBMODULES} (RFC-077 D7.0) -- if this grew, a submodule was \
+         added without the bound moving with it; if it shrank without the bound moving in the \
+         same commit, a D7 stage landed without lowering its own witness"
+    );
+}
+
+/// RFC-077 D7.0 (review 696), bound 2: no module's own-code reference
+/// weight may exceed this ceiling. Opposite polarity from the bound
+/// above -- not every stage lowers it (D7.3 `watch` moves it by zero,
+/// per the staging document's own §5a arithmetic), but RFC-074's
+/// stages 6 through 9 already showed this gate will reward lowering one
+/// bound by densifying a hub unless something else refuses to let the
+/// hub get denser.
+#[test]
+fn no_module_exceeds_the_own_code_reference_weight_ceiling() {
+    let weight = own_code_reference_weight_by_module();
+    let (densest_module, densest_weight) = weight
+        .iter()
+        .max_by_key(|(_, count)| **count)
+        .map(|(module, count)| (module.clone(), *count))
+        .unwrap_or_default();
+    assert!(
+        densest_weight <= MAX_OWN_CODE_REFERENCE_WEIGHT,
+        "{densest_module} carries {densest_weight} own-code references, exceeding the ceiling \
+         of {MAX_OWN_CODE_REFERENCE_WEIGHT} (RFC-077 D7.0) -- a D7 stage made some module denser \
+         while possibly also lowering the submodule-count bound, which is exactly the trade \
+         stages 6 through 9 already took against the SCC bound and this guard exists to refuse \
+         doing again here: {weight:?}"
+    );
+}
+
+/// RFC-077 D7.0 (review 696), control 1: the three numbers bound 2's own
+/// façade exclusion rests on, pinned separately so the subtraction
+/// (total minus façade equals own-code) is measured rather than
+/// trusted.
+#[test]
+fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
+    let graph = measure_capability_graph();
+    let total = total_reference_weight(&graph, "project");
+    let own_code_weight = own_code_reference_weight_by_module();
+    let own = own_code_weight.get("project").copied().unwrap_or(0);
+    assert_eq!(
+        total, 37,
+        "project's total reference count (façade included) moved"
+    );
+    assert_eq!(
+        own, 33,
+        "project's own-code reference count (façade excluded) moved"
+    );
+    assert_eq!(
+        total - own,
+        4,
+        "project's façade (pub use / pub(crate) use) reference count moved"
+    );
+}
+
+/// RFC-077 D7.0 (review 696), control 2, in review 686's own shape: the
+/// façade exclusion must not be able to widen silently into "nothing
+/// counts" -- assert a known façade line **is** excluded and a known
+/// own-code reference **is** still counted, both located by searching
+/// `project.rs`'s real, current text rather than assumed still present.
+#[test]
+fn the_facade_exclusion_drops_a_known_reexport_and_keeps_a_known_own_code_reference() {
+    let root = src_root();
+    let path = root.join("project.rs");
+    let source = fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"));
+    let stripped = strip_full_line_comments(&source);
+
+    let facade_line = stripped
+        .lines()
+        .find(|line| line.trim_start() == "pub use crate::domain::ProjectId;")
+        .expect("project.rs must still re-export ProjectId from domain unchanged");
+    assert!(
+        is_facade_reexport_line(facade_line),
+        "a known façade line stopped being recognized as one: {facade_line:?}"
+    );
+
+    let own_code_line = stripped
+        .lines()
+        .find(|line| line.contains("crate::transcript::read_window("))
+        .expect("read_transcript_window must still call crate::transcript::read_window directly");
+    assert!(
+        !is_facade_reexport_line(own_code_line),
+        "a known own-code reference was misclassified as a façade line: {own_code_line:?}"
+    );
+    let modules = all_top_level_modules(&root);
+    assert!(
+        crate_path_references(own_code_line, &modules).contains(&"transcript".to_owned()),
+        "the known own-code reference line no longer names crate::transcript at all: \
+         {own_code_line:?}"
     );
 }
 
