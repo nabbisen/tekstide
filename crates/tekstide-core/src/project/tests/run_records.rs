@@ -15,6 +15,7 @@ use crate::domain::{
     AuditEventId, ChangeSetId, RUN_NOTES_MAX_CHARS, RUN_RECORD_MAX_IDS_PER_KIND, RunClassification,
     RunEnding, TerminalKind, TerminalSession, Transcript,
 };
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectSession, RunAnnotationError, RunRecordWrite};
 use crate::transcript::{
     RUN_RECORD_FILE_NAME, RUN_RECORD_VERSION, is_run_record_file_name, scan_transcript_disk_usage,
@@ -1211,9 +1212,11 @@ fn project_with_running_run(
 fn project_session(dirs: &TestDirs, sequence: u64) -> ProjectSession {
     ProjectSession::new(
         ProjectId::for_test(sequence),
-        "Records",
-        &dirs.project_root,
-        fs::canonicalize(&dirs.project_root).unwrap(),
+        ValidProjectRoot::for_test(
+            "Records",
+            &dirs.project_root,
+            fs::canonicalize(&dirs.project_root).unwrap(),
+        ),
     )
 }
 

@@ -129,6 +129,7 @@ use alacritty_terminal::term::{Config, Term};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
 use tekstide_core::domain::TerminalSession;
+use tekstide_core::project::root::{ProjectRootValidator, SymlinkPolicy};
 use tekstide_core::project::{ProjectId, ProjectSession};
 use tekstide_core::runtime::terminal::{
     BoundedRuntimeSummary, TerminalDimensions, TerminalLaunchError, TerminalLaunchSpec,
@@ -292,7 +293,24 @@ impl TerminalPane {
         root: PathBuf,
         shell: PathBuf,
     ) -> Result<(Self, TerminalSession), TerminalLaunchError> {
-        let project = ProjectSession::new(project_id.clone(), "terminal-pane", &root, &root);
+        // RFC-077 D7.1 (review 699's required fix): `ProjectSession::new`
+        // takes a `ValidProjectRoot` now, not three loose values, so this
+        // doc comment's own long-standing claim ("root... already
+        // validated to exist") becomes a real check here instead of an
+        // assumption. `AllowCanonicalTarget`, not `FailClosed`: `root` can
+        // be a fresh scratch directory under `$TMPDIR` (the demo-seed
+        // caller), which is reached through a symlink on macOS and would
+        // otherwise fail closed on a path this function's own contract
+        // already treats as trusted. `validate_launch_spec` below
+        // re-checks the same root for real at launch time regardless --
+        // this is this function's own contract made honest, not the
+        // crate's only guard against a bad root.
+        let valid_root = ProjectRootValidator
+            .validate(&root, SymlinkPolicy::AllowCanonicalTarget)
+            .map_err(|error| TerminalLaunchError::MissingProjectRoot {
+                summary: BoundedRuntimeSummary::new(error.to_string()),
+            })?;
+        let project = ProjectSession::new(project_id.clone(), valid_root);
 
         let mut spec = TerminalLaunchSpec::plain_shell(project_id, title, &root, shell);
         spec.dimensions = TerminalDimensions {

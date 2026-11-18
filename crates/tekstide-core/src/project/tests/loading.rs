@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::{AgentRunId, TerminalKind, TerminalSession, Transcript, TranscriptOrigin};
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectSession};
 use crate::transcript::scan_transcript_disk_usage;
 
@@ -359,9 +360,11 @@ fn write_run(dirs: &TestDirs, project_id: &ProjectId, run: &AgentRunId, bytes: &
 fn project_session(dirs: &TestDirs, sequence: u64) -> ProjectSession {
     ProjectSession::new(
         ProjectId::for_test(sequence),
-        "Loading",
-        &dirs.project_root,
-        fs::canonicalize(&dirs.project_root).unwrap(),
+        ValidProjectRoot::for_test(
+            "Loading",
+            &dirs.project_root,
+            fs::canonicalize(&dirs.project_root).unwrap(),
+        ),
     )
 }
 

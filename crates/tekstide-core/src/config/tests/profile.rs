@@ -24,6 +24,7 @@ use crate::agent::{
 };
 use crate::config::{ConfiguredAiCliAdapter, ConfiguredAiCliProfile, to_ai_cli_profile};
 use crate::domain::AgentCompatibilityLevel;
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectSession};
 
 fn configured_profile(command: impl Into<String>) -> ConfiguredAiCliProfile {
@@ -50,7 +51,10 @@ fn request_for(project: &ProjectSession, profile_id: &str) -> AgentRunLaunchRequ
 }
 
 fn restricted_project(root: &Path) -> ProjectSession {
-    ProjectSession::new(ProjectId::for_test(1), "Project", root, root)
+    ProjectSession::new(
+        ProjectId::for_test(1),
+        ValidProjectRoot::for_test("Project", root, root),
+    )
 }
 
 fn executable_file(root: &Path, name: &str) -> PathBuf {

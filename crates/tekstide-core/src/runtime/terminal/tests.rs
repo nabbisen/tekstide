@@ -4,6 +4,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::os::unix::fs::PermissionsExt;
 
 use crate::domain::{TerminalId, TerminalKind, TerminalStatus};
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectSession};
 
 use super::*;
@@ -1620,7 +1621,10 @@ fn parse_pid_after(output: &[u8], marker: &str) -> Option<u32> {
 }
 
 fn project_session(project_id: ProjectId, root: &Path) -> ProjectSession {
-    ProjectSession::new(project_id, "Project", root, root)
+    ProjectSession::new(
+        project_id,
+        ValidProjectRoot::for_test("Project", root, root),
+    )
 }
 
 fn test_root(name: &str) -> PathBuf {

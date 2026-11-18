@@ -480,15 +480,18 @@ fn an_unrecognised_but_harmless_key_is_accepted_branch_only() {
 
 #[test]
 fn the_gate_does_not_depend_on_trust_state() {
+    use crate::project::root::ValidProjectRoot;
     use crate::project::{ProjectId, ProjectSession, WorkspaceTrust};
 
     let trusted_fixture = Fixture::new("gate-trust-trusted");
     trusted_fixture.commit_then_modify_same_length();
     let mut trusted = ProjectSession::new(
         ProjectId::new_uuid(),
-        "trusted".to_string(),
-        trusted_fixture.repo.clone(),
-        trusted_fixture.repo.clone(),
+        ValidProjectRoot::for_test(
+            "trusted".to_string(),
+            trusted_fixture.repo.clone(),
+            trusted_fixture.repo.clone(),
+        ),
     );
     trusted.grant_trust("test fixture");
 
@@ -496,9 +499,11 @@ fn the_gate_does_not_depend_on_trust_state() {
     restricted_fixture.commit_then_modify_same_length();
     let restricted = ProjectSession::new(
         ProjectId::new_uuid(),
-        "restricted".to_string(),
-        restricted_fixture.repo.clone(),
-        restricted_fixture.repo.clone(),
+        ValidProjectRoot::for_test(
+            "restricted".to_string(),
+            restricted_fixture.repo.clone(),
+            restricted_fixture.repo.clone(),
+        ),
     );
 
     // Same shape of repository, one Trusted and one Restricted session:
@@ -1013,6 +1018,7 @@ fn ignore_submodules_all_suppresses_the_submodule_filter_on_its_own() {
 /// test.
 #[test]
 fn compute_summary_does_not_depend_on_trust_state() {
+    use crate::project::root::ValidProjectRoot;
     use crate::project::{ProjectId, ProjectSession, WorkspaceTrust};
 
     let trusted_fixture = Fixture::new("summary-trust-trusted");
@@ -1020,9 +1026,11 @@ fn compute_summary_does_not_depend_on_trust_state() {
     trusted_fixture.commit_then_modify_same_length();
     let mut trusted = ProjectSession::new(
         ProjectId::new_uuid(),
-        "trusted".to_string(),
-        trusted_fixture.repo.clone(),
-        trusted_fixture.repo.clone(),
+        ValidProjectRoot::for_test(
+            "trusted".to_string(),
+            trusted_fixture.repo.clone(),
+            trusted_fixture.repo.clone(),
+        ),
     );
     trusted.grant_trust("test fixture");
 
@@ -1031,9 +1039,11 @@ fn compute_summary_does_not_depend_on_trust_state() {
     restricted_fixture.commit_then_modify_same_length();
     let restricted = ProjectSession::new(
         ProjectId::new_uuid(),
-        "restricted".to_string(),
-        restricted_fixture.repo.clone(),
-        restricted_fixture.repo.clone(),
+        ValidProjectRoot::for_test(
+            "restricted".to_string(),
+            restricted_fixture.repo.clone(),
+            restricted_fixture.repo.clone(),
+        ),
     );
 
     assert_eq!(trusted.trust_state(), WorkspaceTrust::Trusted);

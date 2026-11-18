@@ -155,14 +155,11 @@ impl AppState {
             .find(|project| project.id() == project_id)
     }
 
-    pub(crate) fn add_project_session(
-        &mut self,
-        display_name: impl Into<String>,
-        root_path: impl Into<std::path::PathBuf>,
-        canonical_root_path: impl Into<std::path::PathBuf>,
-    ) -> ProjectId {
-        let root_path = root_path.into();
-        let canonical_root_path = canonical_root_path.into();
+    /// RFC-077 D7.1 (review 699's required fix): takes the already-minted
+    /// `ValidProjectRoot` whole, not three loose values -- see
+    /// `ProjectSession::new`'s own doc for why.
+    pub(crate) fn add_project_session(&mut self, valid_root: ValidProjectRoot) -> ProjectId {
+        let canonical_root_path = valid_root.canonical_path().clone();
 
         if let Some(existing_project_id) = self.project_id_by_canonical_root(&canonical_root_path) {
             self.active_project_id = Some(existing_project_id.clone());
@@ -184,12 +181,7 @@ impl AppState {
         let restored_trust = self.recent_trust_by_canonical_root(&canonical_root_path);
         let restored_capture_declined =
             self.recent_transcript_capture_declined_by_canonical_root(&canonical_root_path);
-        let mut project = ProjectSession::new(
-            project_id.clone(),
-            display_name,
-            root_path,
-            canonical_root_path,
-        );
+        let mut project = ProjectSession::new(project_id.clone(), valid_root);
         if let Some(trust_state) = restored_trust {
             project.restore_trust_state(trust_state);
         }
@@ -229,11 +221,10 @@ impl AppState {
             return AddProjectOutcome::FocusedExisting(existing_project_id);
         }
 
-        // RFC-077 D7.1: `ValidProjectRoot`'s fields are private now, so
-        // `into_parts` is the by-value read -- `root` is already owned
-        // here, and the fields are about to be consumed anyway.
-        let (display_name, selected_path, canonical_path) = root.into_parts();
-        let project_id = self.add_project_session(display_name, selected_path, canonical_path);
+        // RFC-077 D7.1 (review 699's required fix): `root` travels
+        // intact into `add_project_session`, never decomposed -- the
+        // whole point of the fix.
+        let project_id = self.add_project_session(root);
         AddProjectOutcome::Added(project_id)
     }
 

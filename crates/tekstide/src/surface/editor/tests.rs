@@ -68,13 +68,7 @@ impl Sandbox {
         let valid: ValidProjectRoot = ProjectRootValidator
             .validate(&self.root, SymlinkPolicy::FailClosed)
             .expect("sandbox root must validate");
-        let (_, selected_path, canonical_path) = valid.into_parts();
-        ProjectRootHandle::new(
-            ProjectId::new_uuid(),
-            "editor-surface-fixture",
-            selected_path,
-            canonical_path,
-        )
+        ProjectRootHandle::new(ProjectId::new_uuid(), valid)
     }
 }
 

@@ -18,13 +18,7 @@ fn handle(project: &Path) -> ProjectRootHandle {
     let root = ProjectRootValidator
         .validate(project, SymlinkPolicy::FailClosed)
         .expect("the fixture's project root validates");
-    let (display_name, selected_path, canonical_path) = root.into_parts();
-    ProjectRootHandle::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    )
+    ProjectRootHandle::new(ProjectId::for_test(1), root)
 }
 
 /// Runs every pending scan and applies the results, as the shell's worker

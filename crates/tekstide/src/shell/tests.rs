@@ -13710,9 +13710,11 @@ fn browsing_to_a_cached_trusted_but_unconfirmed_recent_project_demotes_to_restri
 fn fixture_project_session(display_name: &str) -> tekstide_core::project::ProjectSession {
     tekstide_core::project::ProjectSession::new(
         tekstide_core::project::ProjectId::new_uuid(),
-        display_name,
-        "/home/user/demo",
-        "/home/user/demo",
+        tekstide_core::project::root::ValidProjectRoot::for_test(
+            display_name,
+            "/home/user/demo",
+            "/home/user/demo",
+        ),
     )
 }
 

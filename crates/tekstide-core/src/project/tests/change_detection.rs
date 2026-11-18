@@ -3,6 +3,7 @@ use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunStatus, ChangeAssociationConfidence,
     ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus,
 };
+use crate::project::root::ValidProjectRoot;
 use crate::project::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationErrorReason, DetectedChangedPath,
     DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
@@ -138,9 +139,11 @@ fn changed_path_validation_allows_valid_paths_when_root_has_symlinked_ancestor()
     sandbox.create_file_with_contents("real/project/src/lib.rs", b"metadata\n");
     let project = ProjectSession::new(
         ProjectId::for_test(1),
-        "Project 1",
-        link_root.join("project"),
-        fs::canonicalize(real_project).unwrap(),
+        ValidProjectRoot::for_test(
+            "Project 1",
+            link_root.join("project"),
+            fs::canonicalize(real_project).unwrap(),
+        ),
     );
 
     let normalized = GeneratedChangeDetector::default()
@@ -494,9 +497,11 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
 
     let project = ProjectSession::new(
         ProjectId::for_test(9999),
-        "tekstide-git (self, for real-repository measurement)",
-        repo_root.clone(),
-        repo_root,
+        ValidProjectRoot::for_test(
+            "tekstide-git (self, for real-repository measurement)",
+            repo_root.clone(),
+            repo_root,
+        ),
     );
 
     // The default policy: the three exclusions this slice ships with.
@@ -1153,9 +1158,11 @@ impl TestSandbox {
         let root_path = self.path("project");
         ProjectSession::new(
             ProjectId::for_test(sequence),
-            format!("Project {sequence}"),
-            root_path.clone(),
-            fs::canonicalize(root_path).unwrap(),
+            ValidProjectRoot::for_test(
+                format!("Project {sequence}"),
+                root_path.clone(),
+                fs::canonicalize(root_path).unwrap(),
+            ),
         )
     }
 }

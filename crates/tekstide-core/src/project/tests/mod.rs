@@ -1,3 +1,4 @@
+use super::root::ValidProjectRoot;
 use super::{ProjectId, ProjectSession};
 
 mod change_detection;
@@ -13,8 +14,10 @@ mod transcripts;
 fn project_session(sequence: u64) -> ProjectSession {
     ProjectSession::new(
         ProjectId::for_test(sequence),
-        format!("Project {sequence}"),
-        format!("/workspace/project-{sequence}"),
-        format!("/workspace/project-{sequence}"),
+        ValidProjectRoot::for_test(
+            format!("Project {sequence}"),
+            format!("/workspace/project-{sequence}"),
+            format!("/workspace/project-{sequence}"),
+        ),
     )
 }

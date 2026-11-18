@@ -9,6 +9,7 @@ use crate::domain::{
     AgentCompatibilityLevel, AgentRunId, AgentRunStatus, OwnershipError, TerminalId, TerminalKind,
     TerminalSession, TerminalStatus, TranscriptAbsence,
 };
+use crate::project::root::ValidProjectRoot;
 use crate::project::{
     AgentAdapterApprovalError, ProjectActiveFileLaunchBlockReason,
     ProjectAgentActiveFileLaunchError, ProjectAgentLaunchError, ProjectAgentRuntimeLaunchError,
@@ -2600,7 +2601,10 @@ fn request_for(project: &ProjectSession, profile: &AiCliProfile) -> AgentRunLaun
 }
 
 fn restricted_project(project_id: ProjectId, root: &Path) -> ProjectSession {
-    ProjectSession::new(project_id, "Project", root, root)
+    ProjectSession::new(
+        project_id,
+        ValidProjectRoot::for_test("Project", root, root),
+    )
 }
 
 fn executable_file(root: &Path, name: &str) -> PathBuf {

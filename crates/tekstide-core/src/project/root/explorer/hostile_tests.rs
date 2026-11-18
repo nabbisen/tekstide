@@ -54,13 +54,7 @@ fn handle(fixture: &HostileFixture) -> ProjectRootHandle {
     let root = ProjectRootValidator
         .validate(&fixture.project, SymlinkPolicy::FailClosed)
         .expect("the fixture's project root validates");
-    let (display_name, selected_path, canonical_path) = root.into_parts();
-    ProjectRootHandle::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    )
+    ProjectRootHandle::new(ProjectId::for_test(1), root)
 }
 
 fn scan(

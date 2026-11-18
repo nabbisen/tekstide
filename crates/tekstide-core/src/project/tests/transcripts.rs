@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::{AgentCompatibilityLevel, AgentRun, TerminalKind, TerminalSession, Transcript};
+use crate::project::root::ValidProjectRoot;
 use crate::project::{
     ProjectId, ProjectSession, ProjectTranscriptError, ProjectTranscriptPurgeSummary,
 };
@@ -312,9 +313,11 @@ fn attach_agent_run_transcript(
 fn real_project_session(sequence: u64, temp: &TestDirs) -> ProjectSession {
     ProjectSession::new(
         ProjectId::for_test(sequence),
-        format!("Project {sequence}"),
-        &temp.project_root,
-        fs::canonicalize(&temp.project_root).unwrap(),
+        ValidProjectRoot::for_test(
+            format!("Project {sequence}"),
+            &temp.project_root,
+            fs::canonicalize(&temp.project_root).unwrap(),
+        ),
     )
 }
 

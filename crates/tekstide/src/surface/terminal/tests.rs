@@ -15,6 +15,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
+use tekstide_core::project::root::ValidProjectRoot;
 use tekstide_core::project::{ProjectId, ProjectSession};
 
 use super::{
@@ -140,7 +141,10 @@ fn bounded_scrollback_holds_under_sustained_output() {
 
 fn test_project(root: &std::path::Path) -> ProjectSession {
     let id = ProjectId::new_uuid();
-    ProjectSession::new(id, "terminal-pane-test", root, root)
+    ProjectSession::new(
+        id,
+        ValidProjectRoot::for_test("terminal-pane-test", root, root),
+    )
 }
 
 struct ScratchPane {

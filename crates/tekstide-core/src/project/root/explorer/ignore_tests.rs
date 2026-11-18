@@ -96,13 +96,7 @@ impl Repo {
         let root = ProjectRootValidator
             .validate(&path, SymlinkPolicy::FailClosed)
             .expect("the fixture's project root validates");
-        let (display_name, selected_path, canonical_path) = root.into_parts();
-        ProjectRootHandle::new(
-            ProjectId::for_test(1),
-            display_name,
-            selected_path,
-            canonical_path,
-        )
+        ProjectRootHandle::new(ProjectId::for_test(1), root)
     }
 
     /// The scan of `relative` under `handle`, with git asked through the
@@ -280,13 +274,7 @@ fn outside_a_repository_the_floor_list_decides_and_the_scan_says_so() {
     let root = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .unwrap();
-    let (display_name, selected_path, canonical_path) = root.into_parts();
-    let handle = ProjectRootHandle::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    );
+    let handle = ProjectRootHandle::new(ProjectId::for_test(1), root);
 
     let mut scan = FileExplorerScanner
         .scan_directory(&handle, "", &FileExplorerScanPolicy::linux_mvp())
@@ -635,13 +623,7 @@ fn asking_git_adds_a_few_milliseconds_to_a_hundred_thousand_entry_scan() {
     let root = ProjectRootValidator
         .validate(&fixture.project, SymlinkPolicy::FailClosed)
         .unwrap();
-    let (display_name, selected_path, canonical_path) = root.into_parts();
-    let handle = ProjectRootHandle::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    );
+    let handle = ProjectRootHandle::new(ProjectId::for_test(1), root);
     // The fixture project is made a repository (its config is allowlist-clean).
     let home = fixture.base.join("home");
     fs::create_dir_all(&home).unwrap();
@@ -730,13 +712,7 @@ fn the_worker_entry_point_asks_git_and_says_what_it_learned() {
     let root = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .unwrap();
-    let (display_name, selected_path, canonical_path) = root.into_parts();
-    let handle = ProjectRootHandle::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    );
+    let handle = ProjectRootHandle::new(ProjectId::for_test(1), root);
 
     let mut tree = ExplorerTree::default();
     tree.request_scan(Path::new(""));

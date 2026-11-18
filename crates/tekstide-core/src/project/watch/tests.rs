@@ -530,13 +530,7 @@ fn measured_git_subprocesses_per_real_scan() {
     let valid = ProjectRootValidator
         .validate(repo, SymlinkPolicy::FailClosed)
         .expect("the measurement repository validates");
-    let (display_name, selected_path, canonical_path) = valid.into_parts();
-    let session = ProjectSession::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    );
+    let session = ProjectSession::new(ProjectId::for_test(1), valid);
     let root = session.root_handle();
     let env = vec![
         ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
@@ -596,13 +590,7 @@ fn real_session(label: &str) -> (crate::project::ProjectSession, PathBuf) {
     let valid = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .expect("the admission project root validates");
-    let (display_name, selected_path, canonical_path) = valid.into_parts();
-    let session = ProjectSession::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    );
+    let session = ProjectSession::new(ProjectId::for_test(1), valid);
     (session, base)
 }
 
@@ -806,13 +794,7 @@ fn measured_reconcile_cost_per_expanded_directory() {
         let valid = ProjectRootValidator
             .validate(&project, SymlinkPolicy::FailClosed)
             .expect("the measurement project root validates");
-        let (display_name, selected_path, canonical_path) = valid.into_parts();
-        let mut session = ProjectSession::new(
-            ProjectId::for_test(1),
-            display_name,
-            selected_path,
-            canonical_path,
-        );
+        let mut session = ProjectSession::new(ProjectId::for_test(1), valid);
         for index in 0..count {
             let _ = session.toggle_explorer_directory(Path::new(&format!("d{index:04}")));
         }
@@ -1126,13 +1108,7 @@ fn the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses()
     let valid = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .expect("the hostile fixture's root validates");
-    let (display_name, selected_path, canonical_path) = valid.into_parts();
-    let mut session = ProjectSession::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    );
+    let mut session = ProjectSession::new(ProjectId::for_test(1), valid);
     for expanded in ["src", "loop", "link-out"] {
         let _ = session.toggle_explorer_directory(Path::new(expanded));
     }

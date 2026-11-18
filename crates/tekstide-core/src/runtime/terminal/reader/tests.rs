@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::domain::AgentRunId;
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectSession};
 use crate::test_support::RealProcessLimiter;
 use crate::transcript::{
@@ -1723,7 +1724,10 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 fn project_session(project_id: ProjectId, root: &Path) -> ProjectSession {
-    ProjectSession::new(project_id, "Project", root, root)
+    ProjectSession::new(
+        project_id,
+        ValidProjectRoot::for_test("Project", root, root),
+    )
 }
 
 fn test_root(name: &str) -> PathBuf {

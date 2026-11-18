@@ -4,6 +4,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::*;
 use crate::domain::AgentRunId;
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectSession};
 use crate::runtime::terminal::{
     TerminalLaunchSpec, TerminalRuntime, TerminalRuntimeHandle, TerminalSecurityParser,
@@ -412,7 +413,10 @@ fn an_unsafe_storage_path_is_refused_before_any_read() {
 
 fn capture_real_sgr_output() -> Vec<u8> {
     let root = pty_test_root("sgr-capture");
-    let project = ProjectSession::new(ProjectId::for_test(1), "Project", &root, &root);
+    let project = ProjectSession::new(
+        ProjectId::for_test(1),
+        ValidProjectRoot::for_test("Project", &root, &root),
+    );
     let spec = TerminalLaunchSpec::plain_shell(project.id().clone(), "Shell", &root, "/bin/sh");
     let mut runtime = TerminalRuntime::new();
 

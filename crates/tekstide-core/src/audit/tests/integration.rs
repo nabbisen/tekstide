@@ -24,6 +24,7 @@ use crate::domain::{
     AuditOperationId, RiskLevel, TerminalId, TerminalKind, TerminalSession, TerminalStatus,
     Transcript,
 };
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectContentError, ProjectId, ProjectSession, WorkspaceTrust};
 use crate::runtime::terminal::{
     BoundedRuntimeSummary, TerminalRuntime, TerminalRuntimeHandle, TerminationOutcome,
@@ -2169,7 +2170,10 @@ fn safe_close_decision_persists_a_cancelled_record_with_no_operation_id() {
 
 fn project_for(dirs: &TestAuditDirs, sequence: u64) -> ProjectSession {
     let root = dirs.base.join("project");
-    ProjectSession::new(ProjectId::for_test(sequence), "Project", &root, &root)
+    ProjectSession::new(
+        ProjectId::for_test(sequence),
+        ValidProjectRoot::for_test("Project", &root, &root),
+    )
 }
 
 /// RFC-033 PR-033-D: a real transcript, with real bytes on a real file,

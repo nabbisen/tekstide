@@ -23,20 +23,16 @@ pub enum SymlinkPolicy {
     AllowCanonicalTarget,
 }
 
-/// RFC-077 D7.1 (review 696/697/698): fields are private, not `pub` --
+/// RFC-077 D7.1 (review 696/697/698/699): fields are private, not `pub` --
 /// the defect review 696 found (`ProjectRootHandle::from_project_session`
 /// built one by hand from a `ProjectSession`'s own accessors, bypassing
-/// `ProjectRootValidator`) is closed by making a struct literal
-/// impossible outside this file, not merely discouraged. The two
-/// construction sites that remain are both inside `root.rs`:
-/// `ProjectRootValidator::validate`'s own sanctioned mint, and
-/// `ProjectRootHandle::new` below, which builds one from values its
-/// caller already holds -- the same values `from_project_session` used
-/// to read through `&ProjectSession`, just no longer naming that type to
-/// get them. Accessors below, plus `#[cfg(test)] for_test`, give every
-/// other module the read (and test-only write) access it needs without
-/// a public constructor -- the `VerifiedCwd::for_test` pattern
-/// (`agent/launch.rs`).
+/// `ProjectRootValidator`) is closed for real now (review 699's required
+/// fix): a struct literal is impossible outside this file, **and nothing
+/// else in the crate can mint one from raw values either** --
+/// `ProjectRootHandle::new` below takes a `ValidProjectRoot` whole rather
+/// than rebuilding one from loose parts, so minting stays with
+/// `ProjectRootValidator::validate` (plus the test-only `for_test`) alone.
+/// Accessors give every other module the read access it needs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValidProjectRoot {
     display_name: String,
@@ -49,28 +45,32 @@ impl ValidProjectRoot {
         &self.display_name
     }
 
-    pub fn selected_path(&self) -> &Path {
+    /// `&PathBuf`, not `&Path` -- matches `ProjectSession::root_path`'s
+    /// own return type exactly, since `ProjectSession` holds one of
+    /// these whole (review 699) and delegates its own accessor to this
+    /// one without widening or narrowing the type.
+    pub fn selected_path(&self) -> &PathBuf {
         &self.selected_path
     }
 
-    pub fn canonical_path(&self) -> &Path {
+    /// `&PathBuf`, for the same reason -- matches
+    /// `ProjectSession::canonical_root_path`.
+    pub fn canonical_path(&self) -> &PathBuf {
         &self.canonical_path
-    }
-
-    /// By-value destructuring for a caller (`app.rs`'s own
-    /// `add_validated_project_root`) that already owns `self` and would
-    /// otherwise have to clone each field back out of the accessors
-    /// above.
-    pub fn into_parts(self) -> (String, PathBuf, PathBuf) {
-        (self.display_name, self.selected_path, self.canonical_path)
     }
 
     /// Test-only escape hatch, matching this crate's established
     /// `for_test` convention (`VerifiedCwd::for_test`, `ProjectId::for_test`)
     /// -- a fixture that needs a `ValidProjectRoot` without running a
-    /// real filesystem validation. `#[cfg(test)]`-gated, so this does not
-    /// weaken the real guarantee in a release build.
-    #[cfg(test)]
+    /// real filesystem validation. Gated on `test_support`'s own broader
+    /// condition, not plain `#[cfg(test)]`: unlike `VerifiedCwd::for_test`
+    /// (used only inside this crate), `ProjectSession::new` now requires
+    /// a `ValidProjectRoot` to construct at all, and `tekstide`'s own
+    /// test fixtures (a separate crate) build sessions directly -- a
+    /// plain `#[cfg(test)]` item does not exist when this crate is
+    /// compiled as an ordinary dependency, even under `cargo test` in
+    /// the dependent crate.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn for_test(
         display_name: impl Into<String>,
         selected_path: impl Into<PathBuf>,
@@ -91,25 +91,17 @@ pub struct ProjectRootHandle {
 }
 
 impl ProjectRootHandle {
-    /// RFC-077 D7.1: replaces `from_project_session(&ProjectSession)` --
-    /// `root` no longer names `ProjectSession` at all. Takes exactly the
-    /// values the old constructor read through that reference
-    /// (`project.rs`'s own `ProjectSession::root_location`-adjacent
-    /// accessors), so the one caller, `project::session`, supplies them
-    /// directly instead of handing over the whole session.
-    pub fn new(
-        project_id: ProjectId,
-        display_name: impl Into<String>,
-        selected_path: impl Into<PathBuf>,
-        canonical_path: impl Into<PathBuf>,
-    ) -> Self {
+    /// RFC-077 D7.1 (review 699's required fix): takes the already-minted
+    /// `ValidProjectRoot` whole, not raw values rebuilt into one --
+    /// `root` no longer names `ProjectSession`, and this constructor
+    /// cannot mint an unvalidated root the way the first version of this
+    /// change (review 699's own finding) could. `project::session` is
+    /// the one caller, supplying the `ValidProjectRoot` it now holds
+    /// whole (`ProjectSession::root_handle`).
+    pub fn new(project_id: ProjectId, valid_root: ValidProjectRoot) -> Self {
         Self {
             project_id,
-            valid_root: ValidProjectRoot {
-                display_name: display_name.into(),
-                selected_path: selected_path.into(),
-                canonical_path: canonical_path.into(),
-            },
+            valid_root,
         }
     }
 

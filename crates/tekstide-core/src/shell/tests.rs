@@ -1,5 +1,6 @@
 use super::ApplicationShell;
 use crate::command::AppCommand;
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectMode, ProjectOpenSurface, ProjectResourceLimits};
 use crate::route::AppRoute;
 use crate::security::RestrictedModeFeature;
@@ -17,7 +18,11 @@ fn command_router_changes_top_level_route() {
     let mut shell = ApplicationShell::new();
     shell
         .state_mut()
-        .add_project_session("Tekstide", "/workspace/tekstide", "/workspace/tekstide");
+        .add_project_session(ValidProjectRoot::for_test(
+            "Tekstide",
+            "/workspace/tekstide",
+            "/workspace/tekstide",
+        ));
 
     shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
     assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
@@ -39,11 +44,13 @@ fn direct_workspace_open_without_active_project_stays_on_project_board() {
 #[test]
 fn active_project_workspace_toggles_between_content_and_terminal_modes() {
     let mut shell = ApplicationShell::new();
-    let project_id = shell.state_mut().add_project_session(
-        "Tekstide",
-        "/workspace/tekstide",
-        "/workspace/tekstide",
-    );
+    let project_id = shell
+        .state_mut()
+        .add_project_session(ValidProjectRoot::for_test(
+            "Tekstide",
+            "/workspace/tekstide",
+            "/workspace/tekstide",
+        ));
 
     shell.dispatch(AppCommand::OpenActiveProjectWorkspace);
     assert_eq!(shell.route(), AppRoute::ActiveProjectWorkspace);
@@ -74,11 +81,13 @@ fn active_project_workspace_toggles_between_content_and_terminal_modes() {
 #[test]
 fn active_workspace_visible_panes_are_capped_by_navigation_policy() {
     let mut shell = ApplicationShell::new();
-    let project_id = shell.state_mut().add_project_session(
-        "Tekstide",
-        "/workspace/tekstide",
-        "/workspace/tekstide",
-    );
+    let project_id = shell
+        .state_mut()
+        .add_project_session(ValidProjectRoot::for_test(
+            "Tekstide",
+            "/workspace/tekstide",
+            "/workspace/tekstide",
+        ));
     shell
         .state_mut()
         .project_mut(&project_id)
@@ -102,11 +111,13 @@ fn active_workspace_visible_panes_are_capped_by_navigation_policy() {
 #[test]
 fn opening_content_surface_returns_to_content_mode_without_losing_active_project() {
     let mut shell = ApplicationShell::new();
-    let project_id = shell.state_mut().add_project_session(
-        "Tekstide",
-        "/workspace/tekstide",
-        "/workspace/tekstide",
-    );
+    let project_id = shell
+        .state_mut()
+        .add_project_session(ValidProjectRoot::for_test(
+            "Tekstide",
+            "/workspace/tekstide",
+            "/workspace/tekstide",
+        ));
 
     shell.dispatch(AppCommand::ToggleActiveProjectMode);
     shell.dispatch(AppCommand::OpenActiveProjectSurface(
@@ -167,7 +178,11 @@ fn populated_project_board_renders_not_implemented_branch_status_without_process
     let mut shell = ApplicationShell::new();
     shell
         .state_mut()
-        .add_project_session("Tekstide", "/workspace/tekstide", "/workspace/tekstide");
+        .add_project_session(ValidProjectRoot::for_test(
+            "Tekstide",
+            "/workspace/tekstide",
+            "/workspace/tekstide",
+        ));
 
     let rendered = shell.render_text();
 

@@ -5,6 +5,7 @@ use super::{
 use crate::app::AppState;
 use crate::domain::{TerminalKind, TerminalSession, TerminalStatus};
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectRuntimeSummary, WorkspaceTrust};
 use crate::security::RestrictedModeFeature;
 
@@ -34,8 +35,11 @@ fn empty_project_board_has_first_run_state() {
 #[test]
 fn project_rows_preserve_placeholder_field_shape_without_probing() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Tekstide", "/workspace/tekstide", "/workspace/tekstide");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Tekstide",
+        "/workspace/tekstide",
+        "/workspace/tekstide",
+    ));
 
     let view_model = ProjectBoardViewModel::from_app_state(&state);
 
@@ -77,8 +81,11 @@ fn project_rows_preserve_placeholder_field_shape_without_probing() {
 #[test]
 fn trusted_project_board_row_uses_security_policy_summary() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Trusted", "/workspace/trusted", "/workspace/trusted");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Trusted",
+        "/workspace/trusted",
+        "/workspace/trusted",
+    ));
     state
         .project_mut(&project_id)
         .expect("project should exist")
@@ -281,7 +288,11 @@ fn attention_calculation_follows_priority_order() {
 #[test]
 fn view_model_uses_runtime_summary_for_known_counts_and_attention() {
     let mut state = AppState::default();
-    let project_id = state.add_project_session("Active", "/workspace/active", "/workspace/active");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Active",
+        "/workspace/active",
+        "/workspace/active",
+    ));
     state
         .project_mut(&project_id)
         .expect("project should exist")
@@ -316,8 +327,11 @@ fn view_model_uses_runtime_summary_for_known_counts_and_attention() {
 #[test]
 fn a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_zero() {
     let mut state = AppState::default();
-    let populated_id =
-        state.add_project_session("Populated", "/workspace/populated", "/workspace/populated");
+    let populated_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Populated",
+        "/workspace/populated",
+        "/workspace/populated",
+    ));
     let mut terminal = TerminalSession::new(
         populated_id.clone(),
         TerminalKind::Plain,
@@ -331,7 +345,11 @@ fn a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_zero(
         .expect("project should exist")
         .add_terminal_session(terminal)
         .unwrap();
-    let empty_id = state.add_project_session("Empty", "/workspace/empty", "/workspace/empty");
+    let empty_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Empty",
+        "/workspace/empty",
+        "/workspace/empty",
+    ));
 
     let view_model = ProjectBoardViewModel::from_app_state(&state);
 
@@ -367,7 +385,11 @@ fn a_project_with_a_terminal_reports_a_real_count_and_an_empty_one_reports_zero(
 #[test]
 fn view_model_uses_real_terminal_collection_summary() {
     let mut state = AppState::default();
-    let project_id = state.add_project_session("Active", "/workspace/active", "/workspace/active");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Active",
+        "/workspace/active",
+        "/workspace/active",
+    ));
     let mut terminal = TerminalSession::new(
         project_id.clone(),
         TerminalKind::Plain,
@@ -393,10 +415,21 @@ fn view_model_uses_real_terminal_collection_summary() {
 #[test]
 fn rows_sort_by_attention_then_active_recent_status_then_name() {
     let mut state = AppState::default();
-    let calm_id = state.add_project_session("Calm", "/workspace/calm", "/workspace/calm");
-    let risk_id = state.add_project_session("Risk", "/workspace/risk", "/workspace/risk");
-    let waiting_id =
-        state.add_project_session("Waiting", "/workspace/waiting", "/workspace/waiting");
+    let calm_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Calm",
+        "/workspace/calm",
+        "/workspace/calm",
+    ));
+    let risk_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Risk",
+        "/workspace/risk",
+        "/workspace/risk",
+    ));
+    let waiting_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Waiting",
+        "/workspace/waiting",
+        "/workspace/waiting",
+    ));
     state
         .project_mut(&risk_id)
         .unwrap()

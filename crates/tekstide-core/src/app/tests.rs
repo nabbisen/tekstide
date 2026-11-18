@@ -8,7 +8,7 @@ use crate::domain::{
     TerminalSession, TerminalStatus,
 };
 use crate::project::recent::{RecentProject, RecentProjectState, Timestamp};
-use crate::project::root::{ProjectRootValidationError, SymlinkPolicy};
+use crate::project::root::{ProjectRootValidationError, SymlinkPolicy, ValidProjectRoot};
 use crate::project::{ProjectId, ProjectProviderState, ProjectRuntimeSummary};
 use crate::runtime::terminal::TerminationOutcome;
 use crate::test_support::RealProcessLimiter;
@@ -30,8 +30,11 @@ fn new_state_has_no_projects() {
 fn first_project_becomes_active() {
     let mut state = AppState::default();
 
-    let project_id =
-        state.add_project_session("Tekstide", "/workspace/tekstide", "/workspace/tekstide");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Tekstide",
+        "/workspace/tekstide",
+        "/workspace/tekstide",
+    ));
 
     assert_eq!(state.active_project_id(), Some(&project_id));
     assert_eq!(
@@ -46,8 +49,16 @@ fn first_project_becomes_active() {
 #[test]
 fn switching_active_project_requires_existing_project_id() {
     let mut state = AppState::default();
-    let first_id = state.add_project_session("First", "/workspace/first", "/workspace/first");
-    let second_id = state.add_project_session("Second", "/workspace/second", "/workspace/second");
+    let first_id = state.add_project_session(ValidProjectRoot::for_test(
+        "First",
+        "/workspace/first",
+        "/workspace/first",
+    ));
+    let second_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Second",
+        "/workspace/second",
+        "/workspace/second",
+    ));
 
     assert!(state.switch_active_project(&second_id));
     assert_eq!(state.active_project_id(), Some(&second_id));
@@ -187,8 +198,11 @@ fn recent_project_state_uses_uuid_project_ids() {
 #[test]
 fn recent_project_state_exports_project_session_timestamps() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Project",
+        "/workspace/project",
+        "/workspace/project",
+    ));
     let opened_at = DomainTimestamp::from_utc_string("2026-07-05T01:02:03Z").unwrap();
     let activity_at = DomainTimestamp::from_utc_string("2026-07-05T04:05:06Z").unwrap();
     let project = state.project_mut(&project_id).unwrap();
@@ -501,8 +515,11 @@ fn declining_transcript_capture_persists_and_survives_a_reopen() {
 #[test]
 fn active_project_with_missing_close_provider_is_not_closed() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Project",
+        "/workspace/project",
+        "/workspace/project",
+    ));
     state
         .project_mut(&project_id)
         .unwrap()
@@ -570,8 +587,11 @@ fn active_idle_project_closes_when_provider_proves_safe() {
 #[test]
 fn active_project_with_resources_needs_confirmation_and_stays_open() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Project",
+        "/workspace/project",
+        "/workspace/project",
+    ));
     state
         .project_mut(&project_id)
         .unwrap()
@@ -617,8 +637,11 @@ fn active_project_with_resources_needs_confirmation_and_stays_open() {
 #[test]
 fn active_project_with_real_running_terminal_needs_confirmation_and_stays_open() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Project",
+        "/workspace/project",
+        "/workspace/project",
+    ));
     let mut terminal = TerminalSession::new(
         project_id.clone(),
         TerminalKind::Plain,
@@ -661,12 +684,16 @@ fn active_project_with_real_running_terminal_needs_confirmation_and_stays_open()
 #[test]
 fn apply_agent_terminal_outcome_for_project_completes_a_run_on_a_project_that_is_not_active() {
     let mut state = AppState::default();
-    let active_id = state.add_project_session("Active", "/workspace/active", "/workspace/active");
-    let background_id = state.add_project_session(
+    let active_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Active",
+        "/workspace/active",
+        "/workspace/active",
+    ));
+    let background_id = state.add_project_session(ValidProjectRoot::for_test(
         "Background",
         "/workspace/background",
         "/workspace/background",
-    );
+    ));
     assert_eq!(
         state.active_project_id(),
         Some(&active_id),
@@ -804,8 +831,11 @@ fn stale_recent_project_removal_only_removes_recent_metadata() {
 #[test]
 fn active_project_cannot_be_removed_as_recent_metadata() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Project",
+        "/workspace/project",
+        "/workspace/project",
+    ));
 
     let error = state
         .remove_recent_project(&project_id)
@@ -820,8 +850,11 @@ fn active_project_cannot_be_removed_as_recent_metadata() {
 #[test]
 fn attach_terminal_session_registers_it_on_the_active_project() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Project",
+        "/workspace/project",
+        "/workspace/project",
+    ));
     let terminal = TerminalSession::new(
         project_id.clone(),
         TerminalKind::Plain,
@@ -868,8 +901,11 @@ fn attach_terminal_session_fails_closed_with_no_active_project() {
 #[test]
 fn assign_terminal_visible_slot_enforces_at_most_one_terminal_per_slot() {
     let mut state = AppState::default();
-    let project_id =
-        state.add_project_session("Project", "/workspace/project", "/workspace/project");
+    let project_id = state.add_project_session(ValidProjectRoot::for_test(
+        "Project",
+        "/workspace/project",
+        "/workspace/project",
+    ));
     let first = TerminalSession::new(
         project_id.clone(),
         TerminalKind::Plain,

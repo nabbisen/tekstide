@@ -22,6 +22,7 @@ use crate::domain::{
     TerminalKind, TerminalSession, TerminalStatus, Transcript, TranscriptId,
     TranscriptLifecycleState, TranscriptOrigin, TruncationState,
 };
+use crate::project::root::ValidProjectRoot;
 use crate::project::{ProjectId, ProjectSession, ProjectTranscriptError};
 use crate::runtime::terminal::{BoundedRuntimeSummary, TerminationOutcome};
 use crate::transcript::TranscriptRetentionLimits;
@@ -662,9 +663,11 @@ fn write_transcript_file(dirs: &TestDirs, name: &str, bytes: &[u8]) -> PathBuf {
 fn project_session(dirs: &TestDirs) -> ProjectSession {
     ProjectSession::new(
         ProjectId::for_test(1),
-        "Retention",
-        &dirs.project_root,
-        fs::canonicalize(&dirs.project_root).unwrap(),
+        ValidProjectRoot::for_test(
+            "Retention",
+            &dirs.project_root,
+            fs::canonicalize(&dirs.project_root).unwrap(),
+        ),
     )
 }
 

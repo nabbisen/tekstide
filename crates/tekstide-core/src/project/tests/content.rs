@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::content::{EditOperation, TextCursor, TextDocumentState, TextViewport};
+use crate::project::root::ValidProjectRoot;
 use crate::project::{
     ProjectContentError, ProjectContentStatus, ProjectId, ProjectResourceLimits, ProjectSession,
 };
@@ -23,7 +24,10 @@ fn cleanup_root(root: PathBuf) {
 }
 
 fn project_at(root: &std::path::Path) -> ProjectSession {
-    ProjectSession::new(ProjectId::for_test(1), "Project", root, root)
+    ProjectSession::new(
+        ProjectId::for_test(1),
+        ValidProjectRoot::for_test("Project", root, root),
+    )
 }
 
 /// **status-mapping-honesty-fixes, Fix 2's own required proof**: a real

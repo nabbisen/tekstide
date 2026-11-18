@@ -19,8 +19,7 @@ fn validate(path: &Path) -> ValidProjectRoot {
 }
 
 fn root_handle(project_id: ProjectId, root: ValidProjectRoot) -> ProjectRootHandle {
-    let (display_name, selected_path, canonical_path) = root.into_parts();
-    ProjectRootHandle::new(project_id, display_name, selected_path, canonical_path)
+    ProjectRootHandle::new(project_id, root)
 }
 
 struct TestSandbox {

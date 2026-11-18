@@ -15,13 +15,7 @@ fn recovered(text: &str) -> RecoveredBufferInit {
 fn session(sandbox: &TestSandbox) -> ProjectSession {
     let project_dir = sandbox.create_dir("project");
     let root = validate(&project_dir);
-    let (display_name, selected_path, canonical_path) = root.into_parts();
-    ProjectSession::new(
-        ProjectId::for_test(1),
-        display_name,
-        selected_path,
-        canonical_path,
-    )
+    ProjectSession::new(ProjectId::for_test(1), root)
 }
 
 /// RFC-027 PR-027-C: `ProjectSession::recover_text_document` inserts into the open set

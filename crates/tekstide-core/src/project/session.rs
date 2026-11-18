@@ -35,7 +35,7 @@ use crate::domain::{
 use super::change_detection::{
     ChangedPathValidationError, DetectedChanges, GeneratedChangeDetector, ReviewBaseline,
 };
-use super::root::{FileExplorerScanPolicy, ProjectRootHandle};
+use super::root::{FileExplorerScanPolicy, ProjectRootHandle, ValidProjectRoot};
 use super::{
     ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
     ProjectFileState, ProjectMode, ProjectOpenSurface, ProjectResourceLimits,
@@ -45,9 +45,15 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectSession {
     id: ProjectId,
-    display_name: String,
-    root_path: PathBuf,
-    canonical_root_path: PathBuf,
+    /// RFC-077 D7.1 (review 699's required fix): held whole, not
+    /// decomposed into loose `display_name`/`root_path`/
+    /// `canonical_root_path` fields -- the validated value now travels
+    /// intact from `ProjectRootValidator` through `app` into this
+    /// struct, never re-claimed from parts a caller could have
+    /// fabricated. `display_name`/`root_path`/`canonical_root_path`
+    /// below delegate to it, unchanged in name and return type, so no
+    /// external caller sees this.
+    valid_root: ValidProjectRoot,
     trust_state: WorkspaceTrust,
     created_at: DomainTimestamp,
     last_opened_at: DomainTimestamp,
@@ -162,18 +168,16 @@ impl crate::runtime::terminal::TerminalLaunchProject for ProjectSession {
 }
 
 impl ProjectSession {
-    pub fn new(
-        id: ProjectId,
-        display_name: impl Into<String>,
-        root_path: impl Into<PathBuf>,
-        canonical_root_path: impl Into<PathBuf>,
-    ) -> Self {
+    /// RFC-077 D7.1 (review 699's required fix): takes the already-minted
+    /// `ValidProjectRoot` whole, not three loose values rebuilt into one
+    /// -- the validated value travels intact from
+    /// `ProjectRootValidator` through `app` into this struct now, rather
+    /// than being decomposed and re-claimed.
+    pub fn new(id: ProjectId, valid_root: ValidProjectRoot) -> Self {
         let opened_at = DomainTimestamp::now_utc();
         Self {
             id,
-            display_name: display_name.into(),
-            root_path: root_path.into(),
-            canonical_root_path: canonical_root_path.into(),
+            valid_root,
             trust_state: WorkspaceTrust::Restricted,
             created_at: opened_at.clone(),
             last_opened_at: opened_at.clone(),
@@ -209,15 +213,15 @@ impl ProjectSession {
     }
 
     pub fn display_name(&self) -> &str {
-        &self.display_name
+        self.valid_root.display_name()
     }
 
     pub fn root_path(&self) -> &PathBuf {
-        &self.root_path
+        self.valid_root.selected_path()
     }
 
     pub fn canonical_root_path(&self) -> &PathBuf {
-        &self.canonical_root_path
+        self.valid_root.canonical_path()
     }
 
     /// RFC-077 D7.1: `change_detection` no longer names `ProjectSession`
@@ -229,24 +233,20 @@ impl ProjectSession {
     pub fn root_location(&self) -> ProjectRootLocation {
         ProjectRootLocation {
             id: self.id.clone(),
-            canonical_root_path: self.canonical_root_path.clone(),
+            canonical_root_path: self.canonical_root_path().clone(),
         }
     }
 
     /// RFC-077 D7.1: replaces `ProjectRootHandle::from_project_session(&self)`
     /// -- `root` no longer names `ProjectSession` at all, so this method
-    /// lives here instead and supplies `ProjectRootHandle::new` with the
-    /// same four values the old constructor used to read through a
-    /// `&ProjectSession` parameter. Every caller that used to write
+    /// lives here instead. Review 699's required fix: hands over the
+    /// `ValidProjectRoot` this struct already holds whole, rather than
+    /// rebuilding one from parts (the bypass the first version of this
+    /// change left open). Every caller that used to write
     /// `ProjectRootHandle::from_project_session(&project)` now writes
     /// `project.root_handle()`.
     pub fn root_handle(&self) -> ProjectRootHandle {
-        ProjectRootHandle::new(
-            self.id.clone(),
-            self.display_name.clone(),
-            self.root_path.clone(),
-            self.canonical_root_path.clone(),
-        )
+        ProjectRootHandle::new(self.id.clone(), self.valid_root.clone())
     }
 
     pub fn trust_state(&self) -> WorkspaceTrust {
@@ -1710,7 +1710,7 @@ impl ProjectSession {
     /// window for a collapsed folder changes nothing on screen, so it asks nothing. Returns
     /// whether a scan was requested.
     pub fn request_explorer_rescan(&mut self, absolute: &Path) -> bool {
-        let Ok(relative) = absolute.strip_prefix(&self.canonical_root_path) else {
+        let Ok(relative) = absolute.strip_prefix(self.canonical_root_path()) else {
             return false;
         };
         let shown = relative.as_os_str().is_empty()
@@ -2073,7 +2073,7 @@ impl ProjectSession {
         }
 
         let storage_path = self.transcripts[index].storage_path.clone();
-        if transcript_path_is_project_local(&storage_path, &self.canonical_root_path) {
+        if transcript_path_is_project_local(&storage_path, self.canonical_root_path()) {
             return Err(ProjectTranscriptError::UnsafeProjectPath {
                 transcript_id,
                 path: storage_path,
