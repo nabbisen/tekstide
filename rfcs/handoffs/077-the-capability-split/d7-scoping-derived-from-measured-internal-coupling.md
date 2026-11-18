@@ -382,3 +382,32 @@ excluded.
 which `ablate.sh` cannot express, so it was run in a detached `git worktree` instead — stronger than
 patch-and-restore, since the main tree is never touched and there is nothing to restore wrongly. Use
 a worktree whenever an ablation needs more than one file.
+
+## 12. D7.1 landed (`cd7f0bb`, reviewed at 699) — back-edges cut, bypass not closed
+
+Both back-edges into `project::session` are genuinely gone (`root.rs` and `change_detection.rs`
+name `ProjectSession` only in doc comments), via the §10 shape: a two-value
+`domain::identity::ProjectRootLocation` for `change_detection`, and an inverted
+`ProjectRootHandle` constructor for `root`. Every number held, re-measured independently:
+submodule count 11, own-code 33, total 37, façade 4, crate-wide 130 refs / 55 edges. A prerequisite
+that lowered neither bound, reported as one.
+
+**The validator bypass was not closed — it was relocated and widened.** §10 directed a constructor
+taking a `ValidProjectRoot` only the validator can mint; what landed is
+`pub fn ProjectRootHandle::new(project_id, display_name, selected_path, canonical_path)` building a
+`ValidProjectRoot` internally (`root.rs:108`). The fields are private and buy nothing: `new` is
+public, `valid_root()` hands the result out, and `ProjectRootHandle` implements
+`content::FileAccessResolver`, so an unvalidated root reaches the file-access policy by a public
+path. The old bypass at least required a real `&ProjectSession`; this one requires nothing. Required
+in review 699, with the fix being the originally directed one plus **`ProjectSession` holding the
+`ValidProjectRoot` whole** rather than the three separate fields it has today — which also deletes
+`app.rs`'s `into_parts()` call and the ~12 test destructurings, so it is net less code.
+
+**Instrument note, from the dev team's own self-caught regression:** writing
+`crate::domain::ProjectRootLocation` inline cost +2 on bound 2 where importing it cost 0. **Bound 2
+counts reference occurrences, not dependencies**, so import style moves it. Harmless in the
+direction that matters — it is a must-not-rise ceiling — but a fall in it is not evidence of less
+coupling, and should never be read as such.
+
+**Correction to §3's own figures:** `change_detection` had **11** `&ProjectSession` signatures, not
+12. The reviewer's original count included the `use super::{…}` import line.
