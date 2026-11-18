@@ -411,3 +411,29 @@ coupling, and should never be read as such.
 
 **Correction to §3's own figures:** `change_detection` had **11** `&ProjectSession` signatures, not
 12. The reviewer's original count included the `use super::{…}` import line.
+
+## 13. D7.1's bypass closed for real (`c680102`, reviewed at 700)
+
+`ProjectRootHandle::new` and `ProjectSession::new` both take an already-minted `ValidProjectRoot`,
+so minting is `ProjectRootValidator::validate`'s alone (plus a test-only `for_test`, gated
+`cfg(any(test, feature = "test-support"))` — the RFC-043 PR-043-A mechanism, enabled only under
+`[dev-dependencies]`, so absent from a release build). `ProjectSession` holds the value **whole**
+instead of three loose fields, so the validated root travels intact from the validator through
+`app` into the session and out to `content::FileAccessResolver`, never decomposed and re-claimed;
+`into_parts()` is gone with zero callers. Verified structurally and by the dev team's own `E0451`
+probe. Both gate bounds and the crate-wide totals unchanged, re-measured independently.
+
+**One production consequence this scoping did not anticipate, and its open edge.**
+`tekstide::surface::terminal::TerminalPane::launch` had a doc comment claiming its root was
+"already validated to exist" and validated nothing; it now validates for real. But it does so with
+`SymlinkPolicy::AllowCanonicalTarget`, which is **this codebase's first production use of the
+weaker policy** — `app.rs:205` and `root/explorer.rs:487` both rely on `FailClosed`. Of the two
+production callers, only the terminal-flood *measurement* path (`shell.rs:7585`, a `$TMPDIR` root,
+symlink-reached on macOS) needs it; the user-facing caller (`shell.rs:3979`) passes a root `app.rs`
+already validated under `FailClosed`, so the policies cannot differ for it. Required in review 700:
+thread the policy so `FailClosed` stays the default on the user-facing route.
+
+Accepted as correct in the same review, and recorded because it reads like a shortcut and is not:
+reusing `TerminalLaunchError::MissingProjectRoot` instead of adding a variant costs nothing, since
+`shell.rs:3823` collapses every launch error to the symbol `"error"` and the real cause is preserved
+in the summary for logs.
