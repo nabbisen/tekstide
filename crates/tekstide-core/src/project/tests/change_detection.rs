@@ -21,7 +21,7 @@ fn filesystem_detector_reports_created_modified_deleted_and_renamed_metadata_pat
     sandbox.create_file_with_contents("project/src/old.rs", b"rename me\n");
 
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     fs::write(
         sandbox.path("project/src/lib.rs"),
@@ -36,7 +36,7 @@ fn filesystem_detector_reports_created_modified_deleted_and_renamed_metadata_pat
     .unwrap();
     sandbox.create_file_with_contents("project/src/created.rs", b"new file\n");
 
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     assert_eq!(baseline.source, ChangeDetectionSource::FilesystemSnapshot);
     assert_eq!(baseline.status, ChangeDetectionStatus::Complete);
@@ -96,10 +96,10 @@ fn changed_path_validation_accepts_absolute_paths_only_after_root_containment() 
 
     let detector = GeneratedChangeDetector::default();
     let normalized = detector
-        .validate_changed_path(&project, &in_root_file)
+        .validate_changed_path(&project.root_location(), &in_root_file)
         .expect("absolute path under root should normalize");
     let error = detector
-        .validate_changed_path(&project, &outside_file)
+        .validate_changed_path(&project.root_location(), &outside_file)
         .expect_err("absolute path outside root should be rejected");
 
     assert_eq!(normalized, PathBuf::from("src/lib.rs"));
@@ -118,7 +118,7 @@ fn changed_path_validation_rejects_parent_traversal_before_resolution() {
     let _outside_file = sandbox.create_file_with_contents("outside.rs", b"outside secret\n");
 
     let error = GeneratedChangeDetector::default()
-        .validate_changed_path(&project, "../outside.rs")
+        .validate_changed_path(&project.root_location(), "../outside.rs")
         .expect_err("relative traversal should not be normalized into a project path");
 
     assert_eq!(
@@ -144,7 +144,7 @@ fn changed_path_validation_allows_valid_paths_when_root_has_symlinked_ancestor()
     );
 
     let normalized = GeneratedChangeDetector::default()
-        .validate_changed_path(&project, "src/lib.rs")
+        .validate_changed_path(&project.root_location(), "src/lib.rs")
         .expect("symlinked ancestors above the project root are not project escapes");
 
     assert_eq!(normalized, PathBuf::from("src/lib.rs"));
@@ -160,9 +160,9 @@ fn filesystem_detector_labels_symlinks_and_does_not_follow_escape_targets() {
     std::os::unix::fs::symlink(&outside_dir, sandbox.path("project/outside-link")).unwrap();
 
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
     let error = detector
-        .validate_changed_path(&project, "outside-link/secret.txt")
+        .validate_changed_path(&project.root_location(), "outside-link/secret.txt")
         .expect_err("paths through escaping symlinks should be rejected");
 
     assert_eq!(baseline.status, ChangeDetectionStatus::Complete);
@@ -200,7 +200,7 @@ fn detector_reports_partial_status_when_entry_limit_is_hit() {
         max_changed_paths: 8,
         ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     assert_eq!(baseline.entries.len(), 1);
     assert_eq!(baseline.status, ChangeDetectionStatus::Partial { limit: 1 });
@@ -237,7 +237,7 @@ fn filesystem_scan_skips_ignored_directories_entirely() {
         max_changed_paths: 100,
         ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     assert_eq!(
         baseline.status,
@@ -270,7 +270,7 @@ fn a_file_named_like_an_ignored_directory_is_not_skipped() {
     sandbox.create_file_with_contents("project/.git", b"also not a directory\n");
 
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     assert_eq!(baseline.status, ChangeDetectionStatus::Complete);
     assert_eq!(
@@ -301,7 +301,7 @@ fn git_hooks_pre_commit_is_watched_while_churn_paths_under_git_stay_excluded() {
     let project = sandbox.project_session(1);
     sandbox.create_dir("project/.git");
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     sandbox.create_file_with_contents(
         "project/.git/hooks/pre-commit",
@@ -311,7 +311,7 @@ fn git_hooks_pre_commit_is_watched_while_churn_paths_under_git_stay_excluded() {
     sandbox.create_file_with_contents("project/.git/refs/heads/main", b"deadbeef\n");
     sandbox.create_file_with_contents("project/.git/index", b"not a real index\n");
 
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     assert_eq!(detected.status, ChangeDetectionStatus::Complete);
     let changed: Vec<&PathBuf> = detected
@@ -350,7 +350,7 @@ fn git_config_is_watched_while_churn_paths_under_git_stay_excluded() {
     let project = sandbox.project_session(1);
     sandbox.create_dir("project/.git");
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     sandbox.create_file_with_contents(
         "project/.git/config",
@@ -359,7 +359,7 @@ fn git_config_is_watched_while_churn_paths_under_git_stay_excluded() {
     sandbox.create_file_with_contents("project/.git/objects/ab/cdef0123", b"git internals\n");
     sandbox.create_file_with_contents("project/.git/refs/heads/main", b"deadbeef\n");
 
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     assert_eq!(detected.status, ChangeDetectionStatus::Complete);
     let changed: Vec<&PathBuf> = detected
@@ -396,11 +396,11 @@ fn git_hooks_path_redirect_in_config_is_not_followed() {
     let project = sandbox.project_session(1);
     sandbox.create_dir("project/.git");
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     sandbox.create_file_with_contents("project/.git/config", b"[core]\n\thooksPath = .githooks\n");
 
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     assert_eq!(
         detected
@@ -436,7 +436,7 @@ fn ablation_without_target_in_the_ignore_list_it_reappears_and_truncates_the_sca
         max_changed_paths: 100,
         ignored_directory_names: &[".git", "node_modules"],
     });
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
 
     assert_eq!(
         baseline.status,
@@ -502,7 +502,7 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
     // The default policy: the three exclusions this slice ships with.
     let excluded_started = std::time::Instant::now();
     let excluded_baseline =
-        GeneratedChangeDetector::default().capture_filesystem_baseline(&project);
+        GeneratedChangeDetector::default().capture_filesystem_baseline(&project.root_location());
     let excluded_elapsed = excluded_started.elapsed();
 
     // No exclusions at all, uncapped: reproduces the "wired as-is, before
@@ -514,13 +514,13 @@ fn real_repository_filesystem_scan_cost_headless_benchmark() {
         ignored_directory_names: &[],
     };
     let full_started = std::time::Instant::now();
-    let full_baseline =
-        GeneratedChangeDetector::new(full_walk_policy).capture_filesystem_baseline(&project);
+    let full_baseline = GeneratedChangeDetector::new(full_walk_policy)
+        .capture_filesystem_baseline(&project.root_location());
     let full_elapsed = full_started.elapsed();
 
     let detect_started = std::time::Instant::now();
-    let detected =
-        GeneratedChangeDetector::default().detect_filesystem_changes(&project, &excluded_baseline);
+    let detected = GeneratedChangeDetector::default()
+        .detect_filesystem_changes(&project.root_location(), &excluded_baseline);
     let detect_elapsed = detect_started.elapsed();
 
     eprintln!(
@@ -735,11 +735,11 @@ fn detector_keeps_the_first_n_changed_paths_and_reports_the_omitted_count() {
         max_changed_paths: 1,
         ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
     sandbox.create_file_with_contents("project/a.txt", b"a\n");
     sandbox.create_file_with_contents("project/b.txt", b"b\n");
 
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     assert_eq!(
         detected.status,
@@ -763,10 +763,10 @@ fn detector_suppresses_changed_paths_when_current_scan_fails() {
     let project = sandbox.project_session(1);
     sandbox.create_file_with_contents("project/src/lib.rs", b"metadata\n");
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
     fs::remove_dir_all(sandbox.path("project")).unwrap();
 
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     assert_eq!(
         detected.status,
@@ -782,9 +782,9 @@ fn detector_rejects_cross_project_baselines_without_reporting_paths() {
     let project = project_session(1);
     let other_project = project_session(2);
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&other_project);
+    let baseline = detector.capture_filesystem_baseline(&other_project.root_location());
 
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     assert_eq!(
         detected.status,
@@ -800,8 +800,8 @@ fn git_status_detection_reports_unavailable_or_unsupported_without_running_git()
     let project = project_session(1);
     let detector = GeneratedChangeDetector::default();
 
-    let unavailable = detector.detect_git_status_unavailable(&project);
-    let unsupported = detector.detect_git_status_unsupported(&project);
+    let unavailable = detector.detect_git_status_unavailable(&project.root_location());
+    let unsupported = detector.detect_git_status_unsupported(&project.root_location());
 
     assert_eq!(unavailable.source, ChangeDetectionSource::GitStatus);
     assert_eq!(unavailable.status, ChangeDetectionStatus::Unavailable);
@@ -819,10 +819,11 @@ fn projectsession_creates_strong_agent_run_changeset_only_from_complete_detectio
     let detector = GeneratedChangeDetector::default();
     let run = completed_agent_run(project.id().clone());
     let run_id = run.id.clone();
-    let baseline = detector.capture_agent_run_filesystem_baseline(&project, run_id.clone());
+    let baseline =
+        detector.capture_agent_run_filesystem_baseline(&project.root_location(), run_id.clone());
     project.add_agent_run(run).unwrap();
     fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     let change_set_id = project
         .add_detected_generated_change_set(
@@ -877,13 +878,13 @@ fn projectsession_refuses_changeset_creation_from_non_complete_detection() {
         max_changed_paths: 8,
         ignored_directory_names: crate::project::IGNORED_DIRECTORY_NAMES,
     });
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
     assert_eq!(
         baseline.status,
         ChangeDetectionStatus::Partial { limit: 1 },
         "test precondition: the baseline capture itself must already be truncated"
     );
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     let error = project
         .add_detected_generated_change_set(&baseline, &detected, None, "partial changes")
@@ -904,10 +905,11 @@ fn projectsession_keeps_detached_agentrun_detection_unlinked_and_ambiguous() {
     let detector = GeneratedChangeDetector::default();
     let run = detached_agent_run(project.id().clone());
     let run_id = run.id.clone();
-    let baseline = detector.capture_agent_run_filesystem_baseline(&project, run_id.clone());
+    let baseline =
+        detector.capture_agent_run_filesystem_baseline(&project.root_location(), run_id.clone());
     project.add_agent_run(run).unwrap();
     fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     let change_set_id = project
         .add_detected_generated_change_set(&baseline, &detected, Some(&run_id), "ambiguous changes")
@@ -936,11 +938,12 @@ fn projectsession_blocks_strong_association_when_another_run_is_active() {
     let target_run = completed_agent_run(project.id().clone());
     let target_run_id = target_run.id.clone();
     let active_run = running_agent_run(project.id().clone());
-    let baseline = detector.capture_agent_run_filesystem_baseline(&project, target_run_id.clone());
+    let baseline = detector
+        .capture_agent_run_filesystem_baseline(&project.root_location(), target_run_id.clone());
     project.add_agent_run(target_run).unwrap();
     project.add_agent_run(active_run).unwrap();
     fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     let change_set_id = project
         .add_detected_generated_change_set(
@@ -981,13 +984,14 @@ fn projectsession_blocks_strong_association_when_another_run_closed_after_baseli
     let detector = GeneratedChangeDetector::default();
     let target_run = completed_agent_run(project.id().clone());
     let target_run_id = target_run.id.clone();
-    let baseline = detector.capture_agent_run_filesystem_baseline(&project, target_run_id.clone());
+    let baseline = detector
+        .capture_agent_run_filesystem_baseline(&project.root_location(), target_run_id.clone());
     let mut overlapping_run = completed_agent_run(project.id().clone());
     overlapping_run.ended_at = Some(baseline.captured_at.clone());
     project.add_agent_run(target_run).unwrap();
     project.add_agent_run(overlapping_run).unwrap();
     fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     let change_set_id = project
         .add_detected_generated_change_set(
@@ -1028,7 +1032,8 @@ fn projectsession_blocks_strong_association_when_closed_bystander_has_unknown_en
     let detector = GeneratedChangeDetector::default();
     let target_run = completed_agent_run(project.id().clone());
     let target_run_id = target_run.id.clone();
-    let baseline = detector.capture_agent_run_filesystem_baseline(&project, target_run_id.clone());
+    let baseline = detector
+        .capture_agent_run_filesystem_baseline(&project.root_location(), target_run_id.clone());
     let completed_bystander = completed_agent_run(project.id().clone());
     assert!(
         completed_bystander.ended_at.is_none(),
@@ -1037,7 +1042,7 @@ fn projectsession_blocks_strong_association_when_closed_bystander_has_unknown_en
     project.add_agent_run(target_run).unwrap();
     project.add_agent_run(completed_bystander).unwrap();
     fs::write(sandbox.path("project/src/lib.rs"), b"after\n").unwrap();
-    let detected = detector.detect_filesystem_changes(&project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
 
     let change_set_id = project
         .add_detected_generated_change_set(
@@ -1075,7 +1080,7 @@ fn projectsession_revalidates_detector_paths_before_changeset_creation() {
     let sandbox = TestSandbox::new("change-detection-revalidate");
     let mut project = sandbox.project_session(1);
     let detector = GeneratedChangeDetector::default();
-    let baseline = detector.capture_filesystem_baseline(&project);
+    let baseline = detector.capture_filesystem_baseline(&project.root_location());
     let detected = DetectedChanges {
         project_id: project.id().clone(),
         source: ChangeDetectionSource::FilesystemSnapshot,

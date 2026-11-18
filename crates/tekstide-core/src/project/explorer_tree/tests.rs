@@ -8,9 +8,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::project::ProjectId;
 use crate::project::root::hostile_fixture::{HostileFixture, NEWLINE_NAME};
 use crate::project::root::{ProjectRootValidator, SymlinkPolicy};
-use crate::project::{ProjectId, ProjectSession};
 
 const SMALL_BREADTH: usize = 300;
 
@@ -18,13 +18,13 @@ fn handle(project: &Path) -> ProjectRootHandle {
     let root = ProjectRootValidator
         .validate(project, SymlinkPolicy::FailClosed)
         .expect("the fixture's project root validates");
-    let session = ProjectSession::new(
+    let (display_name, selected_path, canonical_path) = root.into_parts();
+    ProjectRootHandle::new(
         ProjectId::for_test(1),
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
-    );
-    ProjectRootHandle::from_project_session(&session)
+        display_name,
+        selected_path,
+        canonical_path,
+    )
 }
 
 /// Runs every pending scan and applies the results, as the shell's worker

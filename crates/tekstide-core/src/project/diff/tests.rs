@@ -9,13 +9,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::content::FileSnapshot;
 use crate::domain::{ChangeDetectionSource, ChangeDetectionStatus};
+use crate::project::ProjectId;
 use crate::project::change_detection::{
     ChangeLifecycle, ChangePathKind, DetectedChangedPath, DetectedChanges,
 };
 use crate::project::root::{
     FileAccessBlockedReason, ProjectRootHandle, ProjectRootValidator, SymlinkPolicy,
 };
-use crate::project::{ProjectId, ProjectSession};
 
 use super::{
     BINARY_SNIFF_BYTES, ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DiffContent,
@@ -60,13 +60,13 @@ impl Sandbox {
         let valid = ProjectRootValidator
             .validate(&self.root, SymlinkPolicy::FailClosed)
             .expect("sandbox root must validate");
-        let project = ProjectSession::new(
+        let (_, selected_path, canonical_path) = valid.into_parts();
+        ProjectRootHandle::new(
             ProjectId::new_uuid(),
             "diff-gate-fixture",
-            valid.selected_path,
-            valid.canonical_path,
-        );
-        ProjectRootHandle::from_project_session(&project)
+            selected_path,
+            canonical_path,
+        )
     }
 }
 

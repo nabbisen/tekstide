@@ -20,8 +20,8 @@ use super::{
     ExplorerNode, ExplorerNodeKind, ExplorerNodeState, ExplorerRepositoryPlacement,
     FileExplorerScanPolicy, FileExplorerScanner,
 };
+use crate::project::ProjectId;
 use crate::project::root::{ProjectRootHandle, ProjectRootValidator, SymlinkPolicy};
-use crate::project::{ProjectId, ProjectSession};
 use crate::runtime::git::{
     IgnoreAnswer, IgnoreReport, IgnoreUnknown, ignored_entries_in_environment,
 };
@@ -96,13 +96,13 @@ impl Repo {
         let root = ProjectRootValidator
             .validate(&path, SymlinkPolicy::FailClosed)
             .expect("the fixture's project root validates");
-        let session = ProjectSession::new(
+        let (display_name, selected_path, canonical_path) = root.into_parts();
+        ProjectRootHandle::new(
             ProjectId::for_test(1),
-            root.display_name,
-            root.selected_path,
-            root.canonical_path,
-        );
-        ProjectRootHandle::from_project_session(&session)
+            display_name,
+            selected_path,
+            canonical_path,
+        )
     }
 
     /// The scan of `relative` under `handle`, with git asked through the
@@ -280,13 +280,13 @@ fn outside_a_repository_the_floor_list_decides_and_the_scan_says_so() {
     let root = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .unwrap();
-    let session = ProjectSession::new(
+    let (display_name, selected_path, canonical_path) = root.into_parts();
+    let handle = ProjectRootHandle::new(
         ProjectId::for_test(1),
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
+        display_name,
+        selected_path,
+        canonical_path,
     );
-    let handle = ProjectRootHandle::from_project_session(&session);
 
     let mut scan = FileExplorerScanner
         .scan_directory(&handle, "", &FileExplorerScanPolicy::linux_mvp())
@@ -635,13 +635,13 @@ fn asking_git_adds_a_few_milliseconds_to_a_hundred_thousand_entry_scan() {
     let root = ProjectRootValidator
         .validate(&fixture.project, SymlinkPolicy::FailClosed)
         .unwrap();
-    let session = ProjectSession::new(
+    let (display_name, selected_path, canonical_path) = root.into_parts();
+    let handle = ProjectRootHandle::new(
         ProjectId::for_test(1),
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
+        display_name,
+        selected_path,
+        canonical_path,
     );
-    let handle = ProjectRootHandle::from_project_session(&session);
     // The fixture project is made a repository (its config is allowlist-clean).
     let home = fixture.base.join("home");
     fs::create_dir_all(&home).unwrap();
@@ -730,13 +730,13 @@ fn the_worker_entry_point_asks_git_and_says_what_it_learned() {
     let root = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .unwrap();
-    let session = ProjectSession::new(
+    let (display_name, selected_path, canonical_path) = root.into_parts();
+    let handle = ProjectRootHandle::new(
         ProjectId::for_test(1),
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
+        display_name,
+        selected_path,
+        canonical_path,
     );
-    let handle = ProjectRootHandle::from_project_session(&session);
 
     let mut tree = ExplorerTree::default();
     tree.request_scan(Path::new(""));

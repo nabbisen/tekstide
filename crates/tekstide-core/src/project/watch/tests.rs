@@ -491,7 +491,7 @@ fn a_real_directory_removed_before_reconciling_does_not_stop_watching() {
 #[test]
 #[ignore = "a measurement, not a check: see qa-evidence.md § PR-026-A (review 450)"]
 fn measured_git_subprocesses_per_real_scan() {
-    use crate::project::root::{ProjectRootHandle, ProjectRootValidator, SymlinkPolicy};
+    use crate::project::root::{ProjectRootValidator, SymlinkPolicy};
     use crate::project::{ExplorerTree, ProjectId, ProjectSession};
     use crate::runtime::git::ignored_entries_in_environment;
     use std::path::Path;
@@ -530,13 +530,14 @@ fn measured_git_subprocesses_per_real_scan() {
     let valid = ProjectRootValidator
         .validate(repo, SymlinkPolicy::FailClosed)
         .expect("the measurement repository validates");
+    let (display_name, selected_path, canonical_path) = valid.into_parts();
     let session = ProjectSession::new(
         ProjectId::for_test(1),
-        valid.display_name,
-        valid.selected_path,
-        valid.canonical_path,
+        display_name,
+        selected_path,
+        canonical_path,
     );
-    let root = ProjectRootHandle::from_project_session(&session);
+    let root = session.root_handle();
     let env = vec![
         ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
         ("HOME".to_owned(), home.display().to_string()),
@@ -595,17 +596,18 @@ fn real_session(label: &str) -> (crate::project::ProjectSession, PathBuf) {
     let valid = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .expect("the admission project root validates");
+    let (display_name, selected_path, canonical_path) = valid.into_parts();
     let session = ProjectSession::new(
         ProjectId::for_test(1),
-        valid.display_name,
-        valid.selected_path,
-        valid.canonical_path,
+        display_name,
+        selected_path,
+        canonical_path,
     );
     (session, base)
 }
 
 fn real_root(session: &crate::project::ProjectSession) -> crate::project::root::ProjectRootHandle {
-    crate::project::root::ProjectRootHandle::from_project_session(session)
+    session.root_handle()
 }
 
 /// The policy admits a real directory by its canonical path, and admits an in-root
@@ -804,11 +806,12 @@ fn measured_reconcile_cost_per_expanded_directory() {
         let valid = ProjectRootValidator
             .validate(&project, SymlinkPolicy::FailClosed)
             .expect("the measurement project root validates");
+        let (display_name, selected_path, canonical_path) = valid.into_parts();
         let mut session = ProjectSession::new(
             ProjectId::for_test(1),
-            valid.display_name,
-            valid.selected_path,
-            valid.canonical_path,
+            display_name,
+            selected_path,
+            canonical_path,
         );
         for index in 0..count {
             let _ = session.toggle_explorer_directory(Path::new(&format!("d{index:04}")));
@@ -1123,11 +1126,12 @@ fn the_hostile_tree_is_watched_only_where_the_policy_admits_and_never_recurses()
     let valid = ProjectRootValidator
         .validate(&project, SymlinkPolicy::FailClosed)
         .expect("the hostile fixture's root validates");
+    let (display_name, selected_path, canonical_path) = valid.into_parts();
     let mut session = ProjectSession::new(
         ProjectId::for_test(1),
-        valid.display_name,
-        valid.selected_path,
-        valid.canonical_path,
+        display_name,
+        selected_path,
+        canonical_path,
     );
     for expanded in ["src", "loop", "link-out"] {
         let _ = session.toggle_explorer_directory(Path::new(expanded));

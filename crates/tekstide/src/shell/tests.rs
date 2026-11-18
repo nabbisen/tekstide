@@ -17831,7 +17831,7 @@ fn state_with_a_real_change_set_and_retained_detection(
     );
     let baseline = {
         let project = app_shell.state().active_project().unwrap();
-        detector.capture_filesystem_baseline(project)
+        detector.capture_filesystem_baseline(&project.root_location())
     };
 
     std::fs::write(project_dir.join("existing.txt"), b"after\n")
@@ -17841,7 +17841,7 @@ fn state_with_a_real_change_set_and_retained_detection(
 
     let detected = {
         let project = app_shell.state().active_project().unwrap();
-        detector.detect_filesystem_changes(project, &baseline)
+        detector.detect_filesystem_changes(&project.root_location(), &baseline)
     };
 
     let change_set_id = app_shell
@@ -17941,7 +17941,7 @@ fn change_review_content_label_survives_content_long_enough_to_scroll() {
     );
     let baseline = {
         let project = app_shell.state().active_project().unwrap();
-        detector.capture_filesystem_baseline(project)
+        detector.capture_filesystem_baseline(&project.root_location())
     };
 
     // 40 lines, ~2,500 bytes each: genuinely large in bytes (comfortably
@@ -17966,7 +17966,7 @@ fn change_review_content_label_survives_content_long_enough_to_scroll() {
 
     let detected = {
         let project = app_shell.state().active_project().unwrap();
-        detector.detect_filesystem_changes(project, &baseline)
+        detector.detect_filesystem_changes(&project.root_location(), &baseline)
     };
     let change_set_id = app_shell
         .state_mut()
@@ -18319,14 +18319,14 @@ fn change_review_content_escapes_a_bidi_override_in_file_content() {
     );
     let baseline = {
         let project = app_shell.state().active_project().unwrap();
-        detector.capture_filesystem_baseline(project)
+        detector.capture_filesystem_baseline(&project.root_location())
     };
     let mut bytes = b"safe ".to_vec();
     bytes.extend_from_slice("\u{202E}evil.exe".as_bytes());
     std::fs::write(project_dir.join("bidi.txt"), &bytes).expect("writing bidi.txt must succeed");
     let detected = {
         let project = app_shell.state().active_project().unwrap();
-        detector.detect_filesystem_changes(project, &baseline)
+        detector.detect_filesystem_changes(&project.root_location(), &baseline)
     };
     let change_set_id = app_shell
         .state_mut()
@@ -18379,7 +18379,7 @@ fn state_with_a_selected_modified_file(label: &str, content: &[u8]) -> State {
     );
     let baseline = {
         let project = app_shell.state().active_project().unwrap();
-        detector.capture_filesystem_baseline(project)
+        detector.capture_filesystem_baseline(&project.root_location())
     };
 
     std::fs::write(project_dir.join("file.txt"), content)
@@ -18387,7 +18387,7 @@ fn state_with_a_selected_modified_file(label: &str, content: &[u8]) -> State {
 
     let detected = {
         let project = app_shell.state().active_project().unwrap();
-        detector.detect_filesystem_changes(project, &baseline)
+        detector.detect_filesystem_changes(&project.root_location(), &baseline)
     };
     let change_set_id = app_shell
         .state_mut()

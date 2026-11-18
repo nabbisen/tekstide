@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::{ProjectId, ProjectSession};
+use super::ProjectId;
 
 mod explorer;
 
@@ -23,11 +23,65 @@ pub enum SymlinkPolicy {
     AllowCanonicalTarget,
 }
 
+/// RFC-077 D7.1 (review 696/697/698): fields are private, not `pub` --
+/// the defect review 696 found (`ProjectRootHandle::from_project_session`
+/// built one by hand from a `ProjectSession`'s own accessors, bypassing
+/// `ProjectRootValidator`) is closed by making a struct literal
+/// impossible outside this file, not merely discouraged. The two
+/// construction sites that remain are both inside `root.rs`:
+/// `ProjectRootValidator::validate`'s own sanctioned mint, and
+/// `ProjectRootHandle::new` below, which builds one from values its
+/// caller already holds -- the same values `from_project_session` used
+/// to read through `&ProjectSession`, just no longer naming that type to
+/// get them. Accessors below, plus `#[cfg(test)] for_test`, give every
+/// other module the read (and test-only write) access it needs without
+/// a public constructor -- the `VerifiedCwd::for_test` pattern
+/// (`agent/launch.rs`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValidProjectRoot {
-    pub display_name: String,
-    pub selected_path: PathBuf,
-    pub canonical_path: PathBuf,
+    display_name: String,
+    selected_path: PathBuf,
+    canonical_path: PathBuf,
+}
+
+impl ValidProjectRoot {
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub fn selected_path(&self) -> &Path {
+        &self.selected_path
+    }
+
+    pub fn canonical_path(&self) -> &Path {
+        &self.canonical_path
+    }
+
+    /// By-value destructuring for a caller (`app.rs`'s own
+    /// `add_validated_project_root`) that already owns `self` and would
+    /// otherwise have to clone each field back out of the accessors
+    /// above.
+    pub fn into_parts(self) -> (String, PathBuf, PathBuf) {
+        (self.display_name, self.selected_path, self.canonical_path)
+    }
+
+    /// Test-only escape hatch, matching this crate's established
+    /// `for_test` convention (`VerifiedCwd::for_test`, `ProjectId::for_test`)
+    /// -- a fixture that needs a `ValidProjectRoot` without running a
+    /// real filesystem validation. `#[cfg(test)]`-gated, so this does not
+    /// weaken the real guarantee in a release build.
+    #[cfg(test)]
+    pub fn for_test(
+        display_name: impl Into<String>,
+        selected_path: impl Into<PathBuf>,
+        canonical_path: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            display_name: display_name.into(),
+            selected_path: selected_path.into(),
+            canonical_path: canonical_path.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,13 +91,24 @@ pub struct ProjectRootHandle {
 }
 
 impl ProjectRootHandle {
-    pub fn from_project_session(project: &ProjectSession) -> Self {
+    /// RFC-077 D7.1: replaces `from_project_session(&ProjectSession)` --
+    /// `root` no longer names `ProjectSession` at all. Takes exactly the
+    /// values the old constructor read through that reference
+    /// (`project.rs`'s own `ProjectSession::root_location`-adjacent
+    /// accessors), so the one caller, `project::session`, supplies them
+    /// directly instead of handing over the whole session.
+    pub fn new(
+        project_id: ProjectId,
+        display_name: impl Into<String>,
+        selected_path: impl Into<PathBuf>,
+        canonical_path: impl Into<PathBuf>,
+    ) -> Self {
         Self {
-            project_id: project.id().clone(),
+            project_id,
             valid_root: ValidProjectRoot {
-                display_name: project.display_name().to_owned(),
-                selected_path: project.root_path().clone(),
-                canonical_path: project.canonical_root_path().clone(),
+                display_name: display_name.into(),
+                selected_path: selected_path.into(),
+                canonical_path: canonical_path.into(),
             },
         }
     }

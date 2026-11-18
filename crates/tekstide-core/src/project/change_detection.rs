@@ -6,10 +6,10 @@ use std::time::UNIX_EPOCH;
 
 use crate::domain::{
     AgentRunId, ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus,
-    DomainTimestamp,
+    DomainTimestamp, ProjectRootLocation,
 };
 
-use super::{ProjectId, ProjectSession};
+use super::ProjectId;
 
 pub const DEFAULT_CHANGE_DETECTOR_ENTRY_LIMIT: usize = 4096;
 pub const DEFAULT_CHANGED_PATH_LIMIT: usize = 4096;
@@ -167,13 +167,13 @@ impl GeneratedChangeDetector {
         Self { policy }
     }
 
-    pub fn capture_filesystem_baseline(&self, project: &ProjectSession) -> ReviewBaseline {
+    pub fn capture_filesystem_baseline(&self, project: &ProjectRootLocation) -> ReviewBaseline {
         self.capture_filesystem_baseline_for_agent_run(project, None)
     }
 
     pub fn capture_agent_run_filesystem_baseline(
         &self,
-        project: &ProjectSession,
+        project: &ProjectRootLocation,
         agent_run_id: AgentRunId,
     ) -> ReviewBaseline {
         self.capture_filesystem_baseline_for_agent_run(project, Some(agent_run_id))
@@ -181,7 +181,7 @@ impl GeneratedChangeDetector {
 
     fn capture_filesystem_baseline_for_agent_run(
         &self,
-        project: &ProjectSession,
+        project: &ProjectRootLocation,
         agent_run_id: Option<AgentRunId>,
     ) -> ReviewBaseline {
         let captured_at = DomainTimestamp::now_utc();
@@ -204,7 +204,7 @@ impl GeneratedChangeDetector {
 
     pub fn detect_filesystem_changes(
         &self,
-        project: &ProjectSession,
+        project: &ProjectRootLocation,
         baseline: &ReviewBaseline,
     ) -> DetectedChanges {
         if baseline.project_id != *project.id() {
@@ -258,7 +258,7 @@ impl GeneratedChangeDetector {
         }
     }
 
-    pub fn detect_git_status_unavailable(&self, project: &ProjectSession) -> DetectedChanges {
+    pub fn detect_git_status_unavailable(&self, project: &ProjectRootLocation) -> DetectedChanges {
         DetectedChanges {
             project_id: project.id().clone(),
             source: ChangeDetectionSource::GitStatus,
@@ -270,7 +270,7 @@ impl GeneratedChangeDetector {
         }
     }
 
-    pub fn detect_git_status_unsupported(&self, project: &ProjectSession) -> DetectedChanges {
+    pub fn detect_git_status_unsupported(&self, project: &ProjectRootLocation) -> DetectedChanges {
         DetectedChanges {
             project_id: project.id().clone(),
             source: ChangeDetectionSource::GitStatus,
@@ -284,7 +284,7 @@ impl GeneratedChangeDetector {
 
     pub fn validate_changed_path(
         &self,
-        project: &ProjectSession,
+        project: &ProjectRootLocation,
         selected_path: impl AsRef<Path>,
     ) -> Result<PathBuf, ChangedPathValidationError> {
         validate_changed_path(project, selected_path.as_ref())
@@ -298,7 +298,7 @@ struct FilesystemScan {
 }
 
 fn scan_filesystem(
-    project: &ProjectSession,
+    project: &ProjectRootLocation,
     policy: &GeneratedChangeDetectionPolicy,
 ) -> FilesystemScan {
     let root = project.canonical_root_path();
@@ -620,7 +620,7 @@ fn combine_status(
 }
 
 fn validate_changed_path(
-    project: &ProjectSession,
+    project: &ProjectRootLocation,
     selected_path: &Path,
 ) -> Result<PathBuf, ChangedPathValidationError> {
     let normalized = if selected_path.is_absolute() {
@@ -711,7 +711,7 @@ fn normalize_relative_changed_path(
 }
 
 fn escaping_symlink_reason(
-    project: &ProjectSession,
+    project: &ProjectRootLocation,
     selected_absolute_path: &Path,
 ) -> Option<ChangedPathValidationErrorReason> {
     let relative_path = selected_absolute_path
@@ -774,7 +774,7 @@ fn contains_existing_symlink_component(path: &Path) -> io::Result<bool> {
 }
 
 fn changed_path_error(
-    project: &ProjectSession,
+    project: &ProjectRootLocation,
     selected_path: &Path,
     reason: ChangedPathValidationErrorReason,
 ) -> ChangedPathValidationError {

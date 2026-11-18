@@ -15,11 +15,11 @@ use super::hostile_fixture::{
     non_utf8_name,
 };
 use super::{ExplorerNodeState, ExplorerScanError, FileExplorerScanPolicy, FileExplorerScanner};
+use crate::project::ProjectId;
 use crate::project::root::{
     FileAccessBlockedReason, FileAccessSymlinkStatus, ProjectRootHandle, ProjectRootValidator,
     SymlinkPolicy,
 };
-use crate::project::{ProjectId, ProjectSession};
 use crate::text_safety::quote_untrusted;
 
 /// A small breadth for tests that need the other rows but not 100,000
@@ -54,13 +54,13 @@ fn handle(fixture: &HostileFixture) -> ProjectRootHandle {
     let root = ProjectRootValidator
         .validate(&fixture.project, SymlinkPolicy::FailClosed)
         .expect("the fixture's project root validates");
-    let session = ProjectSession::new(
+    let (display_name, selected_path, canonical_path) = root.into_parts();
+    ProjectRootHandle::new(
         ProjectId::for_test(1),
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
-    );
-    ProjectRootHandle::from_project_session(&session)
+        display_name,
+        selected_path,
+        canonical_path,
+    )
 }
 
 fn scan(

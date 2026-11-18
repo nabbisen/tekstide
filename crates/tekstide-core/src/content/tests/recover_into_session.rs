@@ -15,11 +15,12 @@ fn recovered(text: &str) -> RecoveredBufferInit {
 fn session(sandbox: &TestSandbox) -> ProjectSession {
     let project_dir = sandbox.create_dir("project");
     let root = validate(&project_dir);
+    let (display_name, selected_path, canonical_path) = root.into_parts();
     ProjectSession::new(
         ProjectId::for_test(1),
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
+        display_name,
+        selected_path,
+        canonical_path,
     )
 }
 

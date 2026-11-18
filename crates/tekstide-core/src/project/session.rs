@@ -27,9 +27,9 @@ use crate::domain::{
     AgentCompatibilityLevel, AgentRun, AgentRunId, AgentRunStatus, AgentRunTransitionError,
     ApprovalDecision, ApprovalId, ApprovalRequest, AuditEvent, ChangeAssociationConfidence,
     ChangeDetectionStatus, ChangeSet, ChangeSetId, DomainTimestamp, OwnershipError,
-    ProjectGitSummary, ProjectId, ProjectProviderState, ReviewState, TerminalId, TerminalSession,
-    TerminalStatus, TerminalTransitionError, Transcript, TranscriptAbsence, TranscriptId,
-    TranscriptOrigin, VisibleSlot,
+    ProjectGitSummary, ProjectId, ProjectProviderState, ProjectRootLocation, ReviewState,
+    TerminalId, TerminalSession, TerminalStatus, TerminalTransitionError, Transcript,
+    TranscriptAbsence, TranscriptId, TranscriptOrigin, VisibleSlot,
 };
 
 use super::change_detection::{
@@ -220,6 +220,35 @@ impl ProjectSession {
         &self.canonical_root_path
     }
 
+    /// RFC-077 D7.1: `change_detection` no longer names `ProjectSession`
+    /// directly (the back-edge the gate's `project` capability-submodule
+    /// bound is blocked on) -- this is the one place that assembles the
+    /// two values it reads (`id`, `canonical_root_path`) into the
+    /// `domain` vocabulary type it now takes instead, since `project` is
+    /// the module with an edge to both already.
+    pub fn root_location(&self) -> ProjectRootLocation {
+        ProjectRootLocation {
+            id: self.id.clone(),
+            canonical_root_path: self.canonical_root_path.clone(),
+        }
+    }
+
+    /// RFC-077 D7.1: replaces `ProjectRootHandle::from_project_session(&self)`
+    /// -- `root` no longer names `ProjectSession` at all, so this method
+    /// lives here instead and supplies `ProjectRootHandle::new` with the
+    /// same four values the old constructor used to read through a
+    /// `&ProjectSession` parameter. Every caller that used to write
+    /// `ProjectRootHandle::from_project_session(&project)` now writes
+    /// `project.root_handle()`.
+    pub fn root_handle(&self) -> ProjectRootHandle {
+        ProjectRootHandle::new(
+            self.id.clone(),
+            self.display_name.clone(),
+            self.root_path.clone(),
+            self.canonical_root_path.clone(),
+        )
+    }
+
     pub fn trust_state(&self) -> WorkspaceTrust {
         self.trust_state
     }
@@ -270,7 +299,7 @@ impl ProjectSession {
         std::collections::BTreeSet<super::watch::WatchedDirectory>,
         Vec<(PathBuf, super::watch::WatchAdmissionError)>,
     ) {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let (expanded, open_document_directories) = self.content_workspace.watch_inputs();
         super::watch::desired_directories(&root, &expanded, &open_document_directories)
     }
@@ -1467,7 +1496,9 @@ impl ProjectSession {
         let changed_files = detected
             .changed_paths
             .iter()
-            .map(|changed_path| detector.validate_changed_path(self, &changed_path.relative_path))
+            .map(|changed_path| {
+                detector.validate_changed_path(&self.root_location(), &changed_path.relative_path)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         if changed_files.is_empty() {
             return Ok(None);
@@ -1568,7 +1599,7 @@ impl ProjectSession {
         &mut self,
         selected_relative_path: impl AsRef<std::path::Path>,
     ) -> Result<(), ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let result = self.content_workspace.open_text_document(
             &root,
             selected_relative_path,
@@ -1602,7 +1633,7 @@ impl ProjectSession {
         selected_relative_path: impl AsRef<std::path::Path>,
         recovered: RecoveredBufferInit,
     ) -> Result<(), ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let result = self
             .content_workspace
             .recover_text_document(
@@ -1621,7 +1652,7 @@ impl ProjectSession {
     /// [`ProjectContentWorkspace::reload_active_document`]'s own doc for why this is not
     /// `open_text_document` on the same path.
     pub fn reload_active_document(&mut self) -> Result<(), ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let result = self
             .content_workspace
             .reload_active_document(&root, TextDocumentOpenPolicy::linux_mvp());
@@ -1641,7 +1672,7 @@ impl ProjectSession {
         &mut self,
         selected_relative_path: impl Into<PathBuf>,
     ) -> Result<(), ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let result = self.content_workspace.scan_explorer_directory(
             &root,
             selected_relative_path,
@@ -1707,7 +1738,7 @@ impl ProjectSession {
         {
             return Vec::new();
         }
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         self.content_workspace.explorer_scan_requests(&root)
     }
 
@@ -1739,7 +1770,7 @@ impl ProjectSession {
         &mut self,
         selected_relative_path: impl Into<PathBuf>,
     ) -> Result<(), ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         self.content_workspace.scan_explorer_directory(
             &root,
             selected_relative_path,
@@ -1807,7 +1838,7 @@ impl ProjectSession {
     }
 
     pub fn save_active_text_document(&mut self) -> Result<SaveDecision, ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let result = self
             .content_workspace
             .save_active_document(&root, TextDocumentOpenPolicy::linux_mvp());
@@ -1818,7 +1849,7 @@ impl ProjectSession {
 
     /// RFC-065 PR-065-D: see [`ProjectContentWorkspace::save_all_documents`]'s own doc.
     pub fn save_all_text_documents(&mut self) -> SaveAllOutcome {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let outcome = self
             .content_workspace
             .save_all_documents(&root, TextDocumentOpenPolicy::linux_mvp());
@@ -1830,7 +1861,7 @@ impl ProjectSession {
     pub fn refresh_active_text_document(
         &mut self,
     ) -> Result<ExternalChangeDecision, ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let result = self
             .content_workspace
             .refresh_active_document(&root, TextDocumentOpenPolicy::linux_mvp());
@@ -1846,7 +1877,7 @@ impl ProjectSession {
         &mut self,
         canonical_path: &std::path::Path,
     ) -> Result<ExternalChangeDecision, ProjectContentError> {
-        let root = ProjectRootHandle::from_project_session(self);
+        let root = self.root_handle();
         let result = self.content_workspace.refresh_document_by_canonical_path(
             canonical_path,
             &root,
@@ -1861,7 +1892,7 @@ impl ProjectSession {
         &mut self,
     ) -> Result<ProjectActiveFileLaunchAssessment, ProjectContentError> {
         if self.content_workspace.active_document().is_some() {
-            let root = ProjectRootHandle::from_project_session(self);
+            let root = self.root_handle();
             let result = self
                 .content_workspace
                 .refresh_active_document(&root, TextDocumentOpenPolicy::linux_mvp());

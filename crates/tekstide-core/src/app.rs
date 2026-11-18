@@ -223,13 +223,17 @@ impl AppState {
     }
 
     pub fn add_validated_project_root(&mut self, root: ValidProjectRoot) -> AddProjectOutcome {
-        if let Some(existing_project_id) = self.project_id_by_canonical_root(&root.canonical_path) {
+        if let Some(existing_project_id) = self.project_id_by_canonical_root(root.canonical_path())
+        {
             self.active_project_id = Some(existing_project_id.clone());
             return AddProjectOutcome::FocusedExisting(existing_project_id);
         }
 
-        let project_id =
-            self.add_project_session(root.display_name, root.selected_path, root.canonical_path);
+        // RFC-077 D7.1: `ValidProjectRoot`'s fields are private now, so
+        // `into_parts` is the by-value read -- `root` is already owned
+        // here, and the fields are about to be consumed anyway.
+        let (display_name, selected_path, canonical_path) = root.into_parts();
+        let project_id = self.add_project_session(display_name, selected_path, canonical_path);
         AddProjectOutcome::Added(project_id)
     }
 

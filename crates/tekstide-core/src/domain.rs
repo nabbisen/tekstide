@@ -35,7 +35,7 @@ pub use file_access::{
     FileAccessTarget,
 };
 pub use git_status::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
-pub use identity::ProjectId;
+pub use identity::{ProjectId, ProjectRootLocation};
 pub use ids::{
     AgentRunId, ApprovalId, AuditEventId, AuditOperationId, ChangeSetId, TerminalId, TranscriptId,
 };

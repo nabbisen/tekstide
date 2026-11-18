@@ -3776,7 +3776,7 @@ fn attempt_generated_change_detection(
     };
     let detector =
         tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy());
-    let detected = detector.detect_filesystem_changes(project, &baseline);
+    let detected = detector.detect_filesystem_changes(&project.root_location(), &baseline);
     state
         .agent_run_change_detection_status
         .insert(agent_run_id.clone(), detected.status);
@@ -4740,7 +4740,7 @@ fn attempt_prepared_agent_run_launch(
     // baseline means at the other end.
     let pre_launch_baseline = state.app_shell.state().active_project().map(|project| {
         tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy())
-            .capture_filesystem_baseline(project)
+            .capture_filesystem_baseline(&project.root_location())
     });
 
     let mut runtime = TerminalRuntime::new();
@@ -7481,7 +7481,7 @@ fn seed_change_review_demo_change_set(
         tekstide_core::project::GeneratedChangeDetector::new(generated_change_detection_policy());
     let (baseline, demo_file) = app_shell.state().active_project().map(|project| {
         (
-            detector.capture_filesystem_baseline(project),
+            detector.capture_filesystem_baseline(&project.root_location()),
             project
                 .canonical_root_path()
                 .join("tekstide-changeset-demo.txt"),
@@ -7495,7 +7495,7 @@ fn seed_change_review_demo_change_set(
     let detected = app_shell
         .state()
         .active_project()
-        .map(|project| detector.detect_filesystem_changes(project, &baseline))?;
+        .map(|project| detector.detect_filesystem_changes(&project.root_location(), &baseline))?;
     let change_set_id = app_shell
         .state_mut()
         .add_detected_generated_change_set(
@@ -14336,8 +14336,7 @@ fn select_change_review_file(state: &mut State, relative_path: std::path::PathBu
         .detected_changes_by_change_set
         .get(&change_set_id)
         .and_then(|detected| {
-            let root =
-                tekstide_core::project::root::ProjectRootHandle::from_project_session(project);
+            let root = project.root_handle();
             tekstide_core::project::read_diff_content(
                 detected,
                 &root,
@@ -14451,7 +14450,7 @@ fn change_review_decision_tree_has_moved(
     let Some(baseline) = &selection.baseline else {
         return false;
     };
-    let root = tekstide_core::project::root::ProjectRootHandle::from_project_session(project);
+    let root = project.root_handle();
     tekstide_core::project::diff_content_is_stale(baseline, &root, &selection.relative_path)
         .unwrap_or(true)
 }
@@ -15620,7 +15619,7 @@ fn change_review_content_lines(
         ),
     );
 
-    let root = tekstide_core::project::root::ProjectRootHandle::from_project_session(project);
+    let root = project.root_handle();
 
     // D2: refuse rather than render-with-a-warning when the file has
     // moved since the moment this selection was made -- `baseline` is

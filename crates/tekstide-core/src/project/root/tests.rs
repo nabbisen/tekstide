@@ -3,7 +3,7 @@ use super::{
     ProjectFileAccessPolicy, ProjectRootHandle, ProjectRootValidationError, ProjectRootValidator,
     SymlinkPolicy, ValidProjectRoot,
 };
-use crate::project::{ProjectId, ProjectSession};
+use crate::project::ProjectId;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -342,13 +342,8 @@ fn validate(path: &Path, symlink_policy: SymlinkPolicy) -> ValidProjectRoot {
 }
 
 fn root_handle(project_id: ProjectId, root: ValidProjectRoot) -> ProjectRootHandle {
-    let project = ProjectSession::new(
-        project_id,
-        root.display_name,
-        root.selected_path,
-        root.canonical_path,
-    );
-    ProjectRootHandle::from_project_session(&project)
+    let (display_name, selected_path, canonical_path) = root.into_parts();
+    ProjectRootHandle::new(project_id, display_name, selected_path, canonical_path)
 }
 
 struct TestSandbox {

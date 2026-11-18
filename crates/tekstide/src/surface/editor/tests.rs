@@ -9,7 +9,7 @@ use tekstide_core::project::root::{
     ProjectRootHandle, ProjectRootValidator, SymlinkPolicy, ValidProjectRoot,
 };
 use tekstide_core::project::{
-    DocumentSaveOutcome, ProjectContentStatus, ProjectId, ProjectSession, SaveAllOutcome,
+    DocumentSaveOutcome, ProjectContentStatus, ProjectId, SaveAllOutcome,
 };
 
 use tekstide_core::content::TextCursor;
@@ -68,13 +68,13 @@ impl Sandbox {
         let valid: ValidProjectRoot = ProjectRootValidator
             .validate(&self.root, SymlinkPolicy::FailClosed)
             .expect("sandbox root must validate");
-        let project = ProjectSession::new(
+        let (_, selected_path, canonical_path) = valid.into_parts();
+        ProjectRootHandle::new(
             ProjectId::new_uuid(),
             "editor-surface-fixture",
-            valid.selected_path,
-            valid.canonical_path,
-        );
-        ProjectRootHandle::from_project_session(&project)
+            selected_path,
+            canonical_path,
+        )
     }
 }
 
