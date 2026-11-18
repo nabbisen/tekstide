@@ -5992,6 +5992,19 @@ fn record_project_close_blocked_up_front(
 /// same discipline `ManagedProcessLifecycle` already follows), `record_safe_close_decision`
 /// last.
 fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal) {
+    // Review 695 Required 1: cleared unconditionally, first, before any
+    // of the work below -- so this notice always describes *this*
+    // close, never one from earlier in the session. `status_bar`
+    // renders every frame regardless of route, which is exactly why
+    // `save_all_notice`'s own "never cleared" precedent does not
+    // transfer here: that notice renders only inside
+    // `surface::editor::view`, a route that disappears along with the
+    // project that raised it, so leaving it set costs nothing there.
+    // This one has no such route to disappear with it, so a later
+    // clean, confirmed close must self-correct the line rather than
+    // leave a now-false claim standing for the rest of the session.
+    state.containment_notice = None;
+
     let project_id = modal.project_id.clone();
     let operation_id = tekstide_core::domain::AuditOperationId::new_uuid();
     let mut audit_store =
@@ -6070,6 +6083,14 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
     // *are* deterministic: `TerminalSessionConfirmation::should_notify`'s
     // own exhaustive unit test, and the vacuous case this decision was
     // written to fix.
+    //
+    // **That exclusion is a property of `close_project`'s own fresh
+    // re-assessment, one layer away -- not of this function (review 695
+    // accepted-section note).** If a future slice stops letting a
+    // pane-less active terminal block a close, the benign cases named
+    // above start reaching `closed == true` un-transitioned, and this
+    // whole comment's reasoning needs rechecking rather than assumed
+    // still true.
     if closed && terminal_session_confirmation.should_notify() {
         state.containment_notice = Some(ContainmentNotice);
     }
@@ -6172,15 +6193,23 @@ enum TerminalSessionConfirmation {
 }
 
 impl TerminalSessionConfirmation {
-    /// The audit record's own bool, unchanged in shape and in every
-    /// value it has ever produced for a real close -- `NothingToCheck`
-    /// reads as `true` here exactly as the old accumulator's default
-    /// did, since nothing has ever branched on this value except the
-    /// choice of `AuditOutcome` (the containment-watch review's own
-    /// finding). Only [`Self::should_notify`] below is required to
-    /// tell `NothingToCheck` apart from `Confirmed`.
+    /// The audit record's own bool. `false` for every variant except
+    /// [`Self::Confirmed`] -- restoring D11 (review 501)'s own rule,
+    /// whose comment this type's introduction deleted while reversing
+    /// it: "a value that is wrong but currently masked is exactly the
+    /// shape that produced review 490's own data-loss defect." An
+    /// earlier version of this method read `NothingToCheck` as `true`,
+    /// correct in the one record it reaches today only because
+    /// `&& closed` (`apply_project_close_confirmation`) happens to be
+    /// `false` on that branch -- masked, not honest, and exactly what
+    /// D11 named. `false` here is also what makes the vacuous case (an
+    /// active agent run with no terminal of its own, so the loop in
+    /// `terminate_project_live_work` never runs) stop writing
+    /// `terminal_session_confirmed_empty: true` to the durable record
+    /// for a close where no enumeration ever ran. (Review 695 Required
+    /// 2.)
     fn for_audit_record(self) -> bool {
-        !matches!(self, Self::NotConfirmed)
+        matches!(self, Self::Confirmed)
     }
 
     /// Whether this outcome should raise [`ContainmentNotice`] --

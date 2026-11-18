@@ -15269,15 +15269,17 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
 
 /// The containment watch's product decision (`release-checklist.md`,
 /// 2026-11-18): `TerminalSessionConfirmation`'s own two derived facts,
-/// exhaustively, for all three variants -- `for_audit_record` must stay
-/// byte-identical to the old accumulator's real behaviour (`true`
-/// unless `NotConfirmed`), and `should_notify` must fire on exactly one
-/// of the three.
+/// exhaustively, for all three variants. **`for_audit_record` is `true`
+/// for exactly one variant, `Confirmed` (review 695 Required 2) --**
+/// restoring D11 (review 501)'s own rule that a value "wrong but
+/// currently masked" is not acceptable even where nothing branches on
+/// it today. `should_notify` must fire on exactly one of the three,
+/// `NotConfirmed`.
 #[test]
 fn terminal_session_confirmation_derives_the_audit_bool_and_the_notice_correctly() {
     use super::TerminalSessionConfirmation::{Confirmed, NotConfirmed, NothingToCheck};
 
-    assert!(NothingToCheck.for_audit_record());
+    assert!(!NothingToCheck.for_audit_record());
     assert!(!NothingToCheck.should_notify());
 
     assert!(Confirmed.for_audit_record());
