@@ -245,6 +245,69 @@ imprecise for `pl` outside `cargo install`; see the locale-loading entry below. 
 
 **What would reopen the dependency question**: snora reaching 1.0 (churn stops, and cargo compatibility stops breaking every minor), or this project genuinely needing a full design system — light/dark/high-contrast across many surfaces, with spacing and radius scales — rather than the ideas above.
 
+### The reopening conditions, re-read against snora 0.65.0 (2026-11-18, at the owner's own direction)
+
+**The decline is a standing decision with named triggers, not a settled fact** — the owner stated this
+directly after a reviewer's summary described snora as something that "can't reach us," which
+flattened the two conditions above and the RTL trigger into a permanent no. The conditions are the
+record; this section re-reads them against 0.65.0 and **extends them by two that the 2026-08 list
+could not have anticipated.** None is met today, so the decline stands — but on a shorter list than
+before.
+
+**Condition 1 (1.0): not met, and the raw cadence is worse — but the objection's own cost has
+changed shape.** Decline was taken at `0.33.1` on 2026-08-17; 0.65.0 is 2026-11-18. That is **32
+minor versions in 93 days**, roughly one every three days, against the six-in-one-day figure the
+original objection cited. What has changed is not the cadence but what it costs to track: snora now
+publishes a [migrations index](https://nabbisen.github.io/snora/guides/migrations.html) that
+**enumerates which releases can stop your code compiling** — "since 0.60 there are two" (0.63's
+`LogicalRow`, 0.64's required `direction`) — with a per-release guide carrying a *"Re-check if you
+acted on…"* table. The original wording, *"tekstide would inherit that cadence into its own release
+process,"* is still true of the cadence and no longer true of the discovery cost: 2 compile-breaking
+releases out of 6, named in advance, is a bounded upgrade budget rather than an open one. **Reword
+this reason from "disqualifying" to "bounded, documented, and still real"** — it remains a reason,
+and it is no longer the same reason.
+
+**Condition 2 (a genuine full-design-system need): not met, and slightly closer.** Still one
+compiled dark default plus user-configurable roles through `config.toml`; no light or
+high-contrast preset ships. What moved it is our own gap, found the same day
+(`derived-contrast-pairs.md`'s 2026-11-18 section): scrollbar rail and thumb are drawn by
+`iced::Theme`, outside `Theme` and therefore outside the gate's exhaustive destructure **by
+construction**. Closing that properly means roles for rail/thumb/track across states — and if
+presets are ever added, across presets too. That *is* design-system work, which is the condition's
+own wording. snora 0.63+ already holds every word and non-text element it draws, as drawn, in every
+preset, state and direction, by test.
+
+**Condition 3 (the first RTL locale): not met, and the thing it would buy is materially more
+complete.** Still `en` + `pl`, both LTR. But 0.63 mirrored right-to-left for real (header, Tab
+order, focus across a direction change) and 0.64 brought the five widgets that ignored direction
+into line. At evaluation time ABDD was the novel *API*; it is now a finished behaviour.
+
+**New condition 4 — the first product requirement for a checkbox, toggle, radio, select or
+slider.** This could not have been on the 2026-08 list: snora drew none of these then, so there was
+nothing on offer. **0.65.0 ships five** — `snora::{checkbox, toggler, radio_group, select, slider}`,
+each one Tab stop with the platform's keys (their RFC-134) — on the same pinned `iced 0.14` whose
+own equivalents **register no focus at all** (`checkbox`, `toggler`, `radio`, `pick_list`,
+`combo_box`, `slider`; only `text_input` is reachable). We use none today and are guarded against
+one of them for an unrelated reason. The moment a requirement needs any of them, the choice is
+build-a-reachable-control-in-house or take snora's, and **the "widgets firmly out" reason above does
+not reach this case**: that reason is about re-basing header/sidebar/footer/menu/tab surfaces whose
+untrusted-text escaping, focus routing and i18n are already reviewed work here. A form control is a
+surface this project has never built, so adopting one there re-does nothing. That makes this the
+cleanest adoption opportunity on the list, and the trigger is a requirement, not a release.
+
+**New condition 5 — a need for keyboard behaviour iced itself blocks.** Adjacent to 4 and worth
+separating: snora now documents chord pass-through (0.62: `Ctrl+Enter` and any Ctrl/Alt/logo chord
+no longer presses a focused snora control, so it reaches the application) and F6 counting from a
+click. Both are the kind of thing this project has solved once per surface, in-house, and would
+otherwise solve again. Not a trigger on its own; a tiebreaker if 4 ever fires.
+
+**Unchanged reasons, re-verified:** the `crate::theme::Theme` seam still carries project-specific
+reasoning no generic token vocabulary expresses (`scrim`'s translucency is RFC-018 PR-018-G evidence
+about spoofing); `snora-widgets`' chrome surfaces are still out for the re-basing reason above; and
+snora still does not help the screen-reader gap — nothing in 0.62–0.65 mentions an accessibility
+tree or AccessKit, and our own statement ("no screen-reader support", not "limited" or "partial")
+stands.
+
 ### Sent to snora 2026-09-05, replying to their 0.43.0 / 0.44.0 letter
 
 Neither release affects anyone's build. The letter carried a corrected statement (their prefab
