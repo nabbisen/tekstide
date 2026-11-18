@@ -469,3 +469,72 @@ mechanism in review 669's required-1 fix would need to additionally check, for e
 `text_color:` hit, that the role's own `derived_contrast_pairs` declaration marks it `is_text:
 true` -- a small extension to the same test, left for whoever next touches this guard rather than
 built speculatively now.
+
+## snora 0.65.0's own contrast audit read against this gate, 2026-11-18
+
+snora's 0.65.0 release news to app teams (`.git-exclude/upstream/snora/receive/0.65.0/`) reports two
+audits of its book against its tests and its drawn pixels. tekstide is **not** a snora adopter
+(declined 2026-08-17, `future-work.md`; re-verified — no `snora` in any `Cargo.toml` or `.rs` here),
+but this gate was *modelled on* snora's, so the scope question transfers even though the dependency
+does not. Two of their four headline items reach us, through the shared `iced 0.14` substrate rather
+than through any crate of theirs.
+
+**Their class (A) — declared pairs measured at rest, missing the states a widget draws** (a hovered
+or pressed label, a notice's action label; 3.12-4.47:1 on their own presets). **We found and fixed
+this class independently, a week earlier**: review 669 (2026-11-11) removed `theme::button_style`'s
+`Status::Disabled` branch, which dimmed `text_color` to `a: 0.6` — 5.59:1 composited, under the AAA
+floor D3 above holds the default theme to, and "measured by nothing: the alpha was applied
+downstream of `derived_contrast_pairs`'s own exhaustive `Theme` destructure, which sees `foreground`
+opaque and cannot see a widget dimming it." The fix went further than enumerating states: it forbids
+the shape, via `every_production_text_colour_is_a_bare_theme_role_or_a_declared_exception`
+(`theme/tests.rs`). Two projects on the same substrate arriving at the same defect from opposite
+directions is good evidence that the structural guard is the right answer and state enumeration is
+the fallback.
+
+**Their class (B) — the non-text half of the same mistake — is an open gap here.** Their worst
+measured offenders were a progress track (1.00:1), a `Debug` toast's edge (1.00-1.20:1),
+`card::raised`'s border (2.75:1) and **a long menu's scrollbar thumb (1.02-1.8:1)**. Against this
+tree:
+
+- `derived_contrast_pairs(theme: &Theme)` derives its pairs by destructuring `Theme` exhaustively,
+  so a colour that is not a `Theme` field is outside its scope **by construction** — the
+  mechanism's strength for roles, and its blind spot for anything drawn from elsewhere.
+- **There is no non-text analogue of the text guard.** Nothing forbids a border, fill, track or
+  thumb colour that is not a bare measured role.
+- The concrete instance: **scrollbars are drawn by `iced::Theme`'s default, not by ours.**
+  `scrollable` appears in production at `surface/board.rs:139`, `shell.rs:11404` and elsewhere with
+  geometry only (`.direction`, `.width`, `.height`, `.id`, `.spacing(8)`) — no `.style(...)` call
+  anywhere and no `scrollable::Catalog` implementation in the crate. `crate::theme::Theme`'s module
+  doc states it is "unrelated to `iced::Theme`", so the rail and thumb take colours this project
+  neither configures nor measures.
+
+That is the shape tekstide already fixed once, for buttons — *"iced's default button draws its own
+blue from `iced::Theme`, which no configuration reaches"* (RFC-054 review 428). The button was
+styled; the scrollbar was not.
+
+**Deliberately not quoting a ratio for ours.** 1.02-1.8:1 is snora's palette, and carrying it over
+as ours would be exactly the sampling this document's own §"Anything less is sampling" rejects. Our
+figure is **unknown**, which is the finding: an element held to 3:1 internally, drawn in colours
+nothing here measures.
+
+**The fix that keeps this gate's own property.** Style `scrollable` from `Theme` (rail, thumb,
+hovered thumb) so those colours become roles and fall inside the existing destructure
+automatically — coverage as a consequence of the type, not of a list. If they are to stay iced's,
+declare them as named exceptions the way the text guard's exception list does, with measured ratios
+recorded. Not a release gate: no public document of ours claims WCAG conformance (checked — nothing
+in `docs/src` or `README.md` cites 1.4.3 or 1.4.11), so nothing shipped overclaims to a user; the
+internal threshold is what is incomplete.
+
+**One fact from the same letter worth pinning here, adjacent rather than contrast.** snora's audit of
+the same pinned `iced 0.14` establishes that `checkbox`, `toggler`, `radio`, `pick_list`,
+`combo_box` and `slider` **register no focus** — none is a Tab stop, and a slider answers the arrow
+keys only under the pointer; only `text_input` is reachable. We use none of the six in production.
+But the guard that keeps it so,
+`no_bulk_approval_or_multi_select_construct_exists_anywhere_in_the_crate`, forbids **`checkbox`
+only**, for RFC-022's no-multi-select rule rather than for reachability. A future control satisfying
+RFC-022 with a `toggler` or a `pick_list` would pass every test here and be unreachable by keyboard,
+in a product whose own dialogs say "Tab/Shift+Tab moves focus; Enter activates." Extend that
+denylist to the other five and record that it now has **two** independent reasons, so retiring one
+does not retire the guard.
+
+The letter states "No reply is needed"; none was sent.
