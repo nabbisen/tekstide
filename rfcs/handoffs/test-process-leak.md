@@ -68,7 +68,38 @@ resulting pressure, each disclosed separately and each moved past:
 
 **What remains open, narrowed further still, review 683 round 8: candidate 1 does not survive either, so candidate 2 (session escape) stands alone.** `live_member_of_session` returns `Some(false)` on exactly three conditions -- `ESRCH`, `getsid != session_id`, or `is_gone_or_going`. The tracked pid was provably not exiting: the assertion failing means `process_is_alive` returned `true`, which means `is_gone_or_going` was `false` -- a process mid-exit but not yet `SZOMB`/`P_WEXIT`-flagged still satisfies `live_member_of_session` and is counted as a member, not dropped, so candidate 1 cannot explain a member-to-non-member transition at all; it was only ever an explanation for a false *assertion*, never for the *enumeration* going from 62 consecutive reads finding the member to three reads not finding it. With `ESRCH` and `is_gone_or_going` both excluded for a pid confirmed alive and unflagged, **a `getsid` mismatch is the only surviving mechanism.** The round-4 diagnostic's `getsid` capture is accordingly a *confirmation* instrument now, not a discriminator between two live candidates -- if a recurrence shows `getsid` matching after all, that falsifies candidate 2 too and the question reopens from scratch. One further hypothesis was checked and killed rather than left to recur: whether the comparison runs against the wrong session at all (`session_id` being `child.id()`, equal to the session id only *by construction*). It is not an unverified assumption -- `setsid()` failing in `pre_exec` aborts the spawn, so there is no path to a live child whose session id is not its own pid.
 
-**Cheapest fix that would have shortened this to one round, done now rather than deferred again**: `processes_in_session`'s own `"done, {} member(s) found"` log line discarded `members` after measuring its length. Changed to print the pids themselves (`"done, {} member(s) found: {members:?}"`, `launch.rs`) so a future red names *which* member was present on read 62 and absent by read 64, not only how many. |
+**Cheapest fix that would have shortened this to one round, done now rather than deferred again**: `processes_in_session`'s own `"done, {} member(s) found"` log line discarded `members` after measuring its length. Changed to print the pids themselves (`"done, {} member(s) found: {members:?}"`, `launch.rs`) so a future red names *which* member was present on read 62 and absent by read 64, not only how many.
+
+**Fourth occurrence, 2026-11-18**, `macos-measurement` run
+[44308685213](https://github.com/nabbisen/tekstide/actions/runs/44308685213), attempt 1 (commit
+`c680102`, the D7.1 `ValidProjectRoot`/`ProjectSession` constructor-shape fix). **Not caused by that
+push**: `git show c680102 --stat` touches `runtime/terminal/tests.rs` and `runtime/terminal/reader/
+tests.rs`, but only `project_session`'s own fixture helper (swapping four raw constructor arguments
+for `ValidProjectRoot::for_test(...)`, same values, same behaviour) -- nothing under
+`containment`/`launch.rs`/the session-enumeration path. `gate` (Linux) passed in the same attempt.
+Verbatim, the panic plus the round-4 diagnostic's own capture (`tests.rs:1364`):
+
+> containment confirmed working on macOS: a live backgrounded job that ignores SIGHUP must still be
+> gone after a real close -- SIGKILL, not SIGHUP or the shell's own possible propagation of it, is
+> what must have reached it. diagnose_surviving_background_job(pid=8249, session_id=8247):
+> processes_in_session(8247) just now enumerated [] -- 8249 was NOT reported this time either; getsid
+> failed: Os { code: 3, kind: Uncategorized, message: "No such process" }; proc_pidinfo failed to
+> answer: Os { code: 3, kind: Uncategorized, message: "No such process" }; gone within 11.083µs of
+> this diagnostic's own poll starting
+
+**Recorded as a new data point, not forced into round 8's standing verdict** (candidate 2, session
+escape via a `getsid` mismatch, stands alone): this capture shows `getsid` answering `ESRCH`
+("No such process"), not a mismatched session id -- the pid was fully gone by the time the
+diagnostic polled, not merely alive under a different session. Round 8's own refutation of candidate
+1 was specifically that a process mid-exit but not yet `SZOMB`/`P_WEXIT`-flagged still satisfies
+`live_member_of_session` and cannot explain the enumeration's member-to-non-member transition; this
+capture's "gone within 11.083µs" is a different shape again -- full departure (`ESRCH`) within
+microseconds of the diagnostic's own poll, not a live-but-unflagged process. Whether that is
+consistent with candidate 2, a narrower variant of candidate 1 round 8 did not consider, or something
+else is left to the next review round rather than decided here. Cleared on an isolated rerun with no
+code change (`gh run rerun` on the same commit, both `gate` and `macos-measurement` green) -- this
+document's own established "disclose, don't chase" threshold for a single occurrence, same method as
+every prior recurrence in this row. |
 
 ## 2026-11-07, later the same day -- the `left: 43` is the input line's own echo, and that is a mechanism, not a load story
 
