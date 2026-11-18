@@ -1569,6 +1569,14 @@ status-bar-git-detached = Git: detached
 status-bar-running-sessions = { $count } running
 status-bar-failed-sessions = { $count } failed
 status-bar-pending-approvals = { $count } awaiting approval
+# The containment watch's product decision (release-checklist.md, 2026-11-18):
+# shown after a project close could not confirm one of its terminal sessions
+# was actually empty afterward -- the one surface for the promise
+# project-close-dialog-running-process-detail makes before the click. Says
+# only what is known: never "a process is still running" (the enumeration
+# failing to confirm is not an observation of a survivor), and no pids or
+# command names (process-table text is untrusted input).
+status-bar-containment-not-confirmed = A closed project's terminal session could not be confirmed empty afterward.
 # RFC-030 PR-030-B, REQ-GIT-002: only present once the gate is `Accepted`
 # (never for `AcceptedBranchOnly`/`Refused` -- those never reach
 # `read_status_summary`, so these three fields are always `None` there) and,

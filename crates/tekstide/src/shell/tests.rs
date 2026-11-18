@@ -15213,6 +15213,15 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
             .any(|pane| pane.terminal_id() == &terminal_id),
         "the real terminal's pane must be gone, not orphaned"
     );
+    // The containment watch's product decision (release-checklist.md,
+    // 2026-11-18): a clean close, with its one terminal's session
+    // really confirmed empty, must not raise the containment notice --
+    // the notice exists for the case this test does not exercise.
+    assert!(
+        state.containment_notice.is_none(),
+        "a real, clean close whose only terminal was genuinely confirmed empty must not raise \
+         the containment notice"
+    );
 
     // Server-side filter (response 312's own finding): a bare
     // `latest(50)` window over this shared `AuditStore`, filtered
@@ -15255,6 +15264,60 @@ fn confirming_the_close_terminates_the_real_process_and_removes_the_project() {
     assert_eq!(
         records[0].operation_id, records[1].operation_id,
         "both phases must share one operation_id"
+    );
+}
+
+/// The containment watch's product decision (`release-checklist.md`,
+/// 2026-11-18): `TerminalSessionConfirmation`'s own two derived facts,
+/// exhaustively, for all three variants -- `for_audit_record` must stay
+/// byte-identical to the old accumulator's real behaviour (`true`
+/// unless `NotConfirmed`), and `should_notify` must fire on exactly one
+/// of the three.
+#[test]
+fn terminal_session_confirmation_derives_the_audit_bool_and_the_notice_correctly() {
+    use super::TerminalSessionConfirmation::{Confirmed, NotConfirmed, NothingToCheck};
+
+    assert!(NothingToCheck.for_audit_record());
+    assert!(!NothingToCheck.should_notify());
+
+    assert!(Confirmed.for_audit_record());
+    assert!(!Confirmed.should_notify());
+
+    assert!(!NotConfirmed.for_audit_record());
+    assert!(NotConfirmed.should_notify());
+}
+
+/// The containment watch's product decision, the defect it names
+/// directly: a project whose live work includes no terminal at all
+/// (the review's own example is an active agent run with no terminal
+/// of its own, which this reaches through the simpler, equally
+/// sufficient route of a project with zero terminal sessions -- the
+/// defect is in `live_terminal_ids` being empty, not in *why* it is)
+/// used to return the loop's own hopeful `true` default, read by the
+/// old code as "checked, and confirmed empty." `terminate_project_live_work`
+/// must now return `NothingToCheck`, not `Confirmed` -- the two are
+/// deliberately distinct types precisely so this case cannot be
+/// mistaken for the other at the call site.
+#[test]
+fn terminate_project_live_work_returns_nothing_to_check_for_a_project_with_no_live_terminal() {
+    let mut app_shell = ApplicationShell::new();
+    let project_id = app_shell
+        .add_project_from_path(fresh_project_dir(
+            "containment-watch-nothing-to-check-project",
+        ))
+        .expect("a freshly created directory is a valid project root")
+        .project_id()
+        .clone();
+    let mut state = state_with(app_shell);
+    let mut audit_store = None;
+
+    let result = super::terminate_project_live_work(&mut state, &project_id, &mut audit_store);
+
+    assert_eq!(
+        result,
+        super::TerminalSessionConfirmation::NothingToCheck,
+        "a project with no live terminal checked nothing, and must say so -- not report the \
+         vacuous loop's own hopeful default as a real confirmation"
     );
 }
 

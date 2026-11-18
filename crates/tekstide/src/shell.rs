@@ -1278,6 +1278,24 @@ pub struct State {
     /// project board to say so. `None` until a cleanup removes something or
     /// fails at something.
     transcript_cleanup_notice: Option<TranscriptCleanupNotice>,
+    /// The containment watch's product decision (`release-checklist.md`,
+    /// 2026-11-18): set when a project close could not confirm every
+    /// live terminal session it tried to empty was actually empty
+    /// afterward -- the one user-facing surface for the promise
+    /// `project-close-dialog-running-process-detail` makes before the
+    /// click (*"Anything started from these terminals ends too,
+    /// including a backgrounded job"*), which the close then kept
+    /// silent on regardless of whether it could verify it. **App-level,
+    /// not project-scoped**: by the time this is known, the project tab
+    /// is already gone, so there is no project surface
+    /// (`project_board_notifications`'s own `scope`) left to attach it
+    /// to, and a still-open *other* project might be what the view
+    /// routes to next -- `status_bar` renders on every frame regardless
+    /// of route, which is the one place this is guaranteed seen. Never
+    /// cleared automatically, the same "most recent attempt" shape
+    /// every other notice field here uses -- replaced wholesale by the
+    /// next close, not by a timer.
+    containment_notice: Option<ContainmentNotice>,
     /// RFC-048 D6: what each audited launch this session needs in order for its
     /// **ending** to be recordable — chiefly the operation id its `Started`
     /// phase was written with, since the store admits a `Terminated` phase only
@@ -1663,6 +1681,7 @@ impl State {
             transcript_disk_usage,
             recent_project_list_repair: None,
             transcript_cleanup_notice: None,
+            containment_notice: None,
             audited_agent_runs: std::collections::HashMap::new(),
             audit_view: AuditViewState::default(),
             _instance_marker: instance_marker,
@@ -5989,26 +6008,27 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
     // means refusal regardless of what happens to a terminal, so nothing is terminated to
     // find that out.
     let pre_assessment = state.app_shell.state().assess_project_close(&project_id);
-    let (terminal_session_confirmed_empty, closed) =
+    let (terminal_session_confirmation, closed) =
         if close_assessment_blocked_by_more_than_running_processes(&pre_assessment) {
-            // D11 (review 501): `false`, not a hopeful `true` -- nothing was terminated,
-            // so nothing was confirmed empty, the same "never a hopeful default" rule
-            // `terminated_outcome_and_session_confirmation`'s own doc already states for
-            // this identical field. `&& closed` below makes the two choices equally inert
-            // *today* (`closed` is `false` on this branch either way), but `false` is also
-            // correct on its own, where `true` is not -- PR-066-B's own D10 is about to
-            // rewrite this write site, and a value that is wrong but currently masked is
-            // exactly the shape that produced review 490's own data-loss defect.
-            (false, false)
+            // D11 (review 501), and the containment-watch decision's own
+            // extension of the same rule: nothing was terminated, so
+            // there is nothing here to have confirmed or to notify
+            // about either -- `NothingToCheck`, not a hopeful `Confirmed`.
+            // `&& closed` below (via `for_audit_record`) makes the audit
+            // bool's own choice inert *today* (`closed` is `false` on
+            // this branch either way), but the value is also correct on
+            // its own, where a hopeful default is not -- the same shape
+            // review 490's own data-loss defect came from.
+            (TerminalSessionConfirmation::NothingToCheck, false)
         } else {
-            let terminal_session_confirmed_empty =
+            let terminal_session_confirmation =
                 terminate_project_live_work(state, &project_id, &mut audit_store);
             let assessment = state.app_shell.state_mut().close_project(&project_id);
             let closed = matches!(
                 assessment,
                 Ok(tekstide_core::close::CloseAssessment::SafeToClose)
             );
-            (terminal_session_confirmed_empty, closed)
+            (terminal_session_confirmation, closed)
         };
 
     if let Some(store) = audit_store.as_mut() {
@@ -6017,9 +6037,41 @@ fn apply_project_close_confirmation(state: &mut State, modal: &ProjectCloseModal
                 project_id.clone(),
                 tekstide_core::audit::SafeCloseDecision::Closed {
                     operation_id,
-                    terminal_session_confirmed_empty: terminal_session_confirmed_empty && closed,
+                    terminal_session_confirmed_empty: terminal_session_confirmation
+                        .for_audit_record()
+                        && closed,
                 },
             );
+    }
+
+    // Containment watch (2026-11-18): raised only when the close actually
+    // went through and at least one live terminal was checked and could
+    // not be confirmed empty -- never on a refused close (nothing was
+    // terminated) and never on the vacuous "nothing to check" case
+    // (`TerminalSessionConfirmation::should_notify`'s own doc).
+    //
+    // **Why this combination has no integration test, checked rather
+    // than assumed untestable.** `closed` becomes `true` only once
+    // `close_project`'s own fresh `assess_project_close` re-check finds
+    // nothing blocking -- which requires every terminal
+    // `terminate_project_live_work`'s loop touched to have already
+    // transitioned out of `terminal_status_is_active` (`mark_terminal_exited`/
+    // `transition_terminal_status`, both gated on `outcome` being
+    // `Some`). Every way to reach `NotConfirmed` *except* "signalled,
+    // produced a real outcome, but the final re-enumeration still found
+    // a survivor" (no live pane; `request_terminate` returning `Err`)
+    // skips that transition, so the terminal stays active and the
+    // close is refused before this line runs. The one way that does
+    // transition it requires a real process surviving `SIGKILL` through
+    // its own grace period -- a genuine OS-level race this project's
+    // own `test-process-leak.md` already treats as intermittent at the
+    // layer below this one, not something a fast unit test can force
+    // deterministically. Covered instead at the two boundaries that
+    // *are* deterministic: `TerminalSessionConfirmation::should_notify`'s
+    // own exhaustive unit test, and the vacuous case this decision was
+    // written to fix.
+    if closed && terminal_session_confirmation.should_notify() {
+        state.containment_notice = Some(ContainmentNotice);
     }
 
     if closed {
@@ -6088,6 +6140,60 @@ fn terminated_outcome_and_session_confirmation(
     (outcome, confirmed)
 }
 
+/// The containment watch's product decision (`release-checklist.md`,
+/// 2026-11-18): what a project close learned about its own live
+/// terminal sessions, as a three-way distinction a single `bool`
+/// accumulator could not make. That gap was real, not hypothetical:
+/// `terminate_project_live_work`'s own accumulator used to initialise
+/// at `true` and never correct it when `live_terminal_ids` was empty --
+/// a project whose only live work is an active agent run with no
+/// terminal of its own (`running_processes`, `project/session.rs`)
+/// opens the close's confirmation modal, runs the loop zero times, and
+/// returned the hopeful default as if every session had been checked
+/// and confirmed empty.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalSessionConfirmation {
+    /// No live terminal needed checking at all (including: no project
+    /// found by this id). Not a claim of confirmation or its absence --
+    /// there was nothing here to confirm.
+    NothingToCheck,
+    /// At least one live terminal was checked, and every one's session
+    /// was confirmed empty.
+    Confirmed,
+    /// At least one live terminal was checked, and at least one
+    /// session could not be confirmed empty -- a real survivor, a
+    /// missing pane, or the enumeration itself failing all read the
+    /// same here. The distinction between those is not something the
+    /// one user-facing surface this feeds needs: "say what is known,
+    /// not more" (the containment-watch decision's own constraint)
+    /// means this notice says only that the session could not be ruled
+    /// empty, never which of the three reasons applied.
+    NotConfirmed,
+}
+
+impl TerminalSessionConfirmation {
+    /// The audit record's own bool, unchanged in shape and in every
+    /// value it has ever produced for a real close -- `NothingToCheck`
+    /// reads as `true` here exactly as the old accumulator's default
+    /// did, since nothing has ever branched on this value except the
+    /// choice of `AuditOutcome` (the containment-watch review's own
+    /// finding). Only [`Self::should_notify`] below is required to
+    /// tell `NothingToCheck` apart from `Confirmed`.
+    fn for_audit_record(self) -> bool {
+        !matches!(self, Self::NotConfirmed)
+    }
+
+    /// Whether this outcome should raise [`ContainmentNotice`] --
+    /// exactly the one case the containment-watch decision names: "a
+    /// session we tried to empty had survivors, or could not be ruled
+    /// empty." Never on `NothingToCheck` (the decision's own "do not
+    /// fire on the benign cases" -- a project with no live terminal was
+    /// never promised anything to confirm) and never on `Confirmed`.
+    fn should_notify(self) -> bool {
+        matches!(self, Self::NotConfirmed)
+    }
+}
+
 /// §6's own step 2, generalized to every terminal `assess_project_close`
 /// already counts as live -- both a plain terminal
 /// (`terminal_status_is_active` directly) and one an agent run owns (an
@@ -6115,13 +6221,17 @@ fn terminated_outcome_and_session_confirmation(
 /// claim: only D2's own opt-out now (`nohup`/`disown`/`setsid` leaving
 /// the session entirely), not a surviving in-session backgrounded job
 /// any more.
+///
+/// **Returns [`TerminalSessionConfirmation`], not a bare `bool`**
+/// (containment-watch decision, 2026-11-18): see that type's own doc
+/// for the defect this closes.
 fn terminate_project_live_work(
     state: &mut State,
     project_id: &tekstide_core::project::ProjectId,
     audit_store: &mut Option<tekstide_core::audit::AuditStore>,
-) -> bool {
+) -> TerminalSessionConfirmation {
     let Some(project) = state.app_shell.state().project(project_id) else {
-        return true;
+        return TerminalSessionConfirmation::NothingToCheck;
     };
     let live_terminal_ids: Vec<TerminalId> = project
         .terminal_sessions()
@@ -6130,8 +6240,20 @@ fn terminate_project_live_work(
         .map(|terminal| terminal.id.clone())
         .collect();
 
-    let mut terminal_session_confirmed_empty = true;
+    // Containment watch (2026-11-18): `any_checked` is what the old,
+    // single `bool` accumulator could not express -- a project whose
+    // only live work is an active agent run with no terminal of its
+    // own (`running_processes`, `project/session.rs`) opens this
+    // function with `live_terminal_ids` empty, so the loop below never
+    // runs. The old accumulator's hopeful `true` default then read as
+    // "checked, and confirmed empty" for a close that checked nothing
+    // at all. `any_checked` makes that case its own answer
+    // (`TerminalSessionConfirmation::NothingToCheck`) instead of
+    // silently reusing `Confirmed`'s.
+    let mut any_checked = false;
+    let mut all_confirmed = true;
     for terminal_id in live_terminal_ids {
+        any_checked = true;
         let Some(pane_index) = state
             .terminal_panes
             .iter()
@@ -6141,7 +6263,7 @@ fn terminate_project_live_work(
             // active -- cannot terminate a process this crate holds no
             // handle to; not confirmed, but not fatal to the rest of the
             // close either.
-            terminal_session_confirmed_empty = false;
+            all_confirmed = false;
             continue;
         };
         let mut pane = state.terminal_panes.remove(pane_index);
@@ -6159,10 +6281,10 @@ fn terminate_project_live_work(
             Err(_) => (None, false),
         };
         let Some(outcome) = outcome else {
-            terminal_session_confirmed_empty = false;
+            all_confirmed = false;
             continue;
         };
-        terminal_session_confirmed_empty &= session_confirmed;
+        all_confirmed &= session_confirmed;
 
         let owning_agent_run_id = state
             .app_shell
@@ -6231,7 +6353,13 @@ fn terminate_project_live_work(
         }
     }
 
-    terminal_session_confirmed_empty
+    if !any_checked {
+        TerminalSessionConfirmation::NothingToCheck
+    } else if all_confirmed {
+        TerminalSessionConfirmation::Confirmed
+    } else {
+        TerminalSessionConfirmation::NotConfirmed
+    }
 }
 
 /// After a close actually removed the project: if no project is active
@@ -9831,6 +9959,9 @@ pub(crate) fn status_bar_key_hint(state: &State) -> String {
 fn status_bar(state: &State) -> Element<'_, Message> {
     let mut items =
         row![text(status_bar_summary(state)).size(state.theme.font_size_status())].spacing(16);
+    if let Some(field) = containment_notice_status_field(state) {
+        items = items.push(text(field).size(state.theme.font_size_status()));
+    }
     for field in active_project_status_fields(state) {
         items = items.push(text(field).size(state.theme.font_size_status()));
     }
@@ -9850,6 +9981,23 @@ fn status_bar(state: &State) -> Element<'_, Message> {
             state.theme.border_default(),
         ))
         .into()
+}
+
+/// The containment watch's product decision (`release-checklist.md`,
+/// 2026-11-18): [`State::containment_notice`]'s own rendering, placed
+/// in [`status_bar`] rather than among [`active_project_status_fields`]
+/// or the migrated board notifications
+/// (`project_board_notifications`) -- both of those are project-scoped
+/// (absent with no active project, or shown only on the Project Board
+/// route), and by the time this notice is known the project tab that
+/// raised it is already gone, with a still-open *other* project
+/// possibly being what the view routes to next. `status_bar` renders
+/// on every frame regardless of route, which is what a notice this
+/// decision requires the user to actually see needs.
+fn containment_notice_status_field(state: &State) -> Option<String> {
+    state
+        .containment_notice
+        .map(|_notice| state.catalog.get("status-bar-containment-not-confirmed"))
 }
 
 // --- RFC-025: one model for every board notification -----------------------
@@ -12964,6 +13112,23 @@ impl TranscriptCleanupNotice {
         })
     }
 }
+
+/// The containment watch's product decision (`release-checklist.md`,
+/// 2026-11-18): the one user-facing surface for a project close that
+/// could not confirm every live terminal session it tried to empty was
+/// actually empty afterward. See [`State::containment_notice`]'s own
+/// doc for why this is app-level rather than project-scoped, and
+/// [`TerminalSessionConfirmation`] for the three-way distinction that
+/// decides when this is raised.
+///
+/// **Carries no data on purpose** (containment-watch decision's own
+/// constraints): no pids, no command names -- process-table text is
+/// untrusted input (`text_safety`'s whole remit), and the fact needs
+/// none of it, only that it happened. A marker, not yet a struct with
+/// fields nothing fills, the same shape a future count (if one is ever
+/// added) would extend rather than replace.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ContainmentNotice;
 
 fn transcript_local_data_summary_for(
     state: &State,
