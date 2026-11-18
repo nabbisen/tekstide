@@ -476,6 +476,19 @@ property the gate can hold that a `project/` split actually moves — or D7 land
 which is the condition D1 was written to make impossible. This is not a reason to defer D7; it is
 the thing to settle before starting it.
 
+**Discharged 2026-11-18: D7 is scoped** —
+`d7-scoping-derived-from-measured-internal-coupling.md`, written at the owner's direction against
+the reference-weight measurement this section asked for. The headline results, so this section is
+not the last word a reader finds: `project/` is 6,074 code LOC over 23 files, of which `session` is
+37% and the only file reaching seven external modules; the split is blocked by **exactly two
+back-edges into `session`** (`change_detection` and `root`), both of which want the same four
+project-identity values, so **one `domain` type cuts both** (D5 move 1, not move 2 twice);
+`recent` is already detached in both directions and is the cheapest first departure. And the
+second measurement itself needed a correction this section could not have anticipated: **total
+references rise by construction when a module splits** (`content → root`'s 9 internal references
+become 9 `crate::root` ones), so the bound must be **per-module** weight, and it must **exclude
+`pub use` façade lines** or stage 1 reds the very bound it exists to lower.
+
 ## At bound 0 the gate loses its positive control (review 686, 2026-11-17)
 
 Stage 9's landing is accepted and its numbers reproduced independently from both trees (56 → 55
