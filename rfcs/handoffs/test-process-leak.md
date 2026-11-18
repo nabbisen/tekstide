@@ -5077,6 +5077,22 @@ the same honesty gap as the thread-level `proc_exit` question above, with nothin
 on it. Recorded here so it is a known, named reservation for whoever next touches that function,
 not something rediscovered later and mistaken for a defect no one noticed.
 
+**A seventh occurrence, 2026-11-18, on the cluster's own named-target test.** `macos-measurement`
+run [44319914859](https://github.com/nabbisen/tekstide/actions/runs/44319914859), attempt 1
+(commit `b006884`, a flake-register-only disclosure push -- `gate` on Linux passed in the same
+attempt). `a_real_backgrounded_job_is_dead_after_a_real_close` -- the one row the review-657 fix
+above named as its own target -- failed again, verbatim `tests.rs:761`: *"the real backgrounded
+job's own pid (7746) must be gone or departing after a real close, not merely 'kill(pid, 0) failed'
+-- kill(pid, 0) alone cannot tell a real survivor from a SIGKILLed corpse sitting unreaped for a
+moment under load"*. **Not caused by that push**: the commit touches only this document. **Not a
+sign the fix did not land or does not work**: this section's own "What does not change" already
+says the fix makes the *reporting* honest and explicitly does not touch "why a process can sit
+`SRUN` inside `proc_exit` for tens of seconds," which is "the reserved, thread-level question...
+left open on purpose" -- a recurrence of the underlying timing is exactly what that reservation
+predicts, not a regression of what landed. Cleared on an isolated rerun with no code change (`gate`
+and `macos-measurement` both green). Recorded as the next datum against the reserved question, not
+chased further here.
+
 ## 2026-11-17 (review 688) -- the hundred-thousand-entry ratio row stops being "unexplained": its own two numbers measure the asymmetry, and the bound has 1.62x headroom on this machine
 
 The 2026-11-17 capture's own report reads it as *"new evidence against the 'severely degraded
