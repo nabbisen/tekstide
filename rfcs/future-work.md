@@ -243,7 +243,7 @@ imprecise for `pl` outside `cargo install`; see the locale-loading entry below. 
 
 **The most transferable thing snora has is not an API — it is the review gate**, and it is free. `accessibility-checklist.md` contains items this project would fail today: contrast asserted against real thresholds, translucent colours composited before measuring, rendering verified under a high-contrast preset, a minimum 24×24 pointer target, and a typography floor. **The `border_default` defect existed precisely because no such gate exists here.** An adapted checklist, run per surface, is the cheapest item in this whole evaluation.
 
-**What would reopen the dependency question**: snora reaching 1.0 (churn stops, and cargo compatibility stops breaking every minor), or this project genuinely needing a full design system — light/dark/high-contrast across many surfaces, with spacing and radius scales — rather than the ideas above.
+**What would reopen the dependency question**: this project genuinely needing a full design system — light/dark/high-contrast across many surfaces, with spacing and radius scales — rather than the ideas above. (**The "snora reaching 1.0" condition this sentence used to lead with was dropped by the owner on 2026-11-18**: snora is matured enough in the respects that matter to us, and its version number is not what we are waiting for. See the dated section below.)
 
 ### The reopening conditions, re-read against snora 0.65.0 (2026-11-18, at the owner's own direction)
 
@@ -254,18 +254,28 @@ record; this section re-reads them against 0.65.0 and **extends them by two that
 could not have anticipated.** None is met today, so the decline stands — but on a shorter list than
 before.
 
-**Condition 1 (1.0): not met, and the raw cadence is worse — but the objection's own cost has
-changed shape.** Decline was taken at `0.33.1` on 2026-08-17; 0.65.0 is 2026-11-18. That is **32
-minor versions in 93 days**, roughly one every three days, against the six-in-one-day figure the
-original objection cited. What has changed is not the cadence but what it costs to track: snora now
-publishes a [migrations index](https://nabbisen.github.io/snora/guides/migrations.html) that
-**enumerates which releases can stop your code compiling** — "since 0.60 there are two" (0.63's
-`LogicalRow`, 0.64's required `direction`) — with a per-release guide carrying a *"Re-check if you
-acted on…"* table. The original wording, *"tekstide would inherit that cadence into its own release
-process,"* is still true of the cadence and no longer true of the discovery cost: 2 compile-breaking
-releases out of 6, named in advance, is a bounded upgrade budget rather than an open one. **Reword
-this reason from "disqualifying" to "bounded, documented, and still real"** — it remains a reason,
-and it is no longer the same reason.
+**Condition 1 (snora reaching 1.0): ~~struck~~ — dropped by the owner, 2026-11-18.** Not downgraded,
+not reworded: removed as a trigger. The owner's own reading is that snora is matured enough in the
+respects that matter here and that its version number is not what this project is waiting for. The
+measurement that was gathered against it supports that: 1.0 was a **proxy** for two properties, and
+the proxy is poor. *"Churn stops"* has not happened — `0.33.1` (2026-08-17, the decline) to `0.65.0`
+(2026-11-18) is **32 minor versions in 93 days**, roughly one every three days, worse than the
+six-in-one-day figure the original objection cited. But *"cargo compatibility stops breaking every
+minor"* is already substantially true in the only form an adopter can act on: snora's
+[migrations index](https://nabbisen.github.io/snora/guides/migrations.html) **enumerates which
+releases can stop your code compiling** — "since 0.60 there are two", 0.63's `LogicalRow` and
+0.64's required `direction` — each with a guide carrying a *"Re-check if you acted on…"* table. Two
+compile-breaking releases out of six, named in advance, is behavioural maturity; a `1.0` tag would
+have been a promise about the same behaviour.
+
+**What survives of it is a cost to budget at adoption time, not a condition blocking adoption**: an
+adopter tracks a release every few days and reads one migration guide per compile-breaking release.
+Recorded here so whoever adopts prices it, and so nobody re-derives the version-number argument.
+
+**This changes the shape of the decision, which is worth stating plainly: every remaining trigger is
+a fact about tekstide, not about snora.** With condition 1 gone, nothing on this list waits for the
+upstream project to do anything. The question "when would we adopt?" is now answerable only by us —
+which is the right place for it, and a different posture from "declined, pending their maturity."
 
 **Condition 2 (a genuine full-design-system need): not met, and slightly closer.** Still one
 compiled dark default plus user-configurable roles through `config.toml`; no light or
@@ -296,7 +306,8 @@ surface this project has never built, so adopting one there re-does nothing. Tha
 cleanest adoption opportunity on the list, and the trigger is a requirement, not a release.
 
 **New condition 5 — a need for keyboard behaviour iced itself blocks.** Adjacent to 4 and worth
-separating: snora now documents chord pass-through (0.62: `Ctrl+Enter` and any Ctrl/Alt/logo chord
+separating (the numbering is kept as written so the struck condition 1 stays visible rather than
+vanishing into a renumbered list): snora now documents chord pass-through (0.62: `Ctrl+Enter` and any Ctrl/Alt/logo chord
 no longer presses a focused snora control, so it reaches the application) and F6 counting from a
 click. Both are the kind of thing this project has solved once per surface, in-house, and would
 otherwise solve again. Not a trigger on its own; a tiebreaker if 4 ever fires.
