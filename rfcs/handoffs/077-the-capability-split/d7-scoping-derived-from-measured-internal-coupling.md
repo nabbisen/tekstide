@@ -349,3 +349,36 @@ privileged type relocated — less movement than §3 proposed, and it keeps a gu
 lost. Published-API note for D7.1's own request: privatizing `ValidProjectRoot`'s fields is a change
 for any downstream constructor (none in this workspace), and the owner's compatibility decision
 covers re-exports, not field privacy.
+
+## 11. D7.0 landed (`5b59ffa`, reviewed at 697) — the witness exists
+
+Both bounds are in `capability_graph_gate.rs`, instrument-only, no production change. Gate 13/13;
+CI green. The four numbers, re-measured independently by a script sharing no code with the gate:
+`project` **total 37 / own-code 33 / façade 4**, `project` the densest own-code module, and
+`project.rs` declaring **11** production submodules with one `#[cfg(test)]`-gated declaration
+excluded.
+
+- `MAX_PROJECT_CAPABILITY_SUBMODULES = 11`, asserted `==` — every D7 stage must lower it.
+- `MAX_OWN_CODE_REFERENCE_WEIGHT = 33`, asserted `<=` over the maximum of all modules — no stage may
+  raise it, and `watch` correctly moves it by zero.
+
+**Three facts about this instrument that are load-bearing and were not obvious from building it**
+(review 697):
+
+1. **The pin is part of the ratchet.** `projects_three_reference_numbers_are_pinned_before_the_facade_exclusion`
+   fixes 37 / 33 / 4, and **D7.2 moves all three** (`recent/timestamp.rs` carries one
+   `crate::domain` reference out; the façade gains a line). A red there is the pin working, not a
+   regression — the cheapest-looking fix, deleting it, is the wrong one.
+2. **Bound 2's per-line scan is sound only because review 687's guard exists.** It counts
+   `crate::` references line by line, where `measure_capability_graph` counts them over the whole
+   file; a wrapped `crate::` would be invisible to both, and cannot exist because
+   `every_crate_path_occurrence_names_a_known_top_level_module` reds on it.
+3. **The pin is what saves bound 2 from vacuity.** The ceiling takes
+   `max_by_key(..).unwrap_or_default()`, so a blind instrument yields `0 <= 33` and passes — the
+   same vacuity the SCC bound has at 0. The pin's `own == 33` is the positive control that catches
+   it.
+
+**Ablation precedent set here:** bound 1's ablation needs two files (the `mod` line and its target),
+which `ablate.sh` cannot express, so it was run in a detached `git worktree` instead — stronger than
+patch-and-restore, since the main tree is never touched and there is nothing to restore wrongly. Use
+a worktree whenever an ablation needs more than one file.
