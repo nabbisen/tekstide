@@ -1,6 +1,6 @@
 ---
 title: "RFC-077 D7 scoping — `project/` splits, derived from measured internal coupling"
-status: "Scoped 2026-11-18 by the reviewer, at the owner's direction. No slice begun; the release slot is the owner's."
+status: "Scoped 2026-11-18 by the reviewer, at the owner's direction; **authorized by the owner the same day** — the instrument refinement recommended in §5 is taken, API compatibility is kept. §5 and §6 were then corrected by the reviewer before handoff: reference weight alone is not a witness every stage can move. No slice begun; the release slot remains the owner's."
 rfc_file: "../../accepted/077-the-capability-split.md"
 target_milestone: "M14"
 created: "2026-11-18"
@@ -156,13 +156,47 @@ and getting this wrong would make the gate reward keeping the hub.
   departing cluster. The gate's `crate_path_references` counts `pub use` exactly like `use`, so
   **`project`'s measured weight would go up as its code goes out.**
 
-**Recommendation: refine the instrument, do not break the API.** Count only non-`pub use`
-references toward the per-module weight bound. A pure re-export is not a dependency — the façade
-names a module without reaching into it — and this project has held API compatibility through nine
-stages; inverting that priority for a metric's convenience is the wrong trade. The refinement is
-small and must carry its own positive control, in the shape review 686 established: assert that a
-known façade line is excluded **and** that a known real reference is still counted, so the
-exclusion cannot silently widen into "nothing counts".
+**Recommendation: refine the instrument, do not break the API. — Authorized by the owner,
+2026-11-18.** Count only non-`pub use` references toward the per-module weight bound. A pure
+re-export is not a dependency — the façade names a module without reaching into it — and this
+project has held API compatibility through nine stages; inverting that priority for a metric's
+convenience is the wrong trade. The refinement is small and must carry its own positive control, in
+the shape review 686 established: assert that a known façade line is excluded **and** that a known
+real reference is still counted, so the exclusion cannot silently widen into "nothing counts".
+
+Measured, so the bound has a real starting value: `project` carries **37** references, **4** of them
+façade, so **33 in its own code**. The next-densest module is `app` at 17, all own-code.
+
+### 5a. Correction before handoff: reference weight cannot be D7's primary bound
+
+Written into this document an hour after §5 and §6, by the reviewer, from doing the arithmetic
+RFC-074's own standing rule demands ("a stage that cannot lower the bound is not a stage") against
+the metric §5 had just recommended. **It does not survive that test.** Per-stage, with the
+capabilities' own external references counted from §1's inventory:
+
+| Stage | `mod` declarations in `project` | `project`'s own-code refs | refs moved |
+|---|---|---|---|
+| today | 11 | 33 | — |
+| D7.2 `recent` | 10 | 32 | 1 |
+| D7.3 `watch` | 9 | 32 | **0** |
+| D7.4 `root` + `explorer_tree` | 7 | 27 | 5 |
+| D7.5 `content` + `diff` | 5 | 25 | 2 |
+| D7.6 `change_detection` | 4 | 24 | 1 |
+| D7.7 `metadata` | 3 | 23 | 1 |
+
+`watch` carries **no** external references at all, so a correct, complete stage moves the weight by
+zero and would be "not a stage" under the standing rule. The cause is structural, not incidental:
+**`session` holds 17 of the 33, and `project.rs`'s own `read_transcript_window` body holds 5** — the
+capabilities leaving were never what made the hub dense, so a metric built on their references
+cannot witness them leaving.
+
+**So the primary bound is the count of capability submodules `project` declares** — 11 today, 3 when
+D7 is done. It falls by construction with every stage, it is exact, and it cannot be satisfied by
+anything other than a capability actually leaving: a `pub use crate::recent;` façade line is not a
+`mod` declaration, so compatibility costs the metric nothing. **Reference weight stays as a
+secondary guard with the opposite polarity — it must not *rise***, which is the recurring finding of
+stages 6 through 9 (the gate rewarded lowering the SCC bound by making the hub denser, three stages
+running). Together: one bound that every stage must lower, and one that no stage may raise.
 
 **The alternative is the owner's to take if preferred:** drop the façade, accept a published-API
 break, and keep the instrument unchanged. RFC-077's own D7 note already reserves this ("The
@@ -177,7 +211,8 @@ standing rule.
 
 | Stage | Move | Cut cost | Why here |
 |---|---|---|---|
-| **D7.1** | The identity type to `domain`; `change_detection` and `root` stop naming `ProjectSession` | 2 imports, 13 signatures, 4 accessors | Nothing else can start: both back-edges must fall before any capability leaves, or the first departure is a 2-cycle against a bound of 0 |
+| **D7.0 — the instrument, not a move** | Add both bounds of §5a to `capability_graph_gate.rs`: capability-submodule count at **11**, `project`'s own-code reference weight at **33** (façade-excluded, with the positive control §5 requires) | no production change | RFC-074's own precedent, in its delivery-plan row's words: *"the gate was built before any move and its bound ratcheted with the stage that earned it."* D7 has no witness until this lands |
+| **D7.1 — a prerequisite, not a stage** | The identity type to `domain`; `change_detection` and `root` stop naming `ProjectSession` | 2 imports, 13 signatures, 4 accessors | Nothing else can start: both back-edges must fall before any capability leaves, or the first departure is a 2-cycle against a bound of 0. **It lowers neither bound** — the back-edges are `super::` references the gate cannot see, and no submodule leaves — so it is declared a prerequisite rather than dressed as a stage, which is what the standing rule requires of it |
 | **D7.2** | `recent` out | **0 internal references** | Already detached in both directions. The cheapest possible first departure, and the one that proves the façade-plus-refined-bound mechanism on a cluster where nothing else can go wrong |
 | **D7.3** | `watch` out | 2 (`watch → root`) | Out-degree 1, in-degree 0. One surviving edge to a module that has not moved yet, which is a DAG edge, not a cycle |
 | **D7.4** | `root` + `explorer_tree` out, together | 9 + 9 inbound from `content`, 2 from `session` | `root`'s in-degree is 4; splitting it from `explorer_tree` (9 references, one direction) buys nothing and doubles the churn |
@@ -189,7 +224,9 @@ standing rule.
 around 14 lines is overhead, not a capability.
 
 **Why this order and not by size:** every stage must leave the graph acyclic at a bound of 0, so the
-order is forced by the measured dependency direction, not chosen. D7.2 before D7.3 before D7.4 is
+order is forced by the measured dependency direction, not chosen. Each stage from D7.2 lowers the
+capability-submodule bound by exactly the number of declarations it removes (§5a's table), which is
+what makes each one a stage under the standing rule. D7.2 before D7.3 before D7.4 is
 the only sequence in which each departing cluster's dependencies have either already left or are
 still inside `project` — never half-out.
 
@@ -210,5 +247,5 @@ still inside `project` — never half-out.
 - A stage that cannot lower the bound is not a stage.
 - Every disposition names which of D5's three legal moves it used, per reference.
 - Every commit touching `crates/tekstide-core/src/` reports total edges and total references,
-  before and after (review 687) — **and, from D7.1, the per-module weight too**, since that is the
-  bound that now moves.
+  before and after (review 687) — **and, from D7.0, both of §5a's bounds**, since those are what
+  now move.
