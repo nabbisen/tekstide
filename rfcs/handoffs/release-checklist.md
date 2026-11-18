@@ -650,6 +650,22 @@ Expressing it needs a new outcome, or an outcome no longer derived from this sin
 touch records already on disk, where the deserializer is the writer nobody lists. Out of scope for
 part 1.
 
+  **Part 1 is discharged, 2026-11-18 (`1b870eb`, reviewed at 695 round 2).** Both required
+follow-ups landed and were verified: the notice is cleared unconditionally as the first statement
+of `apply_project_close_confirmation` (and the function has no early return, so every path either
+re-raises it or leaves it cleared), and `for_audit_record()` is now `matches!(self,
+Self::Confirmed)` with D11's reasoning restored in the method's own doc. No test churn, for the
+reason the review predicted and then checked: `attempt_close_project_tab`'s `SafeToClose` branch
+writes no `SafeCloseDecision` record at all, so an idle close never wrote `Applied` to flip.
+**Nothing in part 1 gates 0.41.0 any longer.**
+
+  One consequence on record: narrowing `for_audit_record()` to `Confirmed` enlarges the
+`AuditOutcome::Failed` population by one more case than part 1's own two — a live terminal that
+exits on its own between the dialog opening and `Close` being pressed now yields `NothingToCheck`
+and records `Failed` where it used to record `Applied`, for a close where nothing went wrong. The
+right value for the *field*, the wrong word for the *outcome*: the named residual above, not a new
+defect, and a reason to close that residual eventually rather than to restore the masked `true`.
+
 - [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
