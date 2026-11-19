@@ -677,7 +677,7 @@ fn asking_git_adds_a_few_milliseconds_to_a_hundred_thousand_entry_scan() {
 #[test]
 fn the_shared_directory_list_says_its_two_readers_no_longer_mean_the_same_thing() {
     let source = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/project/ignored_directories.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/domain/ignored_directories.rs"),
     )
     .unwrap();
     let flat = source.split_whitespace().collect::<Vec<_>>().join(" ");

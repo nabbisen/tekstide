@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::ProjectId;
+use crate::domain::ProjectId;
 
 mod explorer;
 

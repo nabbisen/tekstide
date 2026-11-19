@@ -35,15 +35,16 @@
 //! `release-checklist.md`'s Package Smoke (b) already had to correct from one
 //! test to two, which a third, avoidable one should not join.
 //!
-//! **22 top-level modules, plus `test_support` as a 23rd, special one.**
-//! `lib.rs` declares 22 `pub mod`s unconditionally (21 at the RFC's own
-//! count, `+1` from RFC-077 D7.2's `recent` -- a new top-level module,
-//! not a renamed one, since `recent` was `project::recent` before) and
-//! one more, `test_support`, gated on `any(test, feature =
-//! "test-support")` — present in source either way, since this gate
-//! reads source text rather than compiling, and it is exactly the node
-//! D1's third assertion is about reaching. `test_support` is graphed as
-//! the 23rd because it must be, not because the count is wrong.
+//! **24 top-level modules, plus `test_support` as a 25th, special one.**
+//! `lib.rs` declares 24 `pub mod`s unconditionally (21 at the RFC's own
+//! count, `+1` from RFC-077 D7.2's `recent`, `+2` from RFC-077 D7.3's
+//! `root` and `explorer_tree` -- all three new top-level modules, not
+//! renamed ones, since each was `project::X` before) and one more,
+//! `test_support`, gated on `any(test, feature = "test-support")` —
+//! present in source either way, since this gate reads source text
+//! rather than compiling, and it is exactly the node D1's third
+//! assertion is about reaching. `test_support` is graphed as the 25th
+//! because it must be, not because the count is wrong.
 //!
 //! **RFC-077 D7.0 (review 696) added two more bounds, because
 //! `MAX_LARGEST_SCC_SIZE` reaching 0 at Stage 9 left D7 with no witness:
@@ -195,8 +196,13 @@ use tekstide_core::domain::{AgentRunId, ProjectId};
 /// set to 0 and the gate test run before committing to it) rather than
 /// taken on the response's word: zero components of size greater than
 /// one remain anywhere in the graph (22 modules at the time this was
-/// measured; 23 after RFC-077 D7.2's `recent` -- an acyclic graph does
-/// not become cyclic by a module gaining a sibling). `agent -> approval`
+/// measured; 25 after RFC-077 D7.2's `recent` and D7.3's `root` +
+/// `explorer_tree` -- an acyclic graph does not become cyclic by a
+/// module gaining siblings, confirmed directly at D7.3 too, not merely
+/// assumed: `root`'s own new edge to the top-level `content` module
+/// does not close a cycle with `content.rs`'s edge back to `root`,
+/// since `content.rs`'s owning top-level module is `project`).
+/// `agent -> approval`
 /// is now `tekstide-core`'s only residual cross-module edge between these
 /// two modules in either direction remaining from the original SCC —
 /// one directed edge is not a cycle.
@@ -209,29 +215,59 @@ const MAX_LARGEST_SCC_SIZE: usize = 0;
 /// capability submodules at D7.0 (`change_detection`, `content`, `diff`,
 /// `explorer_tree`, `ignored_directories`, `metadata`, `recent`, `root`,
 /// `runtime`, `session`, `watch`); **lowered to 10 by RFC-077 D7.2**
-/// (`recent` out -- already detached in both directions, the cheapest
-/// possible first departure, re-exported from `project.rs` unchanged so
-/// no caller has to move with it). Falls to 3 when D7 is done
-/// (`session`, `runtime`, `ignored_directories` stay with
-/// orchestration). Asserted `==`, the same reasoning
-/// `MAX_LARGEST_SCC_SIZE` already carries: a shrink without the bound
-/// moving in the same commit is as much a lie as a growth.
-const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 10;
+/// (`recent` out). **Lowered to 7 by RFC-077 D7.3** (`root` +
+/// `explorer_tree` out, together -- `root` is the internal base every
+/// other departing capability still needs, so splitting it from
+/// `explorer_tree`, a single nine-reference edge, would only double the
+/// churn; `ignored_directories` also leaves the count here as a side
+/// effect, not a stage of its own -- its one constant moved to `domain`
+/// as a prerequisite, see bound 2's own doc, and the now-empty file was
+/// deleted rather than kept as 1 LOC of orchestration ceremony). Falls
+/// to 3 when D7 is done (`session`, `runtime` stay with orchestration).
+/// Asserted `==`, the same reasoning `MAX_LARGEST_SCC_SIZE` already
+/// carries: a shrink without the bound moving in the same commit is as
+/// much a lie as a growth.
+const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 7;
 
 /// RFC-077 D7.0 (review 696): the secondary guard, opposite polarity --
 /// no stage may *raise* this, though not every stage is required to
 /// lower it (the staging document's own §5a arithmetic: D7.3 `watch`
 /// correctly moves the submodule bound above by one while moving this
 /// one by exactly zero -- D7.2 `recent` is a second confirmed instance,
-/// measured below). `project` carried 33 own-code references at D7.0
-/// (37 total, 4 on `pub use`/`pub(crate) use` façade lines -- excluded
-/// per §5's own recommendation, since a pure re-export names a module
-/// without reaching into it, and every departing capability gains one
-/// such line to keep the published API unchanged); **D7.2 moved it to
-/// 32 own-code (37 total, unchanged -- see the pin test's own doc for
-/// why total does not fall the way a first guess expects; 5 façade)**.
-/// `app` is next densest at 17, all own-code.
-const MAX_OWN_CODE_REFERENCE_WEIGHT: usize = 33;
+/// measured below). `project` carried 33 own-code references at D7.0.
+/// **D7.2 moved it to 32** (37 total, unchanged; 5 façade). **D7.3
+/// raised it to 34, required rather than fit** (review 702's response
+/// measured and predicted ~29 for `root` + `explorer_tree`, naming only
+/// `content.rs`/`session.rs` as newly-crossing; the real set is four
+/// files, not two -- `watch/directory.rs` and `diff.rs` also held
+/// invisible self-references to `root`, found by checking every
+/// in-`project` file rather than the two the prediction named).
+/// **The rise is a measurement-visibility correction, not new
+/// coupling**: `root`/`explorer_tree` carried five already-real
+/// references away whole (their own prior `crate::runtime`/
+/// `crate::content` edges, invisible under `project` only because the
+/// target and the source shared a top-level module), while six
+/// previously-invisible same-module self-references in `content.rs`,
+/// `session.rs`, `watch/directory.rs` and `diff.rs` (`crate::project::
+/// root::X` and `super::root::X`/`super::explorer_tree::X`, all
+/// resolving to `project` itself before this move) became real,
+/// countable `project -> root`/`project -> explorer_tree` edges the
+/// moment their target left -- the same mechanism D7.2's own correction
+/// to the pin already established, scaled to four files instead of
+/// one. **Repointing every one of them to the canonical path, rather
+/// than leaving any on the `project::root` façade to stay under 33, was
+/// the required choice** (review 683's own "a D5 move 1 that leaves its
+/// in-crate callers on the re-export converts its own cut into a later
+/// stage's work" finding, applied to not doing that here either).
+/// Verified acyclic regardless (`the_largest_strongly_connected_
+/// component_is_within_its_ratcheted_bound` stays at 0): `root`'s own
+/// edge to the top-level `content` module (`FileAccessResolver`) and
+/// `content.rs`'s edge back to `root` do not form a cycle, because
+/// `content.rs`'s owning top-level module is `project`, not `content`
+/// -- a same-named but structurally distinct module from the top-level
+/// `content` crate `root.rs` actually implements against. `app` is next
+/// densest at 17, unaffected, all own-code.
+const MAX_OWN_CODE_REFERENCE_WEIGHT: usize = 34;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -717,13 +753,23 @@ fn no_module_exceeds_the_own_code_reference_weight_ceiling() {
 /// `mod recent;` was invisible to this gate). The two cancel exactly
 /// here; a future stage's own net change on `total` is not derivable
 /// from the submodule-count delta alone, only from measuring directly.
-/// **A red here is this test working, not a regression**: update the
-/// three literals in the same commit as the stage that earns the new
-/// values, exactly as a stage must move
+/// **D7.3 moved all three again, past what review 702's own response
+/// predicted (~29 own-code, assuming only two files would newly
+/// cross)**: measured total 41, own 34, façade 7. `MAX_OWN_CODE_
+/// REFERENCE_WEIGHT`'s own doc has the full accounting for why own-code
+/// rose instead of falling -- `root`/`explorer_tree` carried five
+/// already-visible references away, four different files
+/// (`content.rs`, `session.rs`, `watch/directory.rs`, `diff.rs`) each
+/// had one previously-invisible self-reference to `root` become real,
+/// and `project.rs` gained a second façade line (`pub use crate::root;`,
+/// alongside the explorer_tree flatten now sourcing `crate::
+/// explorer_tree::{...}`). **A red here is this test working, not a
+/// regression**: update the three literals in the same commit as the
+/// stage that earns the new values, exactly as a stage must move
 /// `MAX_PROJECT_CAPABILITY_SUBMODULES` and may not raise
-/// `MAX_OWN_CODE_REFERENCE_WEIGHT`. This pin also doubles as
-/// `no_module_exceeds_the_own_code_reference_weight_ceiling`'s own
-/// positive control -- see that test's doc.
+/// `MAX_OWN_CODE_REFERENCE_WEIGHT` without recording why. This pin also
+/// doubles as `no_module_exceeds_the_own_code_reference_weight_ceiling`'s
+/// own positive control -- see that test's doc.
 #[test]
 fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let graph = measure_capability_graph();
@@ -731,16 +777,16 @@ fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let own_code_weight = own_code_reference_weight_by_module();
     let own = own_code_weight.get("project").copied().unwrap_or(0);
     assert_eq!(
-        total, 37,
+        total, 41,
         "project's total reference count (façade included) moved"
     );
     assert_eq!(
-        own, 32,
+        own, 34,
         "project's own-code reference count (façade excluded) moved"
     );
     assert_eq!(
         total - own,
-        5,
+        7,
         "project's façade (pub use / pub(crate) use) reference count moved"
     );
 }

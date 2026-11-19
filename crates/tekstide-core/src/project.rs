@@ -1,10 +1,7 @@
 mod change_detection;
 mod content;
 mod diff;
-mod explorer_tree;
-mod ignored_directories;
 mod metadata;
-pub mod root;
 mod runtime;
 mod session;
 pub mod watch;
@@ -17,6 +14,13 @@ pub mod watch;
 /// when this was `pub mod recent;` rather than a re-export of the new
 /// top-level `crate::recent`.
 pub use crate::recent;
+
+/// RFC-077 D7.3: `root` and `explorer_tree` out, together -- `root` is
+/// the internal base every other departing capability still needs
+/// (in-degree 4 before this), so splitting it from `explorer_tree`
+/// (nine references, one direction) would only double the churn.
+/// Re-exported unchanged so `project::root::X` still resolves.
+pub use crate::root;
 
 /// RFC-074 D3, Stage 1: `ProjectId` is vocabulary (T0), not an orchestration
 /// type, and now lives in `domain::identity` -- re-exported from here
@@ -36,6 +40,16 @@ pub use crate::domain::WorkspaceTrust;
 /// with them.
 pub use crate::domain::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 
+/// RFC-077 D7.3: moved to `domain` ahead of `root` leaving `project` --
+/// `root::explorer`'s own read of it would otherwise become a
+/// `root -> project` edge the moment `root` is a sibling, cycling
+/// against the `project -> root` façade above. Re-exported unchanged.
+pub use crate::domain::IGNORED_DIRECTORY_NAMES;
+
+pub use crate::explorer_tree::{
+    ExplorerRootState, ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
+    ExplorerTreeRow, ExplorerTreeRowKind, MAX_TREE_ROWS, is_expandable,
+};
 pub use change_detection::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
     DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
@@ -52,11 +66,6 @@ pub use diff::{
     DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
     gate_diff_content_read, read_diff_content,
 };
-pub use explorer_tree::{
-    ExplorerRootState, ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
-    ExplorerTreeRow, ExplorerTreeRowKind, MAX_TREE_ROWS, is_expandable,
-};
-pub use ignored_directories::IGNORED_DIRECTORY_NAMES;
 pub use metadata::{
     ProjectFileState, ProjectGitDisplayStatus, ProjectMetadataCountStatus, ProjectMode,
     ProjectOpenSurface, ProjectResourceLimits, ProjectWarning, ProjectWarningLevel,

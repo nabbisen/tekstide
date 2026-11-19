@@ -1,3 +1,11 @@
+/// RFC-077 D7.3: moved to `domain` (D5 move 1 -- dependency-free
+/// vocabulary, shared by two otherwise-unrelated readers) ahead of
+/// `root` leaving `project`. It stayed in `project::ignored_directories`
+/// through D7.1/D7.2 because nothing forced the question; D7.3 does --
+/// `root::explorer`'s own read of it would otherwise become a
+/// `root -> project` edge the moment `root` becomes a sibling, cycling
+/// against the `project -> root` façade.
+///
 /// Change-detection-wiring handoff, decision D1: one shared definition of
 /// directory names project-wide scanners skip by default. Before this,
 /// `FileExplorerScanPolicy::linux_mvp` (`project::root::explorer`) and

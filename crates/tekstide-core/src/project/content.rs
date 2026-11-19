@@ -6,10 +6,10 @@ use crate::content::{
     TextDocument, TextDocumentEditError, TextDocumentOpenError, TextDocumentOpenPolicy,
     TextDocumentRefreshError, TextDocumentSaveError, TextDocumentState, TextViewport,
 };
-use crate::project::explorer_tree::{
+use crate::explorer_tree::{
     ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
 };
-use crate::project::root::{
+use crate::root::{
     ExplorerDirectoryScan, ExplorerNodeKind, ExplorerNodeState, ExplorerScanError,
     FileAccessSymlinkStatus, FileExplorerScanPolicy, FileExplorerScanner, ProjectRootHandle,
 };

@@ -6,6 +6,7 @@ mod file_access;
 mod git_status;
 mod identity;
 mod ids;
+mod ignored_directories;
 mod ownership;
 #[cfg(any(test, feature = "test-support"))]
 mod shell_readiness;
@@ -39,6 +40,7 @@ pub use identity::{ProjectId, ProjectRootLocation};
 pub use ids::{
     AgentRunId, ApprovalId, AuditEventId, AuditOperationId, ChangeSetId, TerminalId, TranscriptId,
 };
+pub use ignored_directories::IGNORED_DIRECTORY_NAMES;
 pub use ownership::OwnershipError;
 #[cfg(any(test, feature = "test-support"))]
 pub use shell_readiness::{

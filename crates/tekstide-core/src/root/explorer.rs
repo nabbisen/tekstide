@@ -22,14 +22,15 @@ impl FileExplorerScanPolicy {
     /// Change-detection-wiring handoff, D1: `collapsed_directory_names`
     /// used to be this policy's own hardcoded copy of
     /// `[".git", "node_modules", "target"]` -- now built from
-    /// `super::super::IGNORED_DIRECTORY_NAMES`, the one list change
+    /// `domain::IGNORED_DIRECTORY_NAMES` (RFC-077 D7.3: moved there
+    /// ahead of this module leaving `project`), the one list change
     /// detection's own policy also builds from, so the two cannot
     /// independently drift into disagreement.
     pub fn linux_mvp() -> Self {
         Self {
             max_children_per_directory: 256,
             omitted_count_limit: OMITTED_COUNT_LIMIT,
-            collapsed_directory_names: super::super::IGNORED_DIRECTORY_NAMES
+            collapsed_directory_names: crate::domain::IGNORED_DIRECTORY_NAMES
                 .iter()
                 .map(|name| (*name).to_owned())
                 .collect(),

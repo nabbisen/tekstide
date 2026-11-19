@@ -26,7 +26,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::root::{
+use crate::root::{
     ExplorerDirectoryScan, ExplorerIgnoreState, ExplorerNode, ExplorerNodeKind, ExplorerNodeState,
     ExplorerScanError, FileExplorerScanPolicy, FileExplorerScanner, ProjectRootHandle,
 };

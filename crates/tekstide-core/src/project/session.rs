@@ -35,12 +35,12 @@ use crate::domain::{
 use super::change_detection::{
     ChangedPathValidationError, DetectedChanges, GeneratedChangeDetector, ReviewBaseline,
 };
-use super::root::{FileExplorerScanPolicy, ProjectRootHandle, ValidProjectRoot};
 use super::{
     ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
     ProjectFileState, ProjectMode, ProjectOpenSurface, ProjectResourceLimits,
     ProjectRuntimeSummary, ProjectWarningState, SaveAllOutcome, WorkspaceTrust,
 };
+use crate::root::{FileExplorerScanPolicy, ProjectRootHandle, ValidProjectRoot};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectSession {
@@ -1689,7 +1689,7 @@ impl ProjectSession {
     /// worker thread and hands each result to [`Self::apply_explorer_scan`].
     /// Returns whether a request was made.
     pub fn request_explorer_root_scan_if_needed(&mut self) -> bool {
-        use super::explorer_tree::ExplorerRootState;
+        use crate::explorer_tree::ExplorerRootState;
         match self.content_workspace.explorer_tree().root_state() {
             ExplorerRootState::NotRequested | ExplorerRootState::Failed => {
                 self.content_workspace

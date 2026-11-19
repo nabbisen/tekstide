@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::project::root::{
+use crate::root::{
     FileAccessContainmentStatus, FileAccessError, FileAccessSymlinkStatus, ProjectFileAccessPolicy,
     ProjectRootHandle,
 };

@@ -21,11 +21,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::change_detection::{ChangeLifecycle, ChangePathKind, DetectedChanges};
-use super::root::{
+use crate::content::FileSnapshot;
+use crate::root::{
     FileAccessBlockedReason, FileAccessError, FileAccessTarget, ProjectFileAccessPolicy,
     ProjectRootHandle,
 };
-use crate::content::FileSnapshot;
 
 /// RFC-024 Decision 2, Open question 1 -- measured, not estimated
 /// (2026-08-11). Holding two text buffers at this size costs
