@@ -532,3 +532,36 @@ unfalsifiable where it matters.
 and `project/runtime.rs` cannot take the top-level names `content` and `runtime` — both are live
 modules with different contents, and reusing either would make the departing module
 indistinguishable from an existing one in every measurement this gate takes.
+
+## 16. D7.4 landed, and §2's coupling table was measured with an incomplete instrument (review 705, 2026-11-19)
+
+`watch` is out. Verified independently: `project` total **44** / own-code **36** / façade **8** /
+**genuine reach 28** — held exactly as predicted, the first stage where the pin and the ceiling
+visibly diverge — submodules **7 → 6**, 26 modules, largest SCC still 0. `"watch"` was added to
+`DEPARTED_D7_CAPABILITIES` in the same commit, and removing it again in an ablation produced
+**exactly 31**, the number the bound's own doc names as the consequence of a stale list: the
+documented failure mode confirmed rather than asserted.
+
+**§2's table under-reports internal coupling.** The script that built it parsed only `use`
+statements, so an inline `super::watch::X` path in a function body was invisible to it — which is
+how §6 came to claim `watch` had in-degree 0 while `session.rs`'s `watched_directories` held three
+such paths. The dev team found them while building. Re-measured counting inline paths as well as
+imports, over the clusters that remain:
+
+| From | To | References |
+|---|---|---|
+| `session` | `change_detection` | 1 |
+| `content` | `change_detection` | 1 |
+
+**`change_detection`, `metadata` and `project/runtime.rs` reference nothing left inside `project`.**
+
+### §6's remaining order is wrong, the same way `watch`'s was
+
+§6 has D7.5 = `content` + `diff` and D7.6 = `change_detection`. But `content → change_detection`, so
+`content` leaving first makes that an edge back to `project`, against the façade line the stage
+itself adds — a 2-cycle against `MAX_LARGEST_SCC_SIZE == 0`, identical to the `watch`-before-`root`
+hazard and missed for the same reason: the rule was right, the table it was applied to was not.
+
+**Corrected remainder:** **D7.5 `change_detection`** (with `metadata` optionally alongside — it is
+independent), **D7.6 `content` + `diff`**, **D7.7 `metadata`** if not already gone. The naming
+constraint from §15 now binds D7.6: the departing module cannot take the top-level name `content`.
