@@ -20,7 +20,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::change_detection::{ChangeLifecycle, ChangePathKind, DetectedChanges};
+use crate::change_detection::{ChangeLifecycle, ChangePathKind, DetectedChanges};
 use crate::content::FileSnapshot;
 use crate::root::{
     FileAccessBlockedReason, FileAccessError, FileAccessTarget, ProjectFileAccessPolicy,

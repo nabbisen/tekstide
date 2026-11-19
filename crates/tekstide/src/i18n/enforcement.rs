@@ -140,7 +140,7 @@ fn no_raw_string_literal_is_passed_to_text_anywhere_in_the_crate() {
 const CORE_TARGET_FILES: &[&str] = &[
     "shell.rs",
     "project_board.rs",
-    "project/metadata.rs",
+    "metadata.rs",
     "domain/trust.rs",
 ];
 
@@ -202,7 +202,7 @@ const CORE_BLANKET_EXEMPT_FILES: &[&str] = &["shell.rs"];
 ///   along with the fields that held them (`primary_action`/
 ///   `secondary_action`, see `CHANGELOG.md`). Only `"No projects yet."`
 ///   (`heading`) remains, still dormant, still not fixed here.
-/// - **`project/metadata.rs` also holds two dormant `.label()`
+/// - **`metadata.rs` also holds two dormant `.label()`
 ///   producers** not in the table: `ProjectOpenSurface::label()` and
 ///   `ProjectMode::label()`. Both are reachable only through
 ///   `render_active_project_workspace` (site 1) -- the real GUI's
@@ -275,15 +275,15 @@ const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     CoreExemptSite::live("domain/trust.rs", "Restricted"),
     CoreExemptSite::live("domain/trust.rs", "Trusted"),
     CoreExemptSite::live("domain/trust.rs", "Revoked"),
-    // project/metadata.rs -- ProjectOpenSurface::label. Dormant: only
+    // metadata.rs -- ProjectOpenSurface::label. Dormant: only
     // reachable through the placeholder `ActiveProjectWorkspace` route.
-    CoreExemptSite::dormant("project/metadata.rs", "Project Dashboard"),
-    CoreExemptSite::dormant("project/metadata.rs", "Text Editor"),
-    CoreExemptSite::dormant("project/metadata.rs", "Git Status"),
-    CoreExemptSite::dormant("project/metadata.rs", "AgentRun Detail"),
-    CoreExemptSite::dormant("project/metadata.rs", "Diff Review"),
-    CoreExemptSite::dormant("project/metadata.rs", "Handoff Report"),
-    CoreExemptSite::dormant("project/metadata.rs", "Trust Settings"),
+    CoreExemptSite::dormant("metadata.rs", "Project Dashboard"),
+    CoreExemptSite::dormant("metadata.rs", "Text Editor"),
+    CoreExemptSite::dormant("metadata.rs", "Git Status"),
+    CoreExemptSite::dormant("metadata.rs", "AgentRun Detail"),
+    CoreExemptSite::dormant("metadata.rs", "Diff Review"),
+    CoreExemptSite::dormant("metadata.rs", "Handoff Report"),
+    CoreExemptSite::dormant("metadata.rs", "Trust Settings"),
     // Response 233: `ApprovalHistory` is the first `ProjectOpenSurface`
     // variant with a real render arm in `view()` -- but `label()` itself
     // is still not that arm's source of user-facing text
@@ -292,10 +292,10 @@ const CORE_EXEMPT_LITERALS: &[CoreExemptSite] = &[
     // literal's own reachability is unchanged: still only
     // `tekstide_core::shell::render_text`'s pre-GUI harness, same as
     // every other variant above.
-    CoreExemptSite::dormant("project/metadata.rs", "Approval History"),
-    // project/metadata.rs -- ProjectMode::label. Same reason.
-    CoreExemptSite::dormant("project/metadata.rs", "Content Mode"),
-    CoreExemptSite::dormant("project/metadata.rs", "Terminal / Agent Immersion Mode"),
+    CoreExemptSite::dormant("metadata.rs", "Approval History"),
+    // metadata.rs -- ProjectMode::label. Same reason.
+    CoreExemptSite::dormant("metadata.rs", "Content Mode"),
+    CoreExemptSite::dormant("metadata.rs", "Terminal / Agent Immersion Mode"),
 ];
 
 struct CoreExemptSite {

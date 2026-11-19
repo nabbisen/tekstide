@@ -35,16 +35,17 @@
 //! `release-checklist.md`'s Package Smoke (b) already had to correct from one
 //! test to two, which a third, avoidable one should not join.
 //!
-//! **25 top-level modules, plus `test_support` as a 26th, special one.**
-//! `lib.rs` declares 25 `pub mod`s unconditionally (21 at the RFC's own
+//! **27 top-level modules, plus `test_support` as a 28th, special one.**
+//! `lib.rs` declares 27 `pub mod`s unconditionally (21 at the RFC's own
 //! count, `+1` from RFC-077 D7.2's `recent`, `+2` from RFC-077 D7.3's
-//! `root` and `explorer_tree`, `+1` from RFC-077 D7.4's `watch` -- all
-//! four new top-level modules, not renamed ones, since each was
-//! `project::X` before) and one more, `test_support`, gated on
+//! `root` and `explorer_tree`, `+1` from RFC-077 D7.4's `watch`, `+2`
+//! from RFC-077 D7.5's `change_detection` and `metadata` -- all six new
+//! top-level modules, not renamed ones, since each was `project::X`
+//! before) and one more, `test_support`, gated on
 //! `any(test, feature = "test-support")` — present in source either
 //! way, since this gate reads source text rather than compiling, and
 //! it is exactly the node D1's third assertion is about reaching.
-//! `test_support` is graphed as the 26th
+//! `test_support` is graphed as the 28th
 //! because it must be, not because the count is wrong.
 //!
 //! **RFC-077 D7.0 (review 696) added two more bounds, because
@@ -233,11 +234,18 @@ const MAX_LARGEST_SCC_SIZE: usize = 0;
 /// **Lowered to 6 by RFC-077 D7.4** (`watch` out -- its only external
 /// reference already targeted a departed capability, so this stage
 /// moves this bound without moving `MAX_PROJECT_GENUINE_REACH`; see
-/// that constant's own doc). Falls to 3 when D7 is done (`session`,
-/// `runtime` stay with orchestration). Asserted `==`, the same
-/// reasoning `MAX_LARGEST_SCC_SIZE` already carries: a shrink without
-/// the bound moving in the same commit is as much a lie as a growth.
-const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 6;
+/// that constant's own doc). **Lowered to 4 by RFC-077 D7.5**
+/// (`change_detection` + `metadata` out, together -- review 705's
+/// re-measured coupling table, built from inline paths as well as `use`
+/// statements after D7.4's own self-reference miss showed the
+/// import-only scan was incomplete, found `metadata` already
+/// independent in both directions and `change_detection` reached only
+/// by `session` and `diff`, both staying). Falls to 3 when D7 is done
+/// (`session`, `runtime` stay with orchestration). Asserted `==`, the
+/// same reasoning `MAX_LARGEST_SCC_SIZE` already carries: a shrink
+/// without the bound moving in the same commit is as much a lie as a
+/// growth.
+const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 4;
 
 /// RFC-077 D7.0 (review 696), REPLACED by review 703's required fix:
 /// the modules a D7 stage has already moved out of `project`, named
@@ -256,7 +264,14 @@ const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 6;
 /// `genuine_reach_weight_by_module`'s measure and redding the ceiling
 /// below -- a red that means "this list is stale," not "the bound is
 /// wrong."
-const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree", "watch"];
+const DEPARTED_D7_CAPABILITIES: &[&str] = &[
+    "recent",
+    "root",
+    "explorer_tree",
+    "watch",
+    "change_detection",
+    "metadata",
+];
 
 /// RFC-077 D7.0 (review 696), REPLACED by review 703's required fix:
 /// `MAX_OWN_CODE_REFERENCE_WEIGHT`'s own must-not-rise ceiling (33 at
@@ -299,7 +314,18 @@ const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree", "
 /// list, these three would have counted as genuine reach and raised
 /// this bound to 31, which is exactly the loud, correctly-directed red
 /// this constant's own earlier doc warns a stale list produces.
-const MAX_PROJECT_GENUINE_REACH: usize = 28;
+///
+/// **Falls to 26 at RFC-077 D7.5** (`change_detection` + `metadata`
+/// out): `change_detection.rs`'s own external reach (to `domain`)
+/// leaves with it, no longer counted under `project`; `session.rs`'s
+/// and `diff.rs`'s own single `super::change_detection::X` import each
+/// (previously invisible, the same class D7.4 found) became real,
+/// visible `crate::change_detection::X` references and are excluded
+/// from genuine reach by `change_detection` joining
+/// `DEPARTED_D7_CAPABILITIES` in the same commit. `metadata` carried no
+/// internal references in either direction, so its own departure moves
+/// nothing here.
+const MAX_PROJECT_GENUINE_REACH: usize = 26;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -856,6 +882,19 @@ fn no_module_exceeds_its_genuine_reach_ceiling() {
 /// line -- all excluded from genuine reach by `watch` joining
 /// `DEPARTED_D7_CAPABILITIES` in the same commit, which is exactly why
 /// that bound stayed at 28 while this pin moved.
+///
+/// **D7.5 moved total and façade again while own-code held**: total
+/// 44 → 46, façade 8 → 10, own unchanged at 36. Two effects cancel on
+/// `own`: `change_detection.rs`'s own single `crate::domain::{...}`
+/// import leaves `project`'s own-code weight (it is no longer a file
+/// `project` owns), while `session.rs`'s and `diff.rs`'s own
+/// previously-invisible `super::change_detection::X` imports become
+/// visible `crate::change_detection::X` references and add back
+/// exactly one each. Total and façade both rise by two: one new façade
+/// line each for `change_detection` and `metadata`, plus the same two
+/// newly-visible `session.rs`/`diff.rs` references landing in total
+/// (not façade). Genuine reach still falls, to 26, because those two
+/// newly-visible references target a departed capability.
 #[test]
 fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let graph = measure_capability_graph();
@@ -863,7 +902,7 @@ fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let own_code_weight = own_code_reference_weight_by_module();
     let own = own_code_weight.get("project").copied().unwrap_or(0);
     assert_eq!(
-        total, 44,
+        total, 46,
         "project's total reference count (façade included) moved"
     );
     assert_eq!(
@@ -872,7 +911,7 @@ fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     );
     assert_eq!(
         total - own,
-        8,
+        10,
         "project's façade (pub use / pub(crate) use) reference count moved"
     );
 }

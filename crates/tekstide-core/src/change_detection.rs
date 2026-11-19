@@ -6,10 +6,8 @@ use std::time::UNIX_EPOCH;
 
 use crate::domain::{
     AgentRunId, ChangeDetectionFailureReason, ChangeDetectionSource, ChangeDetectionStatus,
-    DomainTimestamp, ProjectRootLocation,
+    DomainTimestamp, IGNORED_DIRECTORY_NAMES, ProjectId, ProjectRootLocation,
 };
-
-use super::ProjectId;
 
 pub const DEFAULT_CHANGE_DETECTOR_ENTRY_LIMIT: usize = 4096;
 pub const DEFAULT_CHANGED_PATH_LIMIT: usize = 4096;
@@ -21,7 +19,7 @@ pub struct GeneratedChangeDetectionPolicy {
     /// Change-detection-wiring handoff, D1: directory names a filesystem
     /// scan skips entirely -- not recorded as an entry, not recursed
     /// into, not counted against `max_entries`. Defaults to
-    /// `super::IGNORED_DIRECTORY_NAMES`, the same list
+    /// `IGNORED_DIRECTORY_NAMES`, the same list
     /// `FileExplorerScanPolicy::linux_mvp` builds its own
     /// `collapsed_directory_names` from -- one shared definition of
     /// project-wide scan noise, not two that could disagree. Matched by
@@ -52,7 +50,7 @@ impl Default for GeneratedChangeDetectionPolicy {
         Self {
             max_entries: DEFAULT_CHANGE_DETECTOR_ENTRY_LIMIT,
             max_changed_paths: DEFAULT_CHANGED_PATH_LIMIT,
-            ignored_directory_names: super::IGNORED_DIRECTORY_NAMES,
+            ignored_directory_names: IGNORED_DIRECTORY_NAMES,
         }
     }
 }

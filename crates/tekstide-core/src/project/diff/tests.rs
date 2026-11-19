@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::change_detection::{
+    ChangeLifecycle, ChangePathKind, DetectedChangedPath, DetectedChanges,
+};
 use crate::content::FileSnapshot;
 use crate::domain::{ChangeDetectionSource, ChangeDetectionStatus};
 use crate::project::ProjectId;
-use crate::project::change_detection::{
-    ChangeLifecycle, ChangePathKind, DetectedChangedPath, DetectedChanges,
-};
 use crate::project::root::{
     FileAccessBlockedReason, ProjectRootHandle, ProjectRootValidator, SymlinkPolicy,
 };

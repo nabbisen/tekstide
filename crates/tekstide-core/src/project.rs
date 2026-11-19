@@ -1,7 +1,5 @@
-mod change_detection;
 mod content;
 mod diff;
-mod metadata;
 mod runtime;
 mod session;
 
@@ -45,9 +43,29 @@ pub use crate::domain::{FileGitStatus, ProjectGitSummary, ProjectProviderState};
 /// against the `project -> root` façade above. Re-exported unchanged.
 pub use crate::domain::IGNORED_DIRECTORY_NAMES;
 
+/// RFC-077 D7.5: `change_detection` out -- zero remaining in-project
+/// references (review 705's own re-measured coupling table, built from
+/// inline paths as well as `use` statements after `watch`'s own
+/// previously-invisible self-references showed the import-only scan was
+/// incomplete). Re-exported unchanged so `project::change_detection::X`
+/// still resolves.
+pub use crate::change_detection::{
+    ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
+    DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
+    ReviewBaseline, ReviewBaselineEntry,
+};
 pub use crate::explorer_tree::{
     ExplorerRootState, ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
     ExplorerTreeRow, ExplorerTreeRowKind, MAX_TREE_ROWS, is_expandable,
+};
+/// RFC-077 D7.5: `metadata` out alongside `change_detection` -- already
+/// independent (zero internal references in either direction) before
+/// this move, the same shape `recent` had at D7.2. Re-exported unchanged
+/// so `project::metadata::X` still resolves.
+pub use crate::metadata::{
+    ProjectFileState, ProjectGitDisplayStatus, ProjectMetadataCountStatus, ProjectMode,
+    ProjectOpenSurface, ProjectResourceLimits, ProjectWarning, ProjectWarningLevel,
+    ProjectWarningState,
 };
 /// RFC-077 D7.4: `watch` out -- its only external reference
 /// (`watch/directory.rs`'s own `crate::root::{...}`) already targets a
@@ -65,11 +83,6 @@ pub use crate::watch::{
     ScanRequest, ScopeChange, WatchAdmissionError, WatchBackend, WatchEvents, WatchEventsSlot,
     WatchNotice, WatchRefusal, WatchScope, WatchState, WatchedDirectory, desired_directories,
 };
-pub use change_detection::{
-    ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
-    DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
-    ReviewBaseline, ReviewBaselineEntry,
-};
 pub use content::{
     DocumentSaveOutcome, ProjectActiveFileLaunchAssessment, ProjectActiveFileLaunchBlockReason,
     ProjectActiveFileLaunchDecision, ProjectContentError, ProjectContentStatus,
@@ -80,11 +93,6 @@ pub use diff::{
     ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DEFAULT_MAX_DIFF_LINES, DiffContent,
     DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
     gate_diff_content_read, read_diff_content,
-};
-pub use metadata::{
-    ProjectFileState, ProjectGitDisplayStatus, ProjectMetadataCountStatus, ProjectMode,
-    ProjectOpenSurface, ProjectResourceLimits, ProjectWarning, ProjectWarningLevel,
-    ProjectWarningState,
 };
 pub use runtime::ProjectRuntimeSummary;
 /// RFC-077 Stage 8: `#[cfg(test)]`, not merely `pub(crate)` -- this is

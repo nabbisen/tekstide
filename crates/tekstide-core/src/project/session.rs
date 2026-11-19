@@ -32,13 +32,13 @@ use crate::domain::{
     TranscriptAbsence, TranscriptId, TranscriptOrigin, VisibleSlot,
 };
 
-use super::change_detection::{
-    ChangedPathValidationError, DetectedChanges, GeneratedChangeDetector, ReviewBaseline,
-};
 use super::{
     ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
     ProjectFileState, ProjectMode, ProjectOpenSurface, ProjectResourceLimits,
     ProjectRuntimeSummary, ProjectWarningState, SaveAllOutcome, WorkspaceTrust,
+};
+use crate::change_detection::{
+    ChangedPathValidationError, DetectedChanges, GeneratedChangeDetector, ReviewBaseline,
 };
 use crate::root::{FileExplorerScanPolicy, ProjectRootHandle, ValidProjectRoot};
 
