@@ -437,3 +437,45 @@ Accepted as correct in the same review, and recorded because it reads like a sho
 reusing `TerminalLaunchError::MissingProjectRoot` instead of adding a variant costs nothing, since
 `shell.rs:3823` collapses every launch error to the symbol `"error"` and the real cause is preserved
 in the summary for logs.
+
+## 14. D7.2 landed, and §6's staging order is corrected (review 702, 2026-11-19)
+
+`recent` is out — the first real D7 stage. Measured independently: submodules **11 → 10**, own-code
+**33 → 32**, total **37 → 37**, façade **4 → 5**, crate-wide **22 → 23 modules / 130 → 132 refs /
+55 → 57 edges**, largest SCC still **0**. `recent` has one outgoing edge (`domain`) and one incoming
+(`project`'s façade).
+
+**§5a's own prediction of total 37 → 36 was wrong, and the law that corrects it matters more than
+the number.** The prediction subtracted the reference `recent` carried away and forgot that the
+façade line replacing `pub mod recent;` is itself a `crate::` occurrence:
+
+> A departing capability removes the own-code references it carried and **adds exactly one façade
+> reference**. `project`'s total therefore falls only when the capability carried more than one,
+> stays level at exactly one, and **rises when it carried none**.
+
+### §6's order was wrong, and would have turned the SCC bound red
+
+`watch/directory.rs:9` already reads `use crate::project::root::{` — invisible to the gate today
+because `watch` is inside `project` and same-module references are dropped. The moment `watch`
+becomes top-level that is an edge **`watch → project`**, while `project.rs`'s compatibility line
+`pub use crate::watch;` is **`project → watch`**: a 2-cycle against `MAX_LARGEST_SCC_SIZE == 0`.
+§6 placed `watch` third on the grounds of "out-degree 1, in-degree 0" — but the in-degree is
+irrelevant and the outgoing edge is the whole problem.
+
+**The corrected rule, which §6 should have been built on:**
+
+> **A capability may leave only when nothing it still references lives inside `project`.**
+
+Applied, with D7.1's back-edge cuts in place: **free now** — `root`, `change_detection`, `metadata`
+(each has zero remaining in-project references); **after `root`** — `explorer_tree`, `watch`;
+**last** — `content` + `diff`. So the order becomes **D7.3 `root` + `explorer_tree`, D7.4 `watch`**,
+with the rest as before.
+
+### Second hazard for every remaining stage
+
+A departure also turns `super::X` imports **inside** `project` into counted `crate::X` references —
+`project/content.rs:12`, `explorer_tree.rs:29` and `session.rs:38` all reach `root` that way. So a
+stage can **raise** own-code while lowering the submodule count, and own-code is 32 against a
+ceiling of 33. `root` + `explorer_tree` nets to ≈29 and `watch` to 32; **`change_detection` is the
+binding case at ≈33, exactly at the cap.** Measure per stage rather than predicting, and if one
+would exceed 33, re-derive the ceiling with the derivation recorded — never raise it to fit.
