@@ -244,7 +244,12 @@ const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 7;
 /// and make the bound below unfalsifiable in exactly the direction
 /// that matters. Grows by one name per departure, in the same commit as
 /// the stage that earns it -- the same discipline the bound below
-/// carries.
+/// carries. **Hand-maintained, and fails loud in the right direction
+/// if a departure is missed**: forgetting to add a name here makes
+/// that stage's own split artefact count as genuine reach, *raising*
+/// `genuine_reach_weight_by_module`'s measure and redding the ceiling
+/// below -- a red that means "this list is stale," not "the bound is
+/// wrong."
 const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree"];
 
 /// RFC-077 D7.0 (review 696), REPLACED by review 703's required fix:
@@ -266,11 +271,17 @@ const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree"];
 /// genuine half**: own-code references whose target is not in
 /// `DEPARTED_D7_CAPABILITIES` -- monotone in the direction D7 moves,
 /// immune to the artefact, and it measures what D7 is actually about:
-/// how far orchestration still reaches into real capabilities. Must
-/// fall or hold, never rise; asserted `<=`, the same polarity the
-/// replaced bound carried. 28 today; falls with every remaining
-/// departure. `app` is next densest at 17, unaffected, all own-code and
-/// none of it a departed-capability reference.
+/// how far orchestration still reaches into real capabilities. **Must
+/// fall or hold, never rise -- not a literal must-fall** (review 704's
+/// own correction: a departing capability with no external references
+/// of its own, like `watch`, moves this bound by exactly zero, the same
+/// shape the submodule-count bound's own §5a arithmetic already
+/// established for a different metric). Asserted `<=`, the same
+/// polarity the replaced bound carried. 28 today: falls when the
+/// departing capability carried external references of its own, holds
+/// when it did not -- not predicted per stage, measured. `app` is next
+/// densest at 17, unaffected, all own-code and none of it a
+/// departed-capability reference.
 const MAX_PROJECT_GENUINE_REACH: usize = 28;
 
 fn src_root() -> PathBuf {
