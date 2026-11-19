@@ -565,3 +565,40 @@ hazard and missed for the same reason: the rule was right, the table it was appl
 **Corrected remainder:** **D7.5 `change_detection`** (with `metadata` optionally alongside — it is
 independent), **D7.6 `content` + `diff`**, **D7.7 `metadata`** if not already gone. The naming
 constraint from §15 now binds D7.6: the departing module cannot take the top-level name `content`.
+
+## 17. D7.5 landed, and D7.6 is two capabilities with the names decided (review 707, 2026-11-19)
+
+`change_detection` + `metadata` are out. Verified independently: `project` total **46** / own-code
+**36** / façade **10** / **genuine reach 26** (it falls this time, not merely holds), submodules
+**6 → 4** (`content`, `diff`, `runtime`, `session`), 28 modules, largest SCC 0. Found proactively by
+grep rather than by a red: ten hardcoded `"project/metadata.rs"` occurrences in `tekstide`'s own
+i18n enforcement gate — the third instance of the stale-path class in this split and the first
+caught before it failed.
+
+**`metadata`'s D7.7 question is moot** — it left here. "Capability or vocabulary" was a question
+about where it belongs, not whether it could move; if it is vocabulary, going from top-level into
+`domain` later is a cheap D5 move 1.
+
+### D7.6 departs two capabilities, not one
+
+§1's "content cluster" lumped `content.rs` and `diff.rs` together, inherited from the reviewer's
+original clustering. Measured now that they are the last two: **neither references the other at
+all.** And by D6's own test, `diff` has its own external contract, grant decision and threat
+surface — `gate_diff_content_read`, `DiffGateDecision`, `DiffGateRefusal`, and the
+`DEFAULT_MAX_DIFF_INPUT_BYTES` / `DEFAULT_MAX_DIFF_LINES` limits. Reading a file into a diff is a
+different grant from opening a document in the workspace.
+
+Both are clear to leave: after D7.5 neither references anything still inside `project`, and
+`session → content` becomes an artefact reference excluded by the same-commit departed-list
+addition. Submodule count **4 → 2**.
+
+**Names decided, after checking every top-level module name in the crate:** `diff.rs` → top-level
+**`diff`** (free, and already what the capability is called); `content.rs` → top-level
+**`workspace`** (free; `content` is taken by a live unrelated module per §15's constraint, and
+`workspace` is what the capability is — `ProjectContentWorkspace`, the save/save-all outcomes, the
+active-file launch assessment, the explorer status labels). Façade lines stay flattened so
+`project::DiffContent` and `project::ProjectContentWorkspace` resolve unchanged.
+
+**After D7.6, `project` holds `session` (+`run_records`), `runtime.rs` and the façade** —
+orchestration and nothing else, which is D7's own goal statement. That is the point to re-read D7's
+text against what landed and write the closeout, not to look for a D7.7.
