@@ -35,15 +35,16 @@
 //! `release-checklist.md`'s Package Smoke (b) already had to correct from one
 //! test to two, which a third, avoidable one should not join.
 //!
-//! **24 top-level modules, plus `test_support` as a 25th, special one.**
-//! `lib.rs` declares 24 `pub mod`s unconditionally (21 at the RFC's own
+//! **25 top-level modules, plus `test_support` as a 26th, special one.**
+//! `lib.rs` declares 25 `pub mod`s unconditionally (21 at the RFC's own
 //! count, `+1` from RFC-077 D7.2's `recent`, `+2` from RFC-077 D7.3's
-//! `root` and `explorer_tree` -- all three new top-level modules, not
-//! renamed ones, since each was `project::X` before) and one more,
-//! `test_support`, gated on `any(test, feature = "test-support")` —
-//! present in source either way, since this gate reads source text
-//! rather than compiling, and it is exactly the node D1's third
-//! assertion is about reaching. `test_support` is graphed as the 25th
+//! `root` and `explorer_tree`, `+1` from RFC-077 D7.4's `watch` -- all
+//! four new top-level modules, not renamed ones, since each was
+//! `project::X` before) and one more, `test_support`, gated on
+//! `any(test, feature = "test-support")` — present in source either
+//! way, since this gate reads source text rather than compiling, and
+//! it is exactly the node D1's third assertion is about reaching.
+//! `test_support` is graphed as the 26th
 //! because it must be, not because the count is wrong.
 //!
 //! **RFC-077 D7.0 (review 696) added two more bounds, because
@@ -200,12 +201,14 @@ use tekstide_core::domain::{AgentRunId, ProjectId};
 /// set to 0 and the gate test run before committing to it) rather than
 /// taken on the response's word: zero components of size greater than
 /// one remain anywhere in the graph (22 modules at the time this was
-/// measured; 25 after RFC-077 D7.2's `recent` and D7.3's `root` +
-/// `explorer_tree` -- an acyclic graph does not become cyclic by a
-/// module gaining siblings, confirmed directly at D7.3 too, not merely
-/// assumed: `root`'s own new edge to the top-level `content` module
-/// does not close a cycle with `content.rs`'s edge back to `root`,
-/// since `content.rs`'s owning top-level module is `project`).
+/// measured; 26 after RFC-077 D7.2's `recent`, D7.3's `root` +
+/// `explorer_tree`, and D7.4's `watch` -- an acyclic graph does not
+/// become cyclic by a module gaining siblings, confirmed directly at
+/// D7.3 too, not merely assumed: `root`'s own new edge to the top-level
+/// `content` module does not close a cycle with `content.rs`'s edge
+/// back to `root`, since `content.rs`'s owning top-level module is
+/// `project`; `watch`'s own one outgoing edge, to the already-departed
+/// `root`, cannot close a cycle either).
 /// `agent -> approval`
 /// is now `tekstide-core`'s only residual cross-module edge between these
 /// two modules in either direction remaining from the original SCC —
@@ -226,12 +229,15 @@ const MAX_LARGEST_SCC_SIZE: usize = 0;
 /// churn; `ignored_directories` also leaves the count here as a side
 /// effect, not a stage of its own -- its one constant moved to `domain`
 /// as a prerequisite, see bound 2's own doc, and the now-empty file was
-/// deleted rather than kept as 1 LOC of orchestration ceremony). Falls
-/// to 3 when D7 is done (`session`, `runtime` stay with orchestration).
-/// Asserted `==`, the same reasoning `MAX_LARGEST_SCC_SIZE` already
-/// carries: a shrink without the bound moving in the same commit is as
-/// much a lie as a growth.
-const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 7;
+/// deleted rather than kept as 1 LOC of orchestration ceremony).
+/// **Lowered to 6 by RFC-077 D7.4** (`watch` out -- its only external
+/// reference already targeted a departed capability, so this stage
+/// moves this bound without moving `MAX_PROJECT_GENUINE_REACH`; see
+/// that constant's own doc). Falls to 3 when D7 is done (`session`,
+/// `runtime` stay with orchestration). Asserted `==`, the same
+/// reasoning `MAX_LARGEST_SCC_SIZE` already carries: a shrink without
+/// the bound moving in the same commit is as much a lie as a growth.
+const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 6;
 
 /// RFC-077 D7.0 (review 696), REPLACED by review 703's required fix:
 /// the modules a D7 stage has already moved out of `project`, named
@@ -250,7 +256,7 @@ const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 7;
 /// `genuine_reach_weight_by_module`'s measure and redding the ceiling
 /// below -- a red that means "this list is stale," not "the bound is
 /// wrong."
-const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree"];
+const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree", "watch"];
 
 /// RFC-077 D7.0 (review 696), REPLACED by review 703's required fix:
 /// `MAX_OWN_CODE_REFERENCE_WEIGHT`'s own must-not-rise ceiling (33 at
@@ -273,15 +279,26 @@ const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree"];
 /// immune to the artefact, and it measures what D7 is actually about:
 /// how far orchestration still reaches into real capabilities. **Must
 /// fall or hold, never rise -- not a literal must-fall** (review 704's
-/// own correction: a departing capability with no external references
-/// of its own, like `watch`, moves this bound by exactly zero, the same
-/// shape the submodule-count bound's own §5a arithmetic already
-/// established for a different metric). Asserted `<=`, the same
-/// polarity the replaced bound carried. 28 today: falls when the
-/// departing capability carried external references of its own, holds
-/// when it did not -- not predicted per stage, measured. `app` is next
-/// densest at 17, unaffected, all own-code and none of it a
-/// departed-capability reference.
+/// own correction, confirmed at D7.4: `watch`'s only external reference
+/// already targeted a departed capability, so adding `watch` to
+/// `DEPARTED_D7_CAPABILITIES` in the same commit held this bound at 28
+/// rather than lowering it -- not every departure moves it). Asserted
+/// `<=`, the same polarity the replaced bound carried. 28 today: falls
+/// when the departing capability carried external references of its
+/// own, holds when it did not -- not predicted per stage, measured.
+/// `app` is next densest at 17, unaffected, all own-code and none of it
+/// a departed-capability reference.
+///
+/// **D7.4 also found `project/session.rs` held three previously-
+/// invisible self-references to `watch`** (`super::watch::X`, no
+/// `crate::` prefix, the "in-degree 0" assumption's own blind spot --
+/// the same class of miss this subject keeps finding, this time in
+/// code rather than in a prediction). Repointed to `crate::watch::X`
+/// and excluded from this bound by the same-commit addition of
+/// `"watch"` above -- had `watch` been forgotten from the exclusion
+/// list, these three would have counted as genuine reach and raised
+/// this bound to 31, which is exactly the loud, correctly-directed red
+/// this constant's own earlier doc warns a stale list produces.
 const MAX_PROJECT_GENUINE_REACH: usize = 28;
 
 fn src_root() -> PathBuf {
@@ -829,6 +846,16 @@ fn no_module_exceeds_its_genuine_reach_ceiling() {
 /// This pin also doubles as `no_module_exceeds_its_genuine_reach_
 /// ceiling`'s own positive control (a nonzero own-code value pinned
 /// directly) -- see that test's doc.
+///
+/// **D7.4 moved total and own again while genuine reach held** (the
+/// first stage to show the two pins diverge): total 41 → 44, own
+/// 34 → 36, façade 7 → 8. The rise is `watch`'s own departure
+/// following the same split-artefact shape as D7.3 (`project/session.rs`'s
+/// three previously-invisible `super::watch::X` self-references becoming
+/// real, countable `project -> watch` references), plus a new façade
+/// line -- all excluded from genuine reach by `watch` joining
+/// `DEPARTED_D7_CAPABILITIES` in the same commit, which is exactly why
+/// that bound stayed at 28 while this pin moved.
 #[test]
 fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let graph = measure_capability_graph();
@@ -836,16 +863,16 @@ fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let own_code_weight = own_code_reference_weight_by_module();
     let own = own_code_weight.get("project").copied().unwrap_or(0);
     assert_eq!(
-        total, 41,
+        total, 44,
         "project's total reference count (façade included) moved"
     );
     assert_eq!(
-        own, 34,
+        own, 36,
         "project's own-code reference count (façade excluded) moved"
     );
     assert_eq!(
         total - own,
-        7,
+        8,
         "project's façade (pub use / pub(crate) use) reference count moved"
     );
 }

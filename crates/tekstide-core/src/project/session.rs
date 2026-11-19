@@ -296,12 +296,12 @@ impl ProjectSession {
     pub fn watched_directories(
         &self,
     ) -> (
-        std::collections::BTreeSet<super::watch::WatchedDirectory>,
-        Vec<(PathBuf, super::watch::WatchAdmissionError)>,
+        std::collections::BTreeSet<crate::watch::WatchedDirectory>,
+        Vec<(PathBuf, crate::watch::WatchAdmissionError)>,
     ) {
         let root = self.root_handle();
         let (expanded, open_document_directories) = self.content_workspace.watch_inputs();
-        super::watch::desired_directories(&root, &expanded, &open_document_directories)
+        crate::watch::desired_directories(&root, &expanded, &open_document_directories)
     }
 
     pub fn file_state(&self) -> &ProjectFileState {

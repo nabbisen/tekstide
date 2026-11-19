@@ -869,7 +869,7 @@ fn a_real_change_is_fed_to_the_batcher_and_drains_as_a_scan_request() {
         watcher.drain_due(at).is_empty(),
         "nothing is due before the window closes"
     );
-    let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
+    let due = watcher.drain_due(at + super::SCAN_WINDOW);
     assert_eq!(due.len(), 1, "one directory, one scan request");
     assert_eq!(due[0].directory, *directory);
     drop(watcher);
@@ -953,7 +953,7 @@ fn a_report_of_a_watched_directory_nested_inside_another_watched_directory_recor
 
     let at = Instant::now();
     watcher.record_changed_paths(std::slice::from_ref(inner), at);
-    let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
+    let due = watcher.drain_due(at + super::SCAN_WINDOW);
     let mut directories: Vec<_> = due
         .iter()
         .map(|request| request.directory.clone())
@@ -1051,7 +1051,7 @@ fn a_failed_notice_rescans_every_watched_directory() {
 
     let at = Instant::now();
     watcher.record_all_watched(at);
-    let due = watcher.drain_due(at + super::super::SCAN_WINDOW);
+    let due = watcher.drain_due(at + super::SCAN_WINDOW);
 
     assert_eq!(due.len(), watcher.scope().watched_count());
     assert_eq!(due[0].directory, *root);

@@ -22,6 +22,7 @@ pub mod security;
 pub mod shell;
 pub mod text_safety;
 pub mod transcript;
+pub mod watch;
 
 /// Response 232: `RealProcessLimiter` used to live only inside
 /// `runtime::terminal::reader::tests`, capping contention among that

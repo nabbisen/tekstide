@@ -8548,7 +8548,7 @@ fn reconcile_project_watch(state: &mut State, project_id: &tekstide_core::projec
 /// RFC-026 D3, B2 step 3: one notice from a project's watcher, recorded into its batcher.
 /// A notice whose generation is not the project's current one is from a watcher that has
 /// since closed, and is dropped. The feed itself is in
-/// [`tekstide_core::project::watch::ProjectWatcher::record_changed_paths`],
+/// [`tekstide_core::watch::ProjectWatcher::record_changed_paths`],
 /// which records only directories the project watches.
 fn record_project_watch_notice(
     state: &mut State,

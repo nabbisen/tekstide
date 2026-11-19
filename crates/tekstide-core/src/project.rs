@@ -4,7 +4,6 @@ mod diff;
 mod metadata;
 mod runtime;
 mod session;
-pub mod watch;
 
 /// RFC-077 D7.2: `recent` is already detached from `project` in both
 /// directions (zero internal references, measured before this move) --
@@ -50,6 +49,22 @@ pub use crate::explorer_tree::{
     ExplorerRootState, ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
     ExplorerTreeRow, ExplorerTreeRowKind, MAX_TREE_ROWS, is_expandable,
 };
+/// RFC-077 D7.4: `watch` out -- its only external reference
+/// (`watch/directory.rs`'s own `crate::root::{...}`) already targets a
+/// departed capability, so this move holds `project`'s genuine-reach
+/// weight at 28 rather than lowering it (review 704's own correction:
+/// not every departure moves that bound). **Not in-degree 0 as first
+/// assumed**: `project/session.rs`'s own `watched_directories` named
+/// three `super::watch::X` items (invisible to the gate, the same
+/// previously-unseen-self-reference class every prior D7 stage has
+/// found at least one of) -- repointed to `crate::watch::X`, the same
+/// choice made for every other departing capability's own in-crate
+/// callers, rather than left to inflate a later stage's own cut cost.
+pub use crate::watch::{
+    GIT_SUBPROCESSES_PER_SCAN, NotifyBackend, ProjectWatcher, SCAN_WINDOW, ScanBatcher,
+    ScanRequest, ScopeChange, WatchAdmissionError, WatchBackend, WatchEvents, WatchEventsSlot,
+    WatchNotice, WatchRefusal, WatchScope, WatchState, WatchedDirectory, desired_directories,
+};
 pub use change_detection::{
     ChangeLifecycle, ChangePathKind, ChangedPathValidationError, ChangedPathValidationErrorReason,
     DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
@@ -86,11 +101,6 @@ pub use session::{
     RunAnnotationError, RunRecordPersistSummary, RunRecordWrite, RunRecordsSetAside,
     TranscriptLoadSummary, TranscriptRetentionCleanup, agent_run_status_is_active,
     terminal_status_is_active,
-};
-pub use watch::{
-    GIT_SUBPROCESSES_PER_SCAN, NotifyBackend, ProjectWatcher, SCAN_WINDOW, ScanBatcher,
-    ScanRequest, ScopeChange, WatchAdmissionError, WatchBackend, WatchEvents, WatchEventsSlot,
-    WatchNotice, WatchRefusal, WatchScope, WatchState, WatchedDirectory, desired_directories,
 };
 
 /// RFC-077 Stage 7: the crate's one public entry point for reading a
