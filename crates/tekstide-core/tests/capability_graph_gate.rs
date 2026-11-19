@@ -54,11 +54,15 @@
 //! declares, which falls by construction only when a capability actually
 //! leaves (a compatibility `pub use` façade line is not a `mod`
 //! declaration, so API compatibility costs this bound nothing). Bound 2,
-//! `MAX_OWN_CODE_REFERENCE_WEIGHT`, is the opposite polarity — no stage
+//! `MAX_PROJECT_GENUINE_REACH` (D7.0's own `MAX_OWN_CODE_REFERENCE_WEIGHT`,
+//! replaced by review 703 after D7.3 found it countable but not monotone
+//! — see that constant's own doc), is the opposite polarity — no stage
 //! may *raise* it, though not every stage need lower it — and excludes
-//! façade (`pub use`/`pub(crate) use`) lines from the count, since a pure
-//! re-export names a module without reaching into it and every departing
-//! capability gains one to keep the published API unchanged.
+//! both façade (`pub use`/`pub(crate) use`) lines and references to a
+//! departed D7 capability (`DEPARTED_D7_CAPABILITIES`) from the count,
+//! since a pure re-export names a module without reaching into it, and a
+//! reference to a module that just left is the cost of naming it
+//! honestly, not reach into a capability still inside `project`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -229,45 +233,45 @@ const MAX_LARGEST_SCC_SIZE: usize = 0;
 /// much a lie as a growth.
 const MAX_PROJECT_CAPABILITY_SUBMODULES: usize = 7;
 
-/// RFC-077 D7.0 (review 696): the secondary guard, opposite polarity --
-/// no stage may *raise* this, though not every stage is required to
-/// lower it (the staging document's own §5a arithmetic: D7.3 `watch`
-/// correctly moves the submodule bound above by one while moving this
-/// one by exactly zero -- D7.2 `recent` is a second confirmed instance,
-/// measured below). `project` carried 33 own-code references at D7.0.
-/// **D7.2 moved it to 32** (37 total, unchanged; 5 façade). **D7.3
-/// raised it to 34, required rather than fit** (review 702's response
-/// measured and predicted ~29 for `root` + `explorer_tree`, naming only
-/// `content.rs`/`session.rs` as newly-crossing; the real set is four
-/// files, not two -- `watch/directory.rs` and `diff.rs` also held
-/// invisible self-references to `root`, found by checking every
-/// in-`project` file rather than the two the prediction named).
-/// **The rise is a measurement-visibility correction, not new
-/// coupling**: `root`/`explorer_tree` carried five already-real
-/// references away whole (their own prior `crate::runtime`/
-/// `crate::content` edges, invisible under `project` only because the
-/// target and the source shared a top-level module), while six
-/// previously-invisible same-module self-references in `content.rs`,
-/// `session.rs`, `watch/directory.rs` and `diff.rs` (`crate::project::
-/// root::X` and `super::root::X`/`super::explorer_tree::X`, all
-/// resolving to `project` itself before this move) became real,
-/// countable `project -> root`/`project -> explorer_tree` edges the
-/// moment their target left -- the same mechanism D7.2's own correction
-/// to the pin already established, scaled to four files instead of
-/// one. **Repointing every one of them to the canonical path, rather
-/// than leaving any on the `project::root` façade to stay under 33, was
-/// the required choice** (review 683's own "a D5 move 1 that leaves its
-/// in-crate callers on the re-export converts its own cut into a later
-/// stage's work" finding, applied to not doing that here either).
-/// Verified acyclic regardless (`the_largest_strongly_connected_
-/// component_is_within_its_ratcheted_bound` stays at 0): `root`'s own
-/// edge to the top-level `content` module (`FileAccessResolver`) and
-/// `content.rs`'s edge back to `root` do not form a cycle, because
-/// `content.rs`'s owning top-level module is `project`, not `content`
-/// -- a same-named but structurally distinct module from the top-level
-/// `content` crate `root.rs` actually implements against. `app` is next
-/// densest at 17, unaffected, all own-code.
-const MAX_OWN_CODE_REFERENCE_WEIGHT: usize = 34;
+/// RFC-077 D7.0 (review 696), REPLACED by review 703's required fix:
+/// the modules a D7 stage has already moved out of `project`, named
+/// explicitly -- not derived from the original `mod` declaration names,
+/// because two of the names a capability keeps when it leaves
+/// (`content`, `runtime`) collide with real, unrelated top-level
+/// modules `project` genuinely still reaches (`crate::content` 3,
+/// `crate::runtime` 3, as of D7.3). An exclusion list built from
+/// original `mod` names would silently discount those as "departed"
+/// and make the bound below unfalsifiable in exactly the direction
+/// that matters. Grows by one name per departure, in the same commit as
+/// the stage that earns it -- the same discipline the bound below
+/// carries.
+const DEPARTED_D7_CAPABILITIES: &[&str] = &["recent", "root", "explorer_tree"];
+
+/// RFC-077 D7.0 (review 696), REPLACED by review 703's required fix:
+/// `MAX_OWN_CODE_REFERENCE_WEIGHT`'s own must-not-rise ceiling (33 at
+/// D7.0, raised to 34 at D7.3) counted two things that move in opposite
+/// directions and called the sum one bound. Decomposed at review 703:
+/// `project`'s 34 own-code references split into **28 genuine reach**
+/// (`transcript` 8, `domain` 7, `agent` 4, `runtime` 3, `content` 3,
+/// `close` 2, `approval` 1 -- real capabilities `project` still names)
+/// and **6 split artefact** (`root` 4, `explorer_tree` 2 -- the file
+/// that just departed, named explicitly where `super::` sufficed
+/// before, exactly once per stage, as the honest alternative to leaving
+/// a blind spot). The genuine half **falls** every departure (33 at
+/// D7.0 -> 28 by D7.3, as each capability takes its own external reach
+/// with it); the artefact half **rises** every departure, by
+/// construction, the same way total references rise when a module
+/// splits (§5a). A ceiling built from the sum rises on correct work,
+/// which is the opposite of a guard. **This bound counts only the
+/// genuine half**: own-code references whose target is not in
+/// `DEPARTED_D7_CAPABILITIES` -- monotone in the direction D7 moves,
+/// immune to the artefact, and it measures what D7 is actually about:
+/// how far orchestration still reaches into real capabilities. Must
+/// fall or hold, never rise; asserted `<=`, the same polarity the
+/// replaced bound carried. 28 today; falls with every remaining
+/// departure. `app` is next densest at 17, unaffected, all own-code and
+/// none of it a departed-capability reference.
+const MAX_PROJECT_GENUINE_REACH: usize = 28;
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -606,6 +610,40 @@ fn own_code_reference_weight_by_module() -> BTreeMap<String, usize> {
     weight
 }
 
+/// RFC-077 D7.0 (review 696), bound 2's replacement (review 703
+/// Required): `own_code_reference_weight_by_module`'s own counting,
+/// with one more exclusion -- a reference whose target is a departed
+/// D7 capability (`DEPARTED_D7_CAPABILITIES`) does not count as
+/// "genuine reach," since it exists only because a capability that
+/// used to share a top-level module with its caller now has to be
+/// named explicitly. This is the artefact review 703 found; excluding
+/// it is what makes the bound this feeds monotone in the direction D7
+/// moves, rather than rising on every departure the way the replaced
+/// ceiling did.
+fn genuine_reach_weight_by_module() -> BTreeMap<String, usize> {
+    let root = src_root();
+    let modules = all_top_level_modules(&root);
+    let mut weight: BTreeMap<String, usize> = BTreeMap::new();
+    for file in production_files(&root) {
+        let relative = file.strip_prefix(&root).expect("under src/");
+        let from = owning_module(relative);
+        let source =
+            fs::read_to_string(&file).unwrap_or_else(|e| panic!("reading {}: {e}", file.display()));
+        let stripped = strip_full_line_comments(&source);
+        for line in stripped.lines() {
+            if is_facade_reexport_line(line) {
+                continue;
+            }
+            for to in crate_path_references(line, &modules) {
+                if to != from && !DEPARTED_D7_CAPABILITIES.contains(&to.as_str()) {
+                    *weight.entry(from.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    weight
+}
+
 /// RFC-077 D7.0 (review 696), control 1: `module`'s total reference
 /// count exactly as `measure_capability_graph` counts it -- façade lines
 /// included -- so the own-code weight's own subtraction (total minus
@@ -697,38 +735,46 @@ fn project_capability_submodule_count_is_within_its_ratcheted_bound() {
     );
 }
 
-/// RFC-077 D7.0 (review 696), bound 2: no module's own-code reference
-/// weight may exceed this ceiling. Opposite polarity from the bound
-/// above -- not every stage lowers it (D7.3 `watch` moves it by zero,
-/// per the staging document's own §5a arithmetic), but RFC-074's
+/// RFC-077 D7.0 (review 696), bound 2, REPLACED by review 703's
+/// required fix: no module's *genuine-reach* weight (references to a
+/// module that has not left `project` in a D7 stage) may exceed this
+/// ceiling. The replaced test asserted the same shape against raw
+/// own-code weight, which counted a split artefact that rises every
+/// departure -- see `MAX_PROJECT_GENUINE_REACH`'s own doc for the
+/// decomposition. This bound must fall or hold, never rise; RFC-074's
 /// stages 6 through 9 already showed this gate will reward lowering one
 /// bound by densifying a hub unless something else refuses to let the
-/// hub get denser.
+/// hub get denser, and this is that something, now pointed at a metric
+/// the hub's own split cannot inflate.
 ///
 /// **This assertion alone is vacuous against a blind instrument (review
 /// 697 round 2 finding), the same shape review 686 required a positive
 /// control for at the SCC bound.** `max_by_key(...).unwrap_or_default()`
-/// reads an empty weight map as `0 <= 33` and passes -- so if
-/// `own_code_reference_weight_by_module` ever stopped measuring anything,
+/// reads an empty weight map as `0 <= 28` and passes -- so if
+/// `genuine_reach_weight_by_module` ever stopped measuring anything,
 /// this test would too, silently. `projects_three_reference_numbers_are_
-/// pinned_before_the_facade_exclusion`'s own `own == 33` is what actually
+/// pinned_before_the_facade_exclusion`'s own `own == 34` is what actually
 /// catches that case, by pinning a nonzero value directly; its doc says so
-/// too, so the dependency is written down at both ends.
+/// too, so the dependency is written down at both ends. (The pin tracks
+/// raw own-code, not genuine reach, since it is the measurement record
+/// bound 2's replacement was decomposed from -- it still pins a nonzero
+/// value, which is all the positive control needs.)
 #[test]
-fn no_module_exceeds_the_own_code_reference_weight_ceiling() {
-    let weight = own_code_reference_weight_by_module();
+fn no_module_exceeds_its_genuine_reach_ceiling() {
+    let weight = genuine_reach_weight_by_module();
     let (densest_module, densest_weight) = weight
         .iter()
         .max_by_key(|(_, count)| **count)
         .map(|(module, count)| (module.clone(), *count))
         .unwrap_or_default();
     assert!(
-        densest_weight <= MAX_OWN_CODE_REFERENCE_WEIGHT,
-        "{densest_module} carries {densest_weight} own-code references, exceeding the ceiling \
-         of {MAX_OWN_CODE_REFERENCE_WEIGHT} (RFC-077 D7.0) -- a D7 stage made some module denser \
-         while possibly also lowering the submodule-count bound, which is exactly the trade \
-         stages 6 through 9 already took against the SCC bound and this guard exists to refuse \
-         doing again here: {weight:?}"
+        densest_weight <= MAX_PROJECT_GENUINE_REACH,
+        "{densest_module} carries {densest_weight} genuine-reach references (departed D7 \
+         capabilities excluded), exceeding the ceiling of {MAX_PROJECT_GENUINE_REACH} \
+         (RFC-077 D7.0, replaced by review 703) -- a D7 stage made some module reach further \
+         into a real, undeparted capability, which is exactly the trade stages 6 through 9 \
+         already took against the SCC bound and this guard exists to refuse doing again here: \
+         {weight:?}"
     );
 }
 
@@ -755,21 +801,23 @@ fn no_module_exceeds_the_own_code_reference_weight_ceiling() {
 /// from the submodule-count delta alone, only from measuring directly.
 /// **D7.3 moved all three again, past what review 702's own response
 /// predicted (~29 own-code, assuming only two files would newly
-/// cross)**: measured total 41, own 34, façade 7. `MAX_OWN_CODE_
-/// REFERENCE_WEIGHT`'s own doc has the full accounting for why own-code
-/// rose instead of falling -- `root`/`explorer_tree` carried five
-/// already-visible references away, four different files
-/// (`content.rs`, `session.rs`, `watch/directory.rs`, `diff.rs`) each
-/// had one previously-invisible self-reference to `root` become real,
-/// and `project.rs` gained a second façade line (`pub use crate::root;`,
-/// alongside the explorer_tree flatten now sourcing `crate::
-/// explorer_tree::{...}`). **A red here is this test working, not a
+/// cross)**: measured total 41, own 34, façade 7. `MAX_PROJECT_
+/// GENUINE_REACH`'s own doc has the full accounting for why raw
+/// own-code rose instead of falling, and why that discovery replaced
+/// bound 2 rather than merely explaining it -- 34 decomposes into 28
+/// genuine reach (which fell, as every departure does) and 6 split
+/// artefact (`root` 4, `explorer_tree` 2 -- the departed module named
+/// explicitly where `super::` sufficed before). **This pin keeps
+/// tracking raw own-code, not genuine reach**: it is the measurement
+/// record bound 2's replacement was decomposed from, and review 703
+/// said so directly ("keep the pin as the measurement record; it is
+/// doing its job"). **A red here is this test working, not a
 /// regression**: update the three literals in the same commit as the
 /// stage that earns the new values, exactly as a stage must move
-/// `MAX_PROJECT_CAPABILITY_SUBMODULES` and may not raise
-/// `MAX_OWN_CODE_REFERENCE_WEIGHT` without recording why. This pin also
-/// doubles as `no_module_exceeds_the_own_code_reference_weight_ceiling`'s
-/// own positive control -- see that test's doc.
+/// `MAX_PROJECT_CAPABILITY_SUBMODULES` and `MAX_PROJECT_GENUINE_REACH`.
+/// This pin also doubles as `no_module_exceeds_its_genuine_reach_
+/// ceiling`'s own positive control (a nonzero own-code value pinned
+/// directly) -- see that test's doc.
 #[test]
 fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let graph = measure_capability_graph();
