@@ -5200,3 +5200,33 @@ print both clean timings and the ratio before setting any bound. At or below ~1.
 from the measurement with the margin stated. **Above ~1.5, stop and report the number** -- the cost
 model is then wrong and the disposition changes, rather than the bound being chosen to fit. Either
 way the measured figures replace the "stays flat regardless of which machine" claim in the comment.
+
+## 2026-11-19 (review 705) -- the breadth ratio's pre-registered watch condition has fired, and 2.5 can no longer be one number
+
+Review 694 pre-registered: **act when the window between worst observed noise and worst observed
+signal falls below ~1.6.** The 2026-11-19 macOS capture is **2.95x** (66.71475 ms vs 22.642167 ms,
+load 14.32 on 3 cores) against a bound of **2.5**. Against the full measured record:
+
+| | worst noise | worst signal (ablation) | window |
+|---|---|---|---|
+| Linux (`gate`) | 1.010 | 3.390 | 3.35x |
+| macOS (`macos-measurement`) | **2.95** (was 1.739) | 6.478 | 2.20x |
+| **what a single shared bound must satisfy** | **2.95** | **3.390** | **1.15x** |
+
+Each platform's own window is still healthy. **What collapsed is the intersection** — the range one
+number can occupy while sitting above macOS's observed noise and below Linux's observed signal is
+now (2.95, 3.390), a factor of 1.15. Review 694's own statement of the condition was loose: it read
+worst-signal over worst-noise, which mixes platforms. The correct evaluation is the intersection a
+single shared bound has to fit, and that is what has failed.
+
+**Narrowing review 694's pre-registered conclusion.** It said macOS "will need a different
+assertion, not a third bound." The data now supports something cheaper: **per-platform bounds, each
+derived from its own platform's measured window** — Linux `sqrt(1.010 x 3.390) ~ 1.85`, so **2.0**;
+macOS `sqrt(2.95 x 6.478) ~ 4.37`, so **4.0-4.3**. Both keep regression detection on both platforms,
+and the platform difference being encoded is a *measured* filesystem property (APFS's load-sensitive
+size-dependent term, reviews 691/693), not the assumption review 692 rejected it as.
+
+**Not an option: raising 2.5 to 3.0.** That sits 1.02x above the observed macOS noise and 1.13x
+below the Linux signal — a bound that reds on correct work on one platform while being unable to
+see a regression on the other. The re-derivation belongs in its own review request with the measured
+numbers, not inside an RFC-077 stage.
