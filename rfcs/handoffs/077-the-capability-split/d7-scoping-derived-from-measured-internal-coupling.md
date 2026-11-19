@@ -479,3 +479,47 @@ stage can **raise** own-code while lowering the submodule count, and own-code is
 ceiling of 33. `root` + `explorer_tree` nets to ≈29 and `watch` to 32; **`change_detection` is the
 binding case at ≈33, exactly at the cap.** Measure per stage rather than predicting, and if one
 would exceed 33, re-derive the ceiling with the derivation recorded — never raise it to fit.
+
+## 15. D7.3 landed, and §5a's second bound is replaced (review 703, 2026-11-19)
+
+`root` + `explorer_tree` are out, with `IGNORED_DIRECTORY_NAMES` moved to `domain` first (it was
+reached as `super::super::` from `root::explorer` — the same invisible-back-edge hazard §14 found for
+`watch`, one level earlier, found by the dev team) and `project/ignored_directories.rs` deleted.
+Measured independently: submodules **10 → 7**, `project` total **37 → 41**, own-code **32 → 34**,
+façade **5 → 7**, crate-wide 25 modules / 144 refs / 64 edges, largest SCC still **0**. The
+acyclicity turns on a real subtlety, verified: `root → content` exists and `content`'s only target is
+`domain`, so nothing returns to `project`, and `project/content.rs` is a structurally different
+module from `crate::content`.
+
+**`MAX_OWN_CODE_REFERENCE_WEIGHT` was raised 33 → 34, correctly — and that proves the bound is the
+wrong instrument.** Decomposed:
+
+```
+project own-code = 34
+  = 28 genuine reach   (transcript 8, domain 7, agent 4, runtime 3, content 3, close 2, approval 1)
+  +  6 split artefact  (root 4, explorer_tree 2)
+```
+
+**Genuine reach has fallen 33 → 28** across D7.2 and D7.3: each departing capability takes its own
+external references with it. The artefact half rises, because files that stay behind must now name
+the departed module explicitly where `super::` sufficed. §5a identified exactly this
+construction-driven rise for *total* references and rejected the total on that basis — and then put
+the per-module own-code count in as a must-not-rise ceiling without noticing it suffers the same
+rise for the one module being split. The reviewer caught the trap for one metric and walked into it
+with the next.
+
+**Replacement, required before D7.4:** a **must-fall** bound on **genuine reach** — own-code
+references whose target is not a module that has left `project` in a D7 stage. **28 today**, falling
+with every departure, monotone in the direction D7 moves, and immune to the artefact. The pin stays
+as the measurement record.
+
+**The exclusion list must name the modules that have left** (`recent`, `root`, `explorer_tree`), not
+the original submodule names: `project` references `crate::runtime` and `crate::content` as genuine
+reach (3 each), while `project/runtime.rs` and `project/content.rs` are different modules. A list
+built from the original `mod` names would discount six genuine references and make the bound
+unfalsifiable where it matters.
+
+**Naming constraint for D7.5 and D7.7, from the same collision:** `project/content.rs` (+`diff.rs`)
+and `project/runtime.rs` cannot take the top-level names `content` and `runtime` — both are live
+modules with different contents, and reusing either would make the departing module
+indistinguishable from an existing one in every measurement this gate takes.
