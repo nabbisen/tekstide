@@ -508,10 +508,19 @@ the per-module own-code count in as a must-not-rise ceiling without noticing it 
 rise for the one module being split. The reviewer caught the trap for one metric and walked into it
 with the next.
 
-**Replacement, required before D7.4:** a **must-fall** bound on **genuine reach** — own-code
-references whose target is not a module that has left `project` in a D7 stage. **28 today**, falling
-with every departure, monotone in the direction D7 moves, and immune to the artefact. The pin stays
-as the measurement record.
+**Replacement, required before D7.4:** a bound on **genuine reach** — own-code references whose
+target is not a module that has left `project` in a D7 stage. **28 today**, immune to the artefact,
+and measuring what D7 is about: how far orchestration still reaches into real capabilities. The pin
+stays as the measurement record.
+
+**Corrected 2026-11-19 (review 704): "must-fall" above was wrong — the polarity is "fall or hold,
+never rise", asserted `<=`.** Genuine reach falls only when the departing capability carried
+external references of its own. `watch` carries one and it points at `root`, already departed and
+therefore already excluded, so **D7.4 holds this bound at 28** and a literal must-fall assertion
+would have reddened a correct stage. The must-fall witness is the submodule count, which every
+departure moves by construction; genuine reach is a ceiling. The reviewer wrote this polarity from
+what D7 is *about* rather than from what each stage *measurably moves* — the same error as §6's
+staging order and `launch_terminal`'s default, three times in this subject.
 
 **The exclusion list must name the modules that have left** (`recent`, `root`, `explorer_tree`), not
 the original submodule names: `project` references `crate::runtime` and `crate::content` as genuine
