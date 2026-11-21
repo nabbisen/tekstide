@@ -249,11 +249,7 @@ impl TerminalRuntime {
             after_signal: TerminationSignal::Sighup,
         });
 
-        // TEMPORARY ablation (release-checklist.md Standing Watch, review 710 Required 2):
-        // confirming the macOS guard can still go red. Reverted next commit.
-        let _unused_during_ablation: fn(libc::pid_t, libc::c_int) -> usize =
-            signal_session_survivors;
-        let signalled = 0usize;
+        let signalled = signal_session_survivors(session_id, libc::SIGKILL);
         if signalled > 0 {
             events.push(TerminalRuntimeEvent::TerminationSignalSent {
                 handle: handle.clone(),
