@@ -7,11 +7,14 @@ throughout, and two real safety findings surfaced on the way (`ValidProjectRoot`
 validation claim, `TerminalPane::launch`'s false one); the record is
 `rfcs/handoffs/077-the-capability-split/d7-scoping-derived-from-measured-internal-coupling.md` §19.
 This RFC moves to `done/` as part of the release that ships it, per the standing release rule, not
-on D7's closure. D5 through D8 below are the decisions the owner accepted as part of RFC-074 ("D1
-through D8 as written"); they are carried here **unchanged and still accepted**. The split was not
-a re-opening: it exists because RFC-074 spanned more releases than one, and a released section
-naming an RFC asserts that RFC shipped in that release, so the first slice could not close while
-the capability split was still unstarted — the same reason RFC-026 was split from RFC-065.
+on D7's closure — and not at the candidate cut either, per `every_pack_status_field_agrees_with_
+its_rfc_folder`'s own doc comment: a `done/` folder asserts published, by this project's own
+convention, so the move waits for the actual tag. D5 through D8 below are the decisions the owner
+accepted as part of RFC-074 ("D1 through D8 as written"); they are carried here **unchanged and
+still accepted**. The split was not a re-opening: it exists because RFC-074 spanned more releases
+than one, and a released section naming an RFC asserts that RFC shipped in that release, so the
+first slice could not close while the capability split was still unstarted — the same reason
+RFC-026 was split from RFC-065.
 
 **Not scheduled, deliberately.** This RFC follows [RFC-074](../done/074-capability-boundaries.md)'s first
 slice (`0.40.0`: the gate, `ProjectId` to T0, `test_support` out of the production graph) and its

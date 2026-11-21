@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.41.0 - Honest About Containment
+
+Status: **candidate, not yet published.**
+
+When a project closed and this product could not confirm that every terminal's backgrounded work
+had actually ended, the close dialog's own promise — *"Anything started from these terminals ends
+too, including a backgrounded job"* — went unchecked afterward: the close completed, and nothing
+told the user the promise could not be verified this time. The status bar now carries a notice,
+*"A closed project's terminal session could not be confirmed empty afterward,"* whenever that
+happens, cleared again on the next clean close. This is the product decision behind the
+containment Standing Watch's long-running investigation (`release-checklist.md`'s own dated
+entries); the watch itself stays open on a separate, harder question — what makes a bulk-visible
+session member stop matching its own session while still alive — which this release does not
+close.
+
+Also in this release: `TerminalPane::launch`'s own doc comment had claimed for some time that its
+root was "already validated to exist," while validating nothing; found as a direct consequence of
+RFC-077 D7.1 cutting a back-edge into `project::session`, which forced a real look at this
+function. It now runs a real check, with the symlink policy threaded per caller so the user-facing
+route keeps `FailClosed` and only the two scratch-directory callers (demo panes, the measurement
+harness) take `AllowCanonicalTarget`.
+
+And RFC-077's own capability split: `tekstide-core`'s `project/` module, once holding eight
+unrelated capabilities bundled with its orchestration code, now holds only that orchestration —
+`recent`, `root`, `explorer_tree`, `watch`, `change_detection`, `metadata`, `diff` and `workspace`
+each left as their own top-level module, every one of them still reachable at its old
+`project::X` path through an unchanged compatibility façade. No published API moved. Not
+user-visible, recorded anyway, matching this project's own practice for internal structural work:
+record `rfcs/handoffs/077-the-capability-split/d7-scoping-derived-from-measured-internal-coupling.md`
+§19 has the full account, including the two safety findings above, which the split's own rationale
+("a hub is where safety invariants stop being locatable") predicted it would surface.
+
+**macOS: `0.39.0`'s own disclosure (RFC-028 *Acceptance* option (2), no Apple hardware available
+to this project) covers this release too, unchanged** — the Run It gate and the macOS
+containment-guard watch's own fresh suppress/confirm-red/revert procedure were again not performed
+on real Apple hardware; CI's `macos-measurement` job is accepted as sufficient, the same way and
+for the same reason, not a new or separately-decided gap.
+
+### Fixed — the close dialog's own promise is now checked, not only made
+
+A project could close while a backgrounded job started from one of its terminals went
+uncontained — the containment-check predicate ran, but its result reached only the audit record,
+never the user who had been told the job would end. The honest-close notice (above) is this
+release's only product-visible change to this path; the underlying detection logic the notice
+reports on is unchanged, and the Standing Watch that investigates its own harder residual question
+stays open.
+
+### Fixed — a validated root is now actually validated on the user-facing terminal-launch path
+
+`TerminalPane::launch`'s claim that its root was pre-validated was false; it now runs
+`ProjectRootValidator` for real, `FailClosed` by default. A symlinked or otherwise invalid root
+reaching this path (which `validate_launch_spec` already re-checks at launch time regardless) is
+now refused earlier, with an honest reason, rather than assumed away by a comment.
+
+### Internal — RFC-077: the capability split (`tekstide-core`'s `project/` module)
+
+Eight capabilities carved out of `project/` over six staged moves (D7.1 through D7.6), each proven
+by a measured, ratcheted gate bound before landing: `MAX_PROJECT_CAPABILITY_SUBMODULES` 11 → 2,
+genuine reach 33 → 24, the module graph's largest strongly-connected component held at 0
+throughout. No published path moved — every departed capability is re-exported from `project`
+unchanged. Four stale hardcoded path references to the old module layout were found and fixed
+along the way (three by grep before any test went red); two gate bounds were replaced after
+measurement showed the original ones moving in the wrong direction for what they were meant to
+guard (`MAX_OWN_CODE_REFERENCE_WEIGHT` → `MAX_PROJECT_GENUINE_REACH`; a single shared
+explorer-breadth-ratio test bound → separate Linux/macOS bounds, after real noise and signal
+measurements showed no one number could sit above the former and below the latter). Full record:
+`rfcs/handoffs/077-the-capability-split/d7-scoping-derived-from-measured-internal-coupling.md`.
+
 ## 0.40.0 - Locales That Survive Installation
 
 Status: **released 2026-11-14.** RFC-073's own fix is this release's only user-visible
