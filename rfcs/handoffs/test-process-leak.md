@@ -5274,3 +5274,40 @@ to land on an idle one, would settle the load-confound question directly.
 clean** -- this test and every other passed. Consistent with the load-degraded-single-reading
 reading above, not conclusive against it: one clean run does not retire a watch condition any more
 than one red confirms it. Left open, not closed by this.
+
+## 2026-11-21 (review 714) -- the breadth ratio's signal-side watch has fired on macOS, and the pre-registered conclusion is invoked
+
+Review 706 pre-registered two thresholds at `BREADTH_RATIO_BOUND_MACOS = 4.3`: a second red above
+4.3 on the noise side, **or an ablation crossing below ~5.4 on the signal side**, means the bound
+has no margin left on either side and the ratio form is finished on APFS. **The crossing observed
+on `be8cd3e`'s own `macos-measurement` run is 3.93x** -- below the threshold, and below the bound
+itself.
+
+That last part is what settles it rather than merely triggering a review: **on that run the macOS
+bound could not have detected a review-612 regression.** The ablation exists to prove the bound can
+see what it guards against, and it produced a number the bound reads as clean.
+
+The mechanism, from the four crossings on record against their load -- 13.664, 9.291, 6.478,
+**3.93**: under the ablated policy both sides scale with directory size, so the ratio is
+`(F + 100k*p) / (F + 20k*p)`, and load inflating the fixed per-scan cost `F` pulls it **toward 1**.
+macOS's signal side therefore degrades under load in the direction that destroys detection, while
+its noise side degrades upward (1.283 clean, 2.95 loaded). **The two populations now overlap** --
+noise has reached 2.95, signal has fallen to 3.93 -- and no single number separates two
+distributions that overlap.
+
+**Decision (reviewer, 2026-11-21): assert on Linux, measure on macOS.** Both tests keep running on
+both platforms and keep printing their numbers through the standing `--nocapture` steps; only the
+`assert!` becomes Linux-conditional. This loses nothing real, checked rather than assumed: the scan
+under test is **platform-independent code** -- `root/explorer.rs`'s four `cfg` attributes are all
+`cfg(test)`, and neither it nor `root.rs` branches on `target_os` anywhere in the scan path (the
+only nearby `cfg(target_os = "macos")` is `hostile_fixture.rs`'s `DEPTH_LEVELS`, which belongs to
+the depth row). A 612-class regression is a change to code both platforms run, and **Linux detects
+it with a 3.35x separation** macOS has never had.
+
+The property is platform-independent; the instrument is not. Assert where the instrument works,
+measure where it does not. Two requirements on the change: **delete
+`BREADTH_RATIO_BOUND_MACOS` rather than leaving it unasserted** (a bound nothing checks is the
+state-asserting text this project keeps paying for -- the four crossings belong in the comment as
+history), and **say what would reopen it** -- a macOS runner with bounded load, or a measurement
+that does not divide two timings -- so this does not become a permanent exemption nobody can
+re-examine.
