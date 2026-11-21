@@ -249,7 +249,11 @@ impl TerminalRuntime {
             after_signal: TerminationSignal::Sighup,
         });
 
-        let signalled = signal_session_survivors(session_id, libc::SIGKILL);
+        let signalled = signal_session_survivors(
+            session_id,
+            libc::SIGKILL,
+            &mut self.session_mut(handle)?.recalled_session_members,
+        );
         if signalled > 0 {
             events.push(TerminalRuntimeEvent::TerminationSignalSent {
                 handle: handle.clone(),
@@ -284,7 +288,10 @@ impl TerminalRuntime {
         // A grace period expiring with survivors still present reports
         // `false` here -- not a hopeful `true` inferred from "SIGKILL was
         // sent."
-        let confirmed = session_confirmed_empty(session_id);
+        let confirmed = session_confirmed_empty(
+            session_id,
+            &mut self.session_mut(handle)?.recalled_session_members,
+        );
         self.sessions.remove(&handle.terminal_id);
         events.push(TerminalRuntimeEvent::SessionConfirmedEmpty {
             handle: handle.clone(),
@@ -442,7 +449,11 @@ impl TerminalRuntime {
                 child_outcome = self.try_child_outcome(handle)?;
             }
 
-            if session_confirmed_empty(session_id) {
+            let confirmed = session_confirmed_empty(
+                session_id,
+                &mut self.session_mut(handle)?.recalled_session_members,
+            );
+            if confirmed {
                 // response 340's own zombie fix means this can be
                 // reached with `child_outcome` still `None` even though
                 // the leader is, in fact, gone: `is_live_member_of_session`
@@ -560,11 +571,19 @@ impl TerminalRuntime {
 }
 
 /// Enumerates the session and signals every survivor found. Returns how
-/// many were actually signalled.
-fn signal_session_survivors(session_id: libc::pid_t, signal: libc::c_int) -> usize {
+/// many were actually signalled. `recalled`: RFC-078 D1's own per-session
+/// recall state, threaded through so a pid an earlier enumeration in this
+/// same close already saw is re-checked rather than read as departed.
+fn signal_session_survivors(
+    session_id: libc::pid_t,
+    signal: libc::c_int,
+    recalled: &mut Vec<libc::pid_t>,
+) -> usize {
     signal_candidates(
         session_id,
-        processes_in_session(session_id).into_iter().flatten(),
+        processes_in_session(session_id, recalled)
+            .into_iter()
+            .flatten(),
         signal,
     )
 }

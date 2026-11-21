@@ -897,12 +897,24 @@ fn project_szomb_matches_the_real_platform_constant() {
 /// to gain a way to answer "I cannot be sure this list was complete,"
 /// which does not exist today and is an open question for whoever picks
 /// this up next, not a one-line fix.
+///
+/// **RFC-078 D1: updated, not superseded, to carry this residual
+/// forward rather than let the gap read as closed.** This scenario is
+/// still unrecoverable *with no recall information* -- a member never
+/// named by any earlier enumeration of this same close has no pid for
+/// recall to have remembered, which is the Known Limit D1's own
+/// acceptance states. See
+/// `decide_processes_in_session_recalls_a_previously_seen_pid_the_bulk_list_stops_naming`
+/// (below) for the one case recall *does* cover: the identical pid,
+/// missing from the same bulk list, but seen by an earlier call in this
+/// close.
 #[test]
 fn processes_in_session_cannot_recover_a_live_member_the_bulk_list_never_named() {
     const SESSION_LEADER_PID: libc::pid_t = 42424;
     const LIVE_BACKGROUND_PID_NEVER_IN_THE_BULK_LIST: libc::pid_t = 99999;
 
     let bulk_list_omitting_the_live_member: Vec<libc::pid_t> = Vec::new();
+    let no_recall_information: Vec<libc::pid_t> = Vec::new();
 
     let result = super::launch::decide_processes_in_session(
         bulk_list_omitting_the_live_member,
@@ -910,20 +922,22 @@ fn processes_in_session_cannot_recover_a_live_member_the_bulk_list_never_named()
         |pid, session_id| {
             panic!(
                 "live_member_of_session must not be called for pid {pid} against session \
-                 {session_id} -- the constructed bulk list is empty, so there is nothing for \
-                 the real loop to call this with"
+                 {session_id} -- the constructed bulk list is empty and recall has nothing \
+                 recorded, so there is nothing for the real loop to call this with"
             );
         },
         || Some(super::launch::SessionLeaderState::Gone),
+        no_recall_information,
     );
 
     assert_eq!(
         result,
         Some(vec![]),
         "CONFIRMED, review 683 round 4: a live, non-leader member \
-         ({LIVE_BACKGROUND_PID_NEVER_IN_THE_BULK_LIST}) that the bulk enumeration never named is \
-         not recoverable -- processes_in_session reports a session empty that is not. See this \
-         test's own doc comment for what is, and is not, established by that."
+         ({LIVE_BACKGROUND_PID_NEVER_IN_THE_BULK_LIST}) that the bulk enumeration never named, \
+         and that no earlier enumeration of this close had recalled either, is not recoverable \
+         -- processes_in_session reports a session empty that is not. See this test's own doc \
+         comment for what is, and is not, established by that."
     );
 }
 
@@ -942,6 +956,7 @@ fn decide_processes_in_session_adds_the_leader_from_its_own_fallback_when_alive(
             panic!("the constructed bulk list is empty; nothing should reach this oracle")
         },
         || Some(super::launch::SessionLeaderState::Alive),
+        Vec::new(),
     );
     assert_eq!(result, Some(vec![42424]));
 }
@@ -961,8 +976,105 @@ fn decide_processes_in_session_excludes_a_leader_that_is_only_leaving() {
             panic!("the constructed bulk list is empty; nothing should reach this oracle")
         },
         || Some(super::launch::SessionLeaderState::Leaving),
+        Vec::new(),
     );
     assert_eq!(result, Some(vec![]));
+}
+
+/// RFC-078 D1, scope item 3: the one case recall exists for -- a pid an
+/// earlier enumeration of this same close already reported as a member,
+/// now absent from the bulk list, is re-checked directly rather than
+/// read as departed. The companion to
+/// `processes_in_session_cannot_recover_a_live_member_the_bulk_list_never_named`
+/// above: same shape (bulk list omits a live non-leader pid), different
+/// outcome, because this time the pid was recalled.
+#[test]
+fn decide_processes_in_session_recalls_a_previously_seen_pid_the_bulk_list_stops_naming() {
+    const SESSION_LEADER_PID: libc::pid_t = 42424;
+    const PREVIOUSLY_SEEN_NOW_MISSING_PID: libc::pid_t = 99999;
+
+    let bulk_list_omitting_the_recalled_pid: Vec<libc::pid_t> = Vec::new();
+    let recalled_from_an_earlier_call_this_close = vec![PREVIOUSLY_SEEN_NOW_MISSING_PID];
+
+    let result = super::launch::decide_processes_in_session(
+        bulk_list_omitting_the_recalled_pid,
+        SESSION_LEADER_PID,
+        |pid, session_id| {
+            assert_eq!(
+                pid, PREVIOUSLY_SEEN_NOW_MISSING_PID,
+                "the only pid the recall re-check should ever ask about is the one recalled, \
+                 not an invented one"
+            );
+            assert_eq!(session_id, SESSION_LEADER_PID);
+            Some(true)
+        },
+        || Some(super::launch::SessionLeaderState::Gone),
+        recalled_from_an_earlier_call_this_close,
+    );
+
+    assert_eq!(
+        result,
+        Some(vec![PREVIOUSLY_SEEN_NOW_MISSING_PID]),
+        "a pid recalled from an earlier enumeration of this close, absent from this one's own \
+         bulk list, and still alive under a direct re-check must still be reported a member -- \
+         this is the gap RFC-078 D1 closes"
+    );
+}
+
+/// RFC-078 D1's own required safety bullet, demonstrated rather than
+/// only stated: a recalled pid earns membership through
+/// `live_member_of_session`, the same strict, session-identity-checking
+/// predicate every other member is checked with -- never granted for
+/// free the way the leader's own fallback grants it. A pid that has
+/// exited and been reused by an unrelated process on this shared machine
+/// answers `Some(false)` here (wrong session, or no longer alive) and
+/// must not be signalled.
+#[test]
+fn decide_processes_in_session_does_not_recall_a_pid_that_fails_the_strict_liveness_check() {
+    const SESSION_LEADER_PID: libc::pid_t = 42424;
+    const RECALLED_BUT_NO_LONGER_A_MEMBER: libc::pid_t = 99999;
+
+    let result = super::launch::decide_processes_in_session(
+        Vec::new(),
+        SESSION_LEADER_PID,
+        |_pid, _session_id| Some(false),
+        || Some(super::launch::SessionLeaderState::Gone),
+        vec![RECALLED_BUT_NO_LONGER_A_MEMBER],
+    );
+
+    assert_eq!(
+        result,
+        Some(vec![]),
+        "a recalled pid that live_member_of_session reads as no longer a live member of this \
+         session -- exited and reused, or departed for real -- must not be recovered just \
+         because it was once recalled"
+    );
+}
+
+/// The leader's own pid must not earn membership twice: once through
+/// its own fallback (absent from the bulk list, confirmed `Alive`
+/// directly) and again through the recall loop, if it somehow also
+/// appears in the recalled set. The recall loop skips it by construction
+/// (`decide_processes_in_session`'s own `if pid == session_id { continue
+/// }`), not by coincidence of this scenario never arising.
+#[test]
+fn decide_processes_in_session_does_not_double_count_the_leader_through_recall() {
+    const SESSION_LEADER_PID: libc::pid_t = 42424;
+
+    let result = super::launch::decide_processes_in_session(
+        Vec::new(),
+        SESSION_LEADER_PID,
+        |_pid, _session_id| {
+            panic!(
+                "the recall loop must skip the session leader's own pid, not ask \
+                 live_member_of_session about it a second time"
+            )
+        },
+        || Some(super::launch::SessionLeaderState::Alive),
+        vec![SESSION_LEADER_PID],
+    );
+
+    assert_eq!(result, Some(vec![SESSION_LEADER_PID]));
 }
 
 /// Review 657 round 2: `wait_for_child_outcome`'s own choice at timeout
@@ -1281,7 +1393,7 @@ fn a_live_hup_immune_backgrounded_job_is_reported_as_a_session_member() {
         "test precondition: the backgrounded job must be alive before the enumeration check"
     );
 
-    let members = super::launch::processes_in_session(session_id)
+    let members = super::launch::processes_in_session(session_id, &mut Vec::new())
         .expect("a real enumeration against a live session must not fail");
     assert!(
         members.contains(&(background_pid as libc::pid_t)),
@@ -1413,7 +1525,8 @@ fn a_real_close_kills_a_live_hup_immune_backgrounded_job() {
 fn diagnose_surviving_background_job(background_pid: u32, session_id: libc::pid_t) -> String {
     let pid = background_pid as libc::pid_t;
 
-    let enumeration_report = match super::launch::processes_in_session(session_id) {
+    let enumeration_report = match super::launch::processes_in_session(session_id, &mut Vec::new())
+    {
         Some(members) => {
             let reported = members.contains(&pid);
             format!(
@@ -1604,7 +1717,7 @@ fn session_confirmed_empty_reports_false_when_its_own_enumeration_fails() {
     let _enumeration_failure_guard = super::launch::force_session_enumeration_failure_for_test();
 
     assert!(
-        !super::launch::session_confirmed_empty(1),
+        !super::launch::session_confirmed_empty(1, &mut Vec::new()),
         "a session whose own enumeration could not run at all must report false -- not infer \
          success just because nothing could be observed"
     );

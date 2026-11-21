@@ -88,6 +88,7 @@ impl TerminalRuntime {
                 master: Some(pty.into_master()),
                 transcript_writer,
                 transcript_capture_mode,
+                recalled_session_members: Vec::new(),
             },
         );
 
@@ -165,6 +166,7 @@ impl TerminalRuntime {
                 master: Some(pty.into_master()),
                 transcript_writer,
                 transcript_capture_mode,
+                recalled_session_members: Vec::new(),
             },
         );
 
@@ -469,6 +471,17 @@ pub(super) struct RunningTerminal {
     /// `transcript_writer` is `Some`, checked by construction in
     /// `launch_project_shell` (both are set from the same `match` arm).
     pub(super) transcript_capture_mode: Option<TranscriptCaptureMode>,
+    /// RFC-078 D1: the pids `processes_in_session` most recently reported
+    /// as members of this session, on this same close -- not refreshed
+    /// outside one (there is no production enumeration that runs
+    /// independently of a close or a drop, see the RFC's own Known Limit).
+    /// Updated after every call that returns `Some(members)`, by every
+    /// caller in this close's own sequence (grace poll, signalling
+    /// enumeration, final confirmation), so a pid seen by an earlier
+    /// enumeration and missing from a later one is re-checked directly
+    /// rather than read as having departed. Empty until the first
+    /// enumeration; a no-op on Linux, which has no analogous gap.
+    pub(super) recalled_session_members: Vec<libc::pid_t>,
 }
 
 impl RunningTerminal {
@@ -514,10 +527,14 @@ const DROP_SIGKILL_GRACE: std::time::Duration = std::time::Duration::from_millis
 /// without that function's additional child-outcome bookkeeping --
 /// `Drop` has no `TerminationOutcome` to report, only "is it safe to
 /// stop escalating yet."
-fn wait_briefly_for_session_empty(session_id: libc::pid_t, timeout: std::time::Duration) -> bool {
+fn wait_briefly_for_session_empty(
+    session_id: libc::pid_t,
+    timeout: std::time::Duration,
+    recalled: &mut Vec<libc::pid_t>,
+) -> bool {
     let started = std::time::Instant::now();
     loop {
-        if session_confirmed_empty(session_id) {
+        if session_confirmed_empty(session_id, recalled) {
             return true;
         }
         if started.elapsed() > timeout {
@@ -661,13 +678,23 @@ impl Drop for RunningTerminal {
             }
         }
 
-        if !wait_briefly_for_session_empty(session_id, DROP_HANGUP_GRACE) {
+        if !wait_briefly_for_session_empty(
+            session_id,
+            DROP_HANGUP_GRACE,
+            &mut self.recalled_session_members,
+        ) {
             super::termination::signal_candidates(
                 session_id,
-                processes_in_session(session_id).into_iter().flatten(),
+                processes_in_session(session_id, &mut self.recalled_session_members)
+                    .into_iter()
+                    .flatten(),
                 libc::SIGKILL,
             );
-            let _ = wait_briefly_for_session_empty(session_id, DROP_SIGKILL_GRACE);
+            let _ = wait_briefly_for_session_empty(
+                session_id,
+                DROP_SIGKILL_GRACE,
+                &mut self.recalled_session_members,
+            );
         }
 
         // Reaps this value's own direct child, non-blocking (`try_wait`,
@@ -755,7 +782,12 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
     // rule already uses (RFC-050 D3, review 388): open without
     // truncating, then decide the lock and the truncate from one
     // `fstat`, not two separate reads that could disagree.
-    let survivors = processes_in_session(session_id);
+    // A fresh, throwaway recall state: this is an independent final
+    // re-verification after the drop's own containment sequence already
+    // ran its own (`self.recalled_session_members`), not one more step of
+    // that sequence -- it must not inherit recall state from it, and has
+    // no further call of its own for recall to help across.
+    let survivors = processes_in_session(session_id, &mut Vec::new());
     let session_is_empty = survivors.as_ref().is_some_and(|members| members.is_empty());
     // Review 657: sample each survivor's own p_stat/p_flag *before* the
     // panic below, not after -- the fifth `test-process-leak.md` cluster
@@ -802,8 +834,11 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
 /// the unearned "almost certainly empty" confidence that document
 /// forbids -- caught while writing this slice's own required "grace
 /// period expiring produces false" test, not by inspection.
-pub(super) fn session_confirmed_empty(session_id: libc::pid_t) -> bool {
-    processes_in_session(session_id).is_some_and(|survivors| survivors.is_empty())
+pub(super) fn session_confirmed_empty(
+    session_id: libc::pid_t,
+    recalled: &mut Vec<libc::pid_t>,
+) -> bool {
+    processes_in_session(session_id, recalled).is_some_and(|survivors| survivors.is_empty())
 }
 
 /// Every live pid whose `/proc/<pid>/stat` session field equals
@@ -831,8 +866,17 @@ pub(super) fn session_confirmed_empty(session_id: libc::pid_t) -> bool {
 /// (`#[cfg(test)]` only) instead of the real `/proc`, so a test can
 /// deterministically force the "enumeration failed" branch without
 /// racing real process reaping timing to observe it.
+/// `recalled` is RFC-078 D1's own per-session recall state -- a no-op
+/// parameter here, accepted only so every call site threads the same
+/// signature on both platforms. **Not Linux** (the RFC's own non-goal):
+/// `/proc` is read whole, every time, with no bounded buffer and no
+/// second API path a pid could be invisible to while still being
+/// enumerable here, so there is no omission for recall to recover from.
 #[cfg(target_os = "linux")]
-pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::pid_t>> {
+pub(super) fn processes_in_session(
+    session_id: libc::pid_t,
+    _recalled: &mut Vec<libc::pid_t>,
+) -> Option<Vec<libc::pid_t>> {
     let entries = std::fs::read_dir(proc_root()).ok()?;
     Some(
         entries
@@ -891,8 +935,21 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
 /// `pre_exec` makes the child's own pid the session id) -- so its
 /// membership is never in question, only its existence and zombie
 /// status, checked directly below when the bulk scan never visited it.
+/// `recalled`, RFC-078 D1: the pids an earlier enumeration of this same
+/// close reported as members, maintained by the caller across the whole
+/// close sequence (`RunningTerminal::recalled_session_members`). Any of
+/// them absent from this call's own bulk list is re-checked directly
+/// (`decide_processes_in_session`'s own new input) rather than read as
+/// departed, and the set is replaced with this call's real result on
+/// success -- so a pid that stops being a member for real also stops
+/// being recalled, and a pid this call still finds stays recallable for
+/// whichever call in this sequence runs next. Left unchanged on `None`
+/// (a failed enumeration has nothing to update it with).
 #[cfg(target_os = "macos")]
-pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::pid_t>> {
+pub(super) fn processes_in_session(
+    session_id: libc::pid_t,
+    recalled: &mut Vec<libc::pid_t>,
+) -> Option<Vec<libc::pid_t>> {
     if enumeration_forced_to_fail() {
         return None;
     }
@@ -902,6 +959,19 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
         "processes_in_session: list_all_pids returned {} pids, checking each",
         pids.len()
     ));
+    let recalled_absent_from_pids: Vec<libc::pid_t> = recalled
+        .iter()
+        .copied()
+        .filter(|pid| !pids.contains(pid))
+        .collect();
+    if !recalled_absent_from_pids.is_empty() {
+        enumeration_progress(&format!(
+            "processes_in_session: {} previously-recalled pid(s) absent from this bulk list, \
+             re-checking directly rather than reading their absence as departure: \
+             {recalled_absent_from_pids:?}",
+            recalled_absent_from_pids.len()
+        ));
+    }
     let members = decide_processes_in_session(
         pids,
         session_id,
@@ -924,11 +994,13 @@ pub(super) fn processes_in_session(session_id: libc::pid_t) -> Option<Vec<libc::
             }
             leader_state
         },
+        recalled_absent_from_pids,
     )?;
     enumeration_progress(&format!(
         "processes_in_session: done, {} member(s) found: {members:?}",
         members.len()
     ));
+    *recalled = members.clone();
     Some(members)
 }
 
@@ -969,6 +1041,7 @@ pub(super) fn decide_processes_in_session(
     session_id: libc::pid_t,
     mut live_member_of_session: impl FnMut(libc::pid_t, libc::pid_t) -> Option<bool>,
     leader_state_when_absent: impl FnOnce() -> Option<SessionLeaderState>,
+    recalled_absent_from_pids: Vec<libc::pid_t>,
 ) -> Option<Vec<libc::pid_t>> {
     let mut members = Vec::new();
     let mut session_leader_visited = false;
@@ -984,6 +1057,22 @@ pub(super) fn decide_processes_in_session(
         let leader_state = leader_state_when_absent()?;
         if matches!(leader_state, SessionLeaderState::Alive) {
             members.push(session_id);
+        }
+    }
+    // RFC-078 D1: a pid an earlier enumeration of this same close reported
+    // as a member, now absent from `pids`, is re-checked directly rather
+    // than read as departed -- the same `live_member_of_session` predicate
+    // every non-leader member in `pids` is already checked with, never
+    // `leader_state_when_absent`'s own membership-blind oracle (a reused
+    // pid would otherwise read `Alive` and be signalled). The leader's
+    // own pid is excluded: its coverage above is already complete, and it
+    // must not earn membership twice through a looser check than its own.
+    for pid in recalled_absent_from_pids {
+        if pid == session_id {
+            continue;
+        }
+        if live_member_of_session(pid, session_id)? {
+            members.push(pid);
         }
     }
     Some(members)
