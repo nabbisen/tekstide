@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.42.0 - Closing The Recall Gap
+
+Status: **candidate, not yet published.**
+
+**No user-visible change in this release.** Both items below are internal: a containment-logic
+fix a user cannot see happen, and a test-only bound retirement. Said plainly rather than dressed
+up — `0.40.0`'s RFC-074 slice was the same shape, and this project's own standing rule is that a
+release that improves a guarantee nobody can see is still worth shipping, not a release to claim
+more for than it is.
+
+### Internal — RFC-078: session-member recall when the bulk enumeration stops naming a known member
+
+macOS's containment sweep (`processes_in_session`) re-checks a pid's liveness directly, bypassing
+its own bulk `proc_listallpids` scan, in exactly one case: the session leader, when absent from
+that scan. Every other member was found, or not, purely through the bulk scan — so a live,
+non-leader member the bulk scan happened to omit was read as departed, with nothing to re-check it
+against (confirmed by a pure-function test, not merely suspected). Each `RunningTerminal` now
+remembers which pids its own most recent successful enumeration reported as members; a later
+enumeration in the same close that no longer names one of them re-checks it directly — through the
+same strict, session-identity-checking predicate every other member is checked with, never a
+membership-blind shortcut, so a pid reused by an unrelated process on this shared machine still
+cannot be recovered and signalled by mistake. Known limit, unchanged from the RFC's own acceptance:
+a member never named by *any* earlier enumeration of this same close stays invisible — there is
+still no enumeration independent of a close to have seen it earlier. Does not discharge the
+containment Standing Watch, which stays open on a separate, harder question (what makes a
+bulk-visible member stop matching its own session while still alive).
+
+### Internal — the explorer's macOS breadth-ratio bound is retired, not re-raised
+
+A test bound (`root/explorer/hostile_tests.rs`), not product behaviour: the assertion that an
+unbounded file-explorer scan policy measurably costs more than a bounded one, on a hostile fixture,
+used to run on both platforms against per-platform numbers. Four ablation measurements on the real
+macOS CI runner, taken across several weeks, declined (13.664x, 9.291x, 6.478x, 3.93x) as that
+runner's own load varied — the last below the bound meant to detect the regression it exists to
+prove detectable. The underlying property is platform-independent code; the *instrument* measuring
+it on macOS was not. The assertion is now Linux-only; both tests still run on both platforms and
+macOS still prints its own measured ratio through the standing CI step, on record for whoever
+investigates the platform itself. Reopening condition recorded at the bound's own doc comment: a
+macOS runner whose load is actually bounded, or a replacement measurement that does not divide two
+timings.
+
+**macOS: `0.39.0`'s own disclosure (RFC-028 *Acceptance* option (2), no Apple hardware available
+to this project) covers this release too, unchanged** for the Run It gate. **The containment-guard
+watch's own suppress/confirm-red/revert procedure was re-done this cycle, on both platforms**, per
+the checklist's own "each release, not once" rule.
+
 ## 0.41.0 - Honest About Containment
 
 Status: **released 2026-11-21.**
