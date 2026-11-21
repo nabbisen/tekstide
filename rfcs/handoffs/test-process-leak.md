@@ -5230,3 +5230,42 @@ size-dependent term, reviews 691/693), not the assumption review 692 rejected it
 below the Linux signal — a bound that reds on correct work on one platform while being unable to
 see a regression on the other. The re-derivation belongs in its own review request with the measured
 numbers, not inside an RFC-077 stage.
+
+## 2026-11-21 (CI run `44893491612`, unrelated to the commit it ran on) -- the per-platform bound's own pre-registered signal-side watch condition has fired
+
+`an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound` reds on `macos-measurement`, pushed as
+part of landing RFC-078's required guard fix (`be8cd3e`) -- **unrelated to that change**: this test
+is in `root/explorer/hostile_tests.rs`, a different subsystem from `runtime/terminal`, and the same
+push's `gate` (Linux) job passed clean, 1199/1199 plus this one elsewhere. Disclosed here rather than
+re-run-and-ignored.
+
+Failure message: *"an unbounded `omitted_count_limit` must reproduce review 612's own regression and
+cross macOS's bound (4.3) -- but 100000 entries took only 3.93x as long as 20000 entries
+(138.195875ms vs 35.152208ms) ... load average (1 min): 13.33, 3 core(s)."*
+
+**This is the exact shape `BREADTH_RATIO_BOUND_MACOS`'s own pre-registered watch names, read
+literally from its doc comment (`hostile_tests.rs:66-78`):** *"A macOS ablation crossing below ~5.4
+... the honest conclusion is that the ratio form is finished on APFS and review 694's original
+fallback applies."* 3.93 is below 5.4. The three ablation crossings already on record were declining
+(13.664, 9.291, 6.478); this is a fourth, lower still.
+
+**Read against load, not taken at face value, the same discipline every prior reading here has
+used.** Load average 13.33 on 3 cores (~4.4x overcommitted) is in the same heavy range as the
+14.32/14.29 readings that already degraded the *noise* side of this measurement twice before
+(reviews 692/693's own finding: APFS's size-dependent term is itself load-sensitive, 0.039-0.043ms
+clean vs 0.167ms loaded). The same confound plausibly compresses the *signal* side here too — both
+the 20000- and the 100000-entry scan absorb similar load-driven overhead, shrinking their ratio
+without the underlying regression this test exists to catch actually shrinking. **This is a
+plausible explanation, not a confirmed one**: nothing here re-ran the ablation under controlled load
+to separate "the signal genuinely degraded" from "this one reading was unlucky," the same gap every
+single-reading noise entry before it has had.
+
+**Not decided here, consistent with this subject's own standing division of labour**: whether this
+fourth, lower crossing is itself real signal degradation (meaning the pre-registration's own
+"no further raise... the ratio form is finished on APFS" conclusion now applies) or another
+heavy-load-degraded single reading (meaning it joins the record as a data point, watched rather than
+acted on) is a design judgement the architect makes, the same way the per-platform bounds themselves
+were. Filed for that judgement, not resolved unilaterally. Re-running
+`cargo test -p tekstide-core --lib -- an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound`
+on a real macOS runner under low load, deliberately rather than waiting for the next push to happen
+to land on an idle one, would settle the load-confound question directly.
