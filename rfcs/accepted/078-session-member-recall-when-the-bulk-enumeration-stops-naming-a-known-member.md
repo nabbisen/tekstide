@@ -259,3 +259,36 @@ Reviewer's note on the acceptance itself: the document accepted here is the corr
 first draft's predicate would have let a reused pid be signalled), and round 8 removed the one
 bullet that still rested on the refuted motivating evidence. D1 stands on
 `decide_processes_in_session`'s own pure-function test alone.
+
+## D1 implemented, 2026-11-21 (review 713)
+
+Landed in `475ae1d`: per-session recall state (`RunningTerminal::recalled_session_members`)
+threaded through all five production call sites this document's own Known Limit section names as
+one close's sequence. The two Required decision bullets verified as implemented, not merely
+claimed: the recall re-check calls `live_member_of_session`, never the leader's own
+membership-blind fallback; the state updates after every call that returns `Some(members)`, left
+alone on a failed enumeration. Three new tests exercise recall recovering a previously-seen pid,
+correctly failing to recall a pid that no longer passes the strict liveness check (the reused-pid
+safety property this RFC's own D1 bullet exists for), and the leader not being double-counted
+through the recall loop.
+
+**One finding from review 713, fixed in the same commit as it was found**: `assert_session_is_empty`
+(the test/test-support-only leak guard `RunningTerminal::drop` calls after its own containment
+sequence) was passed a fresh, empty recall list rather than the real
+`recalled_session_members` — making the guard strictly *less* able to confirm membership than the
+production enumeration it certifies, since recall only ever adds members. This is the shape review
+625 named ("the assertion losing the ability to fail"). Fixed: the guard now sees the same recall
+state the sequence it is verifying actually used.
+
+**A behavioural consequence to carry into whatever release note ships this**, beside the Known
+Limit this document already requires there: `live_member_of_session(pid, session_id)?` inside the
+recall loop propagates `None` on an ambiguous answer (not `ESRCH`, e.g. `EPERM`), which fails the
+*whole* enumeration via `?` — the same honest-failure rule D3 already applies everywhere else in
+this codebase. So a recalled pid with an ambiguous liveness answer can turn an enumeration that
+would otherwise have confirmed a session empty into one that cannot confirm it at all. **Recall can
+therefore reduce confirmations, not only find survivors** — the "refuse emptiness more often" cost
+the owner's own acceptance decision weighed explicitly, now a real (if narrow — the pid must be
+both recalled and absent from the bulk list and produce `EPERM` rather than `ESRCH`) consequence of
+D1, not only a hypothetical one. Not a reason to revisit D1: the alternative (treating an ambiguous
+answer as `false`, not a member) would be exactly the unearned confidence `session_confirmed_empty`'s
+own doc comment forbids.

@@ -748,7 +748,7 @@ impl Drop for RunningTerminal {
         // what `tekstide/Cargo.toml`'s `[dev-dependencies]` enables to
         // close that gap; see that feature's own doc comment.
         #[cfg(any(test, feature = "test-support"))]
-        assert_session_is_empty(self.process_group_id);
+        assert_session_is_empty(self.process_group_id, &mut self.recalled_session_members);
     }
 }
 
@@ -765,7 +765,7 @@ impl Drop for RunningTerminal {
 /// slice's own "make the leak red" goal needs, since that test was
 /// already red.
 #[cfg(any(test, feature = "test-support"))]
-fn assert_session_is_empty(session_id: libc::pid_t) {
+fn assert_session_is_empty(session_id: libc::pid_t, recalled: &mut Vec<libc::pid_t>) {
     if std::thread::panicking() {
         return;
     }
@@ -782,12 +782,16 @@ fn assert_session_is_empty(session_id: libc::pid_t) {
     // rule already uses (RFC-050 D3, review 388): open without
     // truncating, then decide the lock and the truncate from one
     // `fstat`, not two separate reads that could disagree.
-    // A fresh, throwaway recall state: this is an independent final
-    // re-verification after the drop's own containment sequence already
-    // ran its own (`self.recalled_session_members`), not one more step of
-    // that sequence -- it must not inherit recall state from it, and has
-    // no further call of its own for recall to help across.
-    let survivors = processes_in_session(session_id, &mut Vec::new());
+    // RFC-078 D1, review 713's required fix: the real per-session recall
+    // state, not a fresh throwaway one. A throwaway list makes this guard
+    // strictly less able to confirm membership than the production
+    // enumeration it is meant to certify -- recall only ever *adds*
+    // members, so a fresh-Vec guard can report a session empty in
+    // exactly the case RFC-078 exists to recover, which is this
+    // project's own named failure shape: "the assertion losing the
+    // ability to fail" (review 625). This guard must see at least what
+    // production saw, not less.
+    let survivors = processes_in_session(session_id, recalled);
     let session_is_empty = survivors.as_ref().is_some_and(|members| members.is_empty());
     // Review 657: sample each survivor's own p_stat/p_flag *before* the
     // panic below, not after -- the fifth `test-process-leak.md` cluster
