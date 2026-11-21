@@ -42,10 +42,14 @@ record `rfcs/handoffs/077-the-capability-split/d7-scoping-derived-from-measured-
 ("a hub is where safety invariants stop being locatable") predicted it would surface.
 
 **macOS: `0.39.0`'s own disclosure (RFC-028 *Acceptance* option (2), no Apple hardware available
-to this project) covers this release too, unchanged** — the Run It gate and the macOS
-containment-guard watch's own fresh suppress/confirm-red/revert procedure were again not performed
-on real Apple hardware; CI's `macos-measurement` job is accepted as sufficient, the same way and
-for the same reason, not a new or separately-decided gap.
+to this project) covers this release too, unchanged for the Run It gate** — it was again not
+performed on real Apple hardware; CI's `macos-measurement` job is accepted as sufficient, the same
+way and for the same reason, not a new or separately-decided gap. **The containment-guard watch's
+own suppress/confirm-red/revert procedure was re-done this cycle, on both platforms**, per the
+checklist's own "each release, not once" rule: `signal_session_survivors`'s call was temporarily
+suppressed, pushed, and confirmed red on real CI — `gate` (Linux) and `macos-measurement` both
+failed the expected tests — then reverted in the next commit. The guard can still fail on both
+platforms; this is evidence of that, not an assumption carried from a past release.
 
 ### Fixed — the close dialog's own promise is now checked, not only made
 
