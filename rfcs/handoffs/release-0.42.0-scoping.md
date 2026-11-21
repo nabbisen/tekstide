@@ -1,6 +1,6 @@
 ---
 title: "0.42.0 scoping"
-status: "Proposed 2026-11-21 by the reviewer, at the owner's direction, the day 0.41.0 published. Not accepted; the slot's contents and the three questions at the end are the owner's."
+status: "**Authorized by the owner 2026-11-21.** The recommended scope stands: RFC-078's implementation slice plus the enumeration-log pid diagnostic, with the two one-liners as candidates. Read as answering question 1 (0.42.0 is the right slot for RFC-078); **questions 2 (scope RFC-075 this cycle?) and 3 (a reserved number for the accessibility question) are not answered by it** and stay open."
 target_milestone: "M14"
 created: "2026-11-21"
 ---
