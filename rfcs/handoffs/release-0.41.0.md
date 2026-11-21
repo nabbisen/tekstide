@@ -108,3 +108,32 @@ the first time it did not survive to a commit.
 
 Did not touch `packaging/aur/*`. The GitHub release workflow runs automatically on the pushed tag;
 the AUR packages remain the owner's own action, under that checklist section's own terms.
+
+## Post-publish verification
+
+Both published `.crate` files downloaded from `static.crates.io`, extracted, and compared against
+the local package trees by content:
+
+- **`tekstide-core 0.41.0`: identical.** `diff -rq` reports nothing.
+- **`tekstide 0.41.0`: identical.** `diff -rq` reports nothing — including `Cargo.lock`.
+
+**Expected difference (a) did not occur, and that is correct rather than suspicious.** The
+Post-Publish Verification section predicts the local `tekstide` archive's lockfile will name the
+*previous* `tekstide-core`, because `cargo package -p tekstide` resolves it from crates.io before
+the new one exists. Under `cargo publish --workspace` the core is published first and the
+`tekstide` archive is packaged after, so the local tree already resolved `tekstide-core 0.41.0`
+(`registry+https://github.com/rust-lang/crates.io-index`) and there was nothing left to differ. The
+check's own substance holds: **the published `tekstide` lockfile names the version of
+`tekstide-core` just published.**
+
+**Expected difference (b) did not occur either, by design.** Both archives'
+`.cargo_vcs_info.json` name `67aec25885451b1468cdfc6d4533f6a06272b97a` — the tagged commit — because
+the publish was run from it with nothing landing in between. That section says to publish from the
+tagged commit if provenance and tag are to agree; they do.
+
+So the rule *"two differences are expected, anything else is a defect"* was met with **zero**
+differences, which is the stronger outcome and not a missed check: each expected difference has a
+named cause that did not apply this time.
+
+Remaining post-publish items are the ones the checklist assigns elsewhere: the beginner-path
+install against the published artifact, and the AUR packages, both the owner's.
