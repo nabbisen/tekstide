@@ -293,3 +293,63 @@ both recalled and absent from the bulk list and produce `EPERM` rather than `ESR
 D1, not only a hypothetical one. Not a reason to revisit D1: the alternative (treating an ambiguous
 answer as `false`, not a member) would be exactly the unearned confidence `session_confirmed_empty`'s
 own doc comment forbids.
+
+## Final Acceptance Decision
+
+**Accepted for release as part of `0.42.0`, 2026-11-21, by the reviewer, across rounds 713, 714,
+715 and 716.** Written before the tag, per the checklist's own review-526 item: the responses in
+`.git-exclude/reviewed/` are correspondence and are not in the repository, so this section is the
+only record of what the acceptance rests on.
+
+**What the acceptance rests on**, each verified against the tree and CI rather than taken from the
+report:
+
+- **The two D1 decision bullets are implemented as decided**, not approximated: the recall re-check
+  is `live_member_of_session`, never the membership-blind fallback, and the per-session set updates
+  after every enumeration returning `Some(members)` and is left alone on a failed one. This is the
+  failure mode this document's own Risks section told its review to check specifically — a cache
+  updated inconsistently compiles and passes a test written against the easy case.
+- **The containment Standing Watch was shown able to fail, this cycle, on both platforms.** The
+  `SIGKILL` fallback was suppressed (`2582dbc`), confirmed red on `gate` and on `macos-measurement`
+  in run `44902051905` — read from the run's own failed-test list, including the macOS-only
+  `a_real_close_kills_a_live_hup_immune_backgrounded_job` — and reverted byte-identically across
+  the whole `crates/` tree (`022d155`; `git diff 2582dbc~1 HEAD -- crates/` empty). A partial revert
+  here would ship a suppressed guard, which is why the byte-identity and not the green run is the
+  evidence.
+- **The release claims nothing it does not deliver.** `0.42.0` has no user-visible change, and the
+  CHANGELOG says so in its own second line rather than dressing an internal containment improvement
+  as a feature. That was the one thing the scoping document asked this candidate to carry.
+- **RFC-078 stayed in `accepted/` at the candidate cut**, with only its text updated — the corrected
+  practice after RFC-077's premature `done/` move was caught by `rfc_docs_invariants` at its own cut.
+
+**Defect found and fixed**: review 713 found `assert_session_is_empty` passed a fresh, empty recall
+list instead of the real `recalled_session_members`, making the leak guard strictly less able to
+confirm membership than the production enumeration it certifies. Fixed in the same commit it was
+found (`be8cd3e`). Review 714 declined the offered extension (take both readings and name which
+disagreed) on the correct reason — a second real enumeration introduces its own TOCTOU question —
+and the smaller fix closes the gap.
+
+**Deferred rather than fixed**, so it is not rediscovered as new:
+
+- **The watch stays open on its own harder question**: what makes a bulk-visible session member stop
+  matching its own session while still alive. D1 is precautionary closure of the consequence, not an
+  explanation of the cause. The diagnostic that will answer its next occurrence — the enumeration
+  log's pids — has been in place since `de4e0e3`, 2026-11-16.
+- **The audit record still has no honest `AuditOutcome` arm for "there was nothing to confirm"**;
+  it needs a schema change and a load path, and it is the residual of the containment product
+  decision whose part 1 shipped in `0.41.0`.
+- **Recall can reduce confirmations**, as the section above records. Deliberate, and the alternative
+  is the unearned confidence `session_confirmed_empty`'s doc comment forbids.
+- **The macOS breadth-ratio assertion was retired** (`132f74a`, review 715) on review 706's
+  pre-registered condition. Not this slot's authorised scope and not a defect in it; recorded here
+  only because it is in the same release window, with its reopening condition stated at the constant.
+- **Two gate findings from review 716**, both now landed as checklist edits (`c5837d5`, `657f292`):
+  a path-dependency harness's stale lock is silent where `--locked` would be loud, and a Run It
+  capture names no build. Neither is about this release's content; both are about what the next
+  release can prove.
+- The two recorded one-liners (the iced form-control denylist beyond `checkbox`; the scrollbar
+  contrast gap) did not go in, as the scoping document records.
+
+**Not yet done at the time of writing: the tag and the publish**, which are the owner's to
+authorise. This section is the pre-tag record the checklist requires, not a statement that the
+release shipped.
