@@ -644,3 +644,78 @@ The closeout should also carry what the split found that D7 never anticipated: f
 enumerated-set paths (three caught by grep before a red), two staging-order corrections forced by
 the façade-creates-a-back-edge property, and two bounds replaced after measurement showed they moved
 the wrong way.
+
+## 19. D7 closeout (2026-11-21, reviews 708/709) — structurally done
+
+Review 708's two required items landed in `548b244` and are verified complete: **zero `super::`
+reads remain in `session.rs` that resolve to a departed capability.** Final measurements,
+independently re-derived: `project` total **47** / own-code **35** / façade **12** / genuine reach
+**24** / departed-capability reach **11** (`explorer_tree` 4, `watch` 3, `change_detection` 1,
+`metadata` 1, `root` 1, `workspace` 1); submodules **2**; largest SCC **0**; gate 13/13.
+
+### What landed against D7's own text
+
+D7 reads: *"`project/` splits: orchestration plus its capabilities. Not because the hub is untidy,
+but because a hub is where safety invariants stop being locatable."*
+
+- **Eight capabilities carved out**: `recent`, `root`, `explorer_tree`, `watch`,
+  `change_detection`, `metadata`, `diff`, `workspace` (only `content` → `workspace` renamed, to
+  avoid colliding with a live module).
+- **`MAX_PROJECT_CAPABILITY_SUBMODULES` 11 → 2.** `project.rs` declares `session` and `runtime`,
+  plus the compatibility façade. No published path moved: every `project::X` still resolves.
+- **`MAX_LARGEST_SCC_SIZE` held at 0 throughout**, confirmed at every stage that added a sibling —
+  twice only because two staging-order errors were caught before landing (§14, §16).
+- **Genuine reach fell 33 → 24, a 27% fall** (33 at D7.0, when nothing had departed and all own-code
+  was genuine by definition; 28 was review 703's mid-split figure, not the starting point).
+- **Departed-capability reach is 11**, up from 6, and that is the verdict rather than a regression:
+  `session.rs` is the one file left in `project`, and it now *visibly* imports what it assembles —
+  nine names from `workspace` and `metadata`, three from `explorer_tree` — by `crate::` path instead
+  of through `project`'s own re-exports. D7 asked for locatability, not for coupling to fall. An
+  orchestrator that assembles capabilities without hiding that it does so is the opposite of the
+  problem this decision was opened against.
+
+### The two safety findings, which are D7's own rationale paying off
+
+Both in D7.1, and both exactly what *"a hub is where safety invariants stop being locatable"*
+predicts:
+
+- **`ValidProjectRoot` named a validation its public fields did not enforce.** Surfaced because
+  cutting `root → session` forced examination of `from_project_session`, which built a "valid" root
+  by hand from a session's accessors, bypassing `ProjectRootValidator`. Closed: fields private,
+  minting the validator's alone, and the validated value now travels intact from validator through
+  `app` into `ProjectSession` rather than being decomposed and re-claimed.
+- **`TerminalPane::launch` claimed its root was "already validated to exist" and validated
+  nothing.** Now a real check, with `SymlinkPolicy` threaded per caller so the user-facing route
+  keeps `FailClosed` and only the two scratch-directory callers take `AllowCanonicalTarget`.
+
+### What the split found that D7's text never anticipated
+
+- **Four stale hardcoded enumerated-set paths**, three caught by grep before a red (the i18n
+  enforcement list at D7.5; `diff/tests.rs`'s file-content allowlist at D7.6; `session.rs`'s own
+  `explorer_tree` return types at review 709), one caught by a loud test failure (D7.2).
+- **An invisible self-reference survived three stages.** The three `super::ExplorerToggle` /
+  `ExplorerScanRequest` / `ExplorerScanCompleted` return types were unseen from D7.3, when
+  `explorer_tree` departed, until review 709 — a measured half-life for this blind-spot class, worth
+  knowing for whoever builds the next instrument.
+- **`content` + `diff` were two capabilities, not one** (review 707), each with its own grant
+  decision — `diff` carries `gate_diff_content_read` and its own size limits.
+- **Two bounds replaced after measurement showed them moving the wrong way**:
+  `MAX_OWN_CODE_REFERENCE_WEIGHT` → `MAX_PROJECT_GENUINE_REACH` (review 703, the sum of two
+  opposite-moving quantities), and the single shared breadth-ratio bound → per-platform bounds
+  (review 706, where no one number could sit above macOS noise and below Linux signal).
+- **Five reviewer prediction errors**, every one of them a per-stage number or ordering derived
+  rather than measured — recorded because the standing instruction that came out of them ("measure
+  per stage; the reviewer does not predict") is the durable output.
+
+### Status
+
+**Structurally D7 is done**, and enforced rather than asserted: three independent gate bounds hold
+`project` to orchestration — submodule count 2 (`==`), genuine reach 24 (`<=`), and the pin's three
+literals. Closing D7 is the owner's call.
+
+**D7 done is not RFC-077 done.** The RFC stays in `rfcs/accepted/` and moves to `done/` as part of
+whichever release ships this, per the standing release rule.
+
+The one follow-on worth naming is a different question and a D6 one, not a graph-coupling one:
+whether `ProjectSession` should present a single external surface at all. That is an API and product
+question for the owner, and it should not be scoped as "reduce the 11."
