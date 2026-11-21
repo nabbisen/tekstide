@@ -26,8 +26,17 @@ And RFC-077's own capability split: `tekstide-core`'s `project/` module, once ho
 unrelated capabilities bundled with its orchestration code, now holds only that orchestration —
 `recent`, `root`, `explorer_tree`, `watch`, `change_detection`, `metadata`, `diff` and `workspace`
 each left as their own top-level module, every one of them still reachable at its old
-`project::X` path through an unchanged compatibility façade. No published API moved. Not
-user-visible, recorded anyway, matching this project's own practice for internal structural work:
+`project::X` path through an unchanged compatibility façade. **Every module path is unchanged, but
+three public item shapes are not**, all from D7.1's own fix to the one path these capabilities used
+to reach `project::session` through (review 700's required disclosure, carried here): `ProjectSession::new`
+took three loose `impl Into<...>` values for the root and now takes one already-minted
+`ValidProjectRoot`; `ValidProjectRoot`'s three fields are no longer `pub` (`display_name()`,
+`selected_path()`, `canonical_path()` accessors instead); and `ProjectRootHandle::from_project_session`
+is gone, replaced by `ProjectRootHandle::new(ProjectId, ValidProjectRoot)`. A caller outside this
+workspace that constructed either type directly (rather than receiving one from `ProjectRootValidator`)
+needs to update the call; this project's own `rfcs/handoffs/052-file-explorer/measurement` harness
+is exactly such a caller, and needed exactly that update. Not user-visible in the running
+application, recorded anyway, matching this project's own practice for internal structural work:
 record `rfcs/handoffs/077-the-capability-split/d7-scoping-derived-from-measured-internal-coupling.md`
 §19 has the full account, including the two safety findings above, which the split's own rationale
 ("a hub is where safety invariants stop being locatable") predicted it would surface.
