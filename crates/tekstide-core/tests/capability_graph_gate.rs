@@ -348,6 +348,20 @@ const DEPARTED_D7_CAPABILITIES: &[&str] = &[
 /// `crate::workspace::X` reference), so unlike D7.4 and D7.5 there is no
 /// newly-visible self-reference this time -- `project` simply has two
 /// fewer own files whose external reach it carried.
+///
+/// **Held at 24 after review 708's required repointing** (session.rs's
+/// nine `super::{...}` façade reads of `workspace`'s and `metadata`'s
+/// own exports, repointed to `crate::workspace::X` / `crate::metadata::X`
+/// -- `project`'s own code should not consume `project`'s own published
+/// re-exports, the same invisibility this whole split has been fighting,
+/// one indirection over; three more self-references found by the same
+/// grep, `super::Explorer{Toggle,ScanRequest,ScanCompleted}`, repointed
+/// to `crate::explorer_tree::X`). All nine-plus-three newly-visible
+/// references target already-departed capabilities, so this bound's own
+/// exclusion does exactly its job here: it holds at 24 rather than rising,
+/// confirming the exclusion still measures "reach into a real capability"
+/// correctly even when the newly-visible reference is the hub consuming
+/// its own façade, not a plain departure artefact.
 const MAX_PROJECT_GENUINE_REACH: usize = 24;
 
 fn src_root() -> PathBuf {
@@ -930,6 +944,31 @@ fn no_module_exceeds_its_genuine_reach_ceiling() {
 /// `session.rs`'s own reads of `workspace`'s exports stay `super::{...}`,
 /// a pure façade read -- so there is no newly-visible reference to add
 /// back, and total simply falls by own's 6 minus façade's 2, net 4.
+///
+/// **Review 708's required repointing moved total and own again, by
+/// exactly 5, not the 9 the review's own prediction expected**: total
+/// 42 → 47, own 30 → 35, façade held at 12 (47 - 35 = 12, same as
+/// 42 - 30). The review predicted departed-capability reach would rise
+/// from 6 to 15 -- one count per repointed *name* (nine façade reads:
+/// `ProjectActiveFileLaunchAssessment`, `ProjectContentError`,
+/// `ProjectContentWorkspace`, `SaveAllOutcome` from `workspace`;
+/// `ProjectFileState`, `ProjectMode`, `ProjectOpenSurface`,
+/// `ProjectResourceLimits`, `ProjectWarningState` from `metadata`).
+/// **Measured instead of taken**: this gate counts one reference per
+/// occurrence of the literal `crate::` substring (this file's own top
+/// doc, "one edge counted per occurrence"), and a grouped
+/// `use crate::workspace::{A, B, C, D};` contains that substring once,
+/// not four times -- the idiomatic repointing (two grouped `use` lines,
+/// matching every other import in this file and every prior stage's own
+/// repointing style) adds exactly 2, not 9. The other 3 of this round's
+/// +5 are three more previously-invisible self-references found by the
+/// same grep and repointed in the same commit, `super::Explorer{Toggle,
+/// ScanRequest,ScanCompleted}` → `crate::explorer_tree::X` (the same
+/// "in-degree 0 was never checked past the headline import block" class
+/// D7.4 first found, missed at D7.3 when `explorer_tree` itself departed
+/// and only now caught). Both effects land in departed-capability reach
+/// (own minus genuine, 6 → 11), not genuine reach, which holds at 24 --
+/// see that bound's own doc.
 #[test]
 fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let graph = measure_capability_graph();
@@ -937,11 +976,11 @@ fn projects_three_reference_numbers_are_pinned_before_the_facade_exclusion() {
     let own_code_weight = own_code_reference_weight_by_module();
     let own = own_code_weight.get("project").copied().unwrap_or(0);
     assert_eq!(
-        total, 42,
+        total, 47,
         "project's total reference count (façade included) moved"
     );
     assert_eq!(
-        own, 30,
+        own, 35,
         "project's own-code reference count (façade excluded) moved"
     );
     assert_eq!(

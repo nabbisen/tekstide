@@ -32,15 +32,17 @@ use crate::domain::{
     TranscriptAbsence, TranscriptId, TranscriptOrigin, VisibleSlot,
 };
 
-use super::{
-    ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace,
-    ProjectFileState, ProjectMode, ProjectOpenSurface, ProjectResourceLimits,
-    ProjectRuntimeSummary, ProjectWarningState, SaveAllOutcome, WorkspaceTrust,
-};
+use super::{ProjectRuntimeSummary, WorkspaceTrust};
 use crate::change_detection::{
     ChangedPathValidationError, DetectedChanges, GeneratedChangeDetector, ReviewBaseline,
 };
+use crate::metadata::{
+    ProjectFileState, ProjectMode, ProjectOpenSurface, ProjectResourceLimits, ProjectWarningState,
+};
 use crate::root::{FileExplorerScanPolicy, ProjectRootHandle, ValidProjectRoot};
+use crate::workspace::{
+    ProjectActiveFileLaunchAssessment, ProjectContentError, ProjectContentWorkspace, SaveAllOutcome,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectSession {
@@ -1701,7 +1703,10 @@ impl ProjectSession {
     }
 
     /// Expands or collapses the folder at `path`; expanding requests a scan.
-    pub fn toggle_explorer_directory(&mut self, path: &Path) -> super::ExplorerToggle {
+    pub fn toggle_explorer_directory(
+        &mut self,
+        path: &Path,
+    ) -> crate::explorer_tree::ExplorerToggle {
         self.content_workspace.toggle_explorer_directory(path)
     }
 
@@ -1726,7 +1731,7 @@ impl ProjectSession {
     }
 
     /// Every scan currently pending, runnable on any thread.
-    pub fn explorer_scan_requests(&self) -> Vec<super::ExplorerScanRequest> {
+    pub fn explorer_scan_requests(&self) -> Vec<crate::explorer_tree::ExplorerScanRequest> {
         // The shell asks on every rebuild of its subscriptions; nearly always
         // there is nothing pending, and then no root handle is built.
         if self
@@ -1743,7 +1748,10 @@ impl ProjectSession {
     }
 
     /// Applies a finished scan; `false` if it was stale.
-    pub fn apply_explorer_scan(&mut self, completed: super::ExplorerScanCompleted) -> bool {
+    pub fn apply_explorer_scan(
+        &mut self,
+        completed: crate::explorer_tree::ExplorerScanCompleted,
+    ) -> bool {
         self.content_workspace.apply_explorer_scan(completed)
     }
 
