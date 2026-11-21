@@ -1,8 +1,11 @@
 # RFC-078: Session-Member Recall When The Bulk Enumeration Stops Naming A Known Member
 
-Status: **Accepted 2026-11-18 by the owner; D1 implemented 2026-11-21, as part of the `0.42.0`
-candidate cut (not yet published).** Moves to `done/` only at the actual publish — see the "D1
-implemented" section below for the landing record. Proposed 2026-11-16, written at the owner's own
+Status: **Implemented and closed 2026-11-21, moved to `done/` as part of the `0.42.0` release,
+published 2026-11-21.** Accepted 2026-11-18 by the owner; D1 implemented 2026-11-21 and shipped in
+that release — see the "D1 implemented" and "Final Acceptance Decision" sections below for the
+landing record and what the acceptance rested on. The move to `done/` was deliberately held until
+the actual publish, which is the corrected practice after RFC-077's premature move was caught by
+`rfc_docs_invariants` at its own candidate cut. Proposed 2026-11-16, written at the owner's own
 direction (`rfcs/handoffs/release-checklist.md`'s dated 2026-11-16 entries) after a confirmed, measured logical gap in
 macOS session-enumeration containment: "this changes production containment behaviour and adds
 per-session state, so it wants a decision record rather than a slice." **D1 below formalizes

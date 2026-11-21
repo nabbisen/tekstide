@@ -2,7 +2,7 @@
 
 ## 0.42.0 - Closing The Recall Gap
 
-Status: **candidate, not yet published.**
+Status: **released 2026-11-21.**
 
 **No user-visible change in this release.** Both items below are internal: a containment-logic
 fix a user cannot see happen, and a test-only bound retirement. Said plainly rather than dressed
