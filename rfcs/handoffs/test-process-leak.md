@@ -5269,3 +5269,8 @@ were. Filed for that judgement, not resolved unilaterally. Re-running
 `cargo test -p tekstide-core --lib -- an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound`
 on a real macOS runner under low load, deliberately rather than waiting for the next push to happen
 to land on an idle one, would settle the load-confound question directly.
+
+**The very next push's own `macos-measurement` run (`44894125368`, docs-only commit `3f60038`) was
+clean** -- this test and every other passed. Consistent with the load-degraded-single-reading
+reading above, not conclusive against it: one clean run does not retire a watch condition any more
+than one red confirms it. Left open, not closed by this.
