@@ -1,8 +1,10 @@
 # RFC-069: An Adapter For A Real AI CLI
 
 Status: **Accepted 2026-11-15, D1 withdrawn the same day at the owner's direction.** D2–D7
-stand; **D1 (ship a bridge) is withdrawn** — see the section below. `0.41.0`'s content is
-consequently open. Reserved 2026-10-12 on RFC-060's acceptance (D9).
+stand; **D1 (ship a bridge) is withdrawn** — see the section below. `0.41.0` consequently shipped
+without it (RFC-077's capability split and the honest-containment notice instead); whether anything
+here is ever revisited is the owner's, not this RFC's. Reserved 2026-10-12 on RFC-060's acceptance
+(D9).
 
 **The two owner-level questions in *Acceptance* are answered by that acceptance, and are recorded
 here so nobody re-opens them from the question's own wording:** (1) **a bridge is shipped** — this
