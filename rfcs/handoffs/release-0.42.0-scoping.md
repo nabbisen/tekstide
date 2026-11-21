@@ -46,11 +46,12 @@ a membership-blind oracle, and the per-session set updates after *every* enumera
 specifically: a cache updated inconsistently still compiles and still passes a test written against
 the easy case.
 
-**2. The enumeration log's pids.** `done, {} member(s) found` discards `members`. Printing them is
-a few lines and it is the step the containment Standing Watch has named as *"the cheapest thing
-that would have avoided six rounds of this"* since 2026-11-16. The watch stays open on its own
-unexplained question — what makes a bulk-visible member stop matching its own session while still
-alive — and this is what turns the next occurrence into an answer instead of a seventh datum.
+**2. ~~The enumeration log's pids.~~ Struck 2026-11-21, review 713: already shipped.** This item
+was wrong when written. The pids have been printed since `de4e0e3`, 2026-11-16 — the reviewer read a
+stale present-tense paragraph in the release checklist as current state instead of checking
+`launch.rs`, and the dev team found it by reading the tree. **0.42.0's scope is therefore RFC-078's
+slice alone**, with the two one-liners still candidates. The watch stays open on its own unexplained
+question, and the diagnostic that will answer its next occurrence is already in place.
 
 **3. Two one-liners already recorded, if they fit**: widen the form-control denylist from `checkbox`
 to the other five iced widgets that register no focus (two independent reasons now, and only one is

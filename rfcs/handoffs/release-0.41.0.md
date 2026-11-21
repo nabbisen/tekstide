@@ -97,7 +97,9 @@ the first time it did not survive to a commit.
 - **The containment Standing Watch stays open** on its own harder question: what makes a
   bulk-visible session member stop matching its own session while still alive. This release makes
   the product honest about the consequence; it does not explain the cause. The cheapest step toward
-  it — printing the pids the enumeration log currently discards — is still untaken.
+  it. **Correction, 2026-11-21, review 713:** this entry originally called printing the pids the
+  enumeration log discards a step still untaken; it had landed in `de4e0e3` on 2026-11-16, before
+  this release was cut, and the claim came from a stale paragraph in the release checklist.
 - **RFC-078 (session-member recall) is accepted with no implementation slice begun.**
 - The scrollbar contrast gap (`derived-contrast-pairs.md`, 2026-11-18) and widening the iced
   form-control denylist beyond `checkbox` are recorded and unscheduled.

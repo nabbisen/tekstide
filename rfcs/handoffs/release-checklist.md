@@ -592,10 +592,15 @@ matching its own session while still alive. `live_member_of_session` answers `So
 established the tracked pid was alive and not `is_gone_or_going`. The round-4 diagnostic captures
 `getsid` against the session id, which is the discriminator, so the next occurrence answers it.
 
-**Cheapest thing that would have avoided six rounds of this, and the one to do first:** the
-enumeration log prints `members.len()` and discards `members`. Print the pids —
-`done, {} member(s) found: {members:?}` — so a future red says *which* member vanished instead of
-only how many.
+**Cheapest thing that would have avoided six rounds of this, and the one that was done first:** the
+enumeration log used to print `members.len()` and discard `members`. **Done in `de4e0e3`,
+2026-11-16** (review 683 round 7) — it now prints `done, {} member(s) found: {members:?}`, so a
+future red says *which* member vanished instead of only how many. **Corrected 2026-11-21, review
+713: this paragraph stood in the present tense for five days after the work landed**, and the
+reviewer read it as current state rather than checking `launch.rs` — carrying "still untaken" into
+`release-0.41.0.md`, RFC-077's Final Acceptance Decision and `release-0.42.0-scoping.md`, where it
+became a line item of an authorised release scope. The dev team caught it by reading the tree.
+State-asserting text, in the document that warns about state-asserting text.
 
   **The product decision above was made 2026-11-18, and the option list it was made against was
 incomplete.** All three options concern the *predicate*; none concerned what the user is told.

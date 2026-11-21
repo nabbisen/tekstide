@@ -754,8 +754,9 @@ measurement showed them moving the wrong way for what they guarded.
 
 **Deferred rather than fixed, deliberately.** The containment Standing Watch's own harder question
 (what makes a bulk-visible session member stop matching its own session while still alive) stays
-open, and the cheapest step toward it — printing the pids the enumeration log currently discards —
-is still untaken. RFC-078 is accepted with no implementation slice begun. The scrollbar contrast
+open. (This paragraph originally named a "cheapest step" as untaken — printing the pids the
+enumeration log discards. It had already landed in `de4e0e3` on 2026-11-16; corrected 2026-11-21,
+review 713.) RFC-078 is accepted with no implementation slice begun. The scrollbar contrast
 gap (`derived-contrast-pairs.md`, 2026-11-18) and widening the iced form-control denylist beyond
 `checkbox` are both recorded and unscheduled. None of these gates a release; each has a named home
 in a document that outlives this one.
