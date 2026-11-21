@@ -1,6 +1,6 @@
 ---
 title: "0.42.0 scoping"
-status: "**Authorized by the owner 2026-11-21.** The recommended scope stands: RFC-078's implementation slice plus the enumeration-log pid diagnostic, with the two one-liners as candidates. Read as answering question 1 (0.42.0 is the right slot for RFC-078); **questions 2 (scope RFC-075 this cycle?) and 3 (a reserved number for the accessibility question) are not answered by it** and stay open."
+status: "**Authorized by the owner 2026-11-21; the scope landed the same day and the candidate is authorized (owner, second "Authorized", read as proceed-and-cut).** The recommended scope stands: RFC-078's implementation slice plus the enumeration-log pid diagnostic, with the two one-liners as candidates. Read as answering question 1 (0.42.0 is the right slot for RFC-078); **questions 2 (scope RFC-075 this cycle?) and 3 (a reserved number for the accessibility question) are not answered by it** and stay open."
 target_milestone: "M14"
 created: "2026-11-21"
 ---
@@ -106,3 +106,24 @@ product decision's own residual (no honest `AuditOutcome` arm for "nothing to co
 a schema change and a load path); the explorer's per-pull cost class, guarded only by a manual
 measurement harness; RFC-068's redaction question; and RFC-071's Windows half, which is where
 RFC-028's remaining cost sits.
+
+## Scope landed, candidate authorized (2026-11-21)
+
+Everything this slot was authorized for is in `main` and green:
+
+- **RFC-078 D1**, session-member recall — `475ae1d`, with review 713's required guard fix at
+  `be8cd3e` (the leak guard now reads the same recall state production does).
+- **The breadth-ratio bound's macOS retirement** — `132f74a`. Not part of this slot's authorized
+  scope; it arrived as a pre-registered watch firing mid-cycle and is recorded here only because it
+  is in the same release window.
+- The pid-diagnostic item was **struck**: already shipped in `de4e0e3`, 2026-11-16.
+
+**The two one-liners did not go in** — the iced form-control denylist and the scrollbar contrast
+gap. Neither was required, both stay recorded and unscheduled. The owner's second "Authorized" is
+read as *proceed and cut the candidate without them*; if it meant include them, that reverses in one
+line and nothing here depends on the reading.
+
+Next step is the dev team's: cut the `0.42.0` candidate against `release-checklist.md`, start to
+finish for everything that needs no tag, publish or Apple hardware. **Note for the candidate's own
+scope reading:** this release has **no user-visible change**. That is acceptable and was said when
+the slot was scoped; it belongs in the CHANGELOG plainly rather than dressed up.
