@@ -1,0 +1,245 @@
+---
+title: "0.43.0 scoping"
+status: "**Scoped 2026-11-22 by the reviewer; awaiting the owner's authorisation.** Written against the measured state after `0.42.0` published. The central fact: **no RFC in the tree can be implemented** — `accepted/` holds only RFC-069, whose D1 the owner withdrew, and `proposed/` is empty. Whatever 0.43.0 is, its first work is writing a document."
+target_milestone: "M14"
+created: "2026-11-22"
+---
+
+# Scoping 0.43.0
+
+Written against what the tree measurably holds, not against the shape of the backlog. Every claim
+below was checked in the source or the history at `9ed3dd4`; where a claim is *not* checkable yet,
+it says so.
+
+## A finding that changes the inventory before anything can be scoped
+
+**The reservations register was withdrawn on 2026-10-22, and it is still alive in two documents.**
+
+`61f7a43` (2026-10-22, "a number is assigned when the document is written — drop the reservations
+register and name planned work instead") deleted `rfcs/reserved.md` and wrote the rule into
+RFC-058's own correction section: *"A number held in prose and in no document is invisible to anyone
+reading `rfcs/`, so it cannot be relied on and cannot be checked — two readers can claim the same
+one, and a reader meeting `RFC-075` has nothing to open."* That commit withdrew the RFC-075
+reservation by name.
+
+What the tree holds today:
+
+- `rfcs/README.md:52-56` lists `068`, `070`, `071`, `072`, `075` as reserved numbers. That commit
+  never touched `README.md`.
+- `rfcs/delivery-plan.md` carries rows for all five, 075's reading **"Reserved 2026-10-19, RFC-028
+  review 603"** — the reservation the correction withdrew three days later.
+- The `075` row in `README.md` was **added after the withdrawal**: `1aceb32`, 2026-11-03, a commit
+  whose subject is proposing RFC-076. Reinstated in passing, not by decision.
+
+**This is mine to own: both my 0.42.0 scoping document and `release-0.42.0.md` cite "RFC-075" and
+"RFC-068/070/071/072" as reserved numbers.** I read them out of `README.md` and never checked them
+against RFC-058's own correction, so a withdrawn register propagated through two cycles of my own
+documents. The rule is sound and the tree disagrees with it; a reader cannot tell which governs, and
+a reader meeting `RFC-075` still has nothing to open.
+
+**Smallest honest fix, and it belongs in this cycle whatever else does:** delete the reserved-number
+rows from `README.md` and rewrite the five `delivery-plan.md` rows to name the *work* without a
+number — the form the schedule's own AUR row already uses ("number assigned when the document is
+written"). The rows' content is valuable; only the numbers are the lie. Then the next document
+written takes **079**, the tree's own maximum plus one.
+
+Below I therefore name planned work by title, not by number.
+
+## What is actually available
+
+**Startable RFCs: none.** `accepted/` holds `069-an-adapter-for-a-real-ai-cli.md` alone, whose D1
+the owner withdrew on the day of acceptance — D2–D7 are a contract and an honesty rule, already
+satisfied, nothing to build. `proposed/` is empty. `done/` holds 69.
+
+So 0.43.0 cannot be "implement the next accepted RFC". It is either **a release whose work begins by
+writing an RFC**, or **a scoping-only cycle**, or **no release yet**. That is not a problem — it is
+what finishing M14's accepted queue looks like — but it should be said plainly rather than
+discovered halfway.
+
+## Candidates, measured
+
+### 1. The audit record says `Failed` for a close where there was nothing to confirm
+
+**The one candidate where the product itself states something untrue, in a durable record a user can
+read.** Verified in the source, not recalled:
+
+- `TerminalSessionConfirmation` is deliberately three-state (`NothingToCheck`, `Confirmed`,
+  `NotConfirmed`) — `shell.rs:6179`, introduced by the containment-watch decision precisely because
+  a bool could not express "checked nothing".
+- `for_audit_record()` collapses it back to a bool, `true` only for `Confirmed`.
+- `safe_close_decision_record` (`audit/integration.rs:1377`) maps that bool to
+  **`AuditOutcome::Applied`** or **`AuditOutcome::Failed`**.
+- So a close where no enumeration ever ran is durably recorded as `Failed` — the same arm as a close
+  whose session was checked and could not be confirmed empty. The record cannot distinguish them.
+- `terminate_project_live_work` returns `NothingToCheck` whenever a project has no live terminal
+  (`shell.rs:6260`, and its own comment names the reachable case: "an active agent run with no
+  terminal of its own, so the loop never runs").
+
+**The argument for the fix is already in the codebase, written for a different variant.**
+`AuditOutcome::Anomaly`'s own doc comment: *"Reusing `Blocked` would overstate what happened."* That
+is this case exactly, one variant along.
+
+**What makes it an RFC rather than a chore — the load path.** The enum's wire codes are generated by
+one `impl_code!` macro that emits `as_code` and `from_code` from a single list (`record.rs:594`), so
+writer and reader **cannot** drift — the usual enumerated-set hazard does not apply here, and I am
+not going to warn about one that does not. The real question is the other direction: `from_code`
+returns `None` for an unrecognised code, `decode_row_inner` turns that into a decode failure
+(`store.rs:607-615`), so **a record written by a newer build is unreadable by an older one.** With
+`AUDIT_RECORD_SCHEMA_VERSION` at `1`, a new variant needs a decision about downgrade — graceful
+unknown-outcome handling, a schema bump, or an explicit statement that downgrade is unsupported —
+and about whether one bad row fails a query or is skipped. That is a decision record's worth of
+work, and it is small.
+
+**Size**: one variant, one mapping, one decision about the load path, tests. Fits a release.
+
+### 2. AUR publishing from CI — the schedule's own next row, and its precondition is now met
+
+`delivery-plan.md`'s Release Schedule ends with a row for **AUR Publishing From CI**, reserved
+2026-10-21 after the owner registered both packages and stated the expectation that they be
+integrated with CI. Its stated position is **"after the capability-boundaries RFC"** — RFC-074 and
+RFC-077, both now closed and published (`0.40.0`, `0.41.0`). **Nothing else in the tree has a
+scheduling precondition that is now satisfied.** The scope note already exists:
+`rfcs/handoffs/aur-ci-publishing.md`.
+
+It is an RFC rather than a chore for one reason, in that row's own words: it puts **a write
+credential for a public package repository into CI**, where today both `cargo publish` and the AUR
+push are the owner's own actions. That moves a security boundary. `tekstide-bin` does not exist in
+this repository yet.
+
+**I am not recommending it for this slot, and the reason is the owner's philosophy rather than its
+size.** "Finally clean, safe, robust" cuts both ways here: automating the push removes a manual step
+the owner currently performs deliberately, and it does so by storing a credential that can publish
+to a public repository in a system that runs on every tag. That is a risk the owner should accept or
+decline explicitly, before anyone writes the document — not a decision a reviewer should make by
+scheduling it.
+
+### 3. Wiring the attention knock
+
+Verified in the current tree: `request_attention` is called by **nothing but the standalone
+diagnostic probe binary** (`bin/project_process_probe.rs:118`) and its own unit tests. No production
+path calls it — the three GUI call sites and the CLI do not.
+
+**But the shape of this debt is narrower than I have been describing it, and the difference matters.
+The product is honest.** Two tests (`shell/tests.rs:13367` and `:13470`) assert that the
+blocked-open message must *not* contain "attention", with a comment recording that the previous
+assertion requiring it was removed **along with the sentence it asserted on**, so a future edit
+reintroducing the claim without a real knock fails there again. The user is told the project is
+already open and nothing more. What is false is **RFC-058's own closeout document**, which says the
+holder is addressed "over a real `AF_UNIX` knock" — and that file already carries a dated section
+admitting it ("The knock was never wired into any real open path").
+
+So this is a missing feature plus an already-disclosed document error, not a live lie to a user. By
+the schedule's own ordering rule that puts it *behind* candidate 1, not ahead of it. Its three
+questions are real and answerable (where the call belongs — the `HeldByAnother` arm at `app.rs:275`;
+what the user is told when a knock fails as opposed to never being attempted; whether to attempt one
+where the socket cannot bind), and the outcome belongs on `ProjectOpenOutcome::Blocked` itself
+rather than a second independently-tracked bool.
+
+### 4. A non-blocking job for quarantined tests
+
+RFC-029's own D1 requires a quarantined test to still run in a separate job that is read, not
+ignored. `ci.yml` has exactly two jobs, `gate` and `macos-measurement`; neither runs `--ignored`,
+and `ci.yml`'s own header comment says so.
+
+**The population question, measured today rather than quoted from 2026-10-14** (`grep -rn
+'^\s*#\[ignore'`, 14 hits, one of which is a fixture string inside a test of the docs invariants, so
+**13 real tests**):
+
+| kind | count |
+|---|---|
+| "a measurement, not a check" | 7 |
+| quarantined flakes (named by the test-flake-disposition pass) | 3 |
+| a standing platform re-confirmation (macOS `/dev/fd`, review 641) | 1 |
+| "a diagnostic, run by hand" | 1 |
+| a fixture **writer** (`write_the_baseline_fixture`) | 1 |
+
+The delivery-plan row's characterisation holds: most are not flakes. One of them *writes a file
+where the environment says*, which is a sharper argument than redness — a job that ran the whole set
+would have side effects, not just noise.
+
+**The convention it says it needs is now derivable rather than open**, which is the part worth
+recording: three reasons already say "quarantined by the test-flake-disposition pass" in those
+words, so the mechanical rule is available. The register it must not drift from
+(`test-process-leak.md`) is 173 dated prose headings and holds no structured list, so the invariant
+needs the register to gain one — modest, and specified.
+
+### 5. Two small ones already recorded, both verified today
+
+- **Widen the denylist in `no_bulk_approval_or_multi_select_construct_exists_anywhere_in_the_crate`
+  from `checkbox` to `toggler`, `radio`, `pick_list`, `combo_box`, `slider`** — and say in its doc
+  that there are now **two independent reasons**, so retiring one does not silently retire the
+  other. Today it forbids `checkbox` for RFC-022's no-multi-select rule only; snora's audit of the
+  same pinned `iced 0.14` establishes all six **register no focus**, and we use none of them in
+  production (the only hits in the workspace are inside that test). A future control satisfying
+  RFC-022 with a `toggler` would pass every test we have and be unreachable by keyboard — in a
+  product whose dialogs tell the user "Tab/Shift+Tab moves focus; Enter activates." A genuine
+  one-liner, and the cheapest accessibility work available to us.
+- **The scrollbar contrast gap** (`derived-contrast-pairs.md:496-520`): `scrollable` appears in
+  production with geometry only, no `.style(...)` anywhere and no `scrollable::Catalog` in the crate,
+  so rail and thumb take `iced::Theme`'s colours — which this project neither configures nor
+  measures, and which `derived_contrast_pairs` cannot see because it destructures *our* `Theme`
+  exhaustively. Our ratio is **unknown**; that is the finding. The fix that preserves the gate's
+  own property is to style `scrollable` from `Theme` so those colours become roles and fall inside
+  the destructure by construction. **Not a one-liner** — a real change to `Theme` — and not a
+  release gate, since no public document of ours claims WCAG conformance.
+
+## Recommendation
+
+**0.43.0 = the audit record's honest outcome, written as RFC-079, plus the register cleanup and the
+denylist one-liner.**
+
+The schedule's own ordering rule decides this: *"a thing the product says that is not true is fixed
+before a thing the product does not yet do."* Candidate 1 is the only item on the list where the
+product states something untrue in something a user can read, and it is small, bounded, and has its
+own precedent inside the enum it modifies. The register cleanup goes in because a governance rule
+and the tree disagree and that disagreement is now documented. The denylist widening goes in because
+it is one line, it was found by an external audit of our own pinned substrate, and it is the only
+accessibility work in the tree that costs nothing.
+
+**Scope, do not schedule, the AUR CI question** — it needs the owner's risk decision before a
+document is worth writing, and that decision is the gate, not the writing.
+
+**What this release does *not* have: a user-visible change.** Again. `0.42.0` had none either, and
+two in a row is worth saying out loud rather than noticing later: the audit outcome is visible in
+the audit view only to a user who goes looking, and the other two items are a test and a document.
+If the owner wants `0.43.0` to carry something a user meets, the scrollbar styling is the candidate
+on this list that qualifies, and it is the one I would add first.
+
+## What I am not proposing, and why
+
+- **Redacting what a run prints** — its own reservation calls the hard part correctly: "a scanner
+  that misses one secret is worse than no claim." A scoping cycle of its own, and pre-1.0.
+- **Check for updates** — this product's first outbound network request. It should be scoped
+  deliberately, and after the structural work it was explicitly ordered behind, which is now done;
+  it is the strongest *next* feature candidate but not something to start in the same slot as a
+  schema change.
+- **Windows packaging** — still blocked on RFC-028's Windows half, where that RFC's whole remaining
+  cost sits. Nothing has changed.
+- **Anything touching RFC-069's withdrawn D1.** The owner withdrew it with reasons; reopening is
+  theirs to initiate.
+- **The crate-level work** in `crate-organization-status.md`: still no demonstrated beneficiary and
+  the prize still unmeasured. Structural tidiness is not a release.
+
+## Questions that are the owner's
+
+1. **Does the register cleanup have your agreement?** It deletes five rows from `README.md` and
+   rewrites five in `delivery-plan.md` to name work without numbers. The rule being enforced is
+   already in the tree, dated 2026-10-22; I am asking because it visibly removes numbers you may be
+   using in your own notes.
+2. **The AUR credential.** Do you want a write credential for the AUR packages in CI at all? A "no"
+   closes the schedule's last row honestly and is not a worse answer than a "yes".
+3. **Still open from the 0.42.0 scoping, unanswered:** should the attention-knock work be scoped
+   this cycle, and does the accessibility question get a document of its own — *what this product
+   does if `iced` never gains a screen-reader bridge*? The denylist item above is a step on that
+   question's cheapest end, which makes the larger one no less open.
+4. **Two releases with no user-visible change.** Acceptable, or should `0.43.0` carry the scrollbar
+   work so it has one?
+
+## Standing debts that outlive this slot
+
+The containment Standing Watch's own unexplained question (what makes a bulk-visible session member
+stop matching its own session while still alive) with its diagnostic now in place; the explorer's
+per-pull cost class, guarded only by a manual measurement harness whose lock must now be updated
+deliberately each release; RFC-068's redaction question; RFC-028's Windows half; and the audit
+record's downgrade story, which candidate 1 will have to state even if it chooses to leave it
+unsupported.
