@@ -602,3 +602,45 @@ active-file launch assessment, the explorer status labels). Façade lines stay f
 **After D7.6, `project` holds `session` (+`run_records`), `runtime.rs` and the façade** —
 orchestration and nothing else, which is D7's own goal statement. That is the point to re-read D7's
 text against what landed and write the closeout, not to look for a D7.7.
+
+## 18. D7.6 landed — the structural goal is met, and the closeout cannot use this document's own bound (review 708, 2026-11-21)
+
+`diff` and `workspace` are out. Verified independently: `project` total **42** / own-code **30** /
+façade **12** / genuine reach **24**, submodules **4 → 2**, 30 modules, largest SCC 0. **`project`
+now holds `session` (+`run_records`), `runtime.rs` and the façade — orchestration and nothing
+else**, which is D7's own stated goal. The build was clean on the first attempt, the only stage
+where no repointing was needed.
+
+Recorded because the dev team recorded it rather than dressing it up: the stale-departed-list
+ablation produced **no red at all** this stage, and that is the correct consequence — `project`'s own
+code holds 6 references to departed capabilities (`watch` 3, `change_detection`/`root`/
+`explorer_tree` 1 each) and **none** targets `diff` or `workspace`, so adding those two names is
+completeness-only. Verified, not taken.
+
+### The bound this document introduced excludes the number the closeout needs
+
+`session.rs` imports **11** names via `use super::{…}`, of which **nine are defined in departed
+capabilities** — `ProjectContentWorkspace`, `ProjectContentError`,
+`ProjectActiveFileLaunchAssessment`, `SaveAllOutcome` (`workspace`); `ProjectMode`,
+`ProjectFileState`, `ProjectOpenSurface`, `ProjectResourceLimits`, `ProjectWarningState`
+(`metadata`). They resolve through `project.rs`'s own `pub use crate::workspace::{…}` /
+`pub use crate::metadata::{…}` lines, so **orchestration depends on two capabilities it spun out by
+consuming its own published re-exports** — and the gate measures none of it: `super::` has no
+`crate::` prefix, and repointed targets are excluded from genuine reach as departed.
+
+§15 introduced that exclusion to stop the split artefact inflating a must-not-rise ceiling, which
+was right **during** the split. It is exactly wrong **for the verdict**: D7's question is whether
+orchestration stopped reaching into its capabilities, and departed-capability reach is the answer.
+
+**Required before the closeout:** repoint `session.rs`'s nine façade reads to `crate::workspace::X` /
+`crate::metadata::X` — `project`'s own code should not consume `project`'s own published API
+surface — and write the closeout against **three** numbers: genuine reach **24**,
+departed-capability reach **6 today / 15 after repointing**, façade **12**. The verdict goes against
+the second. `session` orchestrating content and metadata may well be its job — D7's goal was
+locatability, not zero coupling — but that must be stated and judged, not absorbed by an exclusion
+rule built for another purpose.
+
+The closeout should also carry what the split found that D7 never anticipated: four stale
+enumerated-set paths (three caught by grep before a red), two staging-order corrections forced by
+the façade-creates-a-back-edge property, and two bounds replaced after measurement showed they moved
+the wrong way.
