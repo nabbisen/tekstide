@@ -35,73 +35,56 @@ const SMALL_BREADTH: usize = 300;
 /// fall below the limit if that constant moves.
 const SUPRA_LIMIT_BREADTH: usize = super::OMITTED_COUNT_LIMIT * 2;
 
-/// RFC-052 review 706: **per-platform, replacing the single `2.5`
-/// review 693 derived.** A shared bound stopped fitting either platform
-/// once a third macOS reading (2.95, load 14.32 on 3 cores) collapsed
-/// the intersection between macOS's own worst noise and Linux's own
-/// worst signal to a 1.15x window -- raising to 3.0 would not have
-/// fixed it, only moved the same collapse one decimal later (3.0 sits
-/// 1.02x above the macOS noise and 1.13x below the Linux signal).
+/// RFC-052 review 706 made this per-platform (replacing the single `2.5`
+/// review 693 derived); **review 714 removed the macOS half of that
+/// again, this time for good, rather than raising a fourth number.**
 ///
-/// **Linux: 2.0.** `sqrt(1.010 * 3.390) ~= 1.85`, rounded up -- 1.98x
-/// above observed noise (1.010-1.010 across every `gate` reading in the
-/// register), 1.70x below observed signal (3.390-3.869 across three
-/// ablation crossings).
+/// **Linux: 2.0, unchanged and still asserted.** `sqrt(1.010 * 3.390) ~=
+/// 1.85`, rounded up -- 1.98x above observed noise (1.010-1.010 across
+/// every `gate` reading in the register), 1.70x below observed signal
+/// (3.390-3.869 across three ablation crossings). This property --
+/// scanning two directories that both exceed `OMITTED_COUNT_LIMIT` costs
+/// the same, by construction -- is platform-independent code
+/// (`root/explorer.rs` and `root.rs` carry no `target_os` branch
+/// anywhere in the scan path; the only nearby `cfg(target_os =
+/// "macos")` is `hostile_fixture.rs`'s own `DEPTH_LEVELS`, which belongs
+/// to the depth row, not this one). The *instrument* measuring it is
+/// not platform-independent, which is why only one platform keeps the
+/// `assert!`, below.
 ///
-/// **macOS: 4.3, derived from the signal side, not the noise tail.**
-/// The noise mechanism (APFS's load-sensitive size-dependent term) is
-/// heavy-tailed -- fitted `s` across five macOS register readings spans
-/// 0.0385 to 0.551 µs/entry, a 14x spread with the newest reading 3.3x
-/// the previous worst, so extrapolating a ceiling from that tail is a
-/// guess dressed as a derivation (this subject's own prior ~29 and ~5x
-/// predictions already failed that way). The signal side is bounded by
-/// measurement instead: three ablation crossings (13.664, 9.291, 6.478),
-/// floor 6.478. Taking the bound as high as the floor tolerates while
-/// keeping a >=1.5x detection margin: `6.478 / 4.3 ~= 1.51x` signal
-/// margin, `4.3 / 2.95 ~= 1.46x` noise margin against the worst reading
-/// on record -- the most noise absorption the signal permits, landing
-/// within rounding of the geometric mean (4.372) without eating
-/// detection.
+/// **macOS: no bound asserted any more. Four ablation crossings on
+/// record, declining: 13.664, 9.291, 6.478, 3.93 (2026-11-21, load 13.33
+/// on 3 cores, `test-process-leak.md`'s own dated entry).** The last one
+/// crossed below 4.3 itself -- the bound could not have detected the
+/// regression its own ablation exists to prove it can see. The
+/// mechanism, not only the number: under the ablated policy both sides
+/// scale with directory size, so the ratio is `(F + 100k*p) / (F +
+/// 20k*p)` -- load inflating the fixed per-scan cost `F` pulls the ratio
+/// *toward 1*, the one direction that destroys detection. macOS's noise
+/// side degrades the opposite way under load (1.283 clean, 2.95 loaded,
+/// APFS's own load-sensitive size-dependent term, reviews 692/693). **The
+/// two populations now overlap** -- noise has reached 2.95, signal has
+/// fallen to 3.93 -- and no single number separates two distributions
+/// that overlap. This is review 706's own pre-registered watch condition
+/// (a signal-side crossing below ~5.4), reached from the signal side
+/// rather than the noise side, exactly so this would not be re-argued
+/// when it happened: no further raise; the ratio form is finished on
+/// APFS.
 ///
-/// **Pre-registered, read before raising either number again: there is
-/// no further raise on macOS.** 4.3 is not "safe" -- it is the most room
-/// available; the signal margin is already at the 1.5x floor this
-/// derivation chose. If either of these is ever observed:
-/// - **A macOS red above 4.3** (a fourth noise reading worse than the
-///   2.95 this bound already absorbs), or
-/// - **A macOS ablation crossing below ~5.4** (1.25x above 4.3 -- the
-///   three crossings on record are declining: 13.664, 9.291, 6.478),
+/// **What would reopen this**, so the retirement stays examinable and
+/// does not quietly become a permanent exemption (the same gap review
+/// 625 found alive elsewhere): a macOS CI runner whose load is actually
+/// bounded rather than shared and variable, or a replacement measurement
+/// that does not divide two timings at all (a syscall count, for
+/// instance, which review 691's own doc notes already holds at the
+/// syscall-count level on every platform even where the cost level does
+/// not).
 ///
-/// the honest conclusion is that the ratio form is finished on APFS and
-/// review 694's original fallback applies -- a different assertion for
-/// macOS, not a third bound. Raising the number again at that point is
-/// not on the table.
-///
-/// One selector function rather than two bare literals used by hand in
-/// three places (this test's assertion, its ablation's assertion, and
-/// both failure messages) -- the same single-source-of-truth property
-/// `BREADTH_RATIO_BOUND`'s own doc required, now extended across a
-/// platform branch instead of only across call sites. Derivation and
-/// measured history: this test's own comment below, `052-file-explorer/
-/// qa-evidence.md`.
+/// macOS still runs both tests and still prints its own numbers through
+/// the standing `--nocapture` steps -- the measurement stays on record
+/// for whoever investigates the platform itself; only the `assert!`
+/// is gone.
 const BREADTH_RATIO_BOUND_LINUX: f64 = 2.0;
-const BREADTH_RATIO_BOUND_MACOS: f64 = 4.3;
-
-fn breadth_ratio_bound() -> f64 {
-    if cfg!(target_os = "macos") {
-        BREADTH_RATIO_BOUND_MACOS
-    } else {
-        BREADTH_RATIO_BOUND_LINUX
-    }
-}
-
-fn breadth_ratio_bound_label() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macOS"
-    } else {
-        "Linux"
-    }
-}
 
 fn handle(fixture: &HostileFixture) -> ProjectRootHandle {
     let root = ProjectRootValidator
@@ -460,26 +443,27 @@ fn a_hundred_thousand_entry_directory_is_a_bounded_scan_not_a_walk_of_all_of_it(
     // different assertion, not a third bound; the standing step keeps
     // watching.
     //
-    // Review 705/706: that watch condition fired -- a fourth macOS point
-    // (2.95, load 14.32 on 3 cores) collapsed the single shared bound's
-    // own intersection to a 1.15x window. `BREADTH_RATIO_BOUND` (2.5) is
-    // replaced by `breadth_ratio_bound()`, per-platform: see its own doc
-    // for the derivation and the pre-registered ceiling on macOS (4.3,
-    // no further raise).
-    let bound = breadth_ratio_bound();
-    assert!(
-        ratio < bound,
-        "two directories that both exceed OMITTED_COUNT_LIMIT should cost the same -- both do \
-         256 stats and OMITTED_COUNT_LIMIT + 1 bare pulls by construction -- but \
-         {BREADTH_ENTRIES} entries took {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries \
-         ({big_best:?} vs {small_best:?}), against {platform}'s bound of {bound}. This is a \
-         scaling assertion, not a load-sensitive one (best-of-5 on both sides, a same-run ratio \
-         comparing equal work) -- but a red here was once dispositioned against load with no \
-         measurement to back it (rfcs/handoffs/test-process-leak.md, 2026-11-07), so the \
-         reading is included rather than assumed either way: {}",
-        crate::test_support::load_average_report(),
-        platform = breadth_ratio_bound_label()
-    );
+    // Review 705/706 made this bound per-platform; review 714 removed the
+    // macOS half again -- the bound's own doc comment (above) has the
+    // full mechanism and the four declining ablation crossings that
+    // settled it. Linux keeps asserting; macOS keeps measuring and
+    // printing (the `eprintln!` above already ran) but no longer asserts
+    // -- a guard that has been shown unable to fail is not a guard.
+    if cfg!(target_os = "linux") {
+        assert!(
+            ratio < BREADTH_RATIO_BOUND_LINUX,
+            "two directories that both exceed OMITTED_COUNT_LIMIT should cost the same -- both \
+             do 256 stats and OMITTED_COUNT_LIMIT + 1 bare pulls by construction -- but \
+             {BREADTH_ENTRIES} entries took {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} \
+             entries ({big_best:?} vs {small_best:?}), against Linux's bound of \
+             {BREADTH_RATIO_BOUND_LINUX}. This is a scaling assertion, not a load-sensitive one \
+             (best-of-5 on both sides, a same-run ratio comparing equal work) -- but a red here \
+             was once dispositioned against load with no measurement to back it \
+             (rfcs/handoffs/test-process-leak.md, 2026-11-07), so the reading is included \
+             rather than assumed either way: {}",
+            crate::test_support::load_average_report()
+        );
+    }
 }
 
 /// Review 691's required ablation: the bound just above moved 8.0 -> 2.0
@@ -558,23 +542,24 @@ fn an_unbounded_policy_makes_the_breadth_ratio_cross_its_bound() {
          {big_best:?}; ratio = {ratio:.3}"
     );
 
-    // Review 706: both platforms' crossings clear their own per-platform
-    // bound with margin (Linux 3.390-3.869 over 2.0, macOS 6.478-13.664
-    // over 4.3), so this direction holds unchanged once both tests read
-    // the same selector -- `breadth_ratio_bound()`'s own doc carries the
-    // pre-registered signal-side watch (a crossing below ~5.4 on macOS
-    // means the ratio form is finished there).
-    let bound = breadth_ratio_bound();
-    assert!(
-        ratio > bound,
-        "an unbounded omitted_count_limit must reproduce review 612's own regression and cross \
-         {platform}'s bound ({bound}) -- but {BREADTH_ENTRIES} \
-         entries took only {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries ({big_best:?} \
-         vs {small_best:?}), which would mean that bound cannot see the regression it exists \
-         for on this machine: {}",
-        crate::test_support::load_average_report(),
-        platform = breadth_ratio_bound_label()
-    );
+    // Review 706 asserted this crossing against a per-platform bound on
+    // both platforms; review 714 removed the macOS assertion -- its own
+    // fourth crossing (3.93, test-process-leak.md 2026-11-21) fell below
+    // the bound this test exists to prove crossable, settling the
+    // bound's own doc comment's pre-registered watch. Linux keeps
+    // asserting; macOS keeps measuring and printing (the `eprintln!`
+    // above already ran).
+    if cfg!(target_os = "linux") {
+        assert!(
+            ratio > BREADTH_RATIO_BOUND_LINUX,
+            "an unbounded omitted_count_limit must reproduce review 612's own regression and \
+             cross Linux's bound ({BREADTH_RATIO_BOUND_LINUX}) -- but {BREADTH_ENTRIES} entries \
+             took only {ratio:.2}x as long as {SUPRA_LIMIT_BREADTH} entries ({big_best:?} vs \
+             {small_best:?}), which would mean that bound cannot see the regression it exists \
+             for on this machine: {}",
+            crate::test_support::load_average_report()
+        );
+    }
 }
 
 #[test]
