@@ -249,15 +249,11 @@ impl TerminalRuntime {
             after_signal: TerminationSignal::Sighup,
         });
 
-        // TEMPORARY ablation (release-checklist.md Standing Watch, 0.42.0 candidate cut):
-        // confirming both platforms' containment guard can still go red this release.
-        // Reverted next commit.
-        let _unused_during_ablation: fn(libc::pid_t, libc::c_int, &mut Vec<libc::pid_t>) -> usize =
-            signal_session_survivors;
-        let signalled = {
-            let _ = &mut self.session_mut(handle)?.recalled_session_members;
-            0usize
-        };
+        let signalled = signal_session_survivors(
+            session_id,
+            libc::SIGKILL,
+            &mut self.session_mut(handle)?.recalled_session_members,
+        );
         if signalled > 0 {
             events.push(TerminalRuntimeEvent::TerminationSignalSent {
                 handle: handle.clone(),
