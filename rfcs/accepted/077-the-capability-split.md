@@ -1,7 +1,13 @@
 # RFC-077: The Capability Split
 
 Status: **Accepted 2026-11-03, by inheritance — split out of RFC-074 on 2026-11-12 at the owner's
-direction.** D5 through D8 below are the decisions the owner accepted as part of RFC-074 ("D1
+direction.** **D7 closed by the owner 2026-11-21** — eight capabilities carved out of `project/`,
+`MAX_PROJECT_CAPABILITY_SUBMODULES` 11 → 2, genuine reach 33 → 24, `MAX_LARGEST_SCC_SIZE` held at 0
+throughout, and two real safety findings surfaced on the way (`ValidProjectRoot`'s unenforced
+validation claim, `TerminalPane::launch`'s false one); the record is
+`rfcs/handoffs/077-the-capability-split/d7-scoping-derived-from-measured-internal-coupling.md` §19.
+This RFC moves to `done/` as part of the release that ships it, per the standing release rule, not
+on D7's closure. D5 through D8 below are the decisions the owner accepted as part of RFC-074 ("D1
 through D8 as written"); they are carried here **unchanged and still accepted**. The split was not
 a re-opening: it exists because RFC-074 spanned more releases than one, and a released section
 naming an RFC asserts that RFC shipped in that release, so the first slice could not close while

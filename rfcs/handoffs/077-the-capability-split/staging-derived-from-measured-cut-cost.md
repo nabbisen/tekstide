@@ -574,3 +574,23 @@ reviewer can disagree with it.
 Which release these take, how many slices they become, and D7's own scoping. The first two are the
 owner's and the reviewer's; the third needs the second measurement named above before it can be
 written honestly.
+
+## D7 closed by the owner, 2026-11-21
+
+This document's own "finding that should stop someone declaring victory at stage 9" — *"the bound is
+now 0 and D7 has not started"* — is discharged. D7 was scoped on 2026-11-18 against the
+reference-weight measurement that section asked for, ran as seven pieces (D7.0 the instrument, D7.1
+a prerequisite, D7.2 through D7.6 the departures), and closed on 2026-11-21.
+
+Outcome, measured at every stage rather than predicted: eight capabilities out of `project/`
+(`recent`, `root`, `explorer_tree`, `watch`, `change_detection`, `metadata`, `diff`, `workspace`);
+`MAX_PROJECT_CAPABILITY_SUBMODULES` **11 → 2**; genuine reach **33 → 24**; `MAX_LARGEST_SCC_SIZE`
+held at **0** throughout; no published path moved. Two real safety findings surfaced on the way —
+`ValidProjectRoot` named a validation its public fields did not enforce, and
+`TerminalPane::launch` claimed a validation it never performed — which is D7's own rationale
+("a hub is where safety invariants stop being locatable") paying off rather than a side effect.
+
+Full record, including the two staging-order corrections the façade-creates-a-back-edge property
+forced and the two bounds replaced after measurement showed them moving the wrong way:
+`d7-scoping-derived-from-measured-internal-coupling.md`. **RFC-077 moves to `done/` with the
+release that ships this — 0.41.0, accepted 2026-11-21 — not on D7's closure.**

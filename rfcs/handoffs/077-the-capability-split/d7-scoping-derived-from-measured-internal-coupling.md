@@ -1,6 +1,6 @@
 ---
 title: "RFC-077 D7 scoping — `project/` splits, derived from measured internal coupling"
-status: "Scoped 2026-11-18 by the reviewer, at the owner's direction; **authorized by the owner the same day** — the instrument refinement recommended in §5 is taken, API compatibility is kept. §5 and §6 were then corrected by the reviewer before handoff: reference weight alone is not a witness every stage can move. No slice begun; the release slot remains the owner's."
+status: "**D7 closed by the owner 2026-11-21** (§19 is the closeout). Scoped 2026-11-18 by the reviewer, at the owner's direction; **authorized by the owner the same day** — the instrument refinement recommended in §5 is taken, API compatibility is kept. §5 and §6 were then corrected by the reviewer before handoff: reference weight alone is not a witness every stage can move. No slice begun; the release slot remains the owner's."
 rfc_file: "../../accepted/077-the-capability-split.md"
 target_milestone: "M14"
 created: "2026-11-18"
@@ -711,7 +711,10 @@ predicts:
 
 **Structurally D7 is done**, and enforced rather than asserted: three independent gate bounds hold
 `project` to orchestration — submodule count 2 (`==`), genuine reach 24 (`<=`), and the pin's three
-literals. Closing D7 is the owner's call.
+literals.
+
+**Closed by the owner, 2026-11-21.** The slot for the release that ships it is **0.41.0**, accepted
+the same day.
 
 **D7 done is not RFC-077 done.** The RFC stays in `rfcs/accepted/` and moves to `done/` as part of
 whichever release ships this, per the standing release rule.
