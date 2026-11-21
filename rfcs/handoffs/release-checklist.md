@@ -732,6 +732,15 @@ step toward it remains untaken — the enumeration log prints `members.len()` an
       review rounds, and write what the acceptance rests on, which defects were found and fixed,
       and what was deferred rather than fixed. The untracked response is correspondence; the pack
       is the record.
+- [ ] **Move the RFC's `rfcs/README.md` row from the `## Accepted` table to `## Implemented`, not
+      only its link and status text.** Added 2026-11-22, after `0.42.0`'s own publish did the link
+      (`./accepted/` -> `./done/`) and the status sentence and left the row sitting under
+      `## Accepted`, where RFC-078 stayed for a day. `rfc_docs_invariants` cannot see it: the row's
+      link still resolves and its status text still agrees with its folder, so every check passes
+      while the first place a reader looks for startable work advertises a shipped RFC. RFC-077's
+      own publish did move it (`10f7949`), so the convention existed and only the checklist did not
+      say it. **Candidate invariant, cheap and not yet written:** no row whose link points into
+      `done/` may appear under `## Accepted`, and vice versa.
 - [ ] **Confirm no document yet claims the release.** Added 2026-10-11 after review 522. The
       candidate's status lines say *"candidate, not yet published"* in every one of the five places;
       the flip to *"released"* belongs to the publish commit, with the tag and the post-publish

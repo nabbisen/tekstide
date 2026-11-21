@@ -1,10 +1,16 @@
 # RFC-079: An Honest Audit Outcome For A Close With Nothing To Confirm
 
-Status: **Proposed 2026-11-22**, at the owner's authorisation of the `0.43.0` scoping
-([`release-0.43.0-scoping.md`](../handoffs/release-0.43.0-scoping.md), candidate 1). Number taken
-from the tree's own maximum at the moment this file was created, per RFC-058's own 2026-10-22
-correction. **No decision in this document is made yet**; the *Acceptance-time decisions* section
-names what the owner is being asked to decide, and D1–D4 are proposals until then.
+Status: **Accepted 2026-11-22 by the owner**; proposed the same day at the owner's authorisation of
+the `0.43.0` scoping ([`release-0.43.0-scoping.md`](../handoffs/release-0.43.0-scoping.md),
+candidate 1). Number taken from the tree's own maximum at the moment the file was created, per
+RFC-058's own 2026-10-22 correction. **D1–D4 as written, and the three acceptance-time decisions
+decided by the architect on acceptance** — the owner accepted without ruling them, which is the
+RFC-043/RFC-053 precedent ("decided by the architect on acceptance and recorded in this file before
+implementation begins"). See *Decided on acceptance* below; say otherwise and any of them reverses
+at no cost, because nothing is implemented yet.
+
+**Read *Corrected on acceptance* before starting work.** This document's own estimate of the cost
+was wrong when it was written, and the correction is larger than the estimate.
 
 Written by the reviewer, not the owner, and not a proposal the owner originated — the owner
 authorised the slot this closes, and the defect was found by this reviewer while scoping it.
@@ -179,3 +185,84 @@ produces — the vacuous one first, because that is the one the current code get
 3. **Whether D2 is in scope for this release or deferred.** D1 alone fixes the record; D2 is what
    stops the collapse being reintroduced. Doing D1 without D2 is coherent but leaves the mechanism
    in place.
+
+## Decided on acceptance (2026-11-22, by the architect)
+
+**1. The variant is `NothingToConfirm`, wire code `nothing_to_confirm`.** `AuditOutcome`'s arms are
+family-neutral verbs for what happened — `Applied`, `Blocked`, `Cancelled`, `Anomaly` — and
+`NothingToConfirm` sits in that register. Rejected `NothingToCheck` deliberately, although it is the
+GUI-side vocabulary: that name describes a *code state* in `crates/tekstide`, and reusing it for a
+durable record read by a user invites the two-vocabularies confusion across the crate boundary that
+the Risks section already warns about for the type itself. Rejected `NotApplicable` as vague, which
+is the property this RFC exists to remove.
+
+**2. D3: downgrade is unsupported, and the record's own documentation says so.** Option (a).
+Nothing else in this product supports downgrade, the audit store is per-installation, and option
+(b) — a reserved `Unrecognised` value an old build renders — would have an old build *display* an
+outcome it cannot name, which is the overstatement this RFC removes, one layer down. **Strengthened
+by the correction below**: the schema migration means an older build meets a newer `user_version`
+before it ever meets an unknown outcome code, so the unknown-code path is the second gate, not the
+first. The implementation must confirm what the older build actually does at that first gate and
+record it; it must not assume.
+
+**3. D2 is in scope, and not as a preference — it is entailed.** `safe_close_decision_record` must
+now produce three outcomes, and a `bool` cannot tell it which of two states a `false` means. Leaving
+the bool would force the producer to *infer* the third state, which is precisely the information
+that was lost. So `SafeCloseDecision::Closed`'s field becomes a three-state value owned by
+`tekstide-core`, and the GUI stops calling `for_audit_record()`.
+
+## Corrected on acceptance: the cost is a schema migration, not one variant
+
+**The *Summary* above calls this "not a new capability" and the scoping document called it "small,
+bounded". That estimate was made without reading the storage layer, and it is wrong.** Recorded here
+rather than quietly fixed, because the dev team would otherwise start from a scope that does not
+exist.
+
+A new `AuditOutcome` variant must join **four** lists, not two. The RFC as proposed named the two
+that are guarded and missed the two that are not:
+
+1. `impl_code!` (`record.rs:594`) — one list, both directions. **Guarded.**
+2. `outcome_cycle_index` + `ALL_OUTCOMES` (`shell.rs:14698`, `shell/tests.rs:23251`) — exhaustive
+   match plus an index test. **Guarded.**
+3. **`valid_safe_close()`'s own `match self.outcome`** (`record.rs`) ends in **`_ => false`**. A
+   record carrying a new outcome is therefore *invalid*, and `AuditStore::append` validates before
+   writing (`store.rs:130`), so the close's audit record would **not be written at all** — a missing
+   record, which is worse than a wrong one. No compile error warns of this. This is the
+   "unreachable" wildcard arm this project's own standing lesson names as the tell.
+4. **The SQL `CHECK (outcome IN (…))`** in the `audit_events_v3_table_ddl!` DDL macro
+   (`schema.rs`), plus the per-family row `CHECK` for `family = 'safe_close_decision'`. SQLite bakes
+   a `CHECK` into the table definition, so an **existing** store cannot accept the new code without
+   a migration step; a fresh install would work and an upgraded one would not.
+
+**The precedent is exact and it is in the tree**: `RFC_066_SAFE_CLOSE_BLOCKED_MIGRATION`
+(`migration.rs:124`) exists because the *previous* new outcome for *this same family* —
+`safe_close_decision` + `blocked` — was accepted by `validate()` and rejected by the schema's own
+`CHECK`. Review 503 found it; RFC-066 fixed it with a named `MigrationStep`. This work is that work
+again, with a different code.
+
+### A finding about the test written to catch exactly this
+
+`crates/tekstide-core/src/audit/tests/every_family_outcome_lands.rs` is the enumeration written
+after review 503 so the next such mistake could not land. Its module doc claims it "guards every
+`(family, outcome, action_kind)` combination the type itself can produce, **not only the ones a
+hand-written list happens to include**".
+
+**Only one of its two axes is derived from the type.** `chains_for_family` dispatches on
+`AuditEventFamily` with no wildcard arm, so a new *family* is a compile error — that part of
+the claim is true. The *outcome* axis is a hand-written list of `AuditOutcome::…` values per family.
+A
+new outcome variant is therefore not enumerated by it until someone adds it by hand, which is the
+condition the doc says does not apply.
+
+**Required, as part of this RFC rather than after it:** add the new combination to that enumeration,
+and either make its outcome axis derive from `ALL_OUTCOMES` the way its family axis derives from the
+type, or correct the module doc to state which axis is derived. A test whose doc claims a stronger
+property than it has is the shape this project keeps paying for; this one is now documented, so it
+is no longer free to leave.
+
+### Revised scope
+
+To the *Scope* section above, add: a `MigrationStep` for the `CHECK` constraint; the
+`valid_safe_close` arm and what it requires of `operation_id`; the new combination in
+`every_family_outcome_lands`; and whatever the older-build-meets-newer-`user_version` check turns
+out to do. **Still one release's work, and no longer "one variant, one mapping".**
