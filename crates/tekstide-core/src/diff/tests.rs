@@ -833,7 +833,7 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// Listed here rather than widened out of the scan, the same discipline
 /// the two pre-RFC-024 entries above follow.
 const FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT: &[&str] = &[
-    "project/diff.rs",
+    "diff.rs",
     "content/open.rs",
     "recent/store.rs",
     "audit/recovery.rs",

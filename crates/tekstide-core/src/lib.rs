@@ -7,6 +7,7 @@ pub mod close;
 pub mod command;
 pub mod config;
 pub mod content;
+pub mod diff;
 pub mod domain;
 pub mod explorer_tree;
 pub mod interface_scale;
@@ -25,6 +26,7 @@ pub mod shell;
 pub mod text_safety;
 pub mod transcript;
 pub mod watch;
+pub mod workspace;
 
 /// Response 232: `RealProcessLimiter` used to live only inside
 /// `runtime::terminal::reader::tests`, capping contention among that

@@ -1,5 +1,3 @@
-mod content;
-mod diff;
 mod runtime;
 mod session;
 
@@ -54,6 +52,22 @@ pub use crate::change_detection::{
     DetectedChangedPath, DetectedChanges, GeneratedChangeDetectionPolicy, GeneratedChangeDetector,
     ReviewBaseline, ReviewBaselineEntry,
 };
+/// RFC-077 D7.6: `diff` out -- zero coupling with `workspace` (the two
+/// were lumped together as one "content cluster" since §1, inherited
+/// from the scoping document's own original clustering; measured
+/// directly once they were the last two capabilities left, neither
+/// references the other at all). By D6's own test (one external
+/// contract + one grant decision + one threat surface = one capability)
+/// `diff` has its own of each (`gate_diff_content_read`,
+/// `DiffGateDecision`, `DiffGateRefusal`, the `DEFAULT_MAX_DIFF_*`
+/// limits) -- reading a file into a diff is a different grant from
+/// opening a document in the workspace. Re-exported unchanged so
+/// `project::DiffContent` and friends still resolve.
+pub use crate::diff::{
+    ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DEFAULT_MAX_DIFF_LINES, DiffContent,
+    DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
+    gate_diff_content_read, read_diff_content,
+};
 pub use crate::explorer_tree::{
     ExplorerRootState, ExplorerScanCompleted, ExplorerScanRequest, ExplorerToggle, ExplorerTree,
     ExplorerTreeRow, ExplorerTreeRowKind, MAX_TREE_ROWS, is_expandable,
@@ -83,16 +97,19 @@ pub use crate::watch::{
     ScanRequest, ScopeChange, WatchAdmissionError, WatchBackend, WatchEvents, WatchEventsSlot,
     WatchNotice, WatchRefusal, WatchScope, WatchState, WatchedDirectory, desired_directories,
 };
-pub use content::{
+/// RFC-077 D7.6: `content.rs` out, renamed to top-level `workspace` --
+/// `content` is taken by a live, unrelated top-level module (review
+/// 703's naming constraint), and `workspace` is what the capability
+/// actually is: `ProjectContentWorkspace`, the save and save-all
+/// outcomes, the active-file launch assessment, the explorer status
+/// labels. Zero coupling with `diff`, same as above. Re-exported
+/// unchanged so `project::ProjectContentWorkspace` and friends still
+/// resolve.
+pub use crate::workspace::{
     DocumentSaveOutcome, ProjectActiveFileLaunchAssessment, ProjectActiveFileLaunchBlockReason,
     ProjectActiveFileLaunchDecision, ProjectContentError, ProjectContentStatus,
     ProjectContentWorkspace, ProjectExplorerStatus, SaveAllOutcome, explorer_node_kind_label,
     explorer_node_state_label, explorer_symlink_status_label, text_document_state_label,
-};
-pub use diff::{
-    ContentLifecycle, DEFAULT_MAX_DIFF_INPUT_BYTES, DEFAULT_MAX_DIFF_LINES, DiffContent,
-    DiffContentError, DiffGateDecision, DiffGateRefusal, DiffPreviewPolicy, diff_content_is_stale,
-    gate_diff_content_read, read_diff_content,
 };
 pub use runtime::ProjectRuntimeSummary;
 /// RFC-077 Stage 8: `#[cfg(test)]`, not merely `pub(crate)` -- this is
