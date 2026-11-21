@@ -1,8 +1,8 @@
 ---
 title: "RFC-077 — staging, derived from measured cut cost"
 rfc: "RFC-077"
-rfc_file: "../../accepted/077-the-capability-split.md"
-source_rfc_status: "Accepted 2026-11-03 by inheritance, split out of RFC-074 on 2026-11-12 — RFC-077 is in rfcs/accepted/"
+rfc_file: "../../done/077-the-capability-split.md"
+source_rfc_status: "Implemented and closed 2026-11-21, released as 0.41.0 — RFC-077 is in rfcs/done/"
 target_milestone: "M14"
 created: "2026-11-15"
 ---

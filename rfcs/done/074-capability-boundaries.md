@@ -28,7 +28,7 @@ going to RFC-077. D5 stayed, the registers and the moved-out heading below were 
 clause was not — so the paragraph described one split and its own next sentence described another. A released section naming an RFC asserts that RFC shipped in that release
 (`an_rfc_a_release_names_lives_in_done`), so a `0.40.0` carrying only the first slice could not
 have named the RFC it was about — the same reason RFC-026 was split from RFC-065. **D6–D8 moved to
-[RFC-077](../accepted/077-the-capability-split.md)**, carried forward as already-accepted decisions.
+[RFC-077](../done/077-the-capability-split.md)**, carried forward as already-accepted decisions.
 **The release slot is `0.40.0`**, and **the published API may change shape in it**: Stage 1 is
 API-compatible by construction (D3), Stage 2 takes `test_support` out of the production graph.
 
@@ -222,7 +222,7 @@ The rule that generates the capability list (D6), the `project/` split itself (D
 order derived from measured cut cost (D8) are **not in this RFC any more**. **D5 stays**, above:
 its first real application is this RFC's own Stage 2, and a release should be able to cite the rule
 it applied without naming an RFC that has not shipped. They were accepted on 2026-11-03 as part of it and are carried forward unchanged, as
-accepted decisions, in [RFC-077](../accepted/077-the-capability-split.md). Nothing was re-opened, re-decided
+accepted decisions, in [RFC-077](../done/077-the-capability-split.md). Nothing was re-opened, re-decided
 or weakened: the split changes which release closes which decision, and nothing else.
 
 What stays here is what `0.40.0` can actually close: the gate, the tier model it enforces, the

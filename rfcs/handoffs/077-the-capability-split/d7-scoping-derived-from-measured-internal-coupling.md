@@ -1,7 +1,7 @@
 ---
 title: "RFC-077 D7 scoping — `project/` splits, derived from measured internal coupling"
-status: "**D7 closed by the owner 2026-11-21** (§19 is the closeout). Scoped 2026-11-18 by the reviewer, at the owner's direction; **authorized by the owner the same day** — the instrument refinement recommended in §5 is taken, API compatibility is kept. §5 and §6 were then corrected by the reviewer before handoff: reference weight alone is not a witness every stage can move. No slice begun; the release slot remains the owner's."
-rfc_file: "../../accepted/077-the-capability-split.md"
+status: "**D7 closed by the owner 2026-11-21** (§19 is the closeout). Scoped 2026-11-18 by the reviewer, at the owner's direction; **authorized by the owner the same day** — the instrument refinement recommended in §5 is taken, API compatibility is kept. §5 and §6 were then corrected by the reviewer before handoff: reference weight alone is not a witness every stage can move. D7 closed and released as `0.41.0` on 2026-11-21; the Final Acceptance Decision is at the end of this file."
+rfc_file: "../../done/077-the-capability-split.md"
 target_milestone: "M14"
 created: "2026-11-18"
 ---

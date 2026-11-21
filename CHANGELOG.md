@@ -2,7 +2,7 @@
 
 ## 0.41.0 - Honest About Containment
 
-Status: **candidate, not yet published.**
+Status: **released 2026-11-21.**
 
 When a project closed and this product could not confirm that every terminal's backgrounded work
 had actually ended, the close dialog's own promise — *"Anything started from these terminals ends

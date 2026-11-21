@@ -1,7 +1,8 @@
 # RFC-077: The Capability Split
 
-Status: **Accepted 2026-11-03, by inheritance — split out of RFC-074 on 2026-11-12 at the owner's
-direction.** **D7 closed by the owner 2026-11-21** — eight capabilities carved out of `project/`,
+Status: **Implemented and closed 2026-11-21, moved to `done/` as part of the `0.41.0` release,
+published 2026-11-21.** Accepted 2026-11-03 by inheritance — split out of RFC-074 on 2026-11-12 at
+the owner's direction. **D7 closed by the owner 2026-11-21** — eight capabilities carved out of `project/`,
 `MAX_PROJECT_CAPABILITY_SUBMODULES` 11 → 2, genuine reach 33 → 24, `MAX_LARGEST_SCC_SIZE` held at 0
 throughout, and two real safety findings surfaced on the way (`ValidProjectRoot`'s unenforced
 validation claim, `TerminalPane::launch`'s false one); the record is

@@ -27,7 +27,7 @@ Related RFCs:
 - [RFC-043](../done/043-terminal-process-containment.md) — owns the session-scoped containment
   sweep (`processes_in_session`, `request_terminate`) this RFC closes a gap in. Closed and
   shipped; this is an addendum, not a reopening of D1-D4.
-- [RFC-074](../done/074-capability-boundaries.md) / [RFC-077](../accepted/077-the-capability-split.md)
+- [RFC-074](../done/074-capability-boundaries.md) / [RFC-077](../done/077-the-capability-split.md)
   — unrelated subsystem (the module-graph gate). No interaction; mentioned only because the gap
   below was found while working on RFC-077 Stage 7 and its review (683).
 

@@ -102,7 +102,7 @@ The `project/` split (D7), the remaining cuts in D8's table, any crate split, an
 GUI's breadth. The RFC scopes them out or defers them; this pack does not reopen them.
 
 **Updated 2026-11-12, at the split.** D6 through D8 are no longer part of RFC-074 at all — they
-were moved to [RFC-077](../../accepted/077-the-capability-split.md), carried forward as
+were moved to [RFC-077](../../done/077-the-capability-split.md), carried forward as
 already-accepted decisions, so that RFC-074 is a thing `0.40.0` can actually close. That changes
 nothing in this pack's own two slices: PR-074-A is still the gate and nothing else, PR-074-B is
 still Stages 1 and 2, and the bound still ratchets in the same commit as the move that earns it.
