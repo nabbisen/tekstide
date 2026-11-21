@@ -526,6 +526,17 @@ logical gap exists either way. What is still open is the product decision named 
 that decision is made and, if it changes anything, reflected in `decide_processes_in_session`'s own
 tests.
 
+  **The named condition is satisfied as of 2026-11-18 (review 710's own correction).** The product
+decision was taken that day in three parts; part 1 (the honest close notice) shipped in the `0.41.0`
+candidate, and RFC-078 was accepted as the precautionary closure. So **this clause no longer blocks
+a release**, and reading it as a blocker -- which its wording invites -- would hold a tag on
+something already done. What stays open is narrower and does not gate a release: the unexplained
+question of what makes a bulk-visible session member stop matching its own session while still
+alive, plus the still-untaken cheapest step toward it (the enumeration log prints `members.len()`
+and discards the pids). **Unchanged and still per-release, separately from all of the above:** the
+suppress/confirm-red/revert procedure two items up, on *both* platforms -- that one is not
+dischargeable by any decision, only by a fresh red.
+
 **Two corrections to the framing that decision should be made against (review 683 round 5).**
 
 *First, there is no backstop, so "accept the residual as explicit" is not the mild option it looks
