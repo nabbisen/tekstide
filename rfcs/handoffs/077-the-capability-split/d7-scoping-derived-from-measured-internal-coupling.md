@@ -722,3 +722,40 @@ whichever release ships this, per the standing release rule.
 The one follow-on worth naming is a different question and a D6 one, not a graph-coupling one:
 whether `ProjectSession` should present a single external surface at all. That is an API and product
 question for the owner, and it should not be scoped as "reduce the 11."
+
+## Final Acceptance Decision
+
+**Accepted for release in `0.41.0`, 2026-11-21.** The owner authorised; the reviewer executed the
+tag and the publish. Written before tagging, per the release checklist's own review-526 item — the
+`.git-exclude/reviewed/` responses are correspondence, this is the record.
+
+**Review rounds.** D7 itself: 696 (start authorisation and the corrected D7.1 shape), 697/698
+(D7.0's instrument and its documentation), 699/700 (D7.1, and the `ValidProjectRoot` bypass it
+exposed), 701 (the symlink policy threaded per caller), 702-709 (D7.2 through D7.6 and the
+closeout). The release candidate: 710 (two Required), 711 (both discharged, the missing evidence
+directory found), 712 (evidence and Run It, accepted).
+
+**What the acceptance rests on.** Every stage moved a gate-measured bound in the same commit that
+earned it, each re-ablated on the committed tree; every number was re-measured independently by the
+reviewer rather than taken from the report, and several reports were corrected on that basis. Both
+platforms' containment guards were shown **able to fail** on real CI this cycle — the one gate whose
+whole point is that a green run proves nothing — and reverted byte-identically across `crates/`. The
+Run It gate was performed on the shipped release binary with throwaway state, and the capture was
+looked at, not merely described.
+
+**Defects found and fixed during this work, not after it.** Two in the product:
+`ValidProjectRoot` named a validation its public fields did not enforce, and
+`TerminalPane::launch` claimed a validation it never performed — both surfaced *because* the split
+forced the paths open, which is D7's own stated rationale. Two in the release itself: the CHANGELOG
+claimed no published API moved when three public item shapes had, and the per-platform containment
+red had not been re-done this cycle. Two staging orders were corrected before landing, each of
+which would have made a 2-cycle against an SCC bound of 0; two gate bounds were replaced after
+measurement showed them moving the wrong way for what they guarded.
+
+**Deferred rather than fixed, deliberately.** The containment Standing Watch's own harder question
+(what makes a bulk-visible session member stop matching its own session while still alive) stays
+open, and the cheapest step toward it — printing the pids the enumeration log currently discards —
+is still untaken. RFC-078 is accepted with no implementation slice begun. The scrollbar contrast
+gap (`derived-contrast-pairs.md`, 2026-11-18) and widening the iced form-control denylist beyond
+`checkbox` are both recorded and unscheduled. None of these gates a release; each has a named home
+in a document that outlives this one.
