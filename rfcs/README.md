@@ -25,6 +25,7 @@ RFCs open for review.
 
 | RFC | Title | Status |
 | --- | --- | --- |
+| 079 | [An Honest Audit Outcome For A Close With Nothing To Confirm](./proposed/079-an-honest-audit-outcome-for-a-close-with-nothing-to-confirm.md) | **Proposed 2026-11-22**, at the owner's authorisation of the `0.43.0` scoping. A close where no terminal session was ever enumerated is durably recorded as `AuditOutcome::Failed` — the same arm as a session checked and not confirmed empty — and the audit view's own outcome filter shows those closes as failures. The three states exist internally and are collapsed to a bool one call before the record is written. D1–D4 are proposals; the variant's name, the downgrade story, and whether the bool itself goes are the owner's acceptance-time decisions |
 
 ## Accepted
 
@@ -37,11 +38,28 @@ belongs here, not there.
 | 078 | [Session-Member Recall When The Bulk Enumeration Stops Naming A Known Member](./done/078-session-member-recall-when-the-bulk-enumeration-stops-naming-a-known-member.md) | **Implemented and closed 2026-11-21; released as `0.42.0` 2026-11-21.** Accepted 2026-11-18. Proposed 2026-11-16 at the owner's own direction (`release-checklist.md`'s dated entry, review 683 round 5), after `decide_processes_in_session` confirmed a macOS-only containment gap by measurement. Accepted as a *precautionary* closure: it does not discharge the containment Standing Watch, and its known limit is "never named by an earlier enumeration of this same close," not "never seen over the session's life." |
 | 069 | [An Adapter For A Real AI CLI](./accepted/069-an-adapter-for-a-real-ai-cli.md) | **Accepted 2026-11-15; D1 withdrawn the same day at the owner's direction — no bridge is shipped.** `REQ-AGENT-013` is a prohibition (*must not claim* enforcement unless an adapter or wrapper reports) and was read as a mandate; the other three requirements cited are scoped to **adapter-mediated** commands and were already satisfied. PR-069-A's measurement found the interception opt-in fail-closed on two axes, overridable by a plugin mod on a personal account, and blind to several categories — which is now the evidence for *why* this is not done. D2–D7 stand; the contract stays published and anything that chooses to speak it is supervised. **`0.41.0` shipped without it** (RFC-077's capability split and the honest-containment notice instead) |
 
-### Reserved numbers — check this before authoring
+### Numbers already in use by planned work — check this before authoring
 
-These are claimed by [`delivery-plan.md`](./delivery-plan.md)'s RFC queue but have no
-document yet. **An RFC number is taken the moment the plan reserves it, not when a file
-appears**, so this table exists to make a reservation visible to whoever authors next.
+**The rule, settled 2026-10-22 (`61f7a43`, written into RFC-058's own correction section): a number
+is assigned when the document is written, not when the work is planned.** The next document takes
+the tree's own maximum plus one; two authors at once produce two files, which is a visible clash
+rather than silence. **Nothing below reserves a number for future work, and no new entry is added
+here.**
+
+The nine entries that follow are **grandfathered, and they are not an exception made for
+convenience**. Each is already cited by name across this repository — `RFC-068` in 15 documents,
+`RFC-063` in 13, `RFC-072` in 7, and `RFC-061` and `RFC-071` in source comments in `crates/`
+(counted 2026-11-22, not estimated). A number cited sixty times is in use whatever a rule says about
+how it got there; renumbering or blanking these would invalidate every one of those references to
+fix a register that no longer accepts entries. They stay so that a reader meeting `RFC-068` has
+something to find.
+
+**This section contradicted that rule until 2026-11-22**, stating the reverse ("an RFC number is
+taken the moment the plan reserves it"). `61f7a43` deleted `rfcs/reserved.md` and withdrew the
+`RFC-075` reservation by name, but never touched this file, and the `075` row was re-added on
+2026-11-03 by `1aceb32` — a commit about proposing RFC-076 — so the register outlived its own
+withdrawal by a month. Found while scoping `0.43.0`; the reviewer's own two previous scoping
+documents had cited these rows as live reservations without checking them against the correction.
 
 | RFC | Title | Milestone |
 | --- | --- | --- |
@@ -55,9 +73,9 @@ appears**, so this table exists to make a reservation visible to whoever authors
 | 072 | A Non-Blocking Job For Quarantined Tests | M14 |
 | 075 | Sending The Attention Knock | pre-1.0 |
 
-Reserved 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23. Titles are the
-audit's findings, not guesses; each row's scope is in the release schedule in
-[`delivery-plan.md`](./delivery-plan.md). `072` reserved later, 2026-10-14 at review 553, on
+Numbered 2026-09-24 from the requirements/roadmap/GUI audit of 2026-09-23, under the rule in force
+then. Titles are the audit's findings, not guesses; each row's scope is in the release schedule in
+[`delivery-plan.md`](./delivery-plan.md). `072` numbered later, 2026-10-14 at review 553, on
 RFC-029's own D1: `ci.yml` shipped one job, and the non-blocking job D1's second sentence
 requires — where a quarantined test still runs and is *read*, not only skipped — was never built
 by any of RFC-029's six slices.
