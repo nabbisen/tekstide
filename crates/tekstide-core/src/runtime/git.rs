@@ -1463,7 +1463,7 @@ fn collect_nested_gitattributes(dir: &Path, out: &mut Vec<PathBuf>, budget: &mut
 ///
 /// Disclosed together with `read_bounded`'s subprocess-pipe read under
 /// `runtime/git.rs` in `FILES_ALLOWED_TO_READ_FULL_FILE_CONTENT`
-/// (`project/diff/tests.rs`) -- naming both reads that entry exempts,
+/// (`diff/tests.rs`) -- naming both reads that entry exempts,
 /// not only the one RFC-024's scan happens to pattern-match.
 fn file_declares_content_driver(path: &Path) -> bool {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {

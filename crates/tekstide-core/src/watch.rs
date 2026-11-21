@@ -31,7 +31,7 @@ pub const SCAN_WINDOW: Duration = Duration::from_millis(250);
 /// re-measured against a real scan at review 450: exactly 2 on every scan after the
 /// first). The first scan in a process also runs `git --version` once, because the
 /// verified executable is cached per process -- measured at 3. The batching counts
-/// in `project/watch/tests.rs` are steady-state; the one-time extra is not in them.
+/// in `watch/tests.rs` are steady-state; the one-time extra is not in them.
 pub const GIT_SUBPROCESSES_PER_SCAN: u32 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

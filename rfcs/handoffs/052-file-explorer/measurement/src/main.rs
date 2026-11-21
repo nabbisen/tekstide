@@ -16,7 +16,7 @@
 //! What is drawn is read back from the widget tree through iced's own
 //! `Operation::text`, not from what the code intended to draw.
 
-#[path = "../../../../../crates/tekstide-core/src/project/root/explorer/hostile_fixture.rs"]
+#[path = "../../../../../crates/tekstide-core/src/root/explorer/hostile_fixture.rs"]
 mod hostile_fixture;
 
 use std::fmt;
@@ -38,7 +38,7 @@ use tekstide_core::project::root::{
     ExplorerNodeKind, ExplorerNodeState, FileExplorerScanPolicy, FileExplorerScanner,
     ProjectRootHandle, ProjectRootValidator, SymlinkPolicy,
 };
-use tekstide_core::project::{MAX_TREE_ROWS, ProjectId, ProjectSession};
+use tekstide_core::project::{MAX_TREE_ROWS, ProjectId};
 use tekstide_core::text_safety::quote_untrusted;
 
 #[derive(Clone, Debug)]
@@ -179,14 +179,8 @@ impl Composition {
         let root = ProjectRootValidator
             .validate(project, SymlinkPolicy::FailClosed)
             .expect("root validates");
-        let session = ProjectSession::new(
-            ProjectId::new_uuid(),
-            root.display_name,
-            root.selected_path,
-            root.canonical_path,
-        );
         let mut this = Self {
-            handle: ProjectRootHandle::from_project_session(&session),
+            handle: ProjectRootHandle::new(ProjectId::new_uuid(), root),
             next_id: 1,
             root: Model {
                 id: 0,

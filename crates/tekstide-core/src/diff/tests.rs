@@ -774,7 +774,7 @@ fn the_bounded_read_refuses_rather_than_truncates_when_called_directly() {
 /// test by file name, rather than being discoverable only by a one-time
 /// grep recorded in prose.
 ///
-/// **Closed list, each entry's reason disclosed**: `project/diff.rs`
+/// **Closed list, each entry's reason disclosed**: `diff.rs`
 /// (this module, PR-024-C's own read) and `content/open.rs`
 /// (`TextDocument`'s pre-existing editor read, a different feature) both
 /// read generated-change/project-file content and are the two paths this
