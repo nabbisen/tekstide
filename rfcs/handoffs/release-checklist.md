@@ -712,10 +712,18 @@ earlier enumeration of *this same close*", not "never seen over the session's li
 enumeration runs outside a close — and the Risks section requires it in the implementing commit
 message and the release note, not only in the document.
 
-  **Still open on this watch after parts 1-3:** the unexplained question above, and the cheapest
-step toward it remains untaken — the enumeration log prints `members.len()` and discards the pids.
+  **Still open on this watch after parts 1-3:** the unexplained question above — what makes a
+bulk-visible member stop matching its own session while still alive. **Corrected 2026-11-22: this
+paragraph claimed the cheapest step toward it "remains untaken — the enumeration log prints
+`members.len()` and discards the pids". The pids have been printed since `de4e0e3`, 2026-11-16**
+(`launch.rs:1004`, `"processes_in_session: done, {} member(s) found: {members:?}"`). This is the
+**second** correction of this same claim and the second time a correction inside this one file did
+not reach a sibling instance: review 713 found it in four documents and fixed the paragraph above
+on 2026-11-21, and this paragraph survived it. The diagnostic that will answer the watch's next
+occurrence is in place; what is outstanding is an occurrence to read it on.
 
-- [ ] **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
+- [ ] ~~**Both AUR packages' `pkgver` match the version just released.**~~ **STRUCK 2026-11-22: the owner dropped AUR support; the alternative named is Flathub (`flathub-distribution-assessment.md`). Nothing was ever published, so this gate never had a subject.** Original text kept below for the history only — do not run it.
+- [ ] *(struck, see above)* **Both AUR packages' `pkgver` match the version just released.** `tekstide` (source, from crates.io) and `tekstide-bin` (from the Linux release asset) are two separate AUR packages as of 2026-10-21; a bump to one is not a bump to the other. This project has already shipped with the AUR package a release behind (reviews 561-562), which is why this is a watch and not a trusted step: check both package pages against the released version, and treat a mismatch as unfinished release work. Scope, constraints and the schedule for doing this from CI instead: `aur-ci-publishing.md`. **Corrected 2026-11-12: there are no package pages to check yet.** Both names were booked with placeholder content on 2026-10-21 and deleted, so neither package exists; until the first publication lands, this watch has nothing to compare against. At 0.39.0 it is discharged by "First publication" below instead; from the release after that it reads as written. Read the state from the AUR's own RPC rather than the web pages, which sit behind bot protection and could not be read by tooling on 2026-11-12: `curl 'https://aur.archlinux.org/rpc/v5/info?arg[]=tekstide&arg[]=tekstide-bin'`.
 - [ ] **Public accessibility wording unchanged.** README, release notes and the book's landing page (`docs/src/introduction.md`) say Tekstide has **no** screen-reader support. Not "limited", not "planned", not "partial".
 
 ## Review
@@ -885,7 +893,19 @@ diagnostics promoted to real assertions against the real ambient `$TMPDIR`. See
 `release-0.38.0.md` for that release's own record. **This heading stays for one release and is
 then deleted too** — a reader of the next cut should not wonder what used to be here.
 
-## AUR Package
+## AUR Package — WITHDRAWN 2026-11-22
+
+**The owner dropped AUR support on 2026-11-22 and named Flathub as the alternative. Do not run
+anything in this section.** It is kept because the procedure below was worked out the hard way —
+the orphan/restore/adopt sequence the AUR's own hook forced after the two names were booked and
+deleted — and that knowledge should not be lost to a decision that was never about the procedure.
+**Nothing was ever published to the AUR**, so no user-facing install path changed when this was
+withdrawn. The replacement channel is assessed in
+[`flathub-distribution-assessment.md`](./flathub-distribution-assessment.md), which raises two
+findings the owner must weigh first: Flathub rejects "overly permissive configurations", and this
+product needs host-spawn and host-filesystem permissions to do its job; and Flathub's own policy
+states that a manifest may not be AI-generated or AI-assisted, which would make that artefact the
+owner's to author alone.
 
 Two packages, two separate procedures below — item 396 above is the standing watch that both
 `pkgver`s match the release; this section is what makes that true.

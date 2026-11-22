@@ -1129,6 +1129,17 @@ See [`../ROADMAP.md`](../ROADMAP.md) for the milestone schedule, and [`delivery-
 
 ## Distribution and installation — owner's proposal, 2026-10-08, assessed
 
+**Superseded in part, 2026-11-22: the owner dropped AUR packaging and named Flathub as the
+alternative.** The AUR half of this section is history now, and the scope note it produced
+(`aur-ci-publishing.md`) is withdrawn. Nothing was ever published to the AUR — both names were
+booked with placeholder content and deleted on 2026-11-12 — so no install path a user has ever used
+is affected. The replacement is assessed in
+[`flathub-distribution-assessment.md`](./handoffs/flathub-distribution-assessment.md), with two findings the
+owner must weigh before it is scoped: Flathub's rejection of "overly permissive configurations"
+against this product's need for host-spawn and host-filesystem access, and Flathub's own policy that
+a manifest may not be AI-generated or AI-assisted — which would make that artefact the owner's to
+author alone. The embedded-auto-updater idea's own disposition in this section is unchanged.
+
 Four ideas from the owner: a cross-platform one-liner installer, AUR packaging, an embedded
 auto-updater, and a small landing page. **Most of this is already scheduled**: RFC-029
 (*Documentation, CI, and Release Automation*, M14, `0.35.0`+) owns CI gates, a build matrix and

@@ -1,6 +1,6 @@
 ---
 title: "AUR publishing from CI: what it must do, what it must never do, and what stays the owner's"
-status: "Scope note. Opened 2026-10-21, after the owner registered both AUR packages. Not an RFC yet; it takes a number when the document is written. Corrected 2026-11-12: those packages were booked with placeholder content and deleted, so neither exists and neither name is held; first publication is deferred to 0.39.0."
+status: "**WITHDRAWN 2026-11-22: the owner dropped AUR support; the alternative named is Flathub.** Kept for its history and for the AUR procedure it worked out the hard way — do not act on it. See [`flathub-distribution-assessment.md`](./flathub-distribution-assessment.md), which supersedes it and which carries two findings that may yet change the destination. Originally: scope note, opened 2026-10-21 after the owner registered both AUR packages; corrected 2026-11-12, when those packages were found to have been booked with placeholder content and deleted, so neither ever existed and neither name was held — which is why this withdrawal costs no user anything."
 rfc_file: "none — the RFC is not written yet, so it has no number (see §Why this is an RFC)"
 target_milestone: "M14"
 created: "2026-10-21"
